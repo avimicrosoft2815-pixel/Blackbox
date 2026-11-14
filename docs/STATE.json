@@ -1,0 +1,21 @@
+{
+  "next_ticket": "P1-08",
+  "lane_status": {
+    "L0": "contracts complete (P0-01, 04, 05, 06, 10, 11, 12, 13, 14, 15 done; P0-02/03 workflows not run here)",
+    "L1": "in progress (writer publish path being re-measured)",
+    "L2": "not started (blocked on P1-16)",
+    "L3": "not started",
+    "L4": "not started",
+    "L5": "not started",
+    "L6": "not started",
+    "L7": "not started",
+    "L8": "not started",
+    "L9": "not started",
+    "L10": "not started"
+  },
+  "open_blockers": [],
+  "last_green_commit": "98af79d",
+  "bench_baseline": {
+    "2026-11-14-frame.json": "P1-17 baseline, to be filled by the first run"
+  }
+}
