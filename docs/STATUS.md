@@ -126,7 +126,7 @@ to `P2-11`** (`blackbox run`), not P5 — corrected here and in `DECISIONS.md`.
 | docs + `bench/results/*.json` committed | yes |
 | no absolute sandbox paths | grep over `bench/results/` = 0 |
 | forbidden words, tree + commit messages | green |
-| **C7 CI** | **ran, all three pushes red**: `docs` job (pytest missing — fixed here by installing the dev extras), and `python 3.13 / windows-latest` unit tests (the shim imported `fcntl` at module scope, which does not exist on Windows — fixed here). The job logs are not retrievable from this sandbox (`blob.core.windows.net` is outside the allowed egress), so the next push is the check. Everything else in the matrix is unreported until then. |
+| **C7 CI** | **ran; partially green.** Push 4 (`ci:` fix): **docs green**, and **all three ubuntu cells green** (3.11, 3.12, 3.13). **macOS × 3 and Windows × 3 are still red** (exit 1), cause not yet identified — the job logs are outside this sandbox's egress (only `github.com`, `api.github.com`, `codeload`, npm and PyPI are reachable), so the Cells are reported as red/unknown, never as green. Fixed so far on the way: the docs job had no pytest; the kill step collected zero tests (exit 5); the Windows shim imported `fcntl` at module scope; two POSIX-only suites had no skip marker. The macOS/Windows failures need the Actions-tab log to name — that is the next CI ticket. |
 
 ## 7. Not done — and why that is the honest state
 
