@@ -67,7 +67,7 @@ def _seg_paths(tape_dir: str) -> list[str]:
     return [segments.seg_path(tape_dir, n) for n in segments.list_segments(tape_dir)]
 
 
-def _segment_has_frames(path: str, algo: int = C.DEFAULT_CHECKSUM) -> bool:
+def _segment_has_frames(path: str) -> bool:
     """Content check, not a size check: every segment is preallocated to its full size, so size proves nothing."""
     try:
         with open(path, "rb") as fh:
@@ -78,7 +78,7 @@ def _segment_has_frames(path: str, algo: int = C.DEFAULT_CHECKSUM) -> bool:
     if len(head) < C.FRAME_OVERHEAD_BYTES:
         return False
     try:
-        frame_mod.decode(head, 0, algo=algo)
+        frame_mod.decode(head, 0)
     except frame_mod.FrameError:
         return False
     return True
@@ -100,8 +100,7 @@ def scan(data_dir: str, writer_uuid_hex: str, *, max_frames: int = 2_000_000) ->
         if any(_segment_has_frames(p) for p in _seg_paths(tape_dir)):
             raise bbx("BBX-E222", f"{tape_dir}: segments exist without a meta page") from None
         return ScanResult(writer_uuid=writer_uuid_hex, meta={}, head=None)
-    algo = meta["checksum_algo"]
-    head = head_mod.read_best(os.path.join(tape_dir, "head"), algo)
+    head = head_mod.read_best(os.path.join(tape_dir, "head"))
     segs = segments.list_segments(tape_dir)
     result = ScanResult(writer_uuid=writer_uuid_hex, meta=meta, head=head, segments_seen=segs)
     if head is None:
@@ -118,7 +117,7 @@ def scan(data_dir: str, writer_uuid_hex: str, *, max_frames: int = 2_000_000) ->
     if os.path.exists(active_path):
         buf = _read_file(active_path)
         cursor = min(head.head_off, len(buf))
-        tail = frame_mod.scan_backwards(buf, cursor, algo=algo)
+        tail = frame_mod.scan_backwards(buf, cursor)
         for f in tail:
             if f["seq"] <= head.head_seq:
                 collected[f["seq"]] = f
@@ -156,7 +155,7 @@ def scan(data_dir: str, writer_uuid_hex: str, *, max_frames: int = 2_000_000) ->
         off = C.SEGMENT_HEADER_BYTES
         while off + C.FRAME_OVERHEAD_BYTES <= body_end and len(collected) < max_frames:
             try:
-                fields, nxt = frame_mod.decode(buf, off, algo=algo)
+                fields, nxt = frame_mod.decode(buf, off)
             except frame_mod.FrameError:
                 break
             if fields["seq"] <= head.head_seq:

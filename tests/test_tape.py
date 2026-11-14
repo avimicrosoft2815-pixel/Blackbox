@@ -39,8 +39,8 @@ def test_meta_checksum_and_version_guards():
     newer[8] = C.MAX_READER_FORMAT_VERSION + 1          # format_version low byte
     newer[-4:] = b"\x00\x00\x00\x00"
     import struct
-    from blackbox.codec.crc32c import crc32c
-    struct.pack_into("<I", newer, C.META_CRC_OFF, crc32c(bytes(newer[:C.META_CRC_OFF])))
+    from blackbox.codec.crc32 import crc32
+    struct.pack_into("<I", newer, C.META_CRC_OFF, crc32(bytes(newer[:C.META_CRC_OFF])))
     with pytest.raises(BlackBoxError) as exc:
         meta_mod.decode(bytes(newer))
     assert exc.value.code == "BBX-E221"
@@ -99,7 +99,7 @@ def test_seal_verifies_and_detects_tampering(tmp_path):
 def test_seal_is_256_bytes_and_chained():
     body = b"abc"
     a = seal_mod.encode(segment_no=1, reason=1, start_seq=1, end_seq=1, frame_count=1,
-                        body_len=len(body), body_crc32c=0, body_hash=b"\x01" * 32,
+                        body_len=len(body), body_crc32=0, body_hash=b"\x01" * 32,
                         chain=b"\x02" * 32, sealer=b"", closed_wall_ns=0)
     assert len(a) == C.SEAL_BYTES == 256
 

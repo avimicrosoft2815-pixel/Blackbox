@@ -52,7 +52,7 @@ def _die(stage: str) -> None:
 class TapeWriter:
     def __init__(self, data_dir: str, *, writer_uuid: bytes | None = None,
                  segment_bytes: int = C.DEFAULT_SEGMENT_BYTES, mode: str = C.DEFAULT_MODE,
-                 vantage: int = 1, checksum_algo: int = C.DEFAULT_CHECKSUM,
+                 vantage: int = 1,
                  chain_enabled: bool = True, sealer_token: bytes = b"") -> None:
         if mode not in C.MODES:
             raise bbx("BBX-E100", f"unknown mode {mode!r}")
@@ -63,7 +63,6 @@ class TapeWriter:
         self.segment_bytes = segment_bytes
         self.mode = mode
         self.vantage = vantage
-        self.checksum_algo = checksum_algo
         self.chain_enabled = chain_enabled
         self.sealer_token = sealer_token or b""
 
@@ -101,17 +100,16 @@ class TapeWriter:
         os.makedirs(self.tape_dir, mode=0o700, exist_ok=True)
         if not os.path.exists(self.meta_path):
             blob = meta_mod.encode(writer_uuid=self.writer_uuid, segment_bytes=self.segment_bytes,
-                                   vantage=self.vantage, checksum_algo=self.checksum_algo)
+                                   vantage=self.vantage)
             with open(self.meta_path, "wb") as fh:
                 fh.write(blob)
                 fh.flush()
                 os.fsync(fh.fileno())
         meta = meta_mod.decode(self._read_meta())
-        self.checksum_algo = meta["checksum_algo"]
         self.segment_bytes = meta["segment_bytes"]
 
         existing = segments.list_segments(self.tape_dir)
-        self._head = head_mod.HeadMap(self.head_path, algo=self.checksum_algo)
+        self._head = head_mod.HeadMap(self.head_path)
         self._head.half_hook = lambda: _die("S4")
         best = self._head.best()
         if best is None:
@@ -190,7 +188,7 @@ class TapeWriter:
         hook = _die if _ARMED else None
         size = frame_mod.encode_into(self._mm, off, seq, kind, payload, flags=flags, priority=priority,
                                     run_slot=run_slot, node_slot=node_slot, wall_ns=wall_ns,
-                                    mono_ns=mono_ns, algo=self.checksum_algo, hook=hook)
+                                    mono_ns=mono_ns, hook=hook)
         _die("S3")
 
         if not self._batch_spans:
@@ -219,7 +217,7 @@ class TapeWriter:
             payload = memoryview(self._scratch)[:n]
             off = self._slot.head_off
             written = frame_mod.encode_into(self._mm, off, self._slot.head_seq + 1, C.KIND_CHAIN, payload,
-                                           priority=0, algo=self.checksum_algo)
+                                           priority=0)
             self._slot.head_seq += 1
             self._slot.head_off = off + written
             self._frame_count += 1
@@ -297,8 +295,7 @@ class TapeWriter:
         assert self._slot is not None and self._mm is not None
         n = self._slot.active_segment
         # 1. SEG_END commits the current head
-        blob = frame_mod.encode(self._slot.head_seq + 1, C.KIND_SEG_END, b"", priority=0,
-                                algo=self.checksum_algo)
+        blob = frame_mod.encode(self._slot.head_seq + 1, C.KIND_SEG_END, b"", priority=0)
         if self._slot.head_off + len(blob) <= self.segment_bytes:
             off = self._slot.head_off
             self._mm[off:off + len(blob)] = blob
@@ -355,7 +352,7 @@ class TapeWriter:
         seqs: list[int] = []
         while cur + C.FRAME_OVERHEAD_BYTES <= end:
             try:
-                fields, nxt = fm.decode(buf, cur, algo=self.checksum_algo)
+                fields, nxt = fm.decode(buf, cur)
             except fm.FrameError:
                 break
             seqs.append(fields["seq"])
@@ -371,8 +368,7 @@ class TapeWriter:
         if self._batch_spans:
             self.publish()
         n = self._slot.active_segment
-        blob = frame_mod.encode(self._slot.head_seq + 1, C.KIND_SEG_END, b"", priority=0,
-                                algo=self.checksum_algo)
+        blob = frame_mod.encode(self._slot.head_seq + 1, C.KIND_SEG_END, b"", priority=0)
         if self._mm is not None and self._slot.head_off + len(blob) <= self.segment_bytes:
             off = self._slot.head_off
             self._mm[off:off + len(blob)] = blob

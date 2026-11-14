@@ -1,4 +1,4 @@
-"""P0-07/09/10: CRC32C, canonical CBOR, ids and keyed hashes."""
+"""P1-01/02/04: CRC-32, canonical CBOR, ids and keyed hashes."""
 from __future__ import annotations
 
 import sys
@@ -10,29 +10,29 @@ from hypothesis import given, settings, strategies as st
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from blackbox.codec import cbor  # noqa: E402
-from blackbox.codec.crc32c import checksum, crc_ieee, crc32c  # noqa: E402
+from blackbox.codec.crc32 import crc32  # noqa: E402
 from blackbox.codec.ids import (blake2b, boot_id_hash, fingerprint, keyed_hash, new_run_id,  # noqa: E402
                                 new_writer_uuid, node_id)
 
 
 def test_crc_check_values():
-    assert crc32c(b"") == 0
-    assert crc32c(b"123456789") == 0xE3069283
-    assert crc_ieee(b"123456789") == 0xCBF43926
+    """RFC 1952 / gzip check value, and the format-v2 conformance vector (C4)."""
+    from blackbox.codec.crc32 import CHECK_VALUE
 
-
-def test_crc_algo_selector():
-    assert checksum(b"abc", 0) == crc32c(b"abc")
-    assert checksum(b"abc", 1) == crc_ieee(b"abc")
+    assert crc32(b"") == 0
+    assert crc32(b"123456789") == 0xCBF43926 == CHECK_VALUE
+    assert crc32(b"123456789") != 0xE3069283          # that was CRC32C, removed in v2
 
 
 @given(st.binary(max_size=4096))
 @settings(max_examples=200, deadline=None)
-def test_crc_is_stable_under_slicing(data):
-    # slicing-by-4 must agree with the byte-at-a-time definition on every prefix length
-    assert crc32c(data) == checksum(data, 0)
-    if data:
-        assert crc32c(data[: len(data) // 2]) != crc32c(data) or len(data) < 4
+def test_crc_matches_zlib_and_is_incremental(data):
+    import zlib
+
+    assert crc32(data) == zlib.crc32(data) & 0xFFFFFFFF
+    if len(data) > 3:                                  # folding in parts equals one pass
+        cut = len(data) // 2
+        assert crc32(data[cut:], crc32(data[:cut])) == crc32(data)
 
 
 @pytest.mark.parametrize("value", [

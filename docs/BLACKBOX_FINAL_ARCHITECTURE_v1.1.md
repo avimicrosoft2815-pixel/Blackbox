@@ -531,7 +531,7 @@ The ring remains available as `tape.layout = "ring"` for hosts that must have on
 | 0x048 | 32 | host_fingerprint (blake2b-128 of hostname+os+machine) | capsule provenance |
 | 0x068 | 8 | attrs_json_ref (seq of `INTERN` frame) | config snapshot |
 | 0x070 | 2 | schema_ver | envelope version |
-| 0x0FF0 | 16 | meta_crc32c + pad | integrity |
+| 0x0FF0 | 16 | crc32 + pad | integrity |
 
 **`head` (2 slots × 64 B, alternating, `gen` monotonic):**
 
@@ -546,7 +546,7 @@ The ring remains available as `tape.layout = "ring"` for hosts that must have on
 | 0x030 | 4 | active_segment (u32) |
 | 0x034 | 4 | flags (u32): DEGRADED_NO_SPACE, DEGRADED_CRC, KEEPER_DOWN, ROLL_PENDING |
 | 0x038 | 4 | dropped_events (u32, saturating) |
-| 0x03C | 4 | head_crc32c over 0x000–0x03C of this slot |
+| 0x03C | 4 | head_crc32 over 0x000–0x03C of this slot |
 | 0x040 | 64 | second slot, same layout |
 
 **Publish algorithm (per batch, not per event):**
@@ -591,7 +591,7 @@ in `docs/format.md`, and `constants.py` asserts every magic's width at import ti
 | 36 | 2 | run_slot (u16) | interned run index (0 = unnamed) |
 | 38 | 2 | node_slot (u16) | interned node index |
 | 40 | 4 | payload_len (u32) | `frame_len − 56` |
-| 44 | 4 | crc32c | over bytes `[0,44)` ‖ payload ‖ trailer |
+| 44 | 4 | crc32 | over bytes `[0,44)` ‖ payload ‖ trailer |
 | 48 | n | payload | Canonical CBOR (§8.5), or blob ref stub |
 | 48+n | 4 | tail_magic `BBXT` (`42 42 58 54`) | enables O(1) backwards walk |
 | 52+n | 4 | tail_len (u32) | must equal frame_len |
@@ -663,7 +663,7 @@ Roll latency target: ≤ 5 ms p99 for 16 MiB on an SSD (P1-17 measures; prealloc
 | 48 | 8 | created_wall_ns |
 | 56 | 8 | created_mono_ns |
 | 64 | 32 | prev_chain (chain value at the end of segment n−1; zeros for the first) |
-| 96 | 4 | header_crc32c over 0–96 |
+| 96 | 4 | header_crc32 over 0–96 |
 | 4096 | n | body (frames; unused tail is zeros) |
 
 **`.seal` footer sidecar (256 B, written once, `tmp + fdatasync + os.replace`):**
@@ -676,12 +676,12 @@ Roll latency target: ≤ 5 ms p99 for 16 MiB on an SSD (P1-17 measures; prealloc
 | 16 | 8 | start_seq, 8 end_seq |
 | 32 | 8 | frame_count |
 | 40 | 8 | body_len (bytes of valid frames after the header) |
-| 48 | 4 | body_crc32c |
+| 48 | 4 | body_crc32 |
 | 52 | 32 | body_hash (blake2b-256 of the uncompressed body) |
 | 84 | 32 | chain = blake2b-256(prev_chain ‖ body_hash) |
 | 116 | 8 | closed_wall_ns |
 | 124 | 16 | sealer (pid + proc_start_ns of whoever sealed; keeper or recoverer) |
-| 252 | 4 | seal_crc32c |
+| 252 | 4 | seal_crc32 |
 
 **Rules.** A segment **with** a valid `.seal` is immutable: any later mismatch between the body and the footer is reported as `BBX-E224` and the segment is quarantined, never deleted. A segment **without** a `.seal` is either active or was active at death; it is read by the backward CRC walk from `head` (§14.3) exactly as the 1.0 ring was, and the recoverer writes the `.seal` (`reason = RECOVERED`). Sealing is idempotent: same body ⇒ same footer bytes. **A visible `.seal` is complete by construction** (atomic replace). Capsules are built by reading frames from segments through the same reader; there is no separate "spill" format.
 
@@ -689,7 +689,7 @@ Roll latency target: ≤ 5 ms p99 for 16 MiB on an SSD (P1-17 measures; prealloc
 
 `blob/<h[0:2]>/<h[2:4]>/<hash>.bin`, `hash = blake2b-256(payload)` (blake3 if the `[fast-hash]` extra is installed; the algorithm is recorded in the blob header so mixed stores stay readable).
 
-Blob file: `BBXBLOB1`(8) ‖ version u16 ‖ codec u8 ‖ flags u8 ‖ orig_len u64 ‖ body ‖ body_crc32c u32 ‖ hash 32 B.
+Blob file: `BBXBLOB1`(8) ‖ version u16 ‖ codec u8 ‖ flags u8 ‖ orig_len u64 ‖ body ‖ body_crc32 u32 ‖ hash 32 B.
 
 - **Inline threshold** 1024 B; above → blob. Streams are *chunk-coalesced*: chunks accumulate in 8 KiB buffers so a 2,000-token stream does not create 2,000 blobs.
 - **Dedup** is by hash (identical prompts across runs cost once). Dedup is *not* ref-counted in the write path; the GC is mark-and-sweep from index+capsules (§9.9), which cannot delete a blob referenced by an unindexed capsule because capsules are scanned too.
@@ -1557,7 +1557,7 @@ scan(tape) -> ScanResult
        4a  f = frame_at(off)            # header + payload_len + trailer
        4b  if not (magic ok and tail_magic ok and tail_len == frame_len): 
              mark torn_tail; break
-       4c  if crc32c(hdr[0:44] + payload + trailer) != crc: mark torn_tail; break
+       4c  if crc32(hdr[0:44] + payload + trailer) != crc: mark torn_tail; break
        4d  if f.seq > head.head_seq: break        # garbage from a wrapped slot
        4e  out.append(f); off = prev_offset(off); seq -= 1
   5  segs = list_segments(writer) sorted by start_seq
@@ -1805,7 +1805,7 @@ src/blackbox/
   errors.py               # BBX-Exxx registry, one exception base, "never raise" helpers
   constants.py            # magics, limits, defaults (single source of truth)
   codec/cbor.py           # canonical CBOR subset (encode/decode)
-  codec/crc32c.py         # table-driven CRC32C (pure python) + zlib fallback
+  codec/crc32.py          # CRC-32/ISO-HDLC via zlib (the only checksum in v2)
   codec/ids.py            # run/node/capsule ids (sortable base32), fingerprint(), keyed_hash()
   codec/ulid.py           # time-ordered id
   tape/frame.py           # 48B header + trailer structs, encode/decode, validation
@@ -1906,7 +1906,7 @@ examples/{hello_agent.py, crash_demo.py, replay_demo.py}
 
 | ID | Path | Action | Done when | Est |
 |---|---|---|---|---|
-| P1-01 | `codec/crc32c.py` | software CRC32C (Castagnoli) table + `zlib.crc32` fallback behind a flag | matches 10 000 reference vectors; ~80 MB/s pure python measured | 3 |
+| P1-01 | `codec/crc32.py` | **one** checksum in v2: CRC-32/ISO-HDLC via `zlib.crc32` (C speed); the pure-Python CRC32C path was measured at 9 MB/s and deleted (DV-005, ADR-004) | check value `crc32("123456789") == 0xCBF43926` in the conformance set; 0.45 us per KiB measured (`bench/results/2026-11-14-frame.json`) | 3 |
 | P1-02 | `codec/cbor.py` | canonical encoder (sorted keys, shortest ints, no floats unless flagged) | byte-identical output across runs; RFC 8949 test vectors subset passes | 8 |
 | P1-03 | `codec/cbor.py` | strict decoder: depth ≤ 32, map ≤ 4096, no indefinite, no tags, trailing-bytes rejection | fuzz: 100k random buffers never raise anything but `CBORError` | 6 |
 | P1-04 | `codec/ids.py` | sortable run id (`r_` + 26 base32 chars, time-prefixed), node ids from `(run, path, kind)`, `fingerprint(obj)` | ids sort chronologically; same input ⇒ same node id | 3 |
@@ -2741,7 +2741,7 @@ registry now matches this appendix in both directions (`tests/test_errors.py`).
 
 1. Create `docs/` with this plan, `docs/guarantees.md` (P0-04) and `docs/format.md` (P0-05) — written first so code follows a contract.
 2. `pyproject.toml`, `constants.py`, `errors.py`, `config.py` (P0-01, P0-10…P0-12) plus the two guard tests (P0-13, P0-14).
-3. `codec/crc32c.py`, `codec/cbor.py`, `tape/frame.py` with round-trip + 10 k vector tests (P1-01…P1-05).
+3. `codec/crc32.py`, `codec/cbor.py`, `tape/frame.py` with round-trip + 10 k vector tests (P1-01…P1-05).
 4. `tape/head.py` + `tape/writer.py` with a bench that answers one question: *is the mmap'd active segment fast enough in pure Python — and is plain `write()` close enough to drop mmap (P1-19)?*
 5. The stage probe (`tests/kill/stage_probe.py`, S1–S5) and the first automated `kill -9` recovery test.
 6. Report back with the measured µs/event, the recovered prefix, and any invariant violation. No viewer, no index, no diff until that number exists.

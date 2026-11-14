@@ -5,7 +5,7 @@ import struct
 import time
 
 from blackbox import constants as C
-from blackbox.codec.crc32c import crc32c
+from blackbox.codec.crc32 import crc32
 from blackbox.codec.ids import boot_id_hash, host_fingerprint
 from blackbox.errors import bbx
 
@@ -13,16 +13,14 @@ class MetaError(ValueError):
     pass
 
 
-def encode(*, writer_uuid: bytes, segment_bytes: int, vantage: int, checksum_algo: int = C.DEFAULT_CHECKSUM,
+def encode(*, writer_uuid: bytes, segment_bytes: int, vantage: int,
            pid: int | None = None, created_wall_ns: int | None = None,
            created_mono_ns: int | None = None, schema_ver: int = C.SCHEMA_VER) -> bytes:
     import os
 
     buf = bytearray(C.META_BYTES)
     buf[0:8] = C.MAGIC_META
-    flags = 0
-    if checksum_algo == C.CHECKSUM_IEEE:
-        flags |= C.META_FLAG_CHECKSUM_IEEE
+    flags = 0                          # bit 2 (reserved checksum profile) must stay 0 in v1
     struct.pack_into("<HHI", buf, C.META_VERSION_OFF, C.FORMAT_VERSION, flags, segment_bytes)
     buf[C.META_WRITER_UUID_OFF:C.META_WRITER_UUID_OFF + 16] = writer_uuid
     struct.pack_into("<q", buf, C.META_CREATED_WALL_OFF, created_wall_ns or time.time_ns())
@@ -35,7 +33,7 @@ def encode(*, writer_uuid: bytes, segment_bytes: int, vantage: int, checksum_alg
     buf[C.META_HOST_FP_OFF:C.META_HOST_FP_OFF + len(fp)] = fp
     struct.pack_into("<Q", buf, C.META_ATTRS_REF_OFF, 0)
     struct.pack_into("<H", buf, C.META_SCHEMA_VER_OFF, schema_ver)
-    struct.pack_into("<I", buf, C.META_CRC_OFF, crc32c(bytes(buf[:C.META_CRC_OFF])))
+    struct.pack_into("<I", buf, C.META_CRC_OFF, crc32(bytes(buf[:C.META_CRC_OFF])))
     return bytes(buf)
 
 
@@ -47,13 +45,14 @@ def decode(buf: bytes) -> dict:
     version, flags, segment_bytes = struct.unpack_from("<HHI", buf, C.META_VERSION_OFF)
     if version > C.MAX_READER_FORMAT_VERSION:
         raise bbx("BBX-E221", f"format_version {version} > {C.MAX_READER_FORMAT_VERSION}")
+    if flags & C.META_FLAG_RESERVED_CHECKSUM:
+        raise bbx("BBX-E221", "meta sets the reserved checksum-profile bit; v1 knows one algorithm")
     stored_crc = struct.unpack_from("<I", buf, C.META_CRC_OFF)[0]
-    if crc32c(bytes(buf[:C.META_CRC_OFF])) != stored_crc:
+    if crc32(bytes(buf[:C.META_CRC_OFF])) != stored_crc:
         raise bbx("BBX-E222", "meta checksum mismatch")
     return {
         "format_version": version,
         "layout_ring": bool(flags & C.META_FLAG_LAYOUT_RING),
-        "checksum_algo": C.CHECKSUM_IEEE if flags & C.META_FLAG_CHECKSUM_IEEE else C.CHECKSUM_CRC32C,
         "segment_bytes": segment_bytes,
         "writer_uuid": bytes(buf[C.META_WRITER_UUID_OFF:C.META_WRITER_UUID_OFF + 16]),
         "created_wall_ns": struct.unpack_from("<q", buf, C.META_CREATED_WALL_OFF)[0],

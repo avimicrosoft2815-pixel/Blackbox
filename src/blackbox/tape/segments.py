@@ -30,17 +30,17 @@ def encode_header(*, writer_uuid: bytes, segment_no: int, start_seq: int, segmen
     struct.pack_into("<q", buf, C.SEG_CREATED_WALL_OFF, created_wall_ns or time.time_ns())
     struct.pack_into("<q", buf, C.SEG_CREATED_MONO_OFF, created_mono_ns or time.perf_counter_ns())
     buf[C.SEG_PREV_CHAIN_OFF:C.SEG_PREV_CHAIN_OFF + 32] = prev_chain
-    from blackbox.codec.crc32c import crc32c
-    struct.pack_into("<I", buf, C.SEGMENT_HEADER_CRC_OFF, crc32c(bytes(buf[:C.SEGMENT_HEADER_CRC_OFF])))
+    from blackbox.codec.crc32 import crc32
+    struct.pack_into("<I", buf, C.SEGMENT_HEADER_CRC_OFF, crc32(bytes(buf[:C.SEGMENT_HEADER_CRC_OFF])))
     return bytes(buf)
 
 
 def decode_header(buf: bytes) -> dict:
-    from blackbox.codec.crc32c import crc32c
+    from blackbox.codec.crc32 import crc32
     if len(buf) < C.SEGMENT_HEADER_BYTES or buf[0:8] != C.MAGIC_SEG:
         raise bbx("BBX-E224", "bad segment magic")
     stored = struct.unpack_from("<I", buf, C.SEGMENT_HEADER_CRC_OFF)[0]
-    if crc32c(bytes(buf[:C.SEGMENT_HEADER_CRC_OFF])) != stored:
+    if crc32(bytes(buf[:C.SEGMENT_HEADER_CRC_OFF])) != stored:
         raise bbx("BBX-E224", "segment header checksum mismatch")
     version, _flags = struct.unpack_from("<HH", buf, C.SEG_VERSION_OFF)
     if version > C.MAX_READER_FORMAT_VERSION:

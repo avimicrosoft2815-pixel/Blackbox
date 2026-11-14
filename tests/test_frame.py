@@ -38,12 +38,13 @@ def test_padding_and_alignment(payload, priority):
     assert nxt == len(blob)
 
 
-def test_crc_either_algorithm():
-    for algo in (C.CHECKSUM_CRC32C, C.CHECKSUM_IEEE):
-        blob = fm.encode(1, 2, b"abc", algo=algo)
-        assert fm.decode(blob, 0, algo=algo)[0]["payload"] == b"abc"
-        with pytest.raises(fm.FrameError):
-            fm.decode(blob, 0, algo=1 - algo)
+def test_crc_covers_the_documented_scope():
+    """The CRC must cover header[0,44) + payload + trailer, and nothing else (C4, one algorithm)."""
+    from blackbox.codec.crc32 import checksum_parts
+
+    blob = fm.encode(1, 2, b"abc")
+    stored = int.from_bytes(blob[44:48], "little")
+    assert stored == checksum_parts((blob[:44], blob[48:]))
 
 
 def test_single_bit_flip_is_detected():

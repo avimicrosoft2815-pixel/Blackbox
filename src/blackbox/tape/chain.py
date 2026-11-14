@@ -57,7 +57,7 @@ def decode_payload(payload: bytes) -> dict:
 class ChainState:
     """Tracks the running chain value for one writer."""
 
-    __slots__ = ("value",)
+    __slots__ = ("value")
 
     def __init__(self, value: bytes = ZERO):
         if len(value) != 32:

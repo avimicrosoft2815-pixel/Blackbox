@@ -68,7 +68,7 @@ def node_id(run_id: str, path: str, kind: str, ordinal: int = 0) -> str:
 
 def boot_id_hash() -> bytes:
     """First 8 bytes of BLAKE2b-256 over the kernel boot id; zeros when unavailable (Windows)."""
-    for path in ("/proc/sys/kernel/random/boot_id",):
+    for path in ("/proc/sys/kernel/random/boot_id"):
         try:
             with open(path, "rb") as fh:
                 return blake2b(fh.read().strip())[:8]

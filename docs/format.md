@@ -4,15 +4,17 @@
 `tests/conformance/` (P0-05) — including a non-Python reader later (P11-15).
 All integers are little-endian.
 
-**Checksum profile.** One 4-byte checksum field everywhere; the algorithm is a property of the tape, recorded
-once in `meta.flags` bit 2, and every checksum on that tape (frames, head slots, segment headers, seals) uses
-it. `0` = CRC32C (Castagnoli, reflected, init `0xFFFFFFFF`, xorout `0xFFFFFFFF`); `1` = CRC-32/ISO-HDLC
-(identical to `zlib.crc32`). Fields keep their historical names (`crc32c`, `head_crc32c`, …).
+**Checksum — one algorithm in format v2.** Every 4-byte checksum field (frame, head slot, meta page, segment
+header, `.seal`) is **CRC-32/ISO-HDLC**: polynomial `0x04C11DB7` (reflected `0xEDB88320`), init `0xFFFFFFFF`,
+xorout `0xFFFFFFFF`. Check value: `crc32("123456789") == 0xCBF43926`. Fields keep short historical names
+(`crc32`), and `meta.flags` bit 2 is **reserved and must be 0**; a reader that sees it set rejects the tape with
+`BBX-E221`.
 
-Profile `1` is the default that `blackbox` writes, because CRC32C in pure Python costs ≈ 110 µs per KiB
-(`bench/results/2026-11-14-frame.json`) and would break the §15.1 event budget on its own; CRC32C is
-implemented, verified against reference vectors, and read by both readers. A tape never depends on the reader
-guessing the algorithm.
+Why one algorithm and why this one: a CRC here detects torn or stale frames — tamper evidence is the BLAKE2b
+chain (`§8.12`), not the CRC. Pure-Python CRC32C measured 110.5 µs per KiB (≈ 9 MB/s) against 0.45 µs per KiB
+for `zlib.crc32`, which alone would have broken the `§15.1` event budget, and a second algorithm would force
+every reader (including the Go one) to implement it for nothing. Recorded as `DV-005` and
+`docs/adr/ADR-004-crc32-not-crc32c.md`.
 
 **Frozen magic values (exact bytes).**
 
@@ -58,7 +60,7 @@ Hashes are **BLAKE2b-256** unless stated. Reserved bytes are zero and MUST be ig
 | 0x068 | 8 | attrs_json_ref (seq of an `INTERN` frame; 0 = none) |
 | 0x070 | 2 | schema_ver (u16) = 1 |
 | 0x072 | 0x0F7E | reserved |
-| 0x0FF0 | 4 | meta_crc32c over bytes [0x000, 0x0FF0) |
+| 0x0FF0 | 4 | crc32 over bytes [0x000, 0x0FF0) |
 | 0x0FF4 | 12 | reserved |
 
 Reader rule: reject with `BBX-E222` if the CRC fails; `BBX-E221` if `format_version` is greater than the reader's maximum (2).
@@ -98,7 +100,7 @@ Frame = 48 B header ‖ payload ‖ 8 B trailer. `frame_len = 48 + payload_len +
 | 36 | 2 | run_slot (u16) |
 | 38 | 2 | node_slot (u16) |
 | 40 | 4 | payload_len (u32) |
-| 44 | 4 | checksum (profile) over header[0,44) ‖ payload ‖ trailer |
+| 44 | 4 | crc32 over header[0,44) ‖ payload ‖ trailer |
 | 48 | payload_len | payload (canonical CBOR, see §7) |
 | 48+payload_len | 4 | tail magic `BBXT` |
 | 52+payload_len | 4 | tail_len (= frame_len) |
@@ -144,7 +146,7 @@ a page fault into a hole under `ENOSPC`/EOF raises `SIGBUS` in the faulting proc
 | 24 | 8 | end_seq |
 | 32 | 8 | frame_count |
 | 40 | 8 | body_len (bytes of valid frames after the 4096 B header) |
-| 48 | 4 | body_crc32c over the body bytes `[4096, 4096+body_len)` |
+| 48 | 4 | body_crc32 over the body bytes `[4096, 4096+body_len)` |
 | 52 | 32 | body_hash (BLAKE2b-256 of the same body bytes) |
 | 84 | 32 | chain = BLAKE2b-256(prev_chain ‖ body_hash) |
 | 116 | 8 | closed_wall_ns (i64) |

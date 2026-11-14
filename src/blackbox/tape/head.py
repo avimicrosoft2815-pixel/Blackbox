@@ -12,7 +12,7 @@ from struct import pack_into
 from dataclasses import dataclass, replace
 
 from blackbox import constants as C
-from blackbox.codec.crc32c import checksum
+from blackbox.codec.crc32 import crc32
 from blackbox.errors import bbx
 
 
@@ -27,21 +27,21 @@ class HeadSlot:
     flags: int = 0
     dropped_events: int = 0
 
-    def to_bytes(self, algo: int = 0) -> bytes:
+    def to_bytes(self) -> bytes:
         buf = bytearray(C.HEAD_SLOT_BYTES)
         buf[0:8] = C.MAGIC_HEAD
         struct.pack_into("<QQQQQQ", buf, C.HEAD_GEN_OFF, self.gen, self.head_seq, self.head_off,
                          self.tail_seq, self.sealed_seq, self.active_segment)
         struct.pack_into("<II", buf, C.HEAD_FLAGS_OFF, self.flags, self.dropped_events)
-        struct.pack_into("<I", buf, C.HEAD_CRC_OFF, checksum(bytes(buf[:C.HEAD_CRC_OFF]), algo))
+        struct.pack_into("<I", buf, C.HEAD_CRC_OFF, crc32(bytes(buf[:C.HEAD_CRC_OFF])))
         return bytes(buf)
 
     @classmethod
-    def from_bytes(cls, buf: bytes, algo: int = 0) -> "HeadSlot | None":
+    def from_bytes(cls, buf: bytes) -> "HeadSlot | None":
         if len(buf) != C.HEAD_SLOT_BYTES or buf[0:8] != C.MAGIC_HEAD:
             return None
         stored = struct.unpack_from("<I", buf, C.HEAD_CRC_OFF)[0]
-        if checksum(bytes(buf[:C.HEAD_CRC_OFF]), algo) != stored:
+        if crc32(bytes(buf[:C.HEAD_CRC_OFF])) != stored:
             return None
         gen, head_seq, head_off, tail_seq, sealed_seq, active = struct.unpack_from("<QQQQQQ", buf, C.HEAD_GEN_OFF)
         flags, dropped = struct.unpack_from("<II", buf, C.HEAD_FLAGS_OFF)
@@ -62,7 +62,7 @@ def empty_head_file() -> bytes:
     return b"\x00" * C.HEAD_BYTES
 
 
-def read_slots(path: str | os.PathLike, algo: int = 0) -> tuple[HeadSlot | None, HeadSlot | None]:
+def read_slots(path: str | os.PathLike) -> tuple[HeadSlot | None, HeadSlot | None]:
     try:
         with open(path, "rb") as fh:
             data = fh.read(C.HEAD_BYTES)
@@ -70,27 +70,18 @@ def read_slots(path: str | os.PathLike, algo: int = 0) -> tuple[HeadSlot | None,
         return None, None
     if len(data) < C.HEAD_SLOT_STRIDE + C.HEAD_SLOT_BYTES:
         return None, None
-    s0 = HeadSlot.from_bytes(data[0:C.HEAD_SLOT_BYTES], algo)
-    s1 = HeadSlot.from_bytes(data[C.HEAD_SLOT_STRIDE:C.HEAD_SLOT_STRIDE + C.HEAD_SLOT_BYTES], algo)
+    s0 = HeadSlot.from_bytes(data[0:C.HEAD_SLOT_BYTES])
+    s1 = HeadSlot.from_bytes(data[C.HEAD_SLOT_STRIDE:C.HEAD_SLOT_STRIDE + C.HEAD_SLOT_BYTES])
     return s0, s1
 
 
-def read_best_in(tape_dir: str, algo: int | None = None) -> HeadSlot | None:
-    """Read the head of a tape whose checksum profile is recorded in its `meta` (the normal case)."""
-    if algo is None:
-        from blackbox import constants as _C
-        from blackbox.tape import meta as meta_mod
-
-        try:
-            with open(os.path.join(tape_dir, "meta"), "rb") as fh:
-                algo = meta_mod.decode(fh.read(_C.META_BYTES))["checksum_algo"]
-        except (OSError, Exception):
-            algo = 0
-    return read_best(os.path.join(tape_dir, "head"), algo)
+def read_best_in(tape_dir: str) -> HeadSlot | None:
+    """Read the head of a tape directory (convenience for callers that only have the directory)."""
+    return read_best(os.path.join(tape_dir, "head"))
 
 
-def read_best(path: str | os.PathLike, algo: int = 0) -> HeadSlot | None:
-    s0, s1 = read_slots(path, algo)
+def read_best(path: str | os.PathLike) -> HeadSlot | None:
+    s0, s1 = read_slots(path)
     if s0 is None and s1 is None:
         return None
     if s0 is None:
@@ -120,7 +111,7 @@ def next_slot_index(slot: HeadSlot | None) -> int:
 
 
 def publish(path: str | os.PathLike, slot: HeadSlot, *, mode: str = "process", fd=None,
-            die_point=None, algo: int = 0) -> HeadSlot:
+            die_point=None) -> HeadSlot:
     """Publish `slot` (with gen+1) into the non-current slot and flush it."""
     current = read_best(path)
     index = next_slot_index(current)
@@ -158,10 +149,9 @@ class HeadMap:
     `paranoid` add `flush` + `fdatasync(head_fd)` on the caller's schedule, never per event.
     """
 
-    __slots__ = ("path", "mm", "fd", "_dirty", "_slots", "half_hook", "algo", "_slotbuf")
+    __slots__ = ("path", "mm", "fd", "_dirty", "_slots", "half_hook", "_slotbuf")
 
-    def __init__(self, path: str, *, create: bool = True, algo: int = 0) -> None:
-        self.algo = algo
+    def __init__(self, path: str, *, create: bool = True) -> None:
         self.path = path
         existed = os.path.exists(path)
         self.fd = os.open(path, os.O_RDWR | (0 if existed else os.O_CREAT), 0o600)
@@ -182,9 +172,9 @@ class HeadMap:
 
     # ── reading ─────────────────────────────────────────────────────────────
     def reload(self) -> tuple[HeadSlot | None, HeadSlot | None]:
-        s0 = HeadSlot.from_bytes(bytes(self.mm[0:C.HEAD_SLOT_BYTES]), self.algo)
+        s0 = HeadSlot.from_bytes(bytes(self.mm[0:C.HEAD_SLOT_BYTES]))
         base = C.HEAD_SLOT_STRIDE
-        s1 = HeadSlot.from_bytes(bytes(self.mm[base:base + C.HEAD_SLOT_BYTES]), self.algo)
+        s1 = HeadSlot.from_bytes(bytes(self.mm[base:base + C.HEAD_SLOT_BYTES]))
         self._slots = (s0, s1)
         return self._slots
 
@@ -222,7 +212,7 @@ class HeadMap:
         mm[base:base + C.HEAD_CRC_OFF] = buf[0:C.HEAD_CRC_OFF]
         if self.half_hook is not None:
             self.half_hook()
-        pack_into("<I", mm, base + C.HEAD_CRC_OFF, checksum(buf[0:C.HEAD_CRC_OFF], self.algo))
+        pack_into("<I", mm, base + C.HEAD_CRC_OFF, crc32(buf[0:C.HEAD_CRC_OFF]))
         self._dirty = True
         return slot
 

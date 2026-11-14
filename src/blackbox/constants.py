@@ -118,15 +118,13 @@ HEAD_FLAG_KEEPER_DOWN = 1 << 2
 HEAD_FLAG_ROLL_PENDING = 1 << 3
 
 META_FLAG_LAYOUT_RING = 1 << 0
-META_FLAG_CHECKSUM_IEEE = 1 << 2
+META_FLAG_RESERVED_CHECKSUM = 1 << 2   # must be 0 in v1 (C4); readers reject a tape that sets it
 
 # checksum algorithm ids (meta.flags bit2 selects IEEE instead of CRC32C)
-CHECKSUM_CRC32C = 0
-CHECKSUM_IEEE = 1
+
 # Default: IEEE CRC-32 through zlib (C speed). CRC32C is implemented and verified but costs ~110 us/KiB in
 # pure Python, which alone breaks the section 15.1 event budget; the algorithm is recorded in meta.flags bit 2,
 # so a reader never has to guess. See docs/DECISIONS.md D-007.
-DEFAULT_CHECKSUM = CHECKSUM_IEEE
 
 # Group-commit threshold (plan §8.2 "publish per batch, not per event"). Measured in
 # bench/results/2026-11-14-recovery.json: disk amplification is 1.843x when every event is its own commit,

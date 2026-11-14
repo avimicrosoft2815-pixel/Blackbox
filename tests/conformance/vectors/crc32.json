@@ -1,0 +1,18 @@
+{
+  "algorithm": "CRC-32/ISO-HDLC",
+  "polynomial": "0x04C11DB7",
+  "reflected_polynomial": "0xEDB88320",
+  "init": "0xFFFFFFFF",
+  "xorout": "0xFFFFFFFF",
+  "reflected": true,
+  "note": "check values for a reader implemented from docs/format.md alone; crc32 is zlib.crc32 & 0xFFFFFFFF",
+  "vectors": [
+    {"input_ascii": "", "crc32": "0x00000000"},
+    {"input_ascii": "123456789", "crc32": "0xCBF43926"},
+    {"input_ascii": "a", "crc32": "0xE8B7BE43"},
+    {"input_ascii": "abc", "crc32": "0x352441C2"},
+    {"input_ascii": "The quick brown fox jumps over the lazy dog", "crc32": "0x414FA339"},
+    {"input_hex": "0000000000000000", "crc32": "0x6522DF69"},
+    {"input_hex": "ffffffffffffffff", "crc32": "0x2144DF1C"}
+  ]
+}

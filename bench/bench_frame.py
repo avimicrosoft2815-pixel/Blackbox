@@ -22,7 +22,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from blackbox import constants as C                      # noqa: E402
 from blackbox.codec import cbor                          # noqa: E402
-from blackbox.codec.crc32c import crc32c                 # noqa: E402
+from blackbox.codec.crc32 import crc32                  # noqa: E402
 from blackbox.codec.ids import blake2b                   # noqa: E402
 from blackbox.tape import chain as chain_mod             # noqa: E402
 from blackbox.tape import frame as frame_mod             # noqa: E402
@@ -111,8 +111,8 @@ def main(argv: list[str] | None = None) -> int:
         hmap.publish(slot)          # gen += 1 happens inside; no object is allocated per publish
 
     stages: dict[str, tuple[str, object]] = {
-        "crc32c_1kib": ("CRC32C over 1 KiB", lambda: crc32c(payload_1k)),
-        "crc32c_56b": ("CRC32C over a 56 B frame header", lambda: crc32c(frame_1k[:44])),
+        "crc32_1kib": ("CRC-32 over 1 KiB", lambda: crc32(payload_1k)),
+        "crc32_44b": ("CRC-32 over a 44 B frame header", lambda: crc32(frame_1k[:44])),
         "blake2b_1kib": ("BLAKE2b-256 over 1 KiB (batch hash)", lambda: blake2b(payload_1k)),
         "cbor_encode_event": ("CBOR encode the fixed event payload", lambda: cbor.encode(EVENT)),
         "cbor_decode_event": ("CBOR decode the fixed event payload", lambda: cbor.decode_exact(ev_bytes)),

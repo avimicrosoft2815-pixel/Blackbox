@@ -55,8 +55,7 @@ def classify_tape(tape_dir: str) -> TapeEntry | None:
             meta = meta_mod.decode(fh.read(C.META_BYTES))
     except (OSError, Exception):
         return None
-    algo = meta["checksum_algo"]
-    head = head_mod.read_best(os.path.join(tape_dir, "head"), algo)
+    head = head_mod.read_best(os.path.join(tape_dir, "head"))
     if head is None:
         return None
     segs = segments.list_segments(tape_dir)
@@ -64,7 +63,7 @@ def classify_tape(tape_dir: str) -> TapeEntry | None:
                       created_wall_ns=meta["created_wall_ns"], active_segment=head.active_segment,
                       head_gen=head.gen, segments=segs, stray_tmp=_stray_files(tape_dir))
     for n in segs:
-        state = repair.segment_state(tape_dir, n, algo=algo, segment_bytes=meta["segment_bytes"])
+        state = repair.segment_state(tape_dir, n, segment_bytes=meta["segment_bytes"])
         if state["damaged"]:
             entry.damaged.append(n)
             continue

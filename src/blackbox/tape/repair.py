@@ -20,8 +20,7 @@ from blackbox.tape import seal as seal_mod
 from blackbox.tape import segments
 
 
-def segment_state(tape_dir: str, n: int, *, algo: int = C.DEFAULT_CHECKSUM,
-                  segment_bytes: int | None = None) -> dict:
+def segment_state(tape_dir: str, n: int, *, segment_bytes: int | None = None) -> dict:
     """Classify one segment file: missing, header-only (empty body), open, sealed, or damaged."""
     path = segments.seg_path(tape_dir, n)
     seal_path = segments.seal_path(tape_dir, n)
@@ -44,7 +43,7 @@ def segment_state(tape_dir: str, n: int, *, algo: int = C.DEFAULT_CHECKSUM,
     frames = 0
     while off + C.FRAME_OVERHEAD_BYTES <= limit:
         try:
-            fields, nxt = frame_mod.decode(buf, off, algo=algo)
+            fields, nxt = frame_mod.decode(buf, off)
         except frame_mod.FrameError:
             break
         frames += 1
@@ -73,15 +72,14 @@ def adopt_orphan(tape_dir: str, *, sealer: bytes = b"", closed_wall_ns: int | No
     """
     with open(os.path.join(tape_dir, "meta"), "rb") as fh:
         meta = meta_mod.decode(fh.read(C.META_BYTES))
-    algo = meta["checksum_algo"]
     segment_bytes = meta["segment_bytes"]
-    head = head_mod.read_best(os.path.join(tape_dir, "head"), algo)
+    head = head_mod.read_best(os.path.join(tape_dir, "head"))
     if head is None:
         return None
     n = head.active_segment
     nxt = n + 1
-    current = segment_state(tape_dir, n, algo=algo, segment_bytes=segment_bytes)
-    candidate = segment_state(tape_dir, nxt, algo=algo, segment_bytes=segment_bytes)
+    current = segment_state(tape_dir, n, segment_bytes=segment_bytes)
+    candidate = segment_state(tape_dir, nxt, segment_bytes=segment_bytes)
     if not completes_roll(candidate):
         return None
     if current["damaged"]:
@@ -110,7 +108,7 @@ def adopt_orphan(tape_dir: str, *, sealer: bytes = b"", closed_wall_ns: int | No
         report["seal_chain"] = info["chain"].hex()
     # move the head (idempotent: if it already names n+1 this is skipped)
     if head.active_segment != nxt:
-        hmap = head_mod.HeadMap(os.path.join(tape_dir, "head"), algo=algo)
+        hmap = head_mod.HeadMap(os.path.join(tape_dir, "head"))
         try:
             slot = head_mod.HeadSlot(gen=head.gen, head_seq=head.head_seq, head_off=C.SEGMENT_HEADER_BYTES,
                                      tail_seq=head.tail_seq, sealed_seq=head.head_seq,
