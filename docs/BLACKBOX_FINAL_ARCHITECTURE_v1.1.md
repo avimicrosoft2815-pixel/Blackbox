@@ -517,7 +517,7 @@ The ring remains available as `tape.layout = "ring"` for hosts that must have on
 
 | Offset | Size | Field | Purpose |
 |---|---|---|---|
-| 0x000 | 8 | magic `BBXTAPE2` | identify (format bumped: segment layout) |
+| 0x000 | 8 | magic `BBXTAPE2` (`42 42 58 54 41 50 45 32`) | identify (format bumped: segment layout) |
 | 0x008 | 2 | format_version (u16) | `2` |
 | 0x00A | 2 | flags (u16): layout (0 segments, 1 ring), compression, endian | future-proof |
 | 0x00C | 4 | segment_bytes (u32) | size of every segment of this writer |
@@ -537,7 +537,7 @@ The ring remains available as `tape.layout = "ring"` for hosts that must have on
 
 | Offset | Size | Field |
 |---|---|---|
-| 0x000 | 8 | magic `BBXHEAD2` |
+| 0x000 | 8 | magic `BBXHEAD2` (`42 42 58 48 45 41 44 32`) |
 | 0x008 | 8 | gen (u64, strictly increases per publish) |
 | 0x010 | 8 | head_seq (u64, last committed seq) |
 | 0x018 | 8 | head_off (u64, write cursor **inside the active segment**, ≥ 4096) |
@@ -564,11 +564,24 @@ The ring remains available as `tape.layout = "ring"` for hosts that must have on
 
 **What mmap buys and does not buy (C1, stated once):** mmap gives us no-syscall appends and cross-process visibility of the active segment. It does **not** give durability — any `write()` to a regular file also lands in the page cache and survives process death. P1-19 benchmarks a `write()`-append writer with identical framing; if it is within 20 % at the target event rates, ADR-001 is reopened in favour of the simpler semantics (no mapping lifetime, no SIGBUS class, no `FlushViewOfFile` path).
 
+**Frozen magics (A7).** A magic shorter than its field silently shifts every following byte; that happened in
+this build (`BBXSEG2` is seven characters in an eight-byte field). The exact bytes are therefore frozen here and
+in `docs/format.md`, and `constants.py` asserts every magic's width at import time:
+
+| record | bytes | hex |
+|---|---|---|
+| `meta` | `BBXTAPE2` | `42 42 58 54 41 50 45 32` |
+| `head` | `BBXHEAD2` | `42 42 58 48 45 41 44 32` |
+| segment header | `BBXSEG2` + `0x00` | `42 42 58 53 45 47 32 00` |
+| `.seal` | `BBXSEAL1` | `42 42 58 53 45 41 4C 31` |
+| frame | `BBXF` | `42 42 58 46` |
+| frame trailer | `BBXT` | `42 42 58 54` |
+
 ### 8.3 Frame layout (48 B header + payload + 8 B trailer)
 
 | Offset | Size | Field | Notes |
 |---|---|---|---|
-| 0 | 4 | magic `BBXF` | scanner resync |
+| 0 | 4 | magic `BBXF` (`42 42 58 46`) | scanner resync |
 | 4 | 4 | frame_len (u32) | 56 ≤ len ≤ 1 MiB, multiple of 8 |
 | 8 | 8 | seq (u64) | strictly +1 per frame, per writer |
 | 16 | 8 | wall_ns (i64) | `time.time_ns()` at event close |
@@ -580,7 +593,7 @@ The ring remains available as `tape.layout = "ring"` for hosts that must have on
 | 40 | 4 | payload_len (u32) | `frame_len − 56` |
 | 44 | 4 | crc32c | over bytes `[0,44)` ‖ payload ‖ trailer |
 | 48 | n | payload | Canonical CBOR (§8.5), or blob ref stub |
-| 48+n | 4 | tail_magic `BBXT` | enables O(1) backwards walk |
+| 48+n | 4 | tail_magic `BBXT` (`42 42 58 54`) | enables O(1) backwards walk |
 | 52+n | 4 | tail_len (u32) | must equal frame_len |
 
 **Write order inside one frame:** payload → trailer → header. Header last means a crash mid-frame leaves an unparseable slot that the backward scanner never mistakes for committed data. **Cost:** one extra header pass; measured in §15.
@@ -640,7 +653,7 @@ Roll latency target: ≤ 5 ms p99 for 16 MiB on an SSD (P1-17 measures; prealloc
 
 | Offset | Size | Field |
 |---|---|---|
-| 0 | 8 | magic `BBXSEG2` |
+| 0 | 8 | magic `BBXSEG2` + `0x00` (`42 42 58 53 45 47 32 00`) |
 | 8 | 2 | version, 2 flags |
 | 12 | 16 | writer_uuid |
 | 28 | 4 | segment_no (u32) |
@@ -657,7 +670,7 @@ Roll latency target: ≤ 5 ms p99 for 16 MiB on an SSD (P1-17 measures; prealloc
 
 | Offset | Size | Field |
 |---|---|---|
-| 0 | 8 | magic `BBXSEAL1` |
+| 0 | 8 | magic `BBXSEAL1` (`42 42 58 53 45 41 4C 31`) |
 | 8 | 4 | segment_no |
 | 12 | 4 | reason (1 ROLLED, 2 RUN_END, 3 RECOVERED, 4 SHUTDOWN) |
 | 16 | 8 | start_seq, 8 end_seq |
