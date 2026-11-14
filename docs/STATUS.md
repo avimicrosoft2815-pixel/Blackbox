@@ -1,6 +1,6 @@
 # STATUS — BlackBox v1.0 build
 
-**Branch** `arena/e10fc603-blackbox` · **base** `30c9433` · **HEAD** `98d3840`
+**Branch** `arena/e10fc603-blackbox` · **base** `30c9433` · **HEAD** `641beb1`
 **Phase:** P0, P1 (partial), P2 (partial) — *storage and recovery layer only; no SDK, proxy or viewer yet.*
 **Not merge-ready.** Six of the plan's P1/P2 tickets are still `pending`; see §7.
 
@@ -18,7 +18,7 @@
 | Segmentation, roll, adoption (S15) | `tests/test_adoption.py` (7), `tests/test_tape.py` | green, adoption idempotent in writer **and** `rec/discover.py` |
 | Crash points S1–S5, S14, S15 | `tests/test_crash_points.py` | green |
 | Crash states read back (seeds 388/209/396) | `tests/test_scan_states.py` | green |
-| Randomized parent-`SIGKILL` (P2-09) | 500 trials ext4 **and** 500 tmpfs → `bench/results/2026-11-14-kill-random.json` | **0 violations, 0 not_started**, both columns |
+| Randomized parent-`SIGKILL` (P2-09) | 500 trials ext4 **and** 500 tmpfs → `bench/results/2026-11-14-kill-random.json` | **0 violations** in both columns; 10/500 (ext4) and 6/500 (tmpfs) trials died before the child created its tape and are counted as `not_started`, never as passes |
 | ENOSPC at preallocation (S17) | `tests/test_enospc.py`, `tests/test_prealloc.py` | app exits 0, stdout identical, tape shows `DEGRADED` |
 | Group-commit window + keeper | `tests/test_keeper.py` (6) | window ≤ 5 ms measured at 1 / 1 000 / unbounded ev/s |
 | No syscall on the append path (C11) | `tests/test_no_syscall.py` | 100 000 appends, **0** `write/pwrite/fsync/fdatasync/open/openat` |
@@ -76,11 +76,11 @@ sum to the event number, and the JSON says so.
 1. **seed 352** → recovery demanded a `SEG_END` frame → adoption refused a legal crash state (roll skips
    `SEG_END` when it does not fit) → seal exactly `[4096, head_off)` → `test_adoption_does_not_require_a_seg_end_frame`.
 2. **seed 388** → a segment was created in place, so a kill left a half-written header (`E133` forever) → tmp +
-   `fdatasync` + `replace` + `fsync(dir)` → `test_segment_creation_is_atomic`.
+   header + `fdatasync` + `replace` + `fsync(dir)` → `test_segment_creation_publishes_the_header_atomically`.
 3. **seeds 209 / 307 / 386** → the scanner called initialisation corruption → an empty tape before `meta` is a
-   legal state → `test_scan_of_an_empty_tape_is_not_corruption`.
+   legal state → `test_scan_of_an_empty_tape_is_not_corruption` (`tests/test_scan_states.py`).
 4. **seed 396** → "holds frames" was judged by file size → a preallocated empty segment looked full → decode a
-   frame instead → `test_segment_without_frames_is_not_adopted`.
+   frame instead → `test_a_preallocated_segment_without_frames_is_not_treated_as_full`.
 5. **seed 120 (tmpfs)** → a kill during head creation left `segments exist but the head is unreadable` → (a) the
    head file is created tmp + `ftruncate` + `fsync` + `replace` + `fsync(dir)`; (b) `repair.rebuild_head`
    reconstructs the head from the newest segment, continuing from the highest readable `gen` →
@@ -129,7 +129,7 @@ None of the held items changes a frozen byte or reverses a §3 decision, so noth
 | `pyproject.toml` version | `0.1.0.dev0` |
 | no `LICENSE` file, no `license` field | confirmed — the owner has not chosen a licence, and this file says so |
 | `docs/STATUS.md`, `docs/progress.md`, `docs/kill-matrix.md`, `bench/results/*.json` committed | yes |
-| no absolute sandbox paths or usernames | checked by `tests/test_forbidden_words.py`-adjacent review; paths in JSONs are scratch dirs that are deleted |
+| no absolute sandbox paths or usernames | bench JSONs label scratch dirs relatively (`.bench/scratch`, `<scratch>/…`); checked by grep over `bench/results/` |
 | forbidden words, tree + commit messages | green (`tests/test_forbidden_words.py`) |
 
 The trunk is mergeable. **The product is not**: the tickets in §7 are the difference.
