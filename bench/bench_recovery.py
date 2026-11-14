@@ -158,7 +158,7 @@ def measure_column(column: dict, args) -> dict:
     _fs.release(tmp)
     _fs.release(tmp2)
     return {
-        "filesystem": column["name"], "scratch": column["dir"],
+        "filesystem": column["name"], "scratch": _fs.label(column["dir"]),
         "recovery": {"frames_on_tape": recovered, "requested_frames": args.frames, "rounds": args.rounds,
                      "p50_ms": round(q[49], 2), "p95_ms": round(q[94], 2), "p99_ms": round(q[98], 2),
                      "min_ms": round(min(times), 2), "max_ms": round(max(times), 2),
@@ -198,7 +198,7 @@ def main(argv=None) -> int:
         "date": time.strftime("%Y-%m-%d"), "probe": "recovery time, RSS, amplification",
         "gate_column": _fs.GATE_FS,
         "hardware": hardware(),
-        "columns": {c["name"]: {"path": c["dir"], "gate": c["gate"], "note": c["note"]} for c in columns},
+        "columns": {c["name"]: {"path": _fs.label(c["dir"]), "gate": c["gate"], "note": c["note"]} for c in columns},
         "rss_write_only_process": rss_children,
         "results": {c["name"]: measure_column(c, args) for c in columns},
     }

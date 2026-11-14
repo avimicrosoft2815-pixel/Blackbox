@@ -47,6 +47,14 @@ def columns() -> list[dict]:
     return out
 
 
+def label(path: str | os.PathLike[str]) -> str:
+    """A path as it may appear in a committed JSON: relative to the repo, never an absolute sandbox path."""
+    try:
+        return Path(path).resolve().relative_to(ROOT).as_posix()
+    except ValueError:
+        return "<scratch>/" + Path(path).name
+
+
 def scratch(column: dict, prefix: str) -> str:
     os.makedirs(column["dir"], exist_ok=True)
     return tempfile.mkdtemp(prefix=prefix, dir=column["dir"])

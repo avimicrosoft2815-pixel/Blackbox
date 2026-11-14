@@ -15,12 +15,12 @@
   "threshold": "write() within 20 % of mmap at every rate -> ADR-001 reopened",
   "columns": {
     "ext4": {
-      "path": "/home/user/Blackbox/.bench/scratch",
+      "path": ".bench/scratch",
       "gate": true,
       "note": "gate column: numbers here are measured on the repository's real filesystem"
     },
     "tmpfs": {
-      "path": "/dev/shm",
+      "path": "<scratch>/shm",
       "gate": false,
       "note": "labelled second column only: fdatasync is a no-op on tmpfs, so no durability claim"
     }
@@ -32,80 +32,80 @@
         "mmap": [
           {
             "offered_ev_s": 1000,
-            "events": 2866,
-            "achieved_ev_s": 955.3,
-            "p50_us": 15.8,
-            "p95_us": 68.307,
-            "p99_us": 99.927,
-            "cpu_us_per_event": 433.46
+            "events": 2859,
+            "achieved_ev_s": 953.0,
+            "p50_us": 21.898,
+            "p95_us": 105.274,
+            "p99_us": 158.842,
+            "cpu_us_per_event": 459.369
           },
           {
             "offered_ev_s": 10000,
-            "events": 18822,
-            "achieved_ev_s": 6274.0,
-            "p50_us": 11.98,
-            "p95_us": 35.511,
-            "p99_us": 67.336,
-            "cpu_us_per_event": 73.971
+            "events": 20645,
+            "achieved_ev_s": 6881.7,
+            "p50_us": 13.219,
+            "p95_us": 42.577,
+            "p99_us": 98.925,
+            "cpu_us_per_event": 71.078
           },
           {
             "offered_ev_s": 40000,
-            "events": 31961,
-            "achieved_ev_s": 10653.7,
-            "p50_us": 11.948,
-            "p95_us": 24.451,
-            "p99_us": 63.664,
-            "cpu_us_per_event": 47.203
+            "events": 30499,
+            "achieved_ev_s": 10166.3,
+            "p50_us": 16.129,
+            "p95_us": 36.955,
+            "p99_us": 107.722,
+            "cpu_us_per_event": 55.12
           }
         ],
         "write": [
           {
             "offered_ev_s": 1000,
-            "events": 2871,
-            "achieved_ev_s": 957.0,
-            "p50_us": 18.066,
-            "p95_us": 40.598,
-            "p99_us": 97.87,
-            "cpu_us_per_event": 415.166
+            "events": 2860,
+            "achieved_ev_s": 953.3,
+            "p50_us": 18.865,
+            "p95_us": 49.154,
+            "p99_us": 98.753,
+            "cpu_us_per_event": 436.606
           },
           {
             "offered_ev_s": 10000,
-            "events": 21416,
-            "achieved_ev_s": 7138.7,
-            "p50_us": 14.516,
-            "p95_us": 23.242,
-            "p99_us": 76.193,
-            "cpu_us_per_event": 66.4
+            "events": 24286,
+            "achieved_ev_s": 8095.3,
+            "p50_us": 18.471,
+            "p95_us": 41.192,
+            "p99_us": 94.865,
+            "cpu_us_per_event": 69.269
           },
           {
             "offered_ev_s": 40000,
-            "events": 31085,
-            "achieved_ev_s": 10361.7,
-            "p50_us": 14.612,
-            "p95_us": 29.417,
-            "p99_us": 79.996,
-            "cpu_us_per_event": 51.228
+            "events": 30706,
+            "achieved_ev_s": 10235.3,
+            "p50_us": 17.814,
+            "p95_us": 34.94,
+            "p99_us": 91.771,
+            "cpu_us_per_event": 55.206
           }
         ]
       },
       "ratios": [
         {
           "offered_ev_s": 1000,
-          "p50_ratio": 1.143,
-          "p99_ratio": 0.979,
-          "cpu_ratio": 0.958
+          "p50_ratio": 0.861,
+          "p99_ratio": 0.622,
+          "cpu_ratio": 0.95
         },
         {
           "offered_ev_s": 10000,
-          "p50_ratio": 1.212,
-          "p99_ratio": 1.132,
-          "cpu_ratio": 0.898
+          "p50_ratio": 1.397,
+          "p99_ratio": 0.959,
+          "cpu_ratio": 0.975
         },
         {
           "offered_ev_s": 40000,
-          "p50_ratio": 1.223,
-          "p99_ratio": 1.257,
-          "cpu_ratio": 1.085
+          "p50_ratio": 1.104,
+          "p99_ratio": 0.852,
+          "cpu_ratio": 1.002
         }
       ]
     },
@@ -115,86 +115,86 @@
         "mmap": [
           {
             "offered_ev_s": 1000,
-            "events": 2871,
-            "achieved_ev_s": 957.0,
-            "p50_us": 16.413,
-            "p95_us": 70.402,
-            "p99_us": 102.125,
-            "cpu_us_per_event": 423.968
+            "events": 2872,
+            "achieved_ev_s": 957.3,
+            "p50_us": 21.386,
+            "p95_us": 93.509,
+            "p99_us": 125.584,
+            "cpu_us_per_event": 447.934
           },
           {
             "offered_ev_s": 10000,
-            "events": 18798,
-            "achieved_ev_s": 6266.0,
-            "p50_us": 11.987,
-            "p95_us": 27.984,
-            "p99_us": 63.107,
-            "cpu_us_per_event": 73.461
+            "events": 21187,
+            "achieved_ev_s": 7062.3,
+            "p50_us": 15.117,
+            "p95_us": 38.042,
+            "p99_us": 103.815,
+            "cpu_us_per_event": 67.683
           },
           {
             "offered_ev_s": 40000,
-            "events": 31396,
-            "achieved_ev_s": 10465.3,
-            "p50_us": 11.986,
-            "p95_us": 22.937,
-            "p99_us": 66.457,
-            "cpu_us_per_event": 48.41
+            "events": 31256,
+            "achieved_ev_s": 10418.7,
+            "p50_us": 12.106,
+            "p95_us": 29.365,
+            "p99_us": 77.688,
+            "cpu_us_per_event": 49.888
           }
         ],
         "write": [
           {
             "offered_ev_s": 1000,
-            "events": 2867,
-            "achieved_ev_s": 955.7,
-            "p50_us": 16.745,
-            "p95_us": 37.95,
-            "p99_us": 98.958,
-            "cpu_us_per_event": 438.385
+            "events": 2866,
+            "achieved_ev_s": 955.3,
+            "p50_us": 22.491,
+            "p95_us": 51.9,
+            "p99_us": 109.309,
+            "cpu_us_per_event": 431.508
           },
           {
             "offered_ev_s": 10000,
-            "events": 21303,
-            "achieved_ev_s": 7101.0,
-            "p50_us": 14.303,
-            "p95_us": 28.472,
-            "p99_us": 81.319,
-            "cpu_us_per_event": 67.019
+            "events": 23011,
+            "achieved_ev_s": 7670.3,
+            "p50_us": 17.44,
+            "p95_us": 32.262,
+            "p99_us": 86.037,
+            "cpu_us_per_event": 65.949
           },
           {
             "offered_ev_s": 40000,
-            "events": 30247,
-            "achieved_ev_s": 10082.3,
-            "p50_us": 14.276,
-            "p95_us": 22.085,
-            "p99_us": 75.075,
-            "cpu_us_per_event": 51.827
+            "events": 31152,
+            "achieved_ev_s": 10384.0,
+            "p50_us": 14.825,
+            "p95_us": 28.164,
+            "p99_us": 82.543,
+            "cpu_us_per_event": 50.159
           }
         ]
       },
       "ratios": [
         {
           "offered_ev_s": 1000,
-          "p50_ratio": 1.02,
-          "p99_ratio": 0.969,
-          "cpu_ratio": 1.034
+          "p50_ratio": 1.052,
+          "p99_ratio": 0.87,
+          "cpu_ratio": 0.963
         },
         {
           "offered_ev_s": 10000,
-          "p50_ratio": 1.193,
-          "p99_ratio": 1.289,
-          "cpu_ratio": 0.912
+          "p50_ratio": 1.154,
+          "p99_ratio": 0.829,
+          "cpu_ratio": 0.974
         },
         {
           "offered_ev_s": 40000,
-          "p50_ratio": 1.191,
-          "p99_ratio": 1.13,
-          "cpu_ratio": 1.071
+          "p50_ratio": 1.225,
+          "p99_ratio": 1.062,
+          "cpu_ratio": 1.005
         }
       ]
     }
   },
   "verdict": {
-    "worst_p50_ratio": 1.223,
+    "worst_p50_ratio": 1.397,
     "within_20_percent": false,
     "decision": "keep mmap: write()-append is more than 20 % slower at some target rate"
   }

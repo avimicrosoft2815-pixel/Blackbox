@@ -35,16 +35,16 @@ Same protocol on both filesystems, both written into one JSON. Gate: **p50 ≤ 2
 
 | Row | ext4 (gate) | tmpfs (label only) | Source |
 |---|---|---|---|
-| writer event, group commit 16 KiB, chain on | **p50 4.28 µs · p99 42.0 µs · 80 620 ev/s** | p50 4.22 µs · p99 32.8 µs · 86 477 ev/s | `2026-11-14-writer-throughput.json` |
-| writer event, publish per event | p50 4.26 µs · p99 16.6 µs · 86 619 ev/s | p50 4.23 µs · p99 16.2 µs · 83 557 ev/s | same |
-| kernel mode (`sync_ms=250`, `sync_bytes=1 MiB`) | p50 4.27 µs · p99 57.3 µs · 79 492 ev/s · **sync stall max 2.88 ms** (28 syncs) | p50 4.35 · p99 55.7 · stall max 0.17 ms | same |
-| kernel mode, sync-dense (`sync_bytes=64 KiB`) | p50 4.23 · p99 47.4 · **stall max 1.88 ms** (454 syncs) | p50 4.39 · p99 36.5 · stall max 0.20 ms | same |
-| group-commit window | 4.45 ms @ 1 ev/s · 4.999 ms @ 1 000 ev/s · 3.85 ms unbounded (121 ev/commit) | 0.0 / 5.0 / 1.65 ms | same |
-| recovery, 10 k frames | p50 134.9 ms (**56.3 ms per 10k**), p99 139.6 ms | p50 137.0 ms (50.8 ms/10k) | `2026-11-14-recovery.json` |
-| disk amplification | 1.219× per-event · 1.263× 4 KiB · **1.231× 16 KiB** · 1.222× 64 KiB | identical (frame-size property) | same |
-| RSS above baseline at a full 16 MiB segment (C8) | **5.15 MiB** (anon +0.37, file +4.79) | 5.30 MiB | same |
-| stage table | crc32 1 KiB 0.58 µs · blake2b 1 KiB 1.06 µs · cbor encode 8.62 µs · frame encode 3.07 µs · memcpy 0.22 µs · head publish 1.21 µs | within noise | `2026-11-14-frame.json` |
-| mmap vs `write()` (P1-19, ADR-001) | p50 ratio 1.143 / 1.212 / 1.223 at 1 k / 10 k / 40 k ev/s | 1.020 / 1.193 / 1.191 | `2026-11-14-writer-ab.json` |
+| writer event, group commit 16 KiB, chain on | **p50 4.477 µs · p99 46.259 µs · 75,255 ev/s** | p50 4.415 µs · p99 39.063 µs · 77,326 ev/s | `2026-11-14-writer-throughput.json` |
+| writer event, publish per event | p50 5.531 µs · p99 34.293 µs · 61,084 ev/s | p50 6.378 µs · p99 27.369 µs | same |
+| kernel mode (`sync_ms=250`, `sync_bytes=1 MiB`) | p50 4.741 µs · p99 64.509 µs · 64,954 ev/s · **sync stall max 3 019 µs** (28 syncs) | p50 4.573 · p99 55.261 · stall max 183 µs | same |
+| kernel mode, sync-dense (`sync_bytes=64 KiB`) | p50 4.922 · p99 64.446 · **stall max 3 746 µs** (453 syncs) | p50 4.618 · stall max 293 µs | same |
+| group-commit window | 4.401 ms @ 1 ev/s · 4.996 ms @ 1 000 ev/s · 4.979 ms unbounded | 0.0 / 5.0 / 1.65 ms | same |
+| recovery, 10 k frames | p50 120.25 ms (**58.0 ms per 10k**), p99 124.34 ms | p50 159.17 ms (45.4 ms/10k) | `2026-11-14-recovery.json` |
+| disk amplification | 1.22× per-event · 1.263× 4 KiB · **1.231× 16 KiB** · 1.222× 64 KiB | identical (frame-size property) | same |
+| RSS above baseline at a full 16 MiB segment (C8) | **5.15 MiB** (anon +0.25, file +4.9) | 5.05 MiB | same |
+| stage table | crc32 1 KiB 0.576 µs · blake2b 1 KiB 1.989 µs · cbor encode 9.14 µs · frame encode 3.089 µs · memcpy 0.219 µs · head publish 1.21 µs | within noise | `2026-11-14-frame.json` |
+| mmap vs `write()` (P1-19, ADR-001) | p50 ratio 1.020 / 1.193 / 1.191 at 1 k / 10 k / 40 k ev/s (run 2); run 1 gave 1.143 / 1.212 / 1.223 — the exact ratio is labelled `requires hardware` | — | `2026-11-14-writer-ab.json` |
 
 **C2 — the measured interval, stated once:** it starts from a Python `dict` holding a 1 KiB `content` field,
 with `content=hash` (BLAKE2b-256 of the body), and includes the CBOR encode, the frame encode, the append into

@@ -14,7 +14,6 @@ has to name the claims it forbids.
 """
 from __future__ import annotations
 
-import re
 import subprocess
 from pathlib import Path
 
@@ -72,7 +71,7 @@ def test_no_forbidden_word_in_the_tree():
 def test_no_forbidden_word_in_commit_messages():
     try:
         log = subprocess.run(["git", "log", "--format=%s%n%b"], cwd=ROOT, capture_output=True,
-                             text=True, timeout=30, check=False)      # noqa: S607
+                             text=True, timeout=30, check=False)
     except (OSError, subprocess.SubprocessError):                     # pragma: no cover - no git
         return
     if log.returncode != 0:                                          # pragma: no cover - not a checkout

@@ -13,12 +13,12 @@
   },
   "columns": {
     "ext4": {
-      "path": "/home/user/Blackbox/.bench/scratch",
+      "path": ".bench/scratch",
       "gate": true,
       "note": "gate column: numbers here are measured on the repository's real filesystem"
     },
     "tmpfs": {
-      "path": "/dev/shm",
+      "path": "<scratch>/shm",
       "gate": false,
       "note": "labelled second column only: fdatasync is a no-op on tmpfs, so no durability claim"
     }
@@ -27,68 +27,68 @@
     "ext4": {
       "events": 10000,
       "segment_bytes_mapped": 16777216,
-      "peak_kib": 21896,
-      "peak_mib": 21.38,
+      "peak_kib": 22124,
+      "peak_mib": 21.61,
       "above_baseline_mib": 5.15,
-      "rss_anon_delta_mib": 0.37,
-      "rss_file_delta_mib": 4.79,
+      "rss_anon_delta_mib": 0.25,
+      "rss_file_delta_mib": 4.9,
       "baseline": {
-        "ru_maxrss_kib": 19652,
-        "VmRSS": 16620,
-        "RssAnon": 7476,
-        "RssFile": 9144
+        "ru_maxrss_kib": 19072,
+        "VmRSS": 16848,
+        "RssAnon": 7604,
+        "RssFile": 9244
       },
       "after": {
-        "ru_maxrss_kib": 21896,
-        "VmRSS": 21896,
-        "RssAnon": 7852,
-        "RssFile": 14044
+        "ru_maxrss_kib": 22124,
+        "VmRSS": 22124,
+        "RssAnon": 7860,
+        "RssFile": 14264
       }
     },
     "tmpfs": {
       "events": 10000,
       "segment_bytes_mapped": 16777216,
-      "peak_kib": 22208,
-      "peak_mib": 21.69,
-      "above_baseline_mib": 5.37,
-      "rss_anon_delta_mib": 0.37,
-      "rss_file_delta_mib": 0.5,
+      "peak_kib": 21956,
+      "peak_mib": 21.44,
+      "above_baseline_mib": 5.05,
+      "rss_anon_delta_mib": 0.25,
+      "rss_file_delta_mib": 0.43,
       "baseline": {
-        "ru_maxrss_kib": 19652,
-        "VmRSS": 16712,
-        "RssAnon": 7476,
-        "RssFile": 9236
+        "ru_maxrss_kib": 19072,
+        "VmRSS": 16788,
+        "RssAnon": 7604,
+        "RssFile": 9184
       },
       "after": {
-        "ru_maxrss_kib": 22208,
-        "VmRSS": 22208,
-        "RssAnon": 7852,
-        "RssFile": 9752
+        "ru_maxrss_kib": 21956,
+        "VmRSS": 21956,
+        "RssAnon": 7856,
+        "RssFile": 9628
       }
     }
   },
   "results": {
     "ext4": {
       "filesystem": "ext4",
-      "scratch": "/home/user/Blackbox/.bench/scratch",
+      "scratch": ".bench/scratch",
       "recovery": {
-        "frames_on_tape": 23968,
+        "frames_on_tape": 20744,
         "requested_frames": 10000,
         "rounds": 7,
-        "p50_ms": 134.94,
-        "p95_ms": 139.4,
-        "p99_ms": 139.61,
-        "min_ms": 124.27,
-        "max_ms": 139.01,
-        "per_10k_frames_ms": 56.3
+        "p50_ms": 120.25,
+        "p95_ms": 124.34,
+        "p99_ms": 124.34,
+        "min_ms": 110.98,
+        "max_ms": 124.33,
+        "per_10k_frames_ms": 58.0
       },
-      "rss_this_process_kib": 129576,
+      "rss_this_process_kib": 122284,
       "amplification_by_batch": [
         {
           "batch_bytes": 0,
-          "committed_frame_bytes": 3121584,
+          "committed_frame_bytes": 3122864,
           "payload_bytes": 2560000,
-          "ratio": 1.219
+          "ratio": 1.22
         },
         {
           "batch_bytes": 4096,
@@ -114,28 +114,28 @@
         "committed_frame_bytes": 4718976,
         "ratio": 1.843,
         "reserved_segment_bytes": 16777216,
-        "append_events_per_s": 59244.0
+        "append_events_per_s": 51266.1
       }
     },
     "tmpfs": {
       "filesystem": "tmpfs",
-      "scratch": "/dev/shm",
+      "scratch": "<scratch>/shm",
       "recovery": {
-        "frames_on_tape": 26986,
+        "frames_on_tape": 35060,
         "requested_frames": 10000,
         "rounds": 7,
-        "p50_ms": 137.03,
-        "p95_ms": 141.38,
-        "p99_ms": 141.43,
-        "min_ms": 124.91,
-        "max_ms": 141.27,
-        "per_10k_frames_ms": 50.8
+        "p50_ms": 159.17,
+        "p95_ms": 167.38,
+        "p99_ms": 168.35,
+        "min_ms": 155.6,
+        "max_ms": 165.57,
+        "per_10k_frames_ms": 45.4
       },
-      "rss_this_process_kib": 135028,
+      "rss_this_process_kib": 149180,
       "amplification_by_batch": [
         {
           "batch_bytes": 0,
-          "committed_frame_bytes": 3121584,
+          "committed_frame_bytes": 3121744,
           "payload_bytes": 2560000,
           "ratio": 1.219
         },
@@ -163,7 +163,7 @@
         "committed_frame_bytes": 4718976,
         "ratio": 1.843,
         "reserved_segment_bytes": 16777216,
-        "append_events_per_s": 60971.7
+        "append_events_per_s": 45196.9
       }
     }
   }

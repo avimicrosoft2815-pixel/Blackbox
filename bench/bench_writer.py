@@ -95,7 +95,7 @@ def run(column: dict, n: int, warmup: int, body: bytes, batch_bytes: int, chain:
         "events_per_s": round(n / elapsed, 1), "committed_seq": committed, "publishes": publishes,
         "events_per_publish": round(n / publishes, 1) if publishes else None,
         "window_max_ms": round(window_max, 3),
-        "filesystem": column["name"], "scratch": column["dir"],
+        "filesystem": column["name"], "scratch": _fs.label(column["dir"]),
     }
 
 
@@ -170,7 +170,7 @@ def main(argv=None) -> int:
                      "writes into the mapping, so the stage table does not sum to this number."),
         "gate_column": _fs.GATE_FS,
         "hardware": hardware(),
-        "columns": {c["name"]: {"path": c["dir"], "gate": c["gate"], "note": c["note"]} for c in columns},
+        "columns": {c["name"]: {"path": _fs.label(c["dir"]), "gate": c["gate"], "note": c["note"]} for c in columns},
         "results": {},
     }
     for c in columns:

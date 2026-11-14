@@ -48,7 +48,7 @@
     "filesystems": {
       "home_fstype": "ext4",
       "home_is_network": false,
-      "home_path": "/home/user",
+      "home_path": "/<sandbox>",
       "network_fs_denylist": [
         "9p",
         "cifs",
@@ -62,7 +62,7 @@
       "repo_free_bytes": 20694548480,
       "repo_fstype": "ext4",
       "repo_is_network": false,
-      "repo_path": "/home/user/Blackbox",
+      "repo_path": ".",
       "repo_total_bytes": 21834924032,
       "tmp_fstype": "ext4"
     },

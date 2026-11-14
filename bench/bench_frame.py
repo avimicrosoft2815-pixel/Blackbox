@@ -152,7 +152,7 @@ def measure_column(column: dict, args) -> dict:
     hmap.close()
     _fs.release(tmp)
     _fs.release(nc_tmp)
-    return {"stages": results, "pairs": pairs, "filesystem": column["name"], "scratch": column["dir"]}
+    return {"stages": results, "pairs": pairs, "filesystem": column["name"], "scratch": _fs.label(column["dir"])}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -174,7 +174,7 @@ def main(argv: list[str] | None = None) -> int:
         "hardware": hardware(),
         "workload": {"payload_1kib": 1024, "event_payload_bytes": len(cbor.encode(EVENT)),
                      "frame_1kib_bytes": len(frame_mod.encode(1, C.KIND_MODEL_REQUEST, b"x" * 1024, priority=0))},
-        "columns": {c["name"]: {"path": c["dir"], "gate": c["gate"], "note": c["note"]} for c in columns},
+        "columns": {c["name"]: {"path": _fs.label(c["dir"]), "gate": c["gate"], "note": c["note"]} for c in columns},
         "results": {},
     }
     for c in columns:

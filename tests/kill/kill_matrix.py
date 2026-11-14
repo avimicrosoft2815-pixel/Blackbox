@@ -159,7 +159,7 @@ def main(argv=None) -> int:
         "trials": args.trials, "seed": args.seed, "max_delay_ms": args.max_delay_ms,
         "elapsed_s": round(elapsed, 1),
         "filesystem": args.filesystem or _detect_fstype(str(tmp)),
-        "scratch": str(tmp),
+        "scratch": "<scratch>/" + Path(tmp).name,
         "hardware": {"python": platform.python_version(), "os": platform.platform(),
                      "machine": platform.machine(), "cpu_count": os.cpu_count()},
         "configs": [{"config": k, **v} for k, v in sorted(summary.items())],

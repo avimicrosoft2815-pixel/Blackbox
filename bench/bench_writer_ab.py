@@ -27,16 +27,17 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "bench"))
 
-from blackbox import constants as C              # noqa: E402
-from blackbox.codec import cbor                   # noqa: E402
-from blackbox.codec.ids import blake2b            # noqa: E402
-from blackbox.tape import chain as chain_mod      # noqa: E402
-from blackbox.tape import frame as frame_mod      # noqa: E402
-from blackbox.tape import head as head_mod        # noqa: E402
-from blackbox.tape import segments                # noqa: E402
-from blackbox.tape.writer import TapeWriter       # noqa: E402
-from bench_frame import hardware                  # noqa: E402
-import _fs                                        # noqa: E402
+import _fs
+from bench_frame import hardware
+
+from blackbox import constants as C
+from blackbox.codec import cbor
+from blackbox.codec.ids import blake2b
+from blackbox.tape import chain as chain_mod
+from blackbox.tape import frame as frame_mod
+from blackbox.tape import head as head_mod
+from blackbox.tape import segments
+from blackbox.tape.writer import TapeWriter
 
 RATES = (1_000, 10_000, 40_000)
 
@@ -146,18 +147,20 @@ def measure(column: dict, seconds: float) -> dict:
         tmp, uuid = _mk_tape(column)
         w = TapeWriter(tmp, writer_uuid=uuid, segment_bytes=256 << 20, mode="process").open()
         w.batch_bytes = C.DEFAULT_BATCH_BYTES
-        arms["mmap"].append(_paced_arm(lambda: w.emit(C.KIND_MODEL_REQUEST, payload), rate, seconds))
+        arms["mmap"].append(_paced_arm(lambda writer=w: writer.emit(C.KIND_MODEL_REQUEST, payload),
+                                       rate, seconds))
         w.flush()
         w.close()
         _fs.release(tmp)
 
         tmp, uuid = _mk_tape(column)
         t = WriteAppendTape(tmp, uuid, 256 << 20)
-        arms["write"].append(_paced_arm(lambda: t.emit(C.KIND_MODEL_REQUEST, payload), rate, seconds))
+        arms["write"].append(_paced_arm(lambda tape=t: tape.emit(C.KIND_MODEL_REQUEST, payload),
+                                        rate, seconds))
         t.close()
         _fs.release(tmp)
     ratios = []
-    for a, b in zip(arms["mmap"], arms["write"]):
+    for a, b in zip(arms["mmap"], arms["write"], strict=True):
         ratios.append({"offered_ev_s": a["offered_ev_s"],
                        "p50_ratio": round(b["p50_us"] / a["p50_us"], 3),
                        "p99_ratio": round(b["p99_us"] / a["p99_us"], 3),
@@ -177,7 +180,7 @@ def main(argv=None) -> int:
                         "only the store differs; paced at the offered rate for --seconds"),
            "gate_column": _fs.GATE_FS, "hardware": hardware(),
            "threshold": "write() within 20 % of mmap at every rate -> ADR-001 reopened",
-           "columns": {c["name"]: {"path": c["dir"], "gate": c["gate"], "note": c["note"]} for c in columns},
+           "columns": {c["name"]: {"path": _fs.label(c["dir"]), "gate": c["gate"], "note": c["note"]} for c in columns},
            "results": {c["name"]: measure(c, args.seconds) for c in columns}}
     worst = max(r["p50_ratio"] for r in out["results"][_fs.GATE_FS]["ratios"])
     out["verdict"] = {

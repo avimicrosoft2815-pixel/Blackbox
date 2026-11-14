@@ -21,7 +21,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from blackbox.codec import cbor  # noqa: E402
+from blackbox.codec import cbor
 
 EVENT = {"p": "openai", "m": "gpt-4o-mini", "pt": 3, "ph": b"\x01" * 32, "st": 1, "te": 2,
          "pm": {"temperature": 0.2, "max_tokens": 256}}
@@ -61,7 +61,7 @@ def main(argv: list[str] | None = None) -> int:
             ok += 1
         except cbor.CBORError:
             rejected += 1
-        except Exception as exc:                      # noqa: BLE001 - the point of the fuzz
+        except Exception as exc:
             failures.append({"iteration": i, "input_hex": data.hex()[:200],
                              "error": f"{type(exc).__name__}: {exc}"})
             if len(failures) >= 10:

@@ -14,9 +14,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from blackbox import constants as C  # noqa: E402
-from blackbox.tape import repair, scanner, segments  # noqa: E402
-from blackbox.tape.writer import TapeWriter  # noqa: E402
+from blackbox import constants as C
+from blackbox.tape import repair, scanner, segments
+from blackbox.tape.writer import TapeWriter
 
 
 def test_segment_creation_publishes_the_header_atomically(tmp_path):
