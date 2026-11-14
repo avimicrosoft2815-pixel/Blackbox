@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "blackbox-recorder"
+version = "0.1.0.dev0"
+description = "Local-first flight recorder for LLM-calling programs: crash-durable event tape, portable capsules, no account, no server."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Apache-2.0" }
+authors = [{ name = "BlackBox contributors" }]
+keywords = ["llm", "observability", "flight-recorder", "tracing", "crash-recovery"]
+classifiers = [
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Operating System :: POSIX :: Linux",
+  "Operating System :: MacOS",
+  "Operating System :: Microsoft :: Windows",
+  "Typing :: Typed",
+]
+# Runtime dependencies: deliberately empty. Core must import stdlib only (test-enforced: tests/test_stdlib_only.py).
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest==8.3.4", "hypothesis==6.122.3"]
+
+[project.urls]
+Documentation = "https://github.com/avimicrosoft2815-pixel/Blackbox"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+filterwarnings = ["error::DeprecationWarning"]
