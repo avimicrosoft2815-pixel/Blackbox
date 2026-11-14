@@ -1906,7 +1906,7 @@ examples/{hello_agent.py, crash_demo.py, replay_demo.py}
 
 | ID | Path | Action | Done when | Est |
 |---|---|---|---|---|
-| P1-01 | `codec/crc32.py` | **one** checksum in v2: CRC-32/ISO-HDLC via `zlib.crc32` (C speed); the pure-Python CRC32C path was measured at 9 MB/s and deleted (DV-005, ADR-004) | check value `crc32("123456789") == 0xCBF43926` in the conformance set; 0.45 us per KiB measured (`bench/results/2026-11-14-frame.json`) | 3 |
+| P1-01 | `codec/crc32.py` | **one** checksum in v2: CRC-32/ISO-HDLC via `zlib.crc32` (C speed); the pure-Python CRC32C path was measured at 9 MB/s and deleted (DV-005, ADR-004) | check value `crc32("123456789") == 0xCBF43926` in the conformance set; 0.58 us per KiB measured (`bench/results/2026-11-14-frame.json`) | 3 |
 | P1-02 | `codec/cbor.py` | canonical encoder (sorted keys, shortest ints, no floats unless flagged) | byte-identical output across runs; RFC 8949 test vectors subset passes | 8 |
 | P1-03 | `codec/cbor.py` | strict decoder: depth ≤ 32, map ≤ 4096, no indefinite, no tags, trailing-bytes rejection | fuzz: 100k random buffers never raise anything but `CBORError` | 6 |
 | P1-04 | `codec/ids.py` | sortable run id (`r_` + 26 base32 chars, time-prefixed), node ids from `(run, path, kind)`, `fingerprint(obj)` | ids sort chronologically; same input ⇒ same node id | 3 |

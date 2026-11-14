@@ -13,12 +13,12 @@ import os
 import platform
 import statistics
 import sys
-import tempfile
 import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
+sys.path.insert(0, str(ROOT / "bench"))
 
 from blackbox import constants as C                      # noqa: E402
 from blackbox.codec import cbor                          # noqa: E402
@@ -28,6 +28,7 @@ from blackbox.tape import chain as chain_mod             # noqa: E402
 from blackbox.tape import frame as frame_mod             # noqa: E402
 from blackbox.tape import head as head_mod               # noqa: E402
 from blackbox.tape.writer import TapeWriter              # noqa: E402
+import _fs                                              # noqa: E402
 
 
 def hardware() -> dict:
@@ -83,23 +84,18 @@ EVENT = {
 }
 
 
-def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--n", type=int, default=100_000)
-    ap.add_argument("--warmup", type=int, default=10_000)
-    ap.add_argument("--out", default=None)
-    args = ap.parse_args(argv)
-
+def measure_column(column: dict, args) -> dict:
+    """Every stage, measured twice: once on the real disk (gate) and once on tmpfs (labelled column)."""
     payload_1k = b"x" * 1024
     ev_bytes = cbor.encode(EVENT)
     frame_1k = frame_mod.encode(1, C.KIND_MODEL_REQUEST, payload_1k, priority=0)
     chain_payload = chain_mod.encode_payload(prev=b"\x00" * 32, batch=blake2b(b"y" * 1024),
                                              first_seq=1, last_seq=9)
 
-    tmp = tempfile.mkdtemp(prefix="bbx-bench-")
-    writer = TapeWriter(tmp, segment_bytes=256 << 20, mode="process").open()
-    writer_nc = TapeWriter(tempfile.mkdtemp(prefix="bbx-bench-"), segment_bytes=256 << 20,
-                           mode="process", chain_enabled=False).open()
+    tmp = _fs.scratch(column, "bbx-bench-frame-")
+    nc_tmp = _fs.scratch(column, "bbx-bench-frame-nc-")
+    writer = TapeWriter(tmp, segment_bytes=64 << 20, mode="process").open()
+    writer_nc = TapeWriter(nc_tmp, segment_bytes=64 << 20, mode="process", chain_enabled=False).open()
 
     seg_mm = writer._mm                     # noqa: SLF001 - the bench measures the real mapping
     hmap = head_mod.HeadMap(os.path.join(tmp, "head_bench"))
@@ -123,7 +119,6 @@ def main(argv: list[str] | None = None) -> int:
         "memcpy_mmap_1kib": ("slice-copy 1 KiB into the segment mapping",
                              lambda: seg_mm.__setitem__(slice(4096, 5120), payload_1k)),
         "head_publish": ("head pack_into + CRC (one publish)", publish_once),
-        "head_write_two_halves": ("old path: 2 x 32 B write on a file object", lambda: None),
         "append_1kib_no_publish": ("writer.append, 1 KiB payload", lambda: writer.append(
             C.KIND_MODEL_REQUEST, payload_1k, priority=0)),
         "event_append_publish": ("writer.append_and_publish, 26 B payload (chain on)",
@@ -135,8 +130,6 @@ def main(argv: list[str] | None = None) -> int:
     }
     results = {}
     for name, (label, fn) in stages.items():
-        if name == "head_write_two_halves":       # historical comparison, not measurable now
-            continue
         results[name] = {"label": label, **measure(fn, args.n, args.warmup)}
 
     # paired toggling: the same shape with one component switched off, so the difference is attributable
@@ -156,25 +149,42 @@ def main(argv: list[str] | None = None) -> int:
     writer.close()
     writer_nc.close()
     hmap.close()
+    _fs.release(tmp)
+    _fs.release(nc_tmp)
+    return {"stages": results, "pairs": pairs, "filesystem": column["name"], "scratch": column["dir"]}
 
+
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--n", type=int, default=100_000)
+    ap.add_argument("--warmup", type=int, default=10_000)
+    ap.add_argument("--out", default=None)
+    ap.add_argument("--only", default=None)
+    args = ap.parse_args(argv)
+
+    columns = _fs.columns()
+    if args.only:
+        columns = [c for c in columns if c["name"] == args.only]
     out = {
         "date": time.strftime("%Y-%m-%d"),
         "probe": "P1-17 frame/append stages",
         "protocol": f"N={args.n}, warm-up={args.warmup}, per-call perf_counter_ns, single process",
+        "gate_column": _fs.GATE_FS,
         "hardware": hardware(),
-        "workload": {"payload_1kib": 1024, "event_payload_bytes": len(ev_bytes),
-                     "frame_1kib_bytes": len(frame_1k)},
-        "stages": results,
-        "pairs": pairs,
+        "workload": {"payload_1kib": 1024, "event_payload_bytes": len(cbor.encode(EVENT)),
+                     "frame_1kib_bytes": len(frame_mod.encode(1, C.KIND_MODEL_REQUEST, b"x" * 1024, priority=0))},
+        "columns": {c["name"]: {"path": c["dir"], "gate": c["gate"], "note": c["note"]} for c in columns},
+        "results": {},
     }
+    for c in columns:
+        out["results"][c["name"]] = measure_column(c, args)
     path = args.out or str(ROOT / "bench" / "results" / f"{out['date']}-frame.json")
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     Path(path).write_text(json.dumps(out, indent=2), encoding="utf-8")
     print(f"wrote {path}")
-    for name, r in results.items():
-        print(f"  {name:28s} p50 {r['p50_us']:8.3f} us   p99 {r['p99_us']:9.3f} us")
-    for p in pairs:
-        print(f"  pair {p['pair']:14s} delta p50 {p['delta_p50_us']:8.3f} us   x{p['ratio']}")
+    for fs_name, block in out["results"].items():
+        for name, r in block["stages"].items():
+            print(f"  [{fs_name:6s}] {name:28s} p50 {r['p50_us']:8.3f} us   p99 {r['p99_us']:9.3f} us")
     return 0
 
 

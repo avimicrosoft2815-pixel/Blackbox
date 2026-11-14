@@ -21,7 +21,7 @@ Measured on this machine, `bench/results/2026-11-14-frame.json`, N = 100 000, wa
 | checksum | per KiB | consequence |
 |---|---|---|
 | pure-Python CRC32C, slicing-by-4 | **110.5 µs** (≈ 9 MB/s) | alone exceeds the §15.1 event budget (25 µs p50) |
-| `zlib.crc32` | **0.45 µs** | 0.2 % of the budget |
+| `zlib.crc32` | **0.58 µs** | 0.4 % of the budget |
 
 The plan's P1-01 estimate of "~80 MB/s pure Python" was an estimate and was wrong by an order of magnitude; the
 row is corrected in the same commit.

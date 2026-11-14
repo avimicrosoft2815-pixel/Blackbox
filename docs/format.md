@@ -11,8 +11,8 @@ xorout `0xFFFFFFFF`. Check value: `crc32("123456789") == 0xCBF43926`. Fields kee
 `BBX-E221`.
 
 Why one algorithm and why this one: a CRC here detects torn or stale frames — tamper evidence is the BLAKE2b
-chain (`§8.12`), not the CRC. Pure-Python CRC32C measured 110.5 µs per KiB (≈ 9 MB/s) against 0.45 µs per KiB
-for `zlib.crc32`, which alone would have broken the `§15.1` event budget, and a second algorithm would force
+chain (`§8.12`), not the CRC. Pure-Python CRC32C measured 110.5 µs per KiB (≈ 9 MB/s) against 0.58 µs per KiB
+for `zlib.crc32` (0.58 µs per KiB measured), which alone would have broken the `§15.1` event budget, and a second algorithm would force
 every reader (including the Go one) to implement it for nothing. Recorded as `DV-005` and
 `docs/adr/ADR-004-crc32-not-crc32c.md`.
 

@@ -1,6 +1,7 @@
 {
   "date": "2026-11-14",
   "probe": "recovery time, RSS, amplification",
+  "gate_column": "ext4",
   "hardware": {
     "cpu": "Intel(R) Xeon(R) Processor @ 2.60GHz",
     "cpu_count": 2,
@@ -10,54 +11,160 @@
     "machine": "x86_64",
     "mem_total_kib": 4034452
   },
-  "recovery": {
-    "frames_on_tape": 16182,
-    "requested_frames": 10000,
-    "rounds": 7,
-    "p50_ms": 107.28,
-    "p95_ms": 119.47,
-    "p99_ms": 120.49,
-    "min_ms": 98.38,
-    "max_ms": 117.56
+  "columns": {
+    "ext4": {
+      "path": "/home/user/Blackbox/.bench/scratch",
+      "gate": true,
+      "note": "gate column: numbers here are measured on the repository's real filesystem"
+    },
+    "tmpfs": {
+      "path": "/dev/shm",
+      "gate": false,
+      "note": "labelled second column only: fdatasync is a no-op on tmpfs, so no durability claim"
+    }
   },
   "rss_write_only_process": {
-    "peak_kib": 21952,
-    "peak_mib": 21.44,
-    "events": 10000,
-    "segment_bytes_mapped": 16777216
-  },
-  "rss_this_process_kib": 113920,
-  "amplification_by_batch": [
-    {
-      "batch_bytes": 0,
-      "committed_frame_bytes": 4718976,
-      "payload_bytes": 2560000,
-      "ratio": 1.843
+    "ext4": {
+      "events": 10000,
+      "segment_bytes_mapped": 16777216,
+      "peak_kib": 21896,
+      "peak_mib": 21.38,
+      "above_baseline_mib": 5.15,
+      "rss_anon_delta_mib": 0.37,
+      "rss_file_delta_mib": 4.79,
+      "baseline": {
+        "ru_maxrss_kib": 19652,
+        "VmRSS": 16620,
+        "RssAnon": 7476,
+        "RssFile": 9144
+      },
+      "after": {
+        "ru_maxrss_kib": 21896,
+        "VmRSS": 21896,
+        "RssAnon": 7852,
+        "RssFile": 14044
+      }
     },
-    {
-      "batch_bytes": 4096,
-      "committed_frame_bytes": 3234264,
-      "payload_bytes": 2560000,
-      "ratio": 1.263
-    },
-    {
-      "batch_bytes": 16384,
-      "committed_frame_bytes": 3150200,
-      "payload_bytes": 2560000,
-      "ratio": 1.231
-    },
-    {
-      "batch_bytes": 65536,
-      "committed_frame_bytes": 3127664,
-      "payload_bytes": 2560000,
-      "ratio": 1.222
+    "tmpfs": {
+      "events": 10000,
+      "segment_bytes_mapped": 16777216,
+      "peak_kib": 22208,
+      "peak_mib": 21.69,
+      "above_baseline_mib": 5.37,
+      "rss_anon_delta_mib": 0.37,
+      "rss_file_delta_mib": 0.5,
+      "baseline": {
+        "ru_maxrss_kib": 19652,
+        "VmRSS": 16712,
+        "RssAnon": 7476,
+        "RssFile": 9236
+      },
+      "after": {
+        "ru_maxrss_kib": 22208,
+        "VmRSS": 22208,
+        "RssAnon": 7852,
+        "RssFile": 9752
+      }
     }
-  ],
-  "amplification": {
-    "payload_bytes": 2560000,
-    "committed_frame_bytes": 4718976,
-    "ratio": 1.843,
-    "reserved_segment_bytes": 16777216,
-    "append_events_per_s": 46543.6
+  },
+  "results": {
+    "ext4": {
+      "filesystem": "ext4",
+      "scratch": "/home/user/Blackbox/.bench/scratch",
+      "recovery": {
+        "frames_on_tape": 23968,
+        "requested_frames": 10000,
+        "rounds": 7,
+        "p50_ms": 134.94,
+        "p95_ms": 139.4,
+        "p99_ms": 139.61,
+        "min_ms": 124.27,
+        "max_ms": 139.01,
+        "per_10k_frames_ms": 56.3
+      },
+      "rss_this_process_kib": 129576,
+      "amplification_by_batch": [
+        {
+          "batch_bytes": 0,
+          "committed_frame_bytes": 3121584,
+          "payload_bytes": 2560000,
+          "ratio": 1.219
+        },
+        {
+          "batch_bytes": 4096,
+          "committed_frame_bytes": 3234416,
+          "payload_bytes": 2560000,
+          "ratio": 1.263
+        },
+        {
+          "batch_bytes": 16384,
+          "committed_frame_bytes": 3150352,
+          "payload_bytes": 2560000,
+          "ratio": 1.231
+        },
+        {
+          "batch_bytes": 65536,
+          "committed_frame_bytes": 3127816,
+          "payload_bytes": 2560000,
+          "ratio": 1.222
+        }
+      ],
+      "amplification": {
+        "payload_bytes": 2560000,
+        "committed_frame_bytes": 4718976,
+        "ratio": 1.843,
+        "reserved_segment_bytes": 16777216,
+        "append_events_per_s": 59244.0
+      }
+    },
+    "tmpfs": {
+      "filesystem": "tmpfs",
+      "scratch": "/dev/shm",
+      "recovery": {
+        "frames_on_tape": 26986,
+        "requested_frames": 10000,
+        "rounds": 7,
+        "p50_ms": 137.03,
+        "p95_ms": 141.38,
+        "p99_ms": 141.43,
+        "min_ms": 124.91,
+        "max_ms": 141.27,
+        "per_10k_frames_ms": 50.8
+      },
+      "rss_this_process_kib": 135028,
+      "amplification_by_batch": [
+        {
+          "batch_bytes": 0,
+          "committed_frame_bytes": 3121584,
+          "payload_bytes": 2560000,
+          "ratio": 1.219
+        },
+        {
+          "batch_bytes": 4096,
+          "committed_frame_bytes": 3234416,
+          "payload_bytes": 2560000,
+          "ratio": 1.263
+        },
+        {
+          "batch_bytes": 16384,
+          "committed_frame_bytes": 3150352,
+          "payload_bytes": 2560000,
+          "ratio": 1.231
+        },
+        {
+          "batch_bytes": 65536,
+          "committed_frame_bytes": 3127816,
+          "payload_bytes": 2560000,
+          "ratio": 1.222
+        }
+      ],
+      "amplification": {
+        "payload_bytes": 2560000,
+        "committed_frame_bytes": 4718976,
+        "ratio": 1.843,
+        "reserved_segment_bytes": 16777216,
+        "append_events_per_s": 60971.7
+      }
+    }
   }
 }

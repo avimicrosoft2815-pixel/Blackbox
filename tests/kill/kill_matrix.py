@@ -88,7 +88,7 @@ def one_trial(tmp: Path, cfg: dict, batch: int, delay_s: float, seed: int) -> di
         result["violations"].append("committed region reported as a torn tail")
     if scan.head is None and seqs:
         result["violations"].append("head unreadable while frames exist")
-    elif scan.head.head_seq < len(seqs):
+    elif scan.head is not None and scan.head.head_seq < len(seqs):
         result["violations"].append("head lags behind recovered frames")
 
     # the tape must reopen: adoption of an interrupted roll included
@@ -106,16 +106,34 @@ def one_trial(tmp: Path, cfg: dict, batch: int, delay_s: float, seed: int) -> di
     return result
 
 
+def _detect_fstype(path: str) -> str:
+    """C1: a kill test on tmpfs proves the protocol, not the storage; label which one ran."""
+    try:
+        lines = Path("/proc/mounts").read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return "unknown"
+    best, best_len = "unknown", -1
+    for line in lines:
+        parts = line.split()
+        if len(parts) >= 3:
+            mount = parts[1].replace("\\040", " ")
+            if path.startswith(mount) and len(mount) > best_len:
+                best, best_len = parts[2], len(mount)
+    return best
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--trials", type=int, default=500)
     ap.add_argument("--max-delay-ms", type=int, default=250)
     ap.add_argument("--json", default=None)
     ap.add_argument("--seed", type=int, default=20261114)
+    ap.add_argument("--root", default=None, help="scratch directory (C1: a real disk, not tmpfs)")
+    ap.add_argument("--filesystem", default=None, help="label for the filesystem actually used")
     args = ap.parse_args(argv)
 
     rng = random.Random(args.seed)
-    tmp = Path(__import__("tempfile").mkdtemp(prefix="bbx-kill-"))
+    tmp = Path(__import__("tempfile").mkdtemp(prefix="bbx-kill-", dir=args.root))
     trials: list[dict] = []
     started = time.perf_counter()
     for i in range(args.trials):
@@ -140,6 +158,8 @@ def main(argv=None) -> int:
         "date": time.strftime("%Y-%m-%d"), "probe": "P2-09 randomized parent-SIGKILL matrix",
         "trials": args.trials, "seed": args.seed, "max_delay_ms": args.max_delay_ms,
         "elapsed_s": round(elapsed, 1),
+        "filesystem": args.filesystem or _detect_fstype(str(tmp)),
+        "scratch": str(tmp),
         "hardware": {"python": platform.python_version(), "os": platform.platform(),
                      "machine": platform.machine(), "cpu_count": os.cpu_count()},
         "configs": [{"config": k, **v} for k, v in sorted(summary.items())],
@@ -151,6 +171,7 @@ def main(argv=None) -> int:
     path = args.json or str(ROOT / "bench" / "results" / f"{out['date']}-kill-random.json")
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     Path(path).write_text(json.dumps(out, indent=2), encoding="utf-8")
+    __import__("shutil").rmtree(tmp, ignore_errors=True)      # a 500-trial matrix is GiB of scratch
     print(f"wrote {path}: {args.trials} trials, {len(violations)} with violations, {elapsed:.1f}s")
     for row in out["configs"]:
         print(f"  {row['config']:44s} trials={row['trials']:4d} violations={row['violations']}")
