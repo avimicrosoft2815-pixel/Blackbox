@@ -16,9 +16,13 @@ Written but **not run here** (this environment is Linux); the macOS CI cell is w
 """
 from __future__ import annotations
 
-import fcntl
 import os
 import stat as stat_mod
+
+try:                                    # `fcntl` does not exist on Windows, and this module must stay importable
+    import fcntl
+except ImportError:                 # pragma: no cover - exercised only on Windows
+    fcntl = None                    # type: ignore[assignment]
 
 NAME = "macos"
 SUPPORTED = os.uname().sysname == "Darwin" if hasattr(os, "uname") else False
@@ -66,8 +70,17 @@ def fsync_dir(path: str) -> None:
 
 
 def fdatasync(fd: int) -> None:
-    """No `fdatasync` on Darwin: `F_FULLFSYNC` would be the right call but stdlib cannot issue it."""
-    os.fsync(fd)
+    """The sync `kernel`/`paranoid` use on macOS.
+
+    C20 asked for the confirmation: `os.fsync` on Darwin is `fsync(2)`, which returns once the data is in the
+    *device's* cache, not on the platter/flash. `F_FULLFSYNC` is what forces it, and Python exposes it as
+    `fcntl.F_FULLFSYNC`. So it is issued when the constant exists, and the fallback to plain `os.fsync` is
+    recorded in `capabilities()["durability_note"]` rather than assumed.
+    """
+    if fcntl is not None and hasattr(fcntl, "F_FULLFSYNC"):
+        fcntl.fcntl(fd, fcntl.F_FULLFSYNC)
+    else:
+        os.fsync(fd)
 
 
 def fs_type(path: str) -> str:
@@ -89,7 +102,7 @@ def is_regular_file(path: str) -> bool:
 
 def f_fullfsync_supported() -> bool:
     """True when `fcntl.F_FULLFSYNC` can be issued from this interpreter (it usually cannot)."""
-    return hasattr(fcntl, "F_FULLFSYNC")
+    return fcntl is not None and hasattr(fcntl, "F_FULLFSYNC")
 
 
 def capabilities() -> dict[str, object]:

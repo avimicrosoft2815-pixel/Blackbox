@@ -84,11 +84,22 @@ EVENT = {
     "rf": b"\x02" * 16, "st": 1, "te": 2, "pm": {"temperature": 0.2, "max_tokens": 256},
 }
 
+# C16: the record the §15.1 / throughput bench actually encodes. `content=hash` means the 1 KiB body is hashed
+# and only the hash (plus the small envelope) goes into the frame, so its CBOR encode is much cheaper than
+# `EVENT` above, which carries the body inline. Both rows are reported, and the difference is the explanation.
+BODY_1KIB = b"x" * 1024
+EVENT_HASH_RECORD = {
+    "p": "openai", "m": "gpt-4o-mini", "pt": 3, "ch": blake2b(BODY_1KIB), "phn": len(BODY_1KIB),
+    "st": 1, "te": 2, "k": blake2b(b"y"), "rf": b"\x02" * 16, "fd": 2500,
+}
+
 
 def measure_column(column: dict, args) -> dict:
     """Every stage, measured twice: once on the real disk (gate) and once on tmpfs (labelled column)."""
     payload_1k = b"x" * 1024
     ev_bytes = cbor.encode(EVENT)
+    hash_ev_bytes = cbor.encode(EVENT_HASH_RECORD)
+    full_batch = memoryview(bytes(C.DEFAULT_BATCH_BYTES))
     frame_1k = frame_mod.encode(1, C.KIND_MODEL_REQUEST, payload_1k, priority=0)
     chain_payload = chain_mod.encode_payload(prev=b"\x00" * 32, batch=blake2b(b"y" * 1024),
                                              first_seq=1, last_seq=9)
@@ -98,7 +109,8 @@ def measure_column(column: dict, args) -> dict:
     writer = TapeWriter(tmp, segment_bytes=64 << 20, mode="process").open()
     writer_nc = TapeWriter(nc_tmp, segment_bytes=64 << 20, mode="process", chain_enabled=False).open()
 
-    seg_mm = writer._mm
+    # ADR-005: there is no mapping to copy into; the store is a batch buffer that leaves with one pwrite
+    batch_buf = bytearray(C.DEFAULT_BATCH_BYTES + C.FRAME_MAX_BYTES)
     hmap = head_mod.HeadMap(os.path.join(tmp, "head_bench"))
 
     slot = head_mod.HeadSlot(gen=1, head_off=C.SEGMENT_HEADER_BYTES)
@@ -117,8 +129,16 @@ def measure_column(column: dict, args) -> dict:
         "frame_encode_90b": ("frame encode, 26 B payload", lambda: frame_mod.encode(1, 2, ev_bytes)),
         "chain_frame_encode": ("CHAIN payload + frame encode", lambda: frame_mod.encode(
             1, C.KIND_CHAIN, chain_payload, priority=0)),
-        "memcpy_mmap_1kib": ("slice-copy 1 KiB into the segment mapping",
-                             lambda: seg_mm.__setitem__(slice(4096, 5120), payload_1k)),
+        "cbor_encode_hash_record": ("CBOR encode the content=hash event the throughput bench writes",
+                                    lambda: cbor.encode(EVENT_HASH_RECORD)),
+        "frame_encode_hash_record": ("frame encode of that record into the batch buffer",
+                                     lambda: frame_mod.encode_into(batch_buf, 0, 1,
+                                                                   C.KIND_MODEL_REQUEST, hash_ev_bytes,
+                                                                   priority=0)),
+        "memcpy_buffer_1kib": ("slice-copy 1 KiB into the batch buffer",
+                               lambda: batch_buf.__setitem__(slice(4096, 5120), payload_1k)),
+        "pwrite_batch_16kib": ("one pwrite of a 16 KiB batch (the per-batch store syscall)",
+                               lambda: os.pwrite(writer._seg_fd, memoryview(full_batch), 4096)),
         "head_publish": ("head pack_into + CRC (one publish)", publish_once),
         "append_1kib_no_publish": ("writer.append, 1 KiB payload", lambda: writer.append(
             C.KIND_MODEL_REQUEST, payload_1k, priority=0)),
@@ -139,20 +159,28 @@ def measure_column(column: dict, args) -> dict:
          "note": "append+chain+publish vs enqueue only"},
         {"pair": "chain_cost", "with": "event_append_publish", "without": "event_append_publish_nochain",
          "note": "CHAIN frame + blake2b + payload encode per publish"},
-        {"pair": "crc_vs_payload", "with": "frame_encode_1kib", "without": "memcpy_mmap_1kib",
-         "note": "encode allocates header+payload+trailer; the memcpy is the unavoidable part"},
+        {"pair": "crc_vs_payload", "with": "frame_encode_1kib", "without": "memcpy_buffer_1kib",
+         "note": "encode allocates header+payload+trailer; the copy is the unavoidable part"},
+        {"pair": "body_vs_hash_record", "with": "cbor_encode_event", "without": "cbor_encode_hash_record",
+         "note": "the stage table's event carries the 1 KiB body inline; the throughput bench hashes it and "
+                 "encodes only the hash, which is why the stage rows do not add up to the event p50 (C16)"},
     ]
     for pair in pairs:
         a, b = results[pair["with"]]["p50_us"], results[pair["without"]]["p50_us"]
         pair["delta_p50_us"] = round(a - b, 3)
         pair["ratio"] = round(a / b, 2) if b else None
 
+    results_note = ("C16: `cbor_encode_event` / `frame_encode_1kib` encode a record with the 1 KiB body inline; "
+                    "the throughput bench writes `content=hash`, whose encode is `cbor_encode_hash_record` + "
+                    "`frame_encode_hash_record`. The stage rows are not a sum of the event p50 for that reason "
+                    "and because publish/CHAIN happen on the batch boundary, not per event.")
     writer.close()
     writer_nc.close()
     hmap.close()
     _fs.release(tmp)
     _fs.release(nc_tmp)
-    return {"stages": results, "pairs": pairs, "filesystem": column["name"], "scratch": _fs.label(column["dir"])}
+    return {"stages": results, "pairs": pairs, "note": results_note, "filesystem": column["name"],
+            "scratch": _fs.label(column["dir"])}
 
 
 def main(argv: list[str] | None = None) -> int:

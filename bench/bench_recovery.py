@@ -40,16 +40,22 @@ from blackbox.tape.writer import TapeWriter
 
 
 def rss_fields():
-    # C8: anon and file memory separately, because a mapped file is not heap
+    # C8 / C18: anon, file and shmem separately, plus the cgroup's memory limit, because a sandbox that
+    # reclaims clean pages makes this number a property of the environment, not of the writer.
     out = {"ru_maxrss_kib": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss}
     try:
         with open("/proc/self/status", encoding="ascii") as fh:
             for line in fh:
                 key, _, value = line.partition(":")
-                if key in ("RssAnon", "RssFile", "VmRSS"):
+                if key in ("RssAnon", "RssFile", "RssShmem", "VmRSS", "VmSwap"):
                     out[key] = int(value.split()[0])
     except OSError:
         out["status"] = "unavailable (no /proc)"
+    try:
+        with open("/sys/fs/cgroup/memory.max", encoding="ascii") as fh:
+            out["cgroup_memory_max"] = fh.read().strip()
+    except OSError:
+        pass
     return out
 
 
@@ -63,7 +69,16 @@ w.flush()
 after = rss_fields()
 peak_kib = after["ru_maxrss_kib"]
 base_rss, after_rss = baseline.get("VmRSS", 0), after.get("VmRSS", peak_kib)
-out = {"events": frames, "segment_bytes_mapped": C.DEFAULT_SEGMENT_BYTES,
+out = {"events": frames, "segment_bytes": C.DEFAULT_SEGMENT_BYTES,
+       # C18: state the procedure, not just the delta
+       "procedure": ("read /proc/self/status twice - before `open()` and after the last append - and report "
+                     "the difference; since ADR-005 the segment is not mapped, so a shared file mapping's "
+                     "RssFile accounting does not apply and the batch buffer (16 KiB + 1 MiB worst case) is "
+                     "RssAnon"),
+       "head_off_at_sampling": w.head.head_off,
+       "bytes_written": w.head.head_off - C.SEGMENT_HEADER_BYTES,
+       "segment_percent_written": round(100.0 * (w.head.head_off - C.SEGMENT_HEADER_BYTES)
+                                        / C.DEFAULT_SEGMENT_BYTES, 2),
        "peak_kib": peak_kib, "peak_mib": round(peak_kib / 1024, 2),
        "above_baseline_mib": round((after_rss - base_rss) / 1024, 2),
        "rss_anon_delta_mib": round((after.get("RssAnon", 0) - baseline.get("RssAnon", 0)) / 1024, 2),

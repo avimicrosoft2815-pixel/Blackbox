@@ -15,9 +15,11 @@ What differs on Windows, and why each difference is safe:
   fsync as best-effort everywhere (`posix.fsync_dir` is wrapped in `contextlib.suppress(OSError)`).
 * **Mapped-view flush.** `mmap.flush()` calls `FlushViewOfFile` + `FlushFileBuffers` on CPython/Windows, which
   is what `kernel` mode needs; there is no separate call to make.
-* **PID reuse token.** `CreateToolhelp32Snapshot` is not reachable from stdlib. The shim returns `None`, and
-  the lease code treats "no token" as "cannot prove liveness", i.e. it falls back to a mtime-based staleness
-  check instead of trusting the PID (fail-safe direction).
+* **PID reuse token.** `OpenProcess` + `GetProcessTimes` are reached through `ctypes` (C20), because they are
+  the Windows equivalent of `/proc/<pid>/stat` field 22: the process *creation* time, which is what defeats PID
+  reuse. `PROCESS_QUERY_LIMITED_INFORMATION` keeps the call working for a process owned by another user where
+  the token allows it. If `ctypes` or `kernel32` is unavailable the shim returns `None`, and the lease falls
+  back to a mtime staleness check rather than trusting a bare PID (fail-safe direction).
 * **Filesystem type.** No `/proc`. The shim reports `unknown`, which the network-filesystem check treats as
   "not known to be local" only when the caller asks explicitly.
 """
@@ -33,9 +35,59 @@ DIRECTORY_FSYNC = False
 MAPPED_VIEW_FLUSH = "mmap.flush"       # FlushViewOfFile + FlushFileBuffers, via CPython
 
 
+# ── the lease's start-time check (P2-03, C20) ────────────────────────────────────────────────────────────
+# `GetProcessTimes` returns 100 ns units since 1601-01-01; the caller only needs monotonic identity, so the raw
+# value is passed through and never compared against a wall clock.
+PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+FILETIME_TICKS_PER_SECOND = 10_000_000
+
+
+def _kernel32() -> tuple:
+    """The loaded `kernel32`, or `None` when ctypes/the DLL is not there (then the caller must not guess)."""
+    import ctypes
+    from ctypes import wintypes
+
+    class FILETIME(ctypes.Structure):
+        _fields_ = [("dwLowDateTime", wintypes.DWORD), ("dwHighDateTime", wintypes.DWORD)]
+
+    if not hasattr(_kernel32, "_cached"):
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)      # type: ignore[attr-defined]
+        k32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        k32.OpenProcess.restype = wintypes.HANDLE
+        k32.GetProcessTimes.argtypes = [wintypes.HANDLE, ctypes.POINTER(FILETIME), ctypes.POINTER(FILETIME),
+                                        ctypes.POINTER(FILETIME), ctypes.POINTER(FILETIME)]
+        k32.GetProcessTimes.restype = wintypes.BOOL
+        k32.CloseHandle.argtypes = [wintypes.HANDLE]
+        k32.CloseHandle.restype = wintypes.BOOL
+        _kernel32._cached = (k32, FILETIME)      # type: ignore[attr-defined]
+    cached: tuple = _kernel32._cached            # type: ignore[attr-defined]
+    return cached
+
+
 def proc_start_ticks(pid: int) -> int | None:
-    """No stdlib way to read a process creation time on Windows: `None` means "cannot prove liveness"."""
-    return None
+    """Process creation time in 100 ns ticks via `OpenProcess` + `GetProcessTimes`, or `None`.
+
+    `None` means "no token available", which the lease must treat as *cannot prove liveness* — never as "dead"
+    and never as "same process". The unit test on Linux feeds a fake `kernel32` through `ctypes`, so the
+    argument marshalling and the handle lifetime are exercised even though Windows is not available here.
+    """
+    if pid <= 0:
+        return None
+    try:
+        k32, filetime = _kernel32()
+    except (OSError, ImportError, AttributeError):
+        return None
+    handle = k32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+    if not handle:
+        return None
+    try:
+        created, exited, kernel_t, user_t = filetime(), filetime(), filetime(), filetime()
+        if not k32.GetProcessTimes(handle, created, exited, kernel_t, user_t):
+            return None
+        ticks: int = (created.dwHighDateTime << 32) | created.dwLowDateTime
+        return ticks
+    finally:
+        k32.CloseHandle(handle)
 
 
 def pid_alive(pid: int) -> bool:
@@ -63,8 +115,17 @@ def fsync_dir(path: str) -> None:
 
 
 def fdatasync(fd: int) -> None:
-    """Windows has no `fdatasync`; `FlushFileBuffers` (what `os.fsync` calls) flushes data and metadata."""
+    """Windows has no `fdatasync`; `FlushFileBuffers` (what `os.fsync` calls) flushes the file's data."""
     os.fsync(fd)
+
+
+def flush_mapped_view(mm) -> None:
+    """`FlushViewOfFile`, for a caller that still holds a mapping: CPython's `mmap.flush()` does exactly that.
+
+    With ADR-005 the recorder has no mapping, so `kernel`/`paranoid` reach the device through `fdatasync` above
+    and this exists for readers (`blackbox verify`, capsules) that map a sealed segment to hash it.
+    """
+    mm.flush()
 
 
 def fs_type(path: str) -> str:
@@ -88,6 +149,6 @@ def capabilities() -> dict[str, object]:
     """What a reviewer (and `blackbox doctor`) should see, so nothing here is implied silently."""
     return {"platform": NAME, "supported": SUPPORTED, "prealloc": PREALLOC_METHOD,
             "directory_fsync": DIRECTORY_FSYNC, "mapped_view_flush": MAPPED_VIEW_FLUSH,
-            "process_start_token": False, "boot_id": False, "filesystem_type": "unknown",
+            "process_start_token": True, "boot_id": False, "filesystem_type": "unknown",
             "tested_here": False,
             "note": "written for P2-03; not executed in this environment (Linux only) and not yet run in CI"}

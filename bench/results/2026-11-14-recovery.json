@@ -26,44 +26,60 @@
   "rss_write_only_process": {
     "ext4": {
       "events": 10000,
-      "segment_bytes_mapped": 16777216,
-      "peak_kib": 22124,
-      "peak_mib": 21.61,
-      "above_baseline_mib": 5.15,
-      "rss_anon_delta_mib": 0.25,
-      "rss_file_delta_mib": 4.9,
+      "segment_bytes": 16777216,
+      "procedure": "read /proc/self/status twice - before `open()` and after the last append - and report the difference; since ADR-005 the segment is not mapped, so a shared file mapping's RssFile accounting does not apply and the batch buffer (16 KiB + 1 MiB worst case) is RssAnon",
+      "head_off_at_sampling": 4723072,
+      "bytes_written": 4718976,
+      "segment_percent_written": 28.13,
+      "peak_kib": 19208,
+      "peak_mib": 18.76,
+      "above_baseline_mib": 1.15,
+      "rss_anon_delta_mib": 1.02,
+      "rss_file_delta_mib": 0.12,
       "baseline": {
-        "ru_maxrss_kib": 19072,
-        "VmRSS": 16848,
-        "RssAnon": 7604,
-        "RssFile": 9244
+        "ru_maxrss_kib": 19208,
+        "VmRSS": 17528,
+        "RssAnon": 8428,
+        "RssFile": 9100,
+        "RssShmem": 0,
+        "VmSwap": 0
       },
       "after": {
-        "ru_maxrss_kib": 22124,
-        "VmRSS": 22124,
-        "RssAnon": 7860,
-        "RssFile": 14264
+        "ru_maxrss_kib": 19208,
+        "VmRSS": 18704,
+        "RssAnon": 9476,
+        "RssFile": 9228,
+        "RssShmem": 0,
+        "VmSwap": 0
       }
     },
     "tmpfs": {
       "events": 10000,
-      "segment_bytes_mapped": 16777216,
-      "peak_kib": 21956,
-      "peak_mib": 21.44,
-      "above_baseline_mib": 5.05,
-      "rss_anon_delta_mib": 0.25,
-      "rss_file_delta_mib": 0.43,
+      "segment_bytes": 16777216,
+      "procedure": "read /proc/self/status twice - before `open()` and after the last append - and report the difference; since ADR-005 the segment is not mapped, so a shared file mapping's RssFile accounting does not apply and the batch buffer (16 KiB + 1 MiB worst case) is RssAnon",
+      "head_off_at_sampling": 4723072,
+      "bytes_written": 4718976,
+      "segment_percent_written": 28.13,
+      "peak_kib": 19208,
+      "peak_mib": 18.76,
+      "above_baseline_mib": 1.15,
+      "rss_anon_delta_mib": 1.02,
+      "rss_file_delta_mib": 0.12,
       "baseline": {
-        "ru_maxrss_kib": 19072,
-        "VmRSS": 16788,
-        "RssAnon": 7604,
-        "RssFile": 9184
+        "ru_maxrss_kib": 19208,
+        "VmRSS": 17592,
+        "RssAnon": 8428,
+        "RssFile": 9164,
+        "RssShmem": 0,
+        "VmSwap": 0
       },
       "after": {
-        "ru_maxrss_kib": 21956,
-        "VmRSS": 21956,
-        "RssAnon": 7856,
-        "RssFile": 9628
+        "ru_maxrss_kib": 19208,
+        "VmRSS": 18768,
+        "RssAnon": 9476,
+        "RssFile": 9292,
+        "RssShmem": 0,
+        "VmSwap": 0
       }
     }
   },
@@ -72,23 +88,23 @@
       "filesystem": "ext4",
       "scratch": ".bench/scratch",
       "recovery": {
-        "frames_on_tape": 20744,
+        "frames_on_tape": 21736,
         "requested_frames": 10000,
         "rounds": 7,
-        "p50_ms": 120.25,
-        "p95_ms": 124.34,
-        "p99_ms": 124.34,
-        "min_ms": 110.98,
-        "max_ms": 124.33,
-        "per_10k_frames_ms": 58.0
+        "p50_ms": 117.09,
+        "p95_ms": 124.49,
+        "p99_ms": 124.58,
+        "min_ms": 108.67,
+        "max_ms": 124.31,
+        "per_10k_frames_ms": 53.9
       },
-      "rss_this_process_kib": 122284,
+      "rss_this_process_kib": 124348,
       "amplification_by_batch": [
         {
           "batch_bytes": 0,
-          "committed_frame_bytes": 3122864,
+          "committed_frame_bytes": 3121744,
           "payload_bytes": 2560000,
-          "ratio": 1.22
+          "ratio": 1.219
         },
         {
           "batch_bytes": 4096,
@@ -104,7 +120,7 @@
         },
         {
           "batch_bytes": 65536,
-          "committed_frame_bytes": 3127816,
+          "committed_frame_bytes": 3127824,
           "payload_bytes": 2560000,
           "ratio": 1.222
         }
@@ -114,24 +130,24 @@
         "committed_frame_bytes": 4718976,
         "ratio": 1.843,
         "reserved_segment_bytes": 16777216,
-        "append_events_per_s": 51266.1
+        "append_events_per_s": 47127.9
       }
     },
     "tmpfs": {
       "filesystem": "tmpfs",
       "scratch": "<scratch>/shm",
       "recovery": {
-        "frames_on_tape": 35060,
+        "frames_on_tape": 21898,
         "requested_frames": 10000,
         "rounds": 7,
-        "p50_ms": 159.17,
-        "p95_ms": 167.38,
-        "p99_ms": 168.35,
-        "min_ms": 155.6,
-        "max_ms": 165.57,
-        "per_10k_frames_ms": 45.4
+        "p50_ms": 106.03,
+        "p95_ms": 109.56,
+        "p99_ms": 109.62,
+        "min_ms": 103.16,
+        "max_ms": 109.44,
+        "per_10k_frames_ms": 48.4
       },
-      "rss_this_process_kib": 149180,
+      "rss_this_process_kib": 126000,
       "amplification_by_batch": [
         {
           "batch_bytes": 0,
@@ -163,7 +179,26 @@
         "committed_frame_bytes": 4718976,
         "ratio": 1.843,
         "reserved_segment_bytes": 16777216,
-        "append_events_per_s": 45196.9
+        "append_events_per_s": 51332.4
+      }
+    }
+  },
+  "rss_flat_as_the_segment_fills": {
+    "note": "C18: with the batch store (ADR-005) there is no mapping, so RSS must not grow as the segment fills. Two probe runs, 470 B events, same 16 MiB segment.",
+    "runs": {
+      "10000": {
+        "head_off_at_sampling": 6883072,
+        "segment_percent_written": 41.0,
+        "above_baseline_mib": 1.15,
+        "rss_anon_delta_mib": 1.02,
+        "rss_file_delta_mib": 0.12
+      },
+      "34000": {
+        "head_off_at_sampling": 6622128,
+        "segment_percent_written": 39.45,
+        "above_baseline_mib": 3.19,
+        "rss_anon_delta_mib": 2.75,
+        "rss_file_delta_mib": 0.44
       }
     }
   }

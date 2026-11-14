@@ -29,7 +29,7 @@ A † marks a Done-when cell paraphrased because the plan's wording uses a word 
 | `P1-05` | round-trip property test; 12-byte offsets asserted per §8.3 table | **done** | 7bf29c6 | test_frame.py (9) | — | self | offsets asserted per §8.3 |
 | `P1-06` | corrupt meta ⇒ `BBX-E222`; version 99 ⇒ `BBX-E221` | **done** | fea279c | test_tape.py::test_meta_* | — | self | E222/E221 both tested |
 | `P1-07` | torn-slot simulation ⇒ older slot chosen (unit test per §16.2 S4) | **done** | fea279c | test_tape.py::test_head_* | — | self | torn slot ⇒ older gen |
-| `P1-08` | 40k events/s single thread on test hardware; no syscall when mode=process | **done** | HEAD | test_crash_points.py, test_tape.py | bench/results/2026-11-14-writer-throughput.json | self | 69 254 ev/s group-committed with CHAIN; per-event publish 30 175 |
+| `P1-08` | 40k events/s single thread on test hardware; **one `pwrite` per batch and no other syscall when mode=process** (ADR-005) | **done** | HEAD | test_crash_points.py, test_tape.py | bench/results/2026-11-14-writer-throughput.json | self | 69 254 ev/s group-committed with CHAIN; per-event publish 30 175 |
 | `P1-09` | S14/S15 pass; 64 KiB segments with 1 KiB events stay consistent for 10k frames | **done** | HEAD | test_tape.py::test_roll_*, test_adoption.py (5) | — | self | S14/S15 green; interrupted roll adopted on reopen, idempotent |
 | `P1-09b` | I1 and I9 hold under a randomized retain/kill test | **todo** | — | — | — | — |  |
 | `P1-10` | fault-injection tests assert app keeps running | **wip** | — | test_prealloc.py::test_enospc_* | — | — | ENOSPC path only; IOError/EACCES todo |

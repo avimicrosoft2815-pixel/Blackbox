@@ -67,8 +67,10 @@ def run(column: dict, n: int, warmup: int, body: bytes, batch_bytes: int, chain:
         stall: list[int] = []
         t0 = time.perf_counter()
         for _ in range(n):
-            payload = encode_event(ev)
+            # C2's interval starts at the Python dict: the CBOR encode is inside the clock. It used to be
+            # outside, which is why the old event p50 (4.5 us) looked impossible next to the stage table (C16).
             s0, syncs0 = time.perf_counter_ns(), w.syncs
+            payload = encode_event(ev)
             w.emit(C.KIND_MODEL_REQUEST, payload)
             dt = time.perf_counter_ns() - s0
             (stall if w.syncs > syncs0 else lat).append(dt)
@@ -82,16 +84,27 @@ def run(column: dict, n: int, warmup: int, body: bytes, batch_bytes: int, chain:
             k.stop()
         w.close()
         _fs.release(tmp)
-    q = statistics.quantiles(lat, n=100)
+    # Nearest-rank percentiles from ONE sorted array. `statistics.quantiles(..., method="exclusive")` mixes
+    # extrapolated and observed values, which produced a p90 below the p50 in the first draft of C16's
+    # distribution; a single monotone source removes that class of nonsense.
+    ordered = sorted(lat)
+    pct = lambda q: ordered[min(int(q * (len(ordered) - 1)), len(ordered) - 1)] if ordered else 0  # noqa: E731
     return {
-        "n": n, "warmup": warmup, "body_bytes": len(body), "payload_bytes": len(encode_event(ev)),
+        "n": n, "warmup": warmup, "elapsed_s": round(elapsed, 3),
+        "p90_us": round(pct(0.90) / 1000, 3),
+        "p99_9_us": round(pct(0.999) / 1000, 3),
+        "min_us": round(ordered[0] / 1000, 3), "max_us": round(ordered[-1] / 1000, 3),
+        "threads": ("app thread appends and publishes (the keeper thread publishes too when `keeper` is on); "
+                    "both share one GIL, and the timed region is the app thread's own call including the CBOR "
+                    "encode, so a publish done by the keeper is not charged to the event that follows it"), "body_bytes": len(body), "payload_bytes": len(encode_event(ev)),
         "batch_bytes": batch_bytes, "publish_ms": publish_ms, "chain": chain, "mode": mode,
         "keeper": keeper, "sync_ms": sync_ms, "sync_bytes": sync_bytes, "syncs": w.syncs,
-        "p50_us": round(q[49] / 1000, 3), "p95_us": round(q[94] / 1000, 3), "p99_us": round(q[98] / 1000, 3),
+        "p50_us": round(pct(0.50) / 1000, 3), "p95_us": round(pct(0.95) / 1000, 3),
+        "p99_us": round(pct(0.99) / 1000, 3),
         "mean_us": round(statistics.fmean(lat) / 1000, 3),
         "stall_n": len(stall),
         "stall_max_us": round(max(stall) / 1000, 3) if stall else None,
-        "stall_p99_us": round(statistics.quantiles(stall, n=100)[98] / 1000, 3) if len(stall) > 99 else None,
+        "stall_p99_us": round(sorted(stall)[int(0.99 * (len(stall) - 1))] / 1000, 3) if stall else None,
         "events_per_s": round(n / elapsed, 1), "committed_seq": committed, "publishes": publishes,
         "events_per_publish": round(n / publishes, 1) if publishes else None,
         "window_max_ms": round(window_max, 3),
