@@ -1,0 +1,119 @@
+{
+  "data": {
+    "blake2b_1KiB": {
+      "max": 118.006,
+      "mean": 2.1,
+      "min": 1.902,
+      "n": 20000,
+      "p50": 1.994,
+      "p95": 2.168,
+      "p99": 3.166,
+      "unit": "us"
+    },
+    "blake2b_1MiB": {
+      "max": 2.433093,
+      "mean": 1.66,
+      "min": 1.589847,
+      "n": 200,
+      "p50": 1.646907,
+      "p95": 1.728426,
+      "p99": 2.28726,
+      "unit": "ms"
+    },
+    "capabilities": {
+      "faulthandler_SIGUSR1_roundtrip": true,
+      "faulthandler_register": true,
+      "mmap_MAP_SHARED": true,
+      "mmap_module": true,
+      "os_fdatasync": true,
+      "os_fsync": true,
+      "os_posix_fallocate": true,
+      "os_register_at_fork": true,
+      "os_replace": true,
+      "signal_SIGUSR1": true
+    },
+    "fdatasync": {
+      "command": "pwrite 4 KiB then os.fdatasync, 200 iterations",
+      "file_bytes": 1048576,
+      "max": 454.139,
+      "mean": 219.36,
+      "min": 112.433,
+      "n": 200,
+      "n_iterations": 200,
+      "p50": 174.926,
+      "p95": 402.44,
+      "p99": 421.218,
+      "unit": "us"
+    },
+    "filesystems": {
+      "home_fstype": "ext4",
+      "home_is_network": false,
+      "home_path": "/home/user",
+      "network_fs_denylist": [
+        "9p",
+        "cifs",
+        "fuse.rclone",
+        "fuse.sshfs",
+        "nfs",
+        "nfs4",
+        "smb3",
+        "smbfs"
+      ],
+      "repo_free_bytes": 20694548480,
+      "repo_fstype": "ext4",
+      "repo_is_network": false,
+      "repo_path": "/home/user/Blackbox",
+      "repo_total_bytes": 21834924032,
+      "tmp_fstype": "ext4"
+    },
+    "host": {
+      "cpu_count_logical": 2,
+      "cpu_model": "Intel(R) Xeon(R) Processor @ 2.60GHz",
+      "machine": "x86_64",
+      "mem_total_kib": 4034452,
+      "page_size": 4096,
+      "processor": null,
+      "release": "6.1.158+",
+      "system": "Linux",
+      "version": "#1 SMP PREEMPT_DYNAMIC Mon May 11 18:48:24 UTC 2026"
+    },
+    "mmap_cross_process": {
+      "child_read": "1794680255277348",
+      "parent_wrote": "1794680255277348",
+      "stderr": "",
+      "visible": true
+    },
+    "os_replace": {
+      "command": "write tmp + fsync + os.replace while a reader thread reads the target",
+      "iterations": 500,
+      "reader_observations": {
+        "missing": 0,
+        "ok": 15709,
+        "torn": 0
+      }
+    },
+    "preallocation": {
+      "du_kib_preallocated": 16384,
+      "du_kib_sparse_truncate": 0,
+      "fallocate_16MiB_ms": 0.1,
+      "method": "posix_fallocate",
+      "size_bytes": 16777216,
+      "verdict": "preallocation allocates blocks; truncate() leaves a hole. SIGBUS not delivered by this probe; S17 is the test that must deliver SIGBUS in the sparse control case and none in the preallocated case."
+    },
+    "pythons_found": {
+      "3.11": "3.11.2"
+    },
+    "pythons_requested": [
+      "3.10",
+      "3.11",
+      "3.12",
+      "3.13",
+      "3.14"
+    ]
+  },
+  "date": "2026-11-14T18:17:34Z",
+  "executable": "/usr/bin/python3",
+  "notes": [],
+  "probe": "env",
+  "python": "3.11.2 (main, Apr  8 2026, 01:58:00) [GCC 12.2.0]"
+}
