@@ -1,0 +1,201 @@
+{
+  "date": "2026-11-14",
+  "probe": "P1-17 frame/append stages",
+  "protocol": "N=100000, warm-up=10000, per-call perf_counter_ns, single process",
+  "hardware": {
+    "cpu": "Intel(R) Xeon(R) Processor @ 2.60GHz",
+    "cpu_count": 2,
+    "python": "3.11.2",
+    "implementation": "CPython",
+    "os": "Linux-6.1.158+-x86_64-with-glibc2.36",
+    "machine": "x86_64",
+    "mem_total_kib": 4034452
+  },
+  "workload": {
+    "payload_1kib": 1024,
+    "event_payload_bytes": 138,
+    "frame_1kib_bytes": 1080
+  },
+  "stages": {
+    "crc32c_1kib": {
+      "label": "CRC32C over 1 KiB",
+      "p50_us": 110.843,
+      "p95_us": 161.915,
+      "p99_us": 237.931,
+      "mean_us": 119.723,
+      "min_us": 106.173,
+      "max_us": 584.96,
+      "n": 100000,
+      "warmup": 10000
+    },
+    "crc32c_56b": {
+      "label": "CRC32C over a 56 B frame header",
+      "p50_us": 4.215,
+      "p95_us": 9.064,
+      "p99_us": 10.173,
+      "mean_us": 5.113,
+      "min_us": 3.972,
+      "max_us": 73.207,
+      "n": 100000,
+      "warmup": 10000
+    },
+    "blake2b_1kib": {
+      "label": "BLAKE2b-256 over 1 KiB (batch hash)",
+      "p50_us": 1.945,
+      "p95_us": 2.017,
+      "p99_us": 3.311,
+      "mean_us": 2.041,
+      "min_us": 1.886,
+      "max_us": 110.092,
+      "n": 100000,
+      "warmup": 10000
+    },
+    "cbor_encode_event": {
+      "label": "CBOR encode the fixed event payload",
+      "p50_us": 8.602,
+      "p95_us": 8.994,
+      "p99_us": 28.793,
+      "mean_us": 9.045,
+      "min_us": 8.218,
+      "max_us": 210.369,
+      "n": 100000,
+      "warmup": 10000
+    },
+    "cbor_decode_event": {
+      "label": "CBOR decode the fixed event payload",
+      "p50_us": 9.762,
+      "p95_us": 11.506,
+      "p99_us": 29.946,
+      "mean_us": 10.259,
+      "min_us": 9.324,
+      "max_us": 285.999,
+      "n": 100000,
+      "warmup": 10000
+    },
+    "frame_encode_1kib": {
+      "label": "frame encode, 1 KiB payload",
+      "p50_us": 2.843,
+      "p95_us": 2.97,
+      "p99_us": 4.956,
+      "mean_us": 2.965,
+      "min_us": 2.686,
+      "max_us": 101.426,
+      "n": 100000,
+      "warmup": 10000
+    },
+    "frame_encode_90b": {
+      "label": "frame encode, 26 B payload",
+      "p50_us": 2.651,
+      "p95_us": 2.764,
+      "p99_us": 4.11,
+      "mean_us": 2.755,
+      "min_us": 2.426,
+      "max_us": 73.555,
+      "n": 100000,
+      "warmup": 10000
+    },
+    "chain_frame_encode": {
+      "label": "CHAIN payload + frame encode",
+      "p50_us": 2.685,
+      "p95_us": 2.79,
+      "p99_us": 3.496,
+      "mean_us": 2.789,
+      "min_us": 2.502,
+      "max_us": 61.567,
+      "n": 100000,
+      "warmup": 10000
+    },
+    "memcpy_mmap_1kib": {
+      "label": "slice-copy 1 KiB into the segment mapping",
+      "p50_us": 0.222,
+      "p95_us": 0.247,
+      "p99_us": 0.26,
+      "mean_us": 0.234,
+      "min_us": 0.206,
+      "max_us": 44.503,
+      "n": 100000,
+      "warmup": 10000
+    },
+    "head_publish": {
+      "label": "head pack_into + CRC (one publish)",
+      "p50_us": 6.955,
+      "p95_us": 7.385,
+      "p99_us": 13.858,
+      "mean_us": 7.281,
+      "min_us": 6.534,
+      "max_us": 137.141,
+      "n": 100000,
+      "warmup": 10000
+    },
+    "append_1kib_no_publish": {
+      "label": "writer.append, 1 KiB payload",
+      "p50_us": 2.856,
+      "p95_us": 6.326,
+      "p99_us": 29.326,
+      "mean_us": 4.048,
+      "min_us": 2.639,
+      "max_us": 8651.433,
+      "n": 100000,
+      "warmup": 10000
+    },
+    "event_append_publish": {
+      "label": "writer.append_and_publish, 26 B payload (chain on)",
+      "p50_us": 12.906,
+      "p95_us": 19.139,
+      "p99_us": 52.982,
+      "mean_us": 14.743,
+      "min_us": 11.424,
+      "max_us": 1097.252,
+      "n": 100000,
+      "warmup": 10000
+    },
+    "event_append_publish_nochain": {
+      "label": "writer.append_and_publish, 26 B payload (chain off)",
+      "p50_us": 4.739,
+      "p95_us": 6.593,
+      "p99_us": 13.06,
+      "mean_us": 5.188,
+      "min_us": 4.433,
+      "max_us": 601.483,
+      "n": 100000,
+      "warmup": 10000
+    },
+    "event_emit_chain_off": {
+      "label": "writer.emit with no publish (enqueue only)",
+      "p50_us": 2.626,
+      "p95_us": 4.141,
+      "p99_us": 7.774,
+      "mean_us": 2.958,
+      "min_us": 2.482,
+      "max_us": 280.694,
+      "n": 100000,
+      "warmup": 10000
+    }
+  },
+  "pairs": [
+    {
+      "pair": "publish_cost",
+      "with": "event_append_publish",
+      "without": "event_emit_chain_off",
+      "note": "append+chain+publish vs enqueue only",
+      "delta_p50_us": 10.28,
+      "ratio": 4.91
+    },
+    {
+      "pair": "chain_cost",
+      "with": "event_append_publish",
+      "without": "event_append_publish_nochain",
+      "note": "CHAIN frame + blake2b + payload encode per publish",
+      "delta_p50_us": 8.167,
+      "ratio": 2.72
+    },
+    {
+      "pair": "crc_vs_payload",
+      "with": "frame_encode_1kib",
+      "without": "memcpy_mmap_1kib",
+      "note": "encode allocates header+payload+trailer; the memcpy is the unavoidable part",
+      "delta_p50_us": 2.621,
+      "ratio": 12.81
+    }
+  ]
+}
