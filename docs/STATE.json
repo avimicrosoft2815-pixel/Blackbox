@@ -1,8 +1,8 @@
 {
-  "next_ticket": "P1-08",
+  "next_ticket": "P1-10",
   "lane_status": {
     "L0": "contracts complete (P0-01, 04, 05, 06, 10, 11, 12, 13, 14, 15 done; P0-02/03 workflows not run here)",
-    "L1": "in progress (writer publish path being re-measured)",
+    "L1": "P1-01,02,04,05,06,07,08,09,11,12,13,17,18,20 done; P1-03,10,14,15,16,19,09b todo",
     "L2": "not started (blocked on P1-16)",
     "L3": "not started",
     "L4": "not started",
@@ -14,8 +14,19 @@
     "L10": "not started"
   },
   "open_blockers": [],
-  "last_green_commit": "98af79d",
+  "last_green_commit": "c25a9c6",
   "bench_baseline": {
-    "2026-11-14-frame.json": "P1-17 baseline, to be filled by the first run"
+    "frame": "bench/results/2026-11-14-frame.json",
+    "writer": "bench/results/2026-11-14-writer-throughput.json",
+    "recovery": "bench/results/2026-11-14-recovery.json",
+    "kill": "bench/results/2026-11-14-kill-random.json",
+    "keys": {
+      "append_p50_us": 2.6,
+      "wrap_append_publish_chain_p50_us": 12.9,
+      "full_event_group_commit_p50_us": 11.7,
+      "recovery_ms_per_10k_frames": 63.5,
+      "rss_mib": 21.51,
+      "amplification_16kib": 1.231
+    }
   }
 }
