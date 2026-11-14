@@ -2,7 +2,28 @@
 
 **Status:** frozen for v2 by this document (plan §8, 1.1). A reader implemented from this file alone must pass
 `tests/conformance/` (P0-05) — including a non-Python reader later (P11-15).
-All integers are little-endian. All CRCs are **CRC32C (Castagnoli, reflected, init 0xFFFFFFFF, xorout 0xFFFFFFFF)**.
+All integers are little-endian.
+
+**Checksum profile.** One 4-byte checksum field everywhere; the algorithm is a property of the tape, recorded
+once in `meta.flags` bit 2, and every checksum on that tape (frames, head slots, segment headers, seals) uses
+it. `0` = CRC32C (Castagnoli, reflected, init `0xFFFFFFFF`, xorout `0xFFFFFFFF`); `1` = CRC-32/ISO-HDLC
+(identical to `zlib.crc32`). Fields keep their historical names (`crc32c`, `head_crc32c`, …).
+
+Profile `1` is the default that `blackbox` writes, because CRC32C in pure Python costs ≈ 110 µs per KiB
+(`bench/results/2026-11-14-frame.json`) and would break the §15.1 event budget on its own; CRC32C is
+implemented, verified against reference vectors, and read by both readers. A tape never depends on the reader
+guessing the algorithm.
+
+**Frozen magic values (exact bytes).**
+
+| name | bytes | hex |
+|---|---|---|
+| `meta` | `BBXTAPE2` | `42 42 58 54 41 50 45 32` |
+| `head` | `BBXHEAD2` | `42 42 58 48 45 41 44 32` |
+| segment | `BBXSEG2` + `0x00` | `42 42 58 53 45 47 32 00` |
+| seal | `BBXSEAL1` | `42 42 58 53 45 41 4C 31` |
+| frame | `BBXF` | `42 42 58 46` |
+| frame trailer | `BBXT` | `42 42 58 54` |
 Hashes are **BLAKE2b-256** unless stated. Reserved bytes are zero and MUST be ignored by readers.
 
 ## 1. Directory layout (one directory per writer)
@@ -22,7 +43,7 @@ Hashes are **BLAKE2b-256** unless stated. Reserved bytes are zero and MUST be ig
 
 | Offset | Size | Field |
 |---|---|---|
-| 0x000 | 8 | magic `BBXTAPE2` (0x32 0x45 0x50 0x41 0x54 0x58 0x42 0x42) |
+| 0x000 | 8 | magic `BBXTAPE2` (`42 42 58 54 41 50 45 32`) |
 | 0x008 | 2 | format_version = 2 |
 | 0x00A | 2 | flags: bit0 = layout (0 segments, 1 ring); bits1..15 reserved |
 | 0x00C | 4 | segment_bytes (u32) |
@@ -48,7 +69,7 @@ Each slot is written in full, then flushed; slots alternate so a torn write can 
 
 | Offset in slot | Size | Field |
 |---|---|---|
-| 0x00 | 8 | magic `BBXHEAD2` |
+| 0x00 | 8 | magic `BBXHEAD2` (`42 42 58 48 45 41 44 32`) |
 | 0x08 | 8 | gen (u64; strictly increasing) |
 | 0x10 | 8 | head_seq (u64; last committed seq) |
 | 0x18 | 8 | head_off (u64; write cursor inside the active segment, ≥ 4096) |
@@ -57,7 +78,7 @@ Each slot is written in full, then flushed; slots alternate so a torn write can 
 | 0x30 | 4 | active_segment (u32, 1-based) |
 | 0x34 | 4 | flags: bit0 DEGRADED_NO_SPACE, bit1 DEGRADED_CRC, bit2 KEEPER_DOWN, bit3 ROLL_PENDING |
 | 0x38 | 4 | dropped_events (u32, saturating) |
-| 0x3C | 4 | head_crc32c over slot bytes [0x00, 0x3C) |
+| 0x3C | 4 | head checksum (profile) over slot bytes [0x00, 0x3C) |
 
 Reader rule: take the slot with the **greatest valid `gen`**; if both CRCs fail, fall back to a forward resync scan.
 
@@ -67,7 +88,7 @@ Frame = 48 B header ‖ payload ‖ 8 B trailer. `frame_len = 48 + payload_len +
 
 | Offset | Size | Field |
 |---|---|---|
-| 0 | 4 | magic `BBXF` (0x46 0x58 0x42 0x42) |
+| 0 | 4 | magic `BBXF` (`42 42 58 46`) |
 | 4 | 4 | frame_len (u32) |
 | 8 | 8 | seq (u64) |
 | 16 | 8 | wall_ns (i64) |
@@ -77,7 +98,7 @@ Frame = 48 B header ‖ payload ‖ 8 B trailer. `frame_len = 48 + payload_len +
 | 36 | 2 | run_slot (u16) |
 | 38 | 2 | node_slot (u16) |
 | 40 | 4 | payload_len (u32) |
-| 44 | 4 | crc32c over header[0,44) ‖ payload ‖ trailer |
+| 44 | 4 | checksum (profile) over header[0,44) ‖ payload ‖ trailer |
 | 48 | payload_len | payload (canonical CBOR, see §7) |
 | 48+payload_len | 4 | tail magic `BBXT` |
 | 52+payload_len | 4 | tail_len (= frame_len) |
@@ -94,7 +115,7 @@ Kind registry (append-only): `1 SEG_END`, `2 CHAIN`, `3 INTERN`, `4 GAP`, `5 DEG
 
 | Offset | Size | Field |
 |---|---|---|
-| 0 | 8 | magic `BBXSEG2` + NUL pad to 8 bytes |
+| 0 | 8 | magic `BBXSEG2` + `0x00` (`42 42 58 53 45 47 32 00`) |
 | 8 | 2 | version = 2 |
 | 10 | 2 | flags (reserved) |
 | 12 | 16 | writer_uuid |
@@ -105,7 +126,7 @@ Kind registry (append-only): `1 SEG_END`, `2 CHAIN`, `3 INTERN`, `4 GAP`, `5 DEG
 | 48 | 8 | created_wall_ns (i64) |
 | 56 | 8 | created_mono_ns (i64) |
 | 64 | 32 | prev_chain (chain value at the end of segment n−1; zeros for the first) |
-| 96 | 4 | header_crc32c over bytes [0, 96) |
+| 96 | 4 | header checksum (profile) over bytes [0, 96) |
 | 100 | 3996 | reserved |
 | 4096 | body | frames, byte-identical to what the writer committed; unused tail is zero |
 
@@ -116,7 +137,7 @@ a page fault into a hole under `ENOSPC`/EOF raises `SIGBUS` in the faulting proc
 
 | Offset | Size | Field |
 |---|---|---|
-| 0 | 8 | magic `BBXSEAL1` |
+| 0 | 8 | magic `BBXSEAL1` (`42 42 58 53 45 41 4C 31`) |
 | 8 | 4 | segment_no |
 | 12 | 4 | reason: 1 ROLLED, 2 RUN_END, 3 RECOVERED, 4 SHUTDOWN |
 | 16 | 8 | start_seq |
@@ -129,7 +150,7 @@ a page fault into a hole under `ENOSPC`/EOF raises `SIGBUS` in the faulting proc
 | 116 | 8 | closed_wall_ns (i64) |
 | 124 | 16 | sealer (pid u32 ‖ proc_start_ns u64 ‖ 4 reserved) |
 | 140 | 112 | reserved |
-| 252 | 4 | seal_crc32c over bytes [0, 252) |
+| 252 | 4 | seal checksum (profile) over bytes [0, 252) |
 
 A segment **with** a valid `.seal` is immutable. A segment **without** one is active-or-dead and is read by the
 backward CRC walk; the recoverer writes the missing `.seal` with `reason = RECOVERED`.

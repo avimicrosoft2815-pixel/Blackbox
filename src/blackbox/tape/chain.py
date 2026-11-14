@@ -15,10 +15,25 @@ from blackbox.codec.ids import blake2b
 
 ZERO = b"\x00" * 32
 
+# upper bound on one CHAIN frame: two 32-byte hashes + three u64s, plus the 56-byte frame overhead, padded
+MAX_CHAIN_PAYLOAD_BYTES = 32 + 32 + 3 * 9 + 8
+MAX_CHAIN_FRAME_BYTES = 56 + MAX_CHAIN_PAYLOAD_BYTES + 8
+
 
 def batch_hash(frames: list[bytes]) -> bytes:
     h = blake2b(b"".join(frames))
     return h
+
+
+def batch_hash_spans(mm, spans) -> bytes:
+    """Batch hash straight off the mapped segment: no frame bytes are ever concatenated in memory."""
+    import hashlib
+
+    h = hashlib.blake2b(digest_size=32)
+    view = memoryview(mm)
+    for off, size in spans:
+        h.update(view[off:off + size])
+    return h.digest()
 
 
 def chain_value(prev: bytes, body_hash: bytes) -> bytes:

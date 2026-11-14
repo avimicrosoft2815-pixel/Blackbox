@@ -8,7 +8,7 @@ from blackbox.tape import frame as frame_mod
 from blackbox.tape import segments
 
 
-def iter_frames(tape_dir: str, segment_no: int, *, algo: int = C.CHECKSUM_CRC32C,
+def iter_frames(tape_dir: str, segment_no: int, *, algo: int = C.DEFAULT_CHECKSUM,
                 end_offset: int | None = None) -> Iterator[dict]:
     path = segments.seg_path(tape_dir, segment_no)
     with open(path, "rb") as fh:
@@ -25,6 +25,6 @@ def iter_frames(tape_dir: str, segment_no: int, *, algo: int = C.CHECKSUM_CRC32C
         off = nxt
 
 
-def iter_tape(tape_dir: str, *, algo: int = C.CHECKSUM_CRC32C) -> Iterator[dict]:
+def iter_tape(tape_dir: str, *, algo: int = C.DEFAULT_CHECKSUM) -> Iterator[dict]:
     for n in segments.list_segments(tape_dir):
         yield from iter_frames(tape_dir, n, algo=algo)

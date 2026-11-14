@@ -9,7 +9,8 @@ import struct
 import time
 
 from blackbox import constants as C
-from blackbox.codec.crc32c import checksum as _checksum
+from blackbox.codec.crc32c import checksum
+from blackbox.codec.crc32c import checksum_parts  # noqa: F401  (used by decode paths)
 
 _HEADER = struct.Struct("<4sIqqqHHHHII")
 _TRAILER = struct.Struct("<4sI")
@@ -30,31 +31,71 @@ def frame_size(payload_len: int) -> int:
     return C.FRAME_OVERHEAD_BYTES + padded_len(payload_len)
 
 
-def encode(seq: int, kind: int, payload: bytes = b"", *, flags: int = 0, priority: int = 1,
-           run_slot: int = 0, node_slot: int = 0, wall_ns: int | None = None,
-           mono_ns: int | None = None, algo: int = C.CHECKSUM_CRC32C) -> bytes:
+def encode_into(buf, off: int, seq: int, kind: int, payload: bytes = b"", *, flags: int = 0,
+                priority: int = 1, run_slot: int = 0, node_slot: int = 0, wall_ns: int | None = None,
+                mono_ns: int | None = None, algo: int = C.DEFAULT_CHECKSUM,
+                body_first: bool = True, hook=None) -> int:
+    """Write one frame at `off` inside `buf` (a bytearray or an mmap) and return its total length.
+
+    Zero intermediate buffers: the header is packed straight into `buf`, the payload is a slice copy, and the
+    CRC is folded over the three regions without joining them. Write order is payload → trailer → header
+    (§8.3), so a crash mid-frame leaves a slot the backward walk refuses to treat as committed.
+    """
     if priority < 0 or priority > C.PRIORITY_MAX:
         raise FrameError(f"priority out of range: {priority}")
-    if len(payload) > C.FRAME_MAX_PAYLOAD:
-        raise FrameError(f"payload {len(payload)} > {C.FRAME_MAX_PAYLOAD}")
-    pad = padded_len(len(payload)) - len(payload)
-    total = C.FRAME_OVERHEAD_BYTES + len(payload) + pad
+    plen = len(payload)
+    if plen > C.FRAME_MAX_PAYLOAD:
+        raise FrameError(f"payload {plen} > {C.FRAME_MAX_PAYLOAD}")
+    pad = padded_len(plen) - plen
+    total = C.FRAME_OVERHEAD_BYTES + plen + pad
     flags = (flags & 0x0F) | (priority << C.PRIORITY_SHIFT)
     wall = time.time_ns() if wall_ns is None else wall_ns
     mono = time.perf_counter_ns() if mono_ns is None else mono_ns
-    head = _HEADER.pack(C.MAGIC_FRAME, total, seq, wall, mono, kind, flags, run_slot, node_slot,
-                        len(payload), 0)
-    body = payload + b"\x00" * pad
-    trail = _TRAILER.pack(C.MAGIC_FRAME_TAIL, total)
-    crc = _checksum(head[:C.FRAME_CRC_OFF] + body + trail, algo)
-    out = bytearray(total)
-    out[0:C.FRAME_HEADER_BYTES] = head[:C.FRAME_CRC_OFF] + struct.pack("<I", crc)
-    out[C.FRAME_HEADER_BYTES:C.FRAME_HEADER_BYTES + len(payload) + pad] = body
-    out[total - C.FRAME_TRAILER_BYTES:total] = trail
+    body_off = off + C.FRAME_HEADER_BYTES
+    trail_off = off + total - C.FRAME_TRAILER_BYTES
+
+    if body_first:
+        if plen:
+            buf[body_off:body_off + plen] = payload
+        if pad:
+            buf[body_off + plen:body_off + plen + pad] = _ZEROS[:pad]
+        if hook is not None:
+            hook("S1")
+        struct.pack_into("<4sI", buf, trail_off, C.MAGIC_FRAME_TAIL, total)
+        if hook is not None:
+            hook("S2")
+
+    if hook is not None:
+        hook("S3")
+    _HEADER.pack_into(buf, off, C.MAGIC_FRAME, total if body_first else 0, seq, wall, mono, kind, flags,
+                      run_slot, node_slot, plen, 0)
+    if not body_first:                      # header-only pre-pass, used when the payload arrives later
+        return total
+    # CRC scope is header[0,44) then payload+trailer (the 4-byte CRC field itself is excluded). Folding two
+    # views of the same frame beats building three temporary buffers, and zlib.crc32 takes the previous value.
+    view = memoryview(buf)
+    crc = checksum(view[off:off + C.FRAME_CRC_OFF], algo)
+    crc = checksum(view[off + C.FRAME_HEADER_BYTES:off + total], algo, crc)
+    struct.pack_into("<I", buf, off + C.FRAME_CRC_OFF, crc)
+    if total != frame_size(plen):            # cannot happen; keeps the invariant explicit
+        raise FrameError("frame length mismatch")
+    return total
+
+
+_ZEROS = b"\x00" * 8
+
+
+def encode(seq: int, kind: int, payload: bytes = b"", *, flags: int = 0, priority: int = 1,
+           run_slot: int = 0, node_slot: int = 0, wall_ns: int | None = None,
+           mono_ns: int | None = None, algo: int = C.DEFAULT_CHECKSUM) -> bytes:
+    """Convenience wrapper that allocates the frame (tests, tools, small batches)."""
+    out = bytearray(frame_size(len(payload)))
+    encode_into(out, 0, seq, kind, payload, flags=flags, priority=priority, run_slot=run_slot,
+                node_slot=node_slot, wall_ns=wall_ns, mono_ns=mono_ns, algo=algo)
     return bytes(out)
 
 
-def decode(buf: bytes, off: int = 0, *, algo: int = C.CHECKSUM_CRC32C) -> tuple[dict, int]:
+def decode(buf: bytes, off: int = 0, *, algo: int = C.DEFAULT_CHECKSUM) -> tuple[dict, int]:
     """Decode one frame at `off`; returns (fields, next_offset). Raises FrameError."""
     end = len(buf)
     if off + C.FRAME_HEADER_BYTES + C.FRAME_TRAILER_BYTES > end:
@@ -69,8 +110,8 @@ def decode(buf: bytes, off: int = 0, *, algo: int = C.CHECKSUM_CRC32C) -> tuple[
     tmagic, tlen = _TRAILER.unpack_from(buf, off + total - C.FRAME_TRAILER_BYTES)
     if tmagic != C.MAGIC_FRAME_TAIL or tlen != total:
         raise FrameError("bad or missing trailer")
-    scope = bytes(buf[off:off + C.FRAME_CRC_OFF]) + bytes(buf[off + C.FRAME_HEADER_BYTES:off + total])
-    if _checksum(scope, algo) != crc:
+    if checksum_parts((memoryview(buf)[off:off + C.FRAME_CRC_OFF],
+                       memoryview(buf)[off + C.FRAME_HEADER_BYTES:off + total]), algo) != crc:
         raise FrameError("crc mismatch")
     payload = bytes(buf[off + C.FRAME_HEADER_BYTES:off + C.FRAME_HEADER_BYTES + plen])
     return {
@@ -81,7 +122,7 @@ def decode(buf: bytes, off: int = 0, *, algo: int = C.CHECKSUM_CRC32C) -> tuple[
     }, off + total
 
 
-def scan_backwards(buf: bytes, cursor: int, *, algo: int = C.CHECKSUM_CRC32C,
+def scan_backwards(buf: bytes, cursor: int, *, algo: int = C.DEFAULT_CHECKSUM,
                    min_offset: int = C.SEGMENT_HEADER_BYTES) -> list[dict]:
     """Walk frames backwards from `cursor` (exclusive end). Stops at the first invalid frame."""
     frames: list[dict] = []

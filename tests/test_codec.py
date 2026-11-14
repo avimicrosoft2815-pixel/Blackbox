@@ -93,3 +93,27 @@ def test_hashes():
 
 def test_keyed_hash_changes_with_key():
     assert keyed_hash(b"key1", b"same") != keyed_hash(b"key2", b"same")
+
+
+def test_chain_fastpath_matches_generic():
+    """The fixed-schema encoder must be byte-identical to the generic one (it runs on the publish path)."""
+    from blackbox.tape import chain as chain_mod
+
+    prev, batch = bytes(range(32)), bytes(range(32, 64))
+    for first, last in ((0, 1), (1, 23), (24, 300), (1, 2 ** 40), (2 ** 63, 2 ** 64 - 1)):
+        generic = chain_mod.encode_payload(prev=prev, batch=batch, first_seq=first, last_seq=last)
+        buf = bytearray(256)
+        n = cbor.encode_chain_into(buf, 0, prev, batch, first, last)
+        assert bytes(buf[:n]) == generic
+        assert cbor.decode_exact(bytes(buf[:n])) == {"last": last, "prev": prev, "batch": batch, "first": first}
+
+
+def test_magic_fields_are_exactly_their_width():
+    """A7: a magic shorter than its field silently shifts every following byte (it happened twice)."""
+    from blackbox import constants as C
+
+    for name, width in (("MAGIC_META", 8), ("MAGIC_HEAD", 8), ("MAGIC_SEG", 8), ("MAGIC_SEAL", 8)):
+        assert len(getattr(C, name)) == width, name
+    for name in ("MAGIC_FRAME", "MAGIC_FRAME_TAIL"):
+        assert len(getattr(C, name)) == 4, name
+    assert C.MAGIC_SEG == bytes.fromhex("4242585345473200")     # "BBXSEG2" + NUL pad, frozen in hex

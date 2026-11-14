@@ -72,7 +72,7 @@ def scan(data_dir: str, writer_uuid_hex: str, *, max_frames: int = 2_000_000) ->
     with open(os.path.join(tape_dir, "meta"), "rb") as fh:
         meta = meta_mod.decode(fh.read(C.META_BYTES))
     algo = meta["checksum_algo"]
-    head = head_mod.read_best(os.path.join(tape_dir, "head"))
+    head = head_mod.read_best(os.path.join(tape_dir, "head"), algo)
     segs = segments.list_segments(tape_dir)
     result = ScanResult(writer_uuid=writer_uuid_hex, meta=meta, head=head, segments_seen=segs)
     if head is None:

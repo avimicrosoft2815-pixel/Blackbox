@@ -53,6 +53,13 @@ def crc_ieee(data: bytes, crc: int = 0) -> int:
     return zlib.crc32(data, crc) & 0xFFFFFFFF
 
 
+def checksum_parts(parts, algo: int = CHECKSUM_CRC32C, crc: int = 0) -> int:
+    """Fold several buffers without joining them first (the frame CRC covers header + payload + trailer)."""
+    for part in parts:
+        crc = checksum(part, algo, crc)
+    return crc
+
+
 def checksum(data: bytes, algo: int = CHECKSUM_CRC32C, crc: int = 0) -> int:
     if algo == CHECKSUM_IEEE:
         return crc_ieee(data, crc)

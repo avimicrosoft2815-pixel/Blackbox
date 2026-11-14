@@ -123,6 +123,10 @@ META_FLAG_CHECKSUM_IEEE = 1 << 2
 # checksum algorithm ids (meta.flags bit2 selects IEEE instead of CRC32C)
 CHECKSUM_CRC32C = 0
 CHECKSUM_IEEE = 1
+# Default: IEEE CRC-32 through zlib (C speed). CRC32C is implemented and verified but costs ~110 us/KiB in
+# pure Python, which alone breaks the section 15.1 event budget; the algorithm is recorded in meta.flags bit 2,
+# so a reader never has to guess. See docs/DECISIONS.md D-007.
+DEFAULT_CHECKSUM = CHECKSUM_IEEE
 
 # ── event kinds (append-only registry, docs/format.md §4) ───────────────────
 KIND_SEG_END = 1

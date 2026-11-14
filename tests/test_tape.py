@@ -158,3 +158,29 @@ def test_roll_produces_two_sealed_segments_and_a_full_scan(tmp_path):
     assert result.sealed_segments == segs[:-1]
     # every event that publish() returned for is on the tape
     assert result.last_seq >= written
+
+
+def test_roll_exactly_at_chain_emission_keeps_seq_unique_and_dense(tmp_path):
+    """A9 regression: the CHAIN frame used to be encoded before the roll decision.
+
+    A roll inside `publish()` advances `head_seq` with the `SEG_END` frame, so an already-encoded CHAIN frame
+    reused the SEG_END's seq number and the next one was never used: a duplicate plus a hole. 64 KiB segments
+    with ~1 KiB events force that boundary often, so the test sweeps the whole capacity.
+    """
+    writer = TapeWriter(str(tmp_path), segment_bytes=64 * 1024).open()
+    uuid = writer.writer_uuid.hex()
+    payload = b"y" * 900
+    try:
+        for _ in range(400):                      # 400 * ~1 KiB crosses several segment boundaries
+            writer.emit(C.KIND_MODEL_REQUEST, payload)
+            if writer.head.head_off > writer.segment_bytes - 4096:
+                writer.publish()
+    finally:
+        writer.close()
+
+    result = scanner.scan(str(tmp_path), uuid)
+    seqs = [f["seq"] for f in result.frames]
+    assert seqs == list(range(1, len(seqs) + 1)), "seq numbers must be unique and dense"
+    assert result.gaps == []
+    assert result.completeness() == "full"
+    assert len(segments.list_segments(str(tmp_path / "tape" / uuid))) >= 3

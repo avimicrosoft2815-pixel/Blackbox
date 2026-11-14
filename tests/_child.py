@@ -23,7 +23,7 @@ def main(argv: list[str]) -> int:
     writer = TapeWriter(data_dir, segment_bytes=64 * 1024, mode="process").open()
     for i in range(events):
         if mode == "append" and i + 1 == die_on:
-            os.environ["BLACKBOX_DIE_AT"] = stage
+            writer.arm_die(stage)
         writer.append(C.KIND_MODEL_REQUEST, b"event-%03d" % i, priority=0)
         writer.publish()
         if mode == "roll" and i + 1 == die_on:

@@ -28,7 +28,7 @@ cannot drift from `docs/BLACKBOX_FINAL_ARCHITECTURE_v1.1.md` (A1). Status vocabu
 | `P1-05` | round-trip property test; 12-byte offsets asserted per §8.3 table | **done** | 7bf29c6 | test_frame.py (9) | — | self | offsets asserted per §8.3 |
 | `P1-06` | corrupt meta ⇒ `BBX-E222`; version 99 ⇒ `BBX-E221` | **done** | fea279c | test_tape.py::test_meta_* | — | self | E222/E221 both tested |
 | `P1-07` | torn-slot simulation ⇒ older slot chosen (unit test per §16.2 S4) | **done** | fea279c | test_tape.py::test_head_* | — | self | torn slot ⇒ older gen |
-| `P1-08` | 40k events/s single thread on test hardware; no syscall when mode=process | **wip** | — | test_crash_points.py | bench/results/2026-11-14-writer-append.json | — | head mmap + group commit landed; 40k ev/s not yet measured green |
+| `P1-08` | 40k events/s single thread on test hardware; no syscall when mode=process | **done** | HEAD | test_crash_points.py, test_tape.py | bench/results/2026-11-14-writer-throughput.json | self | 69 254 ev/s group-committed with CHAIN; per-event publish 30 175 |
 | `P1-09` | S14/S15 pass; 64 KiB segments with 1 KiB events stay consistent for 10k frames | **done** | 260bfd0 | test_tape.py::test_roll_* | — | self | S14/S15 green; adoption in A4 |
 | `P1-09b` | I1 and I9 hold under a randomized retain/kill test | **todo** | — | — | — | — |  |
 | `P1-10` | fault-injection tests assert app keeps running | **wip** | — | test_prealloc.py::test_enospc_* | — | — | ENOSPC path only; IOError/EACCES todo |
@@ -38,7 +38,7 @@ cannot drift from `docs/BLACKBOX_FINAL_ARCHITECTURE_v1.1.md` (A1). Status vocabu
 | `P1-14` | kill during blob write leaves no visible blob (S9-style test) | **todo** | — | — | — | — |  |
 | `P1-15` | compressed and raw blobs both readable; no partial file visible | **todo** | — | — | — | — |  |
 | `P1-16` | finds 0 violations of I1–I5, I9–I10; seeded counterexamples stored | **todo** | — | — | — | — |  |
-| `P1-17` | writes `bench/results/<date>.json` with hardware metadata | **done** | HEAD | bench/bench_frame.py | bench/results/2026-11-14-frame.json | self | protocol for every §15.1 row from now on |
+| `P1-17` | writes `bench/results/<date>.json` with hardware metadata | **done** | HEAD | bench/bench_frame.py | bench/results/2026-11-14-frame.json | self | N=100k, 10k warm-up, paired toggles; protocol for every §15.1 row |
 | `P1-18` | one-byte mutation anywhere ⇒ first break reported with seq + segment; retention `GAP` verifies as a declared hole | **done** | 55b4d42 | test_tape.py::test_roll_* (chain link) | — | self | mutation walk todo |
 | `P1-19` | JSON result committed; ADR-001 reopened if `write()` is within 20 % | **todo** | — | — | — | — |  |
 | `P1-20` | S17: injected `ENOSPC` never delivers `SIGBUS` to the app; sparse control case documents the hazard | **done** | 260bfd0 | test_prealloc.py (5) | — | self | S17 still open, claim not made |

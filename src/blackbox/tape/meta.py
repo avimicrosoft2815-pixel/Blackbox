@@ -13,7 +13,7 @@ class MetaError(ValueError):
     pass
 
 
-def encode(*, writer_uuid: bytes, segment_bytes: int, vantage: int, checksum_algo: int = C.CHECKSUM_CRC32C,
+def encode(*, writer_uuid: bytes, segment_bytes: int, vantage: int, checksum_algo: int = C.DEFAULT_CHECKSUM,
            pid: int | None = None, created_wall_ns: int | None = None,
            created_mono_ns: int | None = None, schema_ver: int = C.SCHEMA_VER) -> bytes:
     import os
