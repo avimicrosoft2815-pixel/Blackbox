@@ -135,3 +135,44 @@ def test_adoption_writes_a_missing_seal_as_recovered(tmp_path, crashed_roll):
     assert seal is not None and seal["reason"] == 3          # SEAL_REASON_RECOVERED
     seal_mod.verify(str(tape_dir / "00000001.seg"), seal_path)
     assert scanner.scan(str(tmp_path), crashed_roll).completeness() == "full"
+
+
+def test_adoption_does_not_require_a_seg_end_frame(tmp_path):
+    """Found by the randomized kill matrix (seed 352): `roll()` skips `SEG_END` when it cannot fit.
+
+    The adopted body is then the committed prefix only, and the seal must cover exactly `[4096, head_off)` —
+    refusing this state left a legal crash unrecoverable, which is worse than the crash.
+    """
+    from blackbox import constants as C
+    from blackbox.tape import meta as meta_mod
+    from blackbox.tape import repair
+
+    data_dir = tmp_path
+    writer = TapeWriter(str(data_dir), segment_bytes=64 * 1024).open()
+    uuid = writer.writer_uuid.hex()
+    for _ in range(5):
+        writer.append_and_publish(C.KIND_MODEL_REQUEST, b"x" * 64)
+    writer.abort()                      # leave the head naming segment 1 with no SEG_END and no roll
+
+    tape_dir = str(data_dir / "tape" / uuid)
+    with open(os.path.join(tape_dir, "meta"), "rb") as fh:
+        meta = meta_mod.decode(fh.read(C.META_BYTES))
+    head = head_mod.read_best_in(tape_dir)
+
+    # create <n+1>.seg exactly as an interrupted roll would have: valid header, empty body, no seal
+    from blackbox.tape import segments
+    segments.create(tape_dir, head.active_segment + 1, writer_uuid=bytes.fromhex(uuid),
+                    segment_bytes=meta["segment_bytes"], prev_chain=b"\x00" * 32)
+
+    state = repair.segment_state(tape_dir, head.active_segment)
+    assert state["last_kind"] != C.KIND_SEG_END, "this fixture must not end with SEG_END"
+
+    report = repair.adopt_orphan(tape_dir)
+    assert report is not None and report["adopted"] == head.active_segment + 1
+    seal = seal_mod.read(os.path.join(tape_dir, f"{head.active_segment:08d}.seal"))
+    assert seal is not None
+    assert seal["body_len"] == head.head_off - C.SEGMENT_HEADER_BYTES
+    seal_mod.verify(os.path.join(tape_dir, f"{head.active_segment:08d}.seg"),
+                    os.path.join(tape_dir, f"{head.active_segment:08d}.seal"))
+    assert head_mod.read_best_in(tape_dir).active_segment == head.active_segment + 1
+    assert scanner.scan(str(data_dir), uuid).completeness() == "full"

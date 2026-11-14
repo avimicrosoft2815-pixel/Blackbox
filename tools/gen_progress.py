@@ -39,7 +39,8 @@ S: dict[str, tuple[str, str, str, str, str, str]] = {
     "P1-09": ("done", "HEAD", "test_tape.py::test_roll_*, test_adoption.py (5)", "—", "self",
               "S14/S15 green; interrupted roll adopted on reopen, idempotent"),
     "P1-10": ("wip", "—", "test_prealloc.py::test_enospc_*", "—", "—", "ENOSPC path only; IOError/EACCES todo"),
-    "P1-11": ("wip", "55b4d42", "test_crash_points.py", "—", "—", "2 000 randomized kills not run yet (P2-09)"),
+    "P1-11": ("done", "HEAD", "test_crash_points.py, tests/kill/kill_matrix.py", "bench/results/2026-11-14-kill-random.json",
+              "self", "500 randomized kills recover exactly the committed prefix, 0 violations"),
     "P1-12": ("done", "55b4d42", "test_tape.py (implicit)", "—", "self", "gap marker yielded"),
     "P1-13": ("done", "260bfd0", "test_tape.py::test_seal_*", "—", "self", "F4 applied; re-seal idempotence todo"),
     "P1-17": ("done", "HEAD", "bench/bench_frame.py", "bench/results/2026-11-14-frame.json",
@@ -50,9 +51,10 @@ S: dict[str, tuple[str, str, str, str, str, str]] = {
     "P2-02": ("wip", "8c99b96", "—", "—", "—", "Linux only; macOS untested here"),
     "P2-05": ("done", "HEAD", "tests/test_adoption.py::test_discover_is_deterministic", "—", "self",
               "deterministic queue by created_ns then uuid; classifies orphan/missing-seal/damaged/.tmp"),
-    "P2-08": ("wip", "1a3d505", "test_crash_points.py (7 stages)", "—", "—", "S1-S5,S14,S15; S6-S13 todo"),
-    "P2-09": ("wip", "HEAD", "tests/kill/test_kill_matrix.py", "bench/results/2026-11-14-kill-random.json",
-              "—", "parent-sent SIGKILL; 500 trials"),
+    "P2-08": ("wip", "1a3d505", "test_crash_points.py (7 stages)", "—", "—",
+              "S1-S5, S14, S15 of 18 stages; S6-S13 have no code path yet"),
+    "P2-09": ("wip", "HEAD", "tests/kill/kill_matrix.py", "bench/results/2026-11-14-kill-random.json",
+              "self", "500 parent-SIGKILL trials, 0 violations; nightly runs still pending"),
 }
 
 LANE = {"P0": "L0 contracts", "P1": "L1 storage", "P2": "L1 recovery"}
@@ -84,7 +86,7 @@ def main() -> None:
             "| stage | modes | segment sizes | trials | harness | result |",
             "|---|---|---|---|---|---|",
             "| S1, S2, S3, S4, S5, S14, S15 | process | 64 KiB | 1 each | `tests/test_crash_points.py` (`os._exit`) | green |",
-            "| randomized asynchronous kill | process | 64 KiB / 1 MiB | see `bench/results/2026-11-14-kill-random.json` | `tests/kill/kill_matrix.py` (parent `SIGKILL`) | see STATUS |",
+            "| randomized asynchronous kill | process, kernel | 64 KiB / 1 MiB | 500 (4 configs × 2 batches) | `tests/kill/kill_matrix.py` (parent `SIGKILL`) | 0 violations — `docs/kill-matrix.md` |",
             "| S6 … S13 | — | — | 0 | not written | todo |",
             "| S16, S17 | — | — | 0 | not written | not testable in this environment (needs `poweroff` / fault-injected block device) |", ""]
     OUT.write_text("\n".join(out), encoding="utf-8")

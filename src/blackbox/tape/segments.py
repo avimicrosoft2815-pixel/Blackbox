@@ -57,22 +57,38 @@ def decode_header(buf: bytes) -> dict:
 
 
 def create(tape_dir: str, n: int, *, writer_uuid: bytes, segment_bytes: int, prev_chain: bytes) -> str:
-    """Create segment `n` fully preallocated, write its header, return the path.
+    """Create segment `n` fully preallocated and atomically publish it (§8.6 step 2-3).
+
+    The file appears at `<n>.seg.tmp`, is preallocated and headered and `fdatasync`ed there, and only then is it
+    `os.replace`d into place. Without that, a kill during creation leaves a `<n>.seg` whose header is half
+    written — a segment that can never be rolled onto again (found by the randomized kill matrix, seed 388).
 
     Raises `prealloc.PreallocError`; the writer converts that into a degraded state (never SIGBUS).
     """
     path = seg_path(tape_dir, n)
     if os.path.exists(path):
         raise bbx("BBX-E133", f"segment {n} already exists (an interrupted roll; recovery adopts it)")
-    prealloc.preallocate(path, segment_bytes)
+    tmp = path + ".tmp"
+    if os.path.exists(tmp):
+        os.unlink(tmp)                      # a stale tmp from a previous attempt is never adopted
+    prealloc.preallocate(tmp, segment_bytes)
     header = encode_header(writer_uuid=writer_uuid, segment_no=n, start_seq=0,
                            segment_bytes=segment_bytes, prev_chain=prev_chain)
-    fd = os.open(path, os.O_RDWR)
+    fd = os.open(tmp, os.O_RDWR)
     try:
         os.pwrite(fd, header, 0)
-        os.fsync(fd)      # once per segment: cheap and makes the header durable before it is mapped
+        if hasattr(os, "fdatasync"):
+            os.fdatasync(fd)
+        else:                                # pragma: no cover - Windows
+            os.fsync(fd)
     finally:
         os.close(fd)
+    os.replace(tmp, path)
+    from blackbox.platform import posix
+    try:
+        posix.fsync_dir(tape_dir)
+    except OSError:
+        pass                                 # directory fsync is best effort on filesystems that refuse it
     return path
 
 

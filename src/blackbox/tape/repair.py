@@ -54,6 +54,7 @@ def segment_state(tape_dir: str, n: int, *, algo: int = C.DEFAULT_CHECKSUM,
         info["last_kind"] = fields["kind"]
         off = nxt
     info["frames"] = frames
+    info["body_bytes"] = off          # committed prefix length inside the body
     info["empty_body"] = frames == 0
     return info
 
@@ -85,14 +86,21 @@ def adopt_orphan(tape_dir: str, *, sealer: bytes = b"", closed_wall_ns: int | No
         return None
     if current["damaged"]:
         return None
-    if current["last_kind"] != C.KIND_SEG_END:
+    # The body to seal is exactly the committed prefix `[4096, head_off)`. It normally ends with `SEG_END`,
+    # but roll() skips that frame when it cannot fit, so requiring it here would refuse a legal crash state
+    # (found by the randomized kill matrix, seed 352). Anything past `head_off` is uncommitted and is not
+    # covered by the seal.
+    start = C.SEGMENT_HEADER_BYTES
+    if not (start <= head.head_off <= (head.head_off + segment_bytes)):
+        return None
+    if head.head_off < start or head.head_off > segment_bytes:
         return None
     report = {"adopted": nxt, "sealed": None, "head_gen_before": head.gen}
     seal_path = segments.seal_path(tape_dir, n)
     if not os.path.exists(seal_path):
         with open(current["path"], "rb") as fh:
-            fh.seek(C.SEGMENT_HEADER_BYTES)
-            body = fh.read()
+            fh.seek(start)
+            body = fh.read(head.head_off - start)
         info = seal_mod.write(seal_path, segment_no=n, reason=C.SEAL_REASON_RECOVERED,
                               start_seq=current["first_seq"] or 0, end_seq=current["last_seq"] or 0,
                               frame_count=current["frames"], body=body,

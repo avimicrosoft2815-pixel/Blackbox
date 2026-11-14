@@ -10,6 +10,7 @@ import os
 from dataclasses import dataclass, field
 
 from blackbox import constants as C
+from blackbox.errors import bbx
 from blackbox.tape import frame as frame_mod
 from blackbox.tape import head as head_mod
 from blackbox.tape import meta as meta_mod
@@ -62,6 +63,27 @@ class ScanResult:
         }
 
 
+def _seg_paths(tape_dir: str) -> list[str]:
+    return [segments.seg_path(tape_dir, n) for n in segments.list_segments(tape_dir)]
+
+
+def _segment_has_frames(path: str, algo: int = C.DEFAULT_CHECKSUM) -> bool:
+    """Content check, not a size check: every segment is preallocated to its full size, so size proves nothing."""
+    try:
+        with open(path, "rb") as fh:
+            fh.seek(C.SEGMENT_HEADER_BYTES)
+            head = fh.read(C.FRAME_OVERHEAD_BYTES)
+    except OSError:
+        return False
+    if len(head) < C.FRAME_OVERHEAD_BYTES:
+        return False
+    try:
+        frame_mod.decode(head, 0, algo=algo)
+    except frame_mod.FrameError:
+        return False
+    return True
+
+
 def _read_file(path: str, limit: int | None = None) -> bytes:
     with open(path, "rb") as fh:
         return fh.read() if limit is None else fh.read(limit)
@@ -69,14 +91,23 @@ def _read_file(path: str, limit: int | None = None) -> bytes:
 
 def scan(data_dir: str, writer_uuid_hex: str, *, max_frames: int = 2_000_000) -> ScanResult:
     tape_dir = os.path.join(data_dir, "tape", writer_uuid_hex)
-    with open(os.path.join(tape_dir, "meta"), "rb") as fh:
-        meta = meta_mod.decode(fh.read(C.META_BYTES))
+    try:
+        with open(os.path.join(tape_dir, "meta"), "rb") as fh:
+            meta = meta_mod.decode(fh.read(C.META_BYTES))
+    except FileNotFoundError:
+        # a writer creates the directory, then `meta`, then `head`. A reader can arrive in between; an
+        # uninitialised tape is empty, and it is only an error when frames already exist next to it.
+        if any(_segment_has_frames(p) for p in _seg_paths(tape_dir)):
+            raise bbx("BBX-E222", f"{tape_dir}: segments exist without a meta page") from None
+        return ScanResult(writer_uuid=writer_uuid_hex, meta={}, head=None)
     algo = meta["checksum_algo"]
     head = head_mod.read_best(os.path.join(tape_dir, "head"), algo)
     segs = segments.list_segments(tape_dir)
     result = ScanResult(writer_uuid=writer_uuid_hex, meta=meta, head=head, segments_seen=segs)
     if head is None:
-        result.truncated_tail = True
+        # no committed head yet: empty when nothing was written, otherwise the reader cannot trust anything
+        if any(_segment_has_frames(p) for p in _seg_paths(tape_dir)):
+            raise bbx("BBX-E220", f"{tape_dir}: both head slots are invalid and segments hold frames")
         return result
 
     n_active = head.active_segment

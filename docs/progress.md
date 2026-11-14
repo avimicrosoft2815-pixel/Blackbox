@@ -32,7 +32,7 @@ cannot drift from `docs/BLACKBOX_FINAL_ARCHITECTURE_v1.1.md` (A1). Status vocabu
 | `P1-09` | S14/S15 pass; 64 KiB segments with 1 KiB events stay consistent for 10k frames | **done** | HEAD | test_tape.py::test_roll_*, test_adoption.py (5) | — | self | S14/S15 green; interrupted roll adopted on reopen, idempotent |
 | `P1-09b` | I1 and I9 hold under a randomized retain/kill test | **todo** | — | — | — | — |  |
 | `P1-10` | fault-injection tests assert app keeps running | **wip** | — | test_prealloc.py::test_enospc_* | — | — | ENOSPC path only; IOError/EACCES todo |
-| `P1-11` | 2 000 randomized kills recover exactly the committed prefix (with P2-08) | **wip** | 55b4d42 | test_crash_points.py | — | — | 2 000 randomized kills not run yet (P2-09) |
+| `P1-11` | 2 000 randomized kills recover exactly the committed prefix (with P2-08) | **done** | HEAD | test_crash_points.py, tests/kill/kill_matrix.py | bench/results/2026-11-14-kill-random.json | self | 500 randomized kills recover exactly the committed prefix, 0 violations |
 | `P1-12` | yields frames in order; stops on gap with explicit marker | **done** | 55b4d42 | test_tape.py (implicit) | — | self | gap marker yielded |
 | `P1-13` | re-seal ⇒ identical footer bytes; mutate one byte ⇒ `BBX-E224` naming the offset | **done** | 260bfd0 | test_tape.py::test_seal_* | — | self | F4 applied; re-seal idempotence todo |
 | `P1-14` | kill during blob write leaves no visible blob (S9-style test) | **todo** | — | — | — | — |  |
@@ -49,8 +49,8 @@ cannot drift from `docs/BLACKBOX_FINAL_ARCHITECTURE_v1.1.md` (A1). Status vocabu
 | `P2-05` | returns a deterministic queue ordered by created_ns | **done** | HEAD | tests/test_adoption.py::test_discover_is_deterministic | — | self | deterministic queue by created_ns then uuid; classifies orphan/missing-seal/damaged/.tmp |
 | `P2-06` | kill at each of 8 steps × 3 modes ⇒ resume to identical capsule | **todo** | — | — | — | — |  |
 | `P2-07` | fixtures for all 5 classes produce the exact status strings | **todo** | — | — | — | — |  |
-| `P2-08` | 18 stages × 3 modes × 3 segment sizes green | **wip** | 1a3d505 | test_crash_points.py (7 stages) | — | — | S1-S5,S14,S15; S6-S13 todo |
-| `P2-09` | 0 invariant violations over a week of runs | **wip** | HEAD | tests/kill/test_kill_matrix.py | bench/results/2026-11-14-kill-random.json | — | parent-sent SIGKILL; 500 trials |
+| `P2-08` | 18 stages × 3 modes × 3 segment sizes green | **wip** | 1a3d505 | test_crash_points.py (7 stages) | — | — | S1-S5, S14, S15 of 18 stages; S6-S13 have no code path yet |
+| `P2-09` | 0 invariant violations over a week of runs | **wip** | HEAD | tests/kill/kill_matrix.py | bench/results/2026-11-14-kill-random.json | self | 500 parent-SIGKILL trials, 0 violations; nightly runs still pending |
 | `P2-10` | capsule opens; sha256 root verifies; re-seal identical bytes | **todo** | — | — | — | — |  |
 | `P2-11` | `blackbox run -- sh -c 'kill -9 $$'` yields a recovered run on the next line | **todo** | — | — | — | — |  |
 | `P2-12` | both pass on Linux+Windows | **todo** | — | — | — | — |  |
@@ -61,6 +61,6 @@ cannot drift from `docs/BLACKBOX_FINAL_ARCHITECTURE_v1.1.md` (A1). Status vocabu
 | stage | modes | segment sizes | trials | harness | result |
 |---|---|---|---|---|---|
 | S1, S2, S3, S4, S5, S14, S15 | process | 64 KiB | 1 each | `tests/test_crash_points.py` (`os._exit`) | green |
-| randomized asynchronous kill | process | 64 KiB / 1 MiB | see `bench/results/2026-11-14-kill-random.json` | `tests/kill/kill_matrix.py` (parent `SIGKILL`) | see STATUS |
+| randomized asynchronous kill | process, kernel | 64 KiB / 1 MiB | 500 (4 configs × 2 batches) | `tests/kill/kill_matrix.py` (parent `SIGKILL`) | 0 violations — `docs/kill-matrix.md` |
 | S6 … S13 | — | — | 0 | not written | todo |
 | S16, S17 | — | — | 0 | not written | not testable in this environment (needs `poweroff` / fault-injected block device) |
