@@ -74,6 +74,10 @@ print("events=%d app=%s" % (400, app.hexdigest()))
 CHILD_RUNS = itertools.count()
 
 
+posix = pytest.mark.skipif(os.name != "posix", reason="needs POSIX process/space semantics")
+pytestmark = posix
+
+
 def run_child(tmp_path: Path, mode: str, fault: str) -> subprocess.CompletedProcess:
     d = Path(tempfile.mkdtemp(dir=tmp_path, prefix=f"{CHILD_RUNS}-{mode}-{fault}-"))
     script = CHILD.format(src=str(ROOT / "src"))

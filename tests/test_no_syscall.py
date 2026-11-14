@@ -11,6 +11,8 @@ import os
 import sys
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
@@ -20,6 +22,10 @@ from blackbox.tape.writer import TapeWriter
 APPENDS = 100_000
 WATCHED = ("write", "pwrite", "writev", "pwritev", "fsync", "fdatasync", "open", "openat",
            "posix_fallocate", "ftruncate", "lseek")
+
+
+posix = pytest.mark.skipif(os.name != "posix", reason="counts POSIX syscall wrappers")
+pytestmark = posix
 
 
 def test_process_mode_append_path_makes_no_syscall(tmp_path, monkeypatch):

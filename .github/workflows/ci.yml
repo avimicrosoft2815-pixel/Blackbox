@@ -25,9 +25,13 @@ jobs:
         run: python -m pytest tests/test_stdlib_only.py tests/test_no_egress.py -q
       - name: Unit + property tests
         run: python -m pytest -q
-      - name: Kill stages S1-S5 (POSIX only)
+      - name: Crash stages S1-S5 + a 20-trial kill smoke run (POSIX only)
         if: runner.os != 'Windows'
-        run: python -m pytest tests/kill -q
+        # `tests/kill/` holds drivers, not test modules, so `pytest tests/kill` collected nothing and exited 5.
+        # The stages live in tests/test_crash_points.py; the matrix is a script whose smoke run is 20 trials.
+        run: |
+          python -m pytest tests/test_crash_points.py -q
+          python tests/kill/kill_matrix.py --trials 20
       - name: Packaging check
         run: python -m pytest tests/test_packaging.py -q
 
