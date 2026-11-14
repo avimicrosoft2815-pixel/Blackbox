@@ -1,8 +1,8 @@
 # STATUS — BlackBox v1.0 build
 
-**Branch** `arena/e10fc603-blackbox` · **base** `30c9433` · **HEAD** `c43570d` plus the STATUS commits that follow it
+**Branch** `arena/e10fc603-blackbox` · **base** `30c9433` · **HEAD** `e15a680` plus the STATUS commit that follows it
 **Phase:** P0, P1 (partial), P2 (partial) — *storage and recovery layer only; no SDK, proxy or viewer yet.*
-**Not merge-ready.** Six of the plan's P1/P2 tickets are still `pending`; see §7.
+**Not merge-ready.** The plan's P1/P2 tickets that are still `pending` are listed in §7, with the reason for each.
 
 ---
 
@@ -19,10 +19,11 @@
 | Crash points S1–S5, S14, S15 | `tests/test_crash_points.py` | green |
 | Crash states read back (seeds 388/209/396) | `tests/test_scan_states.py` | green |
 | Randomized parent-`SIGKILL` (P2-09) | 500 trials ext4 **and** 500 tmpfs → `bench/results/2026-11-14-kill-random.json` | **0 violations** in both columns; 10/500 (ext4) and 6/500 (tmpfs) trials died before the child created its tape and are counted as `not_started`, never as passes |
-| ENOSPC at preallocation (S17) | `tests/test_enospc.py`, `tests/test_prealloc.py` | app exits 0, stdout identical, tape shows `DEGRADED` |
+| ENOSPC at preallocation (S17) | `tests/test_enospc.py`, `tests/test_prealloc.py` | **both segments and the first one**: app exits 0, stdout identical, tape shows `DEGRADED`; a writer that cannot get its first segment is a sink (`recording=False`, drops counted), never an exception into the app |
 | Group-commit window + keeper | `tests/test_keeper.py` (6) | window ≤ 5 ms measured at 1 / 1 000 / unbounded ev/s |
 | No syscall on the append path (C11) | `tests/test_no_syscall.py` | 100 000 appends, **0** `write/pwrite/fsync/fdatasync/open/openat` |
 | Seal footer + chain link | `tests/test_tape.py` seal/chain tests | green |
+| Platform shims (P2-03/P2-04) | `tests/test_platform_shims.py` (12) | contract green on Linux; `capabilities()["tested_here"]` is `False` for Windows and macOS, which have **never executed** here |
 | Lint + types (C6) | `make fmt` (ruff 0.17.5, mypy 2.4.1) | **0 findings** both |
 | Forbidden words (C12) | `tests/test_forbidden_words.py` | green over the tree **and** `git log` |
 
