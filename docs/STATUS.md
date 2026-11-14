@@ -1,6 +1,6 @@
 # STATUS — BlackBox v1.0 build
 
-**Branch** `arena/e10fc603-blackbox` · **base** `30c9433` · **HEAD** `641beb1`
+**Branch** `arena/e10fc603-blackbox` · **base** `30c9433` · **HEAD** `c43570d`
 **Phase:** P0, P1 (partial), P2 (partial) — *storage and recovery layer only; no SDK, proxy or viewer yet.*
 **Not merge-ready.** Six of the plan's P1/P2 tickets are still `pending`; see §7.
 
