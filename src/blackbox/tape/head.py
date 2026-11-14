@@ -154,7 +154,28 @@ class HeadMap:
     def __init__(self, path: str, *, create: bool = True) -> None:
         self.path = path
         existed = os.path.exists(path)
-        self.fd = os.open(path, os.O_RDWR | (0 if existed else os.O_CREAT), 0o600)
+        if not existed:
+            # Create the file atomically: a kill between O_CREAT and the ftruncate used to leave an empty
+            # `head` that no reader could parse while segments already existed (kill matrix seed 120, tmpfs).
+            # tmp + ftruncate + fsync + replace + fsync(dir) means the name appears only when it is complete.
+            tmp = path + ".tmp"
+            fd = os.open(tmp, os.O_RDWR | os.O_CREAT | os.O_TRUNC, 0o600)
+            try:
+                os.ftruncate(fd, C.HEAD_BYTES)
+                os.fsync(fd)
+            finally:
+                os.close(fd)
+            os.replace(tmp, path)
+            try:
+                dfd = os.open(os.path.dirname(path) or ".", os.O_RDONLY)
+                try:
+                    os.fsync(dfd)
+                finally:
+                    os.close(dfd)
+            except OSError:
+                pass
+            existed = True
+        self.fd = os.open(path, os.O_RDWR)
         try:
             if not existed or os.fstat(self.fd).st_size < C.HEAD_BYTES:
                 os.ftruncate(self.fd, C.HEAD_BYTES)

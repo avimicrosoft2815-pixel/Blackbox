@@ -63,6 +63,42 @@ def completes_roll(state: dict) -> bool:
     return bool(state["exists"] and not state["damaged"] and state["empty_body"] and not state["sealed"])
 
 
+def rebuild_head(tape_dir: str, *, sealer: bytes = b"") -> dict | None:
+    """Reconstruct `head` from the segments when both slots are unreadable.
+
+    The head is a *hint*: every frame carries its own `seq`, so the committed prefix is recoverable from the
+    segment bytes alone. Until this existed, a kill during head creation left `segments exist but the head is
+    unreadable` — a legal crash state that recovery refused (kill matrix seed 120 on tmpfs).
+
+    Returns a report, or None when there is nothing to rebuild from.
+    """
+    existing = segments.list_segments(tape_dir)
+    if not existing:
+        return None
+    with open(os.path.join(tape_dir, "meta"), "rb") as fh:
+        meta = meta_mod.decode(fh.read(C.META_BYTES))
+    segment_bytes = meta["segment_bytes"]
+    newest = max(existing)
+    state = segment_state(tape_dir, newest, segment_bytes=segment_bytes)
+    if state["damaged"]:
+        return None
+    # continue from whatever generation is still readable, so a rebuild never publishes a *lower* gen than a
+    # surviving slot (readers pick the highest gen; equal gens would be ambiguous)
+    current = head_mod.read_best(os.path.join(tape_dir, "head"))
+    base = head_mod.HeadSlot(gen=current.gen if current else 0, head_seq=state["last_seq"] or 0,
+                             head_off=C.SEGMENT_HEADER_BYTES + state.get("body_bytes", 0),
+                             tail_seq=state["last_seq"] or 0, sealed_seq=state["last_seq"] or 0,
+                             active_segment=newest)
+    hmap = head_mod.HeadMap(os.path.join(tape_dir, "head"))
+    try:
+        slot = hmap.publish(base)
+        report = {"rebuilt_head": newest, "head_seq": slot.head_seq, "head_off": slot.head_off,
+                  "frames": state["frames"], "head_gen_after": slot.gen}
+    finally:
+        hmap.close()
+    return report
+
+
 def adopt_orphan(tape_dir: str, *, sealer: bytes = b"", closed_wall_ns: int | None = None) -> dict | None:
     """Complete an interrupted roll. Returns a report, or None when there is nothing to do.
 

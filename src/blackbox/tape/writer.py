@@ -126,6 +126,15 @@ class TapeWriter:
         self._head = head_mod.HeadMap(self.head_path)
         self._head.half_hook = lambda: _die("S4")
         best = self._head.best()
+        if best is None and existing:
+            # Both slots unreadable but frames exist: the head is a hint, so rebuild it from the segments
+            # instead of refusing a legal crash state (kill matrix seed 120).
+            from blackbox.tape import repair as repair_mod
+
+            report = repair_mod.rebuild_head(self.tape_dir, sealer=self.sealer_token)
+            if report is not None:
+                self.adopted = report
+                best = self._head.best()
         if best is None:
             if existing:
                 raise TapeError("segments exist but the head is unreadable; run recovery")
