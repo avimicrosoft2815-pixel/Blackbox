@@ -58,14 +58,12 @@ def decode_header(buf: bytes) -> dict:
     }
 
 
-def create(tape_dir: str, n: int, *, writer_uuid: bytes, segment_bytes: int, prev_chain: bytes) -> str:
-    """Create segment `n` fully preallocated and atomically publish it (§8.6 step 2-3).
+def reserve(tape_dir: str, n: int, *, segment_bytes: int) -> str:
+    """Reserve space for segment `n` in `n.seg.tmp` — **before** the current segment is closed down.
 
-    The file appears at `<n>.seg.tmp`, is preallocated and headered and `fdatasync`ed there, and only then is it
-    `os.replace`d into place. Without that, a kill during creation leaves a `<n>.seg` whose header is half
-    written — a segment that can never be rolled onto again (found by the randomized kill matrix, seed 388).
-
-    Raises `prealloc.PreallocError`; the writer converts that into a degraded state (never SIGBUS).
+    S17 (C5): a roll that discovers ENOSPC only *after* sealing and unmapping the current segment leaves the
+    writer with no mapping and nowhere to write. Reserving first means a failed roll leaves the active segment
+    exactly as it was, still open and still appendable. Raises `prealloc.PreallocError`.
     """
     path = seg_path(tape_dir, n)
     if os.path.exists(path):
@@ -74,6 +72,13 @@ def create(tape_dir: str, n: int, *, writer_uuid: bytes, segment_bytes: int, pre
     if os.path.exists(tmp):
         os.unlink(tmp)                      # a stale tmp from a previous attempt is never adopted
     prealloc.preallocate(tmp, segment_bytes)
+    return tmp
+
+
+def finish(tape_dir: str, n: int, tmp: str, *, writer_uuid: bytes, segment_bytes: int,
+           prev_chain: bytes) -> str:
+    """Write the header into a reserved segment and publish it atomically (fdatasync -> replace -> fsync)."""
+    path = seg_path(tape_dir, n)
     header = encode_header(writer_uuid=writer_uuid, segment_no=n, start_seq=0,
                            segment_bytes=segment_bytes, prev_chain=prev_chain)
     fd = os.open(tmp, os.O_RDWR)
@@ -90,6 +95,20 @@ def create(tape_dir: str, n: int, *, writer_uuid: bytes, segment_bytes: int, pre
     with contextlib.suppress(OSError):
         posix.fsync_dir(tape_dir)
     return path
+
+
+def create(tape_dir: str, n: int, *, writer_uuid: bytes, segment_bytes: int, prev_chain: bytes) -> str:
+    """Create segment `n` fully preallocated and atomically publish it (§8.6 step 2-3).
+
+    The file appears at `<n>.seg.tmp`, is preallocated and headered and `fdatasync`ed there, and only then is it
+    `os.replace`d into place. Without that, a kill during creation leaves a `<n>.seg` whose header is half
+    written — a segment that can never be rolled onto again (found by the randomized kill matrix, seed 388).
+
+    Raises `prealloc.PreallocError`; the writer converts that into a degraded state (never SIGBUS).
+    """
+    tmp = reserve(tape_dir, n, segment_bytes=segment_bytes)
+    return finish(tape_dir, n, tmp, writer_uuid=writer_uuid, segment_bytes=segment_bytes,
+                  prev_chain=prev_chain)
 
 
 def list_segments(tape_dir: str) -> list[int]:

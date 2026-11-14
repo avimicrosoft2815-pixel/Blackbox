@@ -98,6 +98,7 @@ class TapeWriter:
         self._window_start_ns = 0
         self.publishes = 0
         self.syncs = 0
+        self.dropped_events = 0
         # The keeper thread publishes on a tick while the app thread appends. Roll mutates the mapping,
         # the head and the chain, so publish/flush/roll/close are serialised; append keeps its own short
         # critical section so a publish never sees a half-recorded batch.
@@ -210,8 +211,13 @@ class TapeWriter:
         size = frame_mod.frame_size(len(payload))
         if size > self.segment_bytes - C.SEGMENT_HEADER_BYTES - C.RESERVED_HEAD_ROOM:
             raise bbx("BBX-E225", f"frame of {size} B does not fit a {self.segment_bytes} B segment")
-        if self._slot.head_off + size + C.RESERVED_HEAD_ROOM > self.segment_bytes:
-            self.roll()
+        if (self._slot.head_off + size + C.RESERVED_HEAD_ROOM > self.segment_bytes
+                and not self.roll()):
+            # Degraded and no room for another segment: drop the frame and count it. The app never sees an
+            # exception from the recorder (C5 fail-open); readers see the DEGRADED frame and the count.
+            self.dropped_events += 1
+            self._slot = self._slot.with_(dropped_events=self._slot.dropped_events + 1)
+            return self._slot.head_seq
 
         seq = self._slot.head_seq + 1
         off = self._slot.head_off
@@ -241,17 +247,19 @@ class TapeWriter:
                 # Decide the roll *before* the CHAIN frame is written: the frame carries `last_seq`, and a roll
                 # advances `head_seq` (the SEG_END frame), so writing first would duplicate a seq number. The bound
                 # is the largest a CHAIN frame can be (32+32 byte hashes plus three u64s), so no probe encode.
-                if self._slot.head_off + chain_mod.MAX_CHAIN_FRAME_BYTES + C.RESERVED_HEAD_ROOM > self.segment_bytes:
-                    self.roll()
-                n = cbor.encode_chain_into(self._scratch, 0, self._chain.value, batch_hash,
-                                           self._batch_first_seq, self._slot.head_seq)
-                off = self._slot.head_off
-                written = frame_mod.encode_into(self._mm, off, self._slot.head_seq + 1, C.KIND_CHAIN,
-                                               bytes(memoryview(self._scratch)[:n]), priority=0)
-                self._slot.head_seq += 1
-                self._slot.head_off = off + written
-                self._frame_count += 1
-                self._chain.value = chain_mod.chain_value(self._chain.value, batch_hash)
+                need = chain_mod.MAX_CHAIN_FRAME_BYTES + C.RESERVED_HEAD_ROOM
+                if self._slot.head_off + need > self.segment_bytes:
+                    self.roll()                   # returns False when the roll degraded; checked below
+                if self._slot.head_off + need <= self.segment_bytes:
+                    n = cbor.encode_chain_into(self._scratch, 0, self._chain.value, batch_hash,
+                                               self._batch_first_seq, self._slot.head_seq)
+                    off = self._slot.head_off
+                    written = frame_mod.encode_into(self._mm, off, self._slot.head_seq + 1, C.KIND_CHAIN,
+                                                    bytes(memoryview(self._scratch)[:n]), priority=0)
+                    self._slot.head_seq += 1
+                    self._slot.head_off = off + written
+                    self._frame_count += 1
+                    self._chain.value = chain_mod.chain_value(self._chain.value, batch_hash)
             self._slot = self._publish()
 
             if self.mode in ("kernel", "paranoid"):
@@ -350,8 +358,13 @@ class TapeWriter:
             return self._slot
 
     # ── roll ────────────────────────────────────────────────────────────────
-    def roll(self) -> None:
-        """Close the active segment and start the next one (P1-09, §8.6)."""
+    def roll(self) -> bool:
+        """Close the active segment and start the next one (P1-09, §8.6).
+
+        Returns True when the roll happened. A preallocation failure (ENOSPC/EDQUOT) does **not** raise into
+        the app: the writer stays on the current segment, sets DEGRADED_NO_SPACE in the head, and keeps
+        recording until the segment is full (C5, S17). Returns False in that case.
+        """
         with self._lock:
             arm_die()                      # roll is rare; re-reading the env here keeps S14/S15 armable
             assert self._slot is not None and self._mm is not None
@@ -365,7 +378,20 @@ class TapeWriter:
             self._publish()
             _die("S14")     # after SEG_END published, before the next segment is durable
 
-            # 2. capture the body of segment n and seal it (footer sidecar; P1-13)
+            # 2. reserve space for n+1 *before* closing n down: if the reservation fails, the active segment
+            # stays open and appendable, so the app keeps recording (S17/C5). The header is written later,
+            # because it chains to the seal of n, which does not exist yet.
+            next_no = n + 1
+            try:
+                reserved = segments.reserve(self.tape_dir, next_no, segment_bytes=self.segment_bytes)
+            except prealloc.PreallocError:
+                self.degraded_reason = "NO_SPACE"
+                self._slot = self._slot.with_(flags=self._slot.flags | C.HEAD_FLAG_DEGRADED_NO_SPACE)
+                self._publish()
+                self._emit_degraded("NO_SPACE")
+                return False
+
+            # 3. capture the body of segment n and seal it (footer sidecar; P1-13)
             body = bytes(self._mm[C.SEGMENT_HEADER_BYTES:self._slot.head_off])
             start_seq, end_seq, frame_count = self._segment_range(n)
             self._mm.flush()
@@ -379,21 +405,32 @@ class TapeWriter:
             if seal_info is not None:
                 self._chain.value = seal_info["chain"]     # the next segment's header chains to this seal
 
-            # 3. preallocate + header the next segment. Failure degrades; it never raises into the app.
-            next_no = n + 1
-            try:
-                self._create_segment(next_no)
-            except prealloc.PreallocError:
-                self.degraded_reason = "NO_SPACE"
-                self._slot = self._slot.with_(flags=self._slot.flags | C.HEAD_FLAG_DEGRADED_NO_SPACE)
-                self._publish()
-                raise bbx("BBX-E132", "preallocation failed at roll; recording degraded") from None
+            # 4. header the reserved segment and publish it into place
+            segments.finish(self.tape_dir, next_no, reserved, writer_uuid=self.writer_uuid,
+                            segment_bytes=self.segment_bytes, prev_chain=self._chain.value)
             _die("S14b")
             self._map_segment(next_no)
             _die("S15")     # segment n+1 exists (and its header is durable) but the head still names n
             self._slot = self._slot.with_(active_segment=next_no, head_off=C.SEGMENT_HEADER_BYTES,
                                           flags=self._slot.flags & ~C.HEAD_FLAG_ROLL_PENDING)
             self._publish()
+            return True
+
+    def _emit_degraded(self, reason: str) -> None:
+        """Append one DEGRADED frame if it fits. Failures here are swallowed: recording must not raise."""
+        if self._mm is None or self._slot is None:
+            return
+        try:
+            payload = cbor.encode({"d": reason, "s": self._slot.active_segment,
+                                   "drop": self._slot.dropped_events})
+            blob = frame_mod.encode(self._slot.head_seq + 1, C.KIND_DEGRADED, payload, priority=0)
+            if self._slot.head_off + len(blob) <= self.segment_bytes:
+                off = self._slot.head_off
+                self._mm[off:off + len(blob)] = blob
+                self._slot = self._slot.with_(head_seq=self._slot.head_seq + 1, head_off=off + len(blob))
+                self._publish()
+        except Exception:
+            return
 
     def _write_seal(self, n: int, *, body: bytes, start_seq: int, end_seq: int, frame_count: int,
                     reason: int) -> dict | None:
