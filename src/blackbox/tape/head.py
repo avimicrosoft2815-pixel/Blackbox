@@ -75,6 +75,20 @@ def read_slots(path: str | os.PathLike, algo: int = 0) -> tuple[HeadSlot | None,
     return s0, s1
 
 
+def read_best_in(tape_dir: str, algo: int | None = None) -> HeadSlot | None:
+    """Read the head of a tape whose checksum profile is recorded in its `meta` (the normal case)."""
+    if algo is None:
+        from blackbox import constants as _C
+        from blackbox.tape import meta as meta_mod
+
+        try:
+            with open(os.path.join(tape_dir, "meta"), "rb") as fh:
+                algo = meta_mod.decode(fh.read(_C.META_BYTES))["checksum_algo"]
+        except (OSError, Exception):
+            algo = 0
+    return read_best(os.path.join(tape_dir, "head"), algo)
+
+
 def read_best(path: str | os.PathLike, algo: int = 0) -> HeadSlot | None:
     s0, s1 = read_slots(path, algo)
     if s0 is None and s1 is None:

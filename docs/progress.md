@@ -29,7 +29,7 @@ cannot drift from `docs/BLACKBOX_FINAL_ARCHITECTURE_v1.1.md` (A1). Status vocabu
 | `P1-06` | corrupt meta ⇒ `BBX-E222`; version 99 ⇒ `BBX-E221` | **done** | fea279c | test_tape.py::test_meta_* | — | self | E222/E221 both tested |
 | `P1-07` | torn-slot simulation ⇒ older slot chosen (unit test per §16.2 S4) | **done** | fea279c | test_tape.py::test_head_* | — | self | torn slot ⇒ older gen |
 | `P1-08` | 40k events/s single thread on test hardware; no syscall when mode=process | **done** | HEAD | test_crash_points.py, test_tape.py | bench/results/2026-11-14-writer-throughput.json | self | 69 254 ev/s group-committed with CHAIN; per-event publish 30 175 |
-| `P1-09` | S14/S15 pass; 64 KiB segments with 1 KiB events stay consistent for 10k frames | **done** | 260bfd0 | test_tape.py::test_roll_* | — | self | S14/S15 green; adoption in A4 |
+| `P1-09` | S14/S15 pass; 64 KiB segments with 1 KiB events stay consistent for 10k frames | **done** | HEAD | test_tape.py::test_roll_*, test_adoption.py (5) | — | self | S14/S15 green; interrupted roll adopted on reopen, idempotent |
 | `P1-09b` | I1 and I9 hold under a randomized retain/kill test | **todo** | — | — | — | — |  |
 | `P1-10` | fault-injection tests assert app keeps running | **wip** | — | test_prealloc.py::test_enospc_* | — | — | ENOSPC path only; IOError/EACCES todo |
 | `P1-11` | 2 000 randomized kills recover exactly the committed prefix (with P2-08) | **wip** | 55b4d42 | test_crash_points.py | — | — | 2 000 randomized kills not run yet (P2-09) |
@@ -46,7 +46,7 @@ cannot drift from `docs/BLACKBOX_FINAL_ARCHITECTURE_v1.1.md` (A1). Status vocabu
 | `P2-02` | Linux+macOS tests pass; no psutil | **wip** | 8c99b96 | — | — | — | Linux only; macOS untested here |
 | `P2-03` | Windows cell passes the lease tests | **todo** | — | — | — | — |  |
 | `P2-04` | measured fsync latency recorded in bench | **todo** | — | — | — | — |  |
-| `P2-05` | returns a deterministic queue ordered by created_ns | **wip** | HEAD | tests/test_discover.py | — | — | adoption of S15 orphan |
+| `P2-05` | returns a deterministic queue ordered by created_ns | **done** | HEAD | tests/test_adoption.py::test_discover_is_deterministic | — | self | deterministic queue by created_ns then uuid; classifies orphan/missing-seal/damaged/.tmp |
 | `P2-06` | kill at each of 8 steps × 3 modes ⇒ resume to identical capsule | **todo** | — | — | — | — |  |
 | `P2-07` | fixtures for all 5 classes produce the exact status strings | **todo** | — | — | — | — |  |
 | `P2-08` | 18 stages × 3 modes × 3 segment sizes green | **wip** | 1a3d505 | test_crash_points.py (7 stages) | — | — | S1-S5,S14,S15; S6-S13 todo |

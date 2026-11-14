@@ -89,6 +89,7 @@ class TapeWriter:
         self.batch_bytes = 0            # 0 = publish on every explicit call
         self.batch_ms = 0.0
         self.degraded_reason: str | None = None
+        self.adopted: dict | None = None      # set when open() completed an interrupted roll (S15)
 
     # ── lifecycle ───────────────────────────────────────────────────────────
     def arm_die(self, stage: str | None = None) -> str | None:
@@ -125,6 +126,9 @@ class TapeWriter:
             self._map_segment(1)
             self._publish()
         else:
+            # P1-09 / S15: an interrupted roll is completed, not refused (idempotent with rec/discover.py)
+            if self._complete_roll_if_needed():
+                best = self._head.best() or best
             self._slot = best
             n = best.active_segment
             if not os.path.exists(segments.seg_path(self.tape_dir, n)):
@@ -134,6 +138,16 @@ class TapeWriter:
             # a reopened writer must never reuse seq numbers
             self._frame_count = 0
         return self
+
+    def _complete_roll_if_needed(self) -> bool:
+        from blackbox.tape import repair
+
+        report = repair.adopt_orphan(self.tape_dir, sealer=self.sealer_token)
+        if report is None:
+            return False
+        self._head.reload()
+        self.adopted = report
+        return True
 
     def _read_meta(self) -> bytes:
         with open(self.meta_path, "rb") as fh:
@@ -378,6 +392,21 @@ class TapeWriter:
         if self._head is not None:
             if self.mode in ("kernel", "paranoid"):
                 self._head.sync()
+            self._head.close()
+            self._head = None
+
+    def abort(self) -> None:
+        """Release mappings without committing anything (used by recovery and by idempotence tests)."""
+        if self._mm is not None:
+            try:
+                self._mm.close()
+            except (ValueError, BufferError):
+                pass
+            self._mm = None
+        if self._seg_fd is not None:
+            os.close(self._seg_fd)
+            self._seg_fd = None
+        if self._head is not None:
             self._head.close()
             self._head = None
 

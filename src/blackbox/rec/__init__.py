@@ -1,1 +1,1 @@
-"""rec package (see docs/BLACKBOX_FINAL_ARCHITECTURE_v1.1.md)."""
+"""Recovery: discovery, adoption, and the recovery state machine (P2)."""

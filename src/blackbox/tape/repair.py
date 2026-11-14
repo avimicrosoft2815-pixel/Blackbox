@@ -1,0 +1,115 @@
+"""Roll completion and idempotent adoption of an orphan segment (P1-09 reopen path, P2-05).
+
+Crash stage S15 leaves this state: `SEG_END` for segment `n` is published in the head, `<n+1>.seg` exists with
+a valid header and an empty body, and the head still names `n` as active. Both the writer's reopen path and
+`rec/discover.py` must *adopt* `n+1` rather than refuse: first because §16.2a S15 asserts the adoption, second
+because a recovery that errors out on a legal crash state is a recovery that does not recover.
+
+Everything here is idempotent. Running it twice changes no byte and publishes no extra generation once the
+head already names `n+1`.
+"""
+from __future__ import annotations
+
+import os
+
+from blackbox import constants as C
+from blackbox.tape import frame as frame_mod
+from blackbox.tape import head as head_mod
+from blackbox.tape import meta as meta_mod
+from blackbox.tape import seal as seal_mod
+from blackbox.tape import segments
+
+
+def segment_state(tape_dir: str, n: int, *, algo: int = C.DEFAULT_CHECKSUM,
+                  segment_bytes: int | None = None) -> dict:
+    """Classify one segment file: missing, header-only (empty body), open, sealed, or damaged."""
+    path = segments.seg_path(tape_dir, n)
+    seal_path = segments.seal_path(tape_dir, n)
+    info: dict = {"segment": n, "path": path, "exists": os.path.exists(path),
+                  "sealed": os.path.exists(seal_path), "empty_body": False, "frames": 0,
+                  "last_kind": None, "first_seq": None, "last_seq": None, "header": None, "damaged": False}
+    if not info["exists"]:
+        return info
+    try:
+        with open(path, "rb") as fh:
+            header = segments.decode_header(fh.read(C.SEGMENT_HEADER_BYTES))
+            info["header"] = header
+            buf = fh.read()
+    except Exception:
+        info["damaged"] = True
+        return info
+    off = 0
+    size = segment_bytes or header["segment_bytes"]
+    limit = min(len(buf), max(0, size - C.SEGMENT_HEADER_BYTES))
+    frames = 0
+    while off + C.FRAME_OVERHEAD_BYTES <= limit:
+        try:
+            fields, nxt = frame_mod.decode(buf, off, algo=algo)
+        except frame_mod.FrameError:
+            break
+        frames += 1
+        if info["first_seq"] is None:
+            info["first_seq"] = fields["seq"]
+        info["last_seq"] = fields["seq"]
+        info["last_kind"] = fields["kind"]
+        off = nxt
+    info["frames"] = frames
+    info["empty_body"] = frames == 0
+    return info
+
+
+def completes_roll(state: dict) -> bool:
+    """True when this segment is the `n+1` of an interrupted roll: valid header, nothing written yet."""
+    return bool(state["exists"] and not state["damaged"] and state["empty_body"] and not state["sealed"])
+
+
+def adopt_orphan(tape_dir: str, *, sealer: bytes = b"", closed_wall_ns: int | None = None) -> dict | None:
+    """Complete an interrupted roll. Returns a report, or None when there is nothing to do.
+
+    Steps (each skipped when already done): seal segment `n` if it is missing its `.seal`, then publish the
+    head with `active_segment = n+1` and `head_off = 4096`. The `.seal` is written before the head moves, so a
+    crash in the middle of adoption leaves the same state it found.
+    """
+    with open(os.path.join(tape_dir, "meta"), "rb") as fh:
+        meta = meta_mod.decode(fh.read(C.META_BYTES))
+    algo = meta["checksum_algo"]
+    segment_bytes = meta["segment_bytes"]
+    head = head_mod.read_best(os.path.join(tape_dir, "head"), algo)
+    if head is None:
+        return None
+    n = head.active_segment
+    nxt = n + 1
+    current = segment_state(tape_dir, n, algo=algo, segment_bytes=segment_bytes)
+    candidate = segment_state(tape_dir, nxt, algo=algo, segment_bytes=segment_bytes)
+    if not completes_roll(candidate):
+        return None
+    if current["damaged"]:
+        return None
+    if current["last_kind"] != C.KIND_SEG_END:
+        return None
+    report = {"adopted": nxt, "sealed": None, "head_gen_before": head.gen}
+    seal_path = segments.seal_path(tape_dir, n)
+    if not os.path.exists(seal_path):
+        with open(current["path"], "rb") as fh:
+            fh.seek(C.SEGMENT_HEADER_BYTES)
+            body = fh.read()
+        info = seal_mod.write(seal_path, segment_no=n, reason=C.SEAL_REASON_RECOVERED,
+                              start_seq=current["first_seq"] or 0, end_seq=current["last_seq"] or 0,
+                              frame_count=current["frames"], body=body,
+                              prev_chain=current["header"]["prev_chain"], sealer=sealer,
+                              closed_wall_ns=closed_wall_ns)
+        report["sealed"] = n
+        report["seal_chain"] = info["chain"].hex()
+    # move the head (idempotent: if it already names n+1 this is skipped)
+    if head.active_segment != nxt:
+        hmap = head_mod.HeadMap(os.path.join(tape_dir, "head"), algo=algo)
+        try:
+            slot = head_mod.HeadSlot(gen=head.gen, head_seq=head.head_seq, head_off=C.SEGMENT_HEADER_BYTES,
+                                     tail_seq=head.tail_seq, sealed_seq=head.head_seq,
+                                     active_segment=nxt, flags=head.flags & ~C.HEAD_FLAG_ROLL_PENDING,
+                                     dropped_events=head.dropped_events)
+            hmap.publish(slot)
+            report["head_gen_after"] = slot.gen
+        finally:
+            hmap.close()
+    return report
