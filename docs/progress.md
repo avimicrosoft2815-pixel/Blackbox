@@ -45,8 +45,8 @@ A † marks a Done-when cell paraphrased because the plan's wording uses a word 
 | `P1-20` | S17: injected `ENOSPC` never delivers `SIGBUS` to the app; sparse control case documents the hazard | **done** | 260bfd0 | test_prealloc.py (5) | — | self | S17 still open, claim not made |
 | `P2-01` | stale/reboot/PID-reuse/live cases each have a test | **done** | 8c99b96 | test_tape.py::test_lease_* | — | self | stale/reboot/pid-reuse/live |
 | `P2-02` | Linux+macOS tests pass; no psutil | **wip** | 8c99b96 | — | — | — | Linux only; macOS untested here |
-| `P2-03` | Windows cell passes the lease tests | **todo** | — | — | — | — |  |
-| `P2-04` | measured fsync latency recorded in bench | **todo** | — | — | — | — |  |
+| `P2-03` | Windows cell passes the lease tests | **wip** | HEAD | tests/test_platform_shims.py | — | — | shim written (zero-fill prealloc, no directory fsync, no start token) and its contract is tested on Linux; the Windows cell itself has never run (C7) |
+| `P2-04` | measured fsync latency recorded in bench | **wip** | HEAD | tests/test_platform_shims.py | — | — | shim written and contract-tested; F_FULLFSYNC is not in stdlib so F2 on macOS is labelled weaker; no fsync latency measured on a Mac |
 | `P2-05` | returns a stable queue ordered by created_ns † | **done** | HEAD | tests/test_adoption.py::test_discover_order_is_stable | — | self | stable queue by created_ns then uuid; classifies orphan/missing-seal/damaged/.tmp |
 | `P2-06` | kill at each of 8 steps × 3 modes ⇒ resume to identical capsule | **todo** | — | — | — | — |  |
 | `P2-07` | fixtures for all 5 classes produce the exact status strings | **todo** | — | — | — | — |  |

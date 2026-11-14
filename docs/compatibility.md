@@ -37,3 +37,5 @@ report `not testable in this environment`, never "supported".
 ## Provider SDKs
 
 Not yet applicable — no capture layer exists (phase P3). The declared matrix lands with P3-05 and `SUPPORTED.md`.
+| macOS (APFS) | **written, never executed** | `blackbox.platform.macos`: preallocation is `zero-fill` (no `F_PREALLOCATE` in stdlib, so a sparse file is never mapped), `fsync(dir)` is a documented no-op, and `os.fsync` does not flush the drive cache — F2 is weaker than on Linux until measured | `tests/test_platform_shims.py` (contract only) | not testable here |
+| Windows (NTFS) | **written, never executed** | `blackbox.platform.windows`: preallocation is `zero-fill`, no directory fsync, no process-start token (the lease falls back to a mtime staleness check instead of trusting a PID) | `tests/test_platform_shims.py` (contract only) | not testable here |

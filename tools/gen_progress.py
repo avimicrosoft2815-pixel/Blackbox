@@ -49,6 +49,12 @@ S: dict[str, tuple[str, str, str, str, str, str]] = {
     "P1-20": ("done", "260bfd0", "test_prealloc.py (5)", "—", "self", "S17 still open, claim not made"),
     "P2-01": ("done", "8c99b96", "test_tape.py::test_lease_*", "—", "self", "stale/reboot/pid-reuse/live"),
     "P2-02": ("wip", "8c99b96", "—", "—", "—", "Linux only; macOS untested here"),
+    "P2-03": ("wip", "HEAD", "tests/test_platform_shims.py", "—", "—",
+              "shim written (zero-fill prealloc, no directory fsync, no start token) and its contract is "
+              "tested on Linux; the Windows cell itself has never run (C7)"),
+    "P2-04": ("wip", "HEAD", "tests/test_platform_shims.py", "—", "—",
+              "shim written and contract-tested; F_FULLFSYNC is not in stdlib so F2 on macOS is labelled weaker; "
+              "no fsync latency measured on a Mac"),
     "P2-05": ("done", "HEAD", "tests/test_adoption.py::test_discover_order_is_stable", "—", "self",
               "stable queue by created_ns then uuid; classifies orphan/missing-seal/damaged/.tmp"),
     "P2-08": ("wip", "1a3d505", "test_crash_points.py (7 stages)", "—", "—",

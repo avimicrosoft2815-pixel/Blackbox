@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import os
 import stat as stat_mod
+from pathlib import Path
 
 _NETWORK_FS = {"nfs", "nfs4", "cifs", "smb3", "smbfs", "9p", "fuse.sshfs", "fuse.rclone", "afs"}
 
@@ -93,3 +94,12 @@ def is_regular_file(path: str) -> bool:
         return stat_mod.S_ISREG(os.stat(path).st_mode)
     except OSError:
         return False
+
+
+def capabilities() -> dict[str, object]:
+    """What this shim promises, in the same shape as `windows.capabilities()` / `macos.capabilities()`."""
+    return {"platform": "posix", "supported": True, "prealloc": "posix_fallocate",
+            "directory_fsync": True, "mapped_view_flush": "mmap.flush",
+            "process_start_token": Path("/proc/self/stat").exists(), "boot_id": True,
+            "filesystem_type": "/proc/self/mountinfo", "tested_here": True,
+            "note": "the shim every number in this repository was measured through"}

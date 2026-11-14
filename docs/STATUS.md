@@ -26,7 +26,7 @@
 | Lint + types (C6) | `make fmt` (ruff 0.17.5, mypy 2.4.1) | **0 findings** both |
 | Forbidden words (C12) | `tests/test_forbidden_words.py` | green over the tree **and** `git log` |
 
-Total: **159 tests**, all green (`make test`).
+Total: **171 tests**, all green (`make test`).
 
 ## 2. §15.1 rows — gate column is ext4 (C1), tmpfs is the labelled second column
 
@@ -156,7 +156,7 @@ The trunk is mergeable. **The product is not**: the tickets in §7 are the diffe
 | `P1-13` seal verifier + compaction | **partial** | footer writer and verifier exist and are tested; `arch/` compaction is not written |
 | `P1-14` / `P1-15` `store/blobs.py` | **pending** | blob write/read, compression queue |
 | `P1-16` small-model state machine | **pending** | the randomized kill matrix covers the same invariants empirically for 1 000 trials, but it is not the model |
-| `P2-03` / `P2-04` `platform/windows.py`, `platform/macos.py` | **pending** | POSIX path is done; Windows/macOS writers are not |
+| `P2-03` / `P2-04` OS gates | **written, `not testable in this environment`** | `platform/windows.py` and `platform/macos.py` exist, answer the same eight questions as `posix`, and publish `capabilities()` that says `tested_here: False`. Three decisions matter and are documented there: preallocation is **zero-fill** on both (a sparse segment must never be mapped), directory fsync is a no-op with a reason, and Windows has no process-start token so the lease falls back to mtime staleness rather than trusting a PID. `tests/test_platform_shims.py` (12 cases) tests the contract on Linux; the OS cells themselves have never run (C7) |
 | `P2-06` / `P2-07` / `P2-10`…`P2-13` | **pending** | see `docs/progress.md` |
 | `P1-02b` mypy `type-arg` + `no-untyped-def` | **pending** | 75 strict findings, all in the two disabled categories |
 | P2-09 week of nightlies | **requires time (nightly CI × 7 days)** | GitHub `schedule` only runs on the default branch: the clock starts at merge |
@@ -167,7 +167,7 @@ The trunk is mergeable. **The product is not**: the tickets in §7 are the diffe
 
 ## 8. Next three things, in order
 
-1. `P2-03`/`P2-04`: platform modules for Windows and macOS, because two of the pending gates are only blocked
-   on "no writer for that OS".
+1. `P1-16` small-model state machine over the crash stages that `tests/kill/kill_matrix.py` already exercises.
 2. `P1-09b` retention with F2/F3 decided in the same commit (format + `DEVIATIONS.md`).
-3. `P1-16` small-model state machine, then `P1-14`/`P1-15` blobs.
+3. `P1-14`/`P1-15` blobs, then `P2-06`/`P2-07`.
+   `P2-03`/`P2-04` stay `not testable in this environment` until a Windows and a macOS runner execute the cells.
