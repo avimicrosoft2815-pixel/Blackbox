@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from blackbox.errors import BlackBoxError
 from blackbox.tape import prealloc, segments
-from blackbox.tape.writer import TapeWriter
+from blackbox.tape.writer import TapeError, TapeWriter
 
 
 def test_preallocate_then_not_sparse(tmp_path):
@@ -33,11 +33,24 @@ def test_sparse_detection(tmp_path):
         prealloc.ensure_not_sparse(str(path), 8 << 20)
 
 
-def test_enospc_at_open_degrades(tmp_path, monkeypatch):
+def test_enospc_at_open_degrades_to_a_sink(tmp_path, monkeypatch):
+    """S17 covers the first segment: no segment means a sink, not an exception into the app."""
     monkeypatch.setenv(prealloc.FAULT_ENV, "ENOSPC")
-    with pytest.raises(BlackBoxError) as exc:
-        TapeWriter(str(tmp_path), segment_bytes=64 * 1024).open()
-    assert exc.value.code == "BBX-E132"    # preallocation failure, not the proxy allowlist code
+    w = TapeWriter(str(tmp_path), segment_bytes=64 * 1024).open()          # must not raise
+    assert w.recording is False
+    assert w.degraded_reason == "NO_SPACE"
+    assert w.emit(5, b"payload") == 0                                       # dropped, counted
+    assert w.dropped_events == 1
+    assert w.flush() is None
+    assert w.roll() is False
+    with pytest.raises(TapeError):
+        _ = w.head                     # no head exists, and the error says why
+    w.close()
+    monkeypatch.delenv(prealloc.FAULT_ENV)
+    # nothing was published, so no reader can see a head naming a segment that does not exist
+    assert not (Path(tmp_path) / "tape" / w.writer_uuid.hex() / "head").exists() or \
+        __import__("blackbox.tape.head", fromlist=["x"]).read_best(
+            str(Path(tmp_path) / "tape" / w.writer_uuid.hex() / "head")) is None
 
 
 def test_enospc_at_roll_degrades_without_raising(tmp_path, monkeypatch):

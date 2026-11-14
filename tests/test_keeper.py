@@ -19,11 +19,15 @@ def _writer(tmp_path, **kw):
 
 def test_low_rate_event_is_published_within_the_window(tmp_path):
     w = _writer(tmp_path)
-    w.batch_ms = 5.0
+    # 200 ms, not 5: under load, a 5 ms window can expire *between* flush() and emit(), in which case `emit`
+    # publishes inline and this test would be measuring the app thread instead of the keeper. The assertion
+    # below is about the keeper draining a window the app left open, so the window has to survive a stall.
+    w.batch_ms = 200.0
     k = Keeper(w).start()
     try:
+        w.flush()                    # start the window here, so `emit` cannot be "already due"
         w.emit(C.KIND_MARK, b"x" * 64)
-        deadline = time.monotonic() + 0.5
+        deadline = time.monotonic() + 2.0
         while w._pending and time.monotonic() < deadline:
             time.sleep(0.002)
         assert w._pending == 0, "keeper did not drain the window"

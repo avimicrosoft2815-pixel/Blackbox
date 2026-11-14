@@ -104,6 +104,7 @@ class TapeWriter:
         # critical section so a publish never sees a half-recorded batch.
         self._lock = threading.RLock()
         self.degraded_reason: str | None = None
+        self.recording = True                 # False = degraded sink (no segment could be allocated)
         self.adopted: dict[str, object] | None = None   # open() completed a roll or rebuilt the head
 
     # ── lifecycle ───────────────────────────────────────────────────────────
@@ -143,9 +144,15 @@ class TapeWriter:
             self._slot = head_mod.HeadSlot(head_off=C.SEGMENT_HEADER_BYTES, active_segment=1)
             try:
                 self._create_segment(1)
-            except prealloc.PreallocError as exc:
+            except prealloc.PreallocError:
+                # S17 covers the first segment too, not just a roll: a recorder that cannot get its first
+                # segment must degrade into a sink, never raise into the user's program (§8.6 step 2,
+                # "never raise into the app"). Nothing is published, so no reader ever sees a head that
+                # names a segment which does not exist.
                 self.degraded_reason = "NO_SPACE"
-                raise bbx("BBX-E132", str(exc)) from exc
+                self.recording = False
+                self._slot = None
+                return self
             self._map_segment(1)
             self._publish()
         else:
@@ -207,6 +214,9 @@ class TapeWriter:
                                        node_slot=node_slot, wall_ns=wall_ns, mono_ns=mono_ns)
 
     def _append_locked(self, kind, payload, *, priority, flags, run_slot, node_slot, wall_ns, mono_ns) -> int:
+        if not self.recording:
+            self.dropped_events += 1        # sink: counted, never raised (S17)
+            return 0
         assert self._slot is not None and self._mm is not None
         size = frame_mod.frame_size(len(payload))
         if size > self.segment_bytes - C.SEGMENT_HEADER_BYTES - C.RESERVED_HEAD_ROOM:
@@ -238,9 +248,11 @@ class TapeWriter:
         self._slot.head_off = off + size
         return seq
 
-    def publish(self, *, publish_chain: bool = True) -> head_mod.HeadSlot:
+    def publish(self, *, publish_chain: bool = True) -> head_mod.HeadSlot | None:
         """Publish the current head. Also commits a CHAIN frame for the batch when enabled."""
         with self._lock:
+            if not self.recording:
+                return None
             assert self._slot is not None
             if publish_chain and self.chain_enabled and self._batch_spans:
                 batch_hash = chain_mod.batch_hash_spans(self._mm, self._batch_spans)
@@ -331,6 +343,8 @@ class TapeWriter:
         Returns True if a publish happened. Never raises for "nothing to do" — the keeper must stay cheap.
         """
         with self._lock:
+            if not self.recording:
+                return False
             if not self._pending:
                 return False
             now = time.perf_counter_ns() if now_ns is None else now_ns
@@ -349,9 +363,11 @@ class TapeWriter:
             return 0.0
         return (time.perf_counter_ns() - self._last_publish_ns) / 1_000_000
 
-    def flush(self) -> head_mod.HeadSlot:
-        """Publish whatever is pending (and sync in kernel/paranoid)."""
+    def flush(self) -> head_mod.HeadSlot | None:
+        """Publish whatever is pending (and sync in kernel/paranoid). None when degraded to a sink."""
         with self._lock:
+            if not self.recording:
+                return None
             assert self._slot is not None
             if self._batch_spans or self._slot.gen == 0:
                 return self.publish()
@@ -366,6 +382,8 @@ class TapeWriter:
         recording until the segment is full (C5, S17). Returns False in that case.
         """
         with self._lock:
+            if not self.recording:
+                return False               # a sink has nothing to roll
             arm_die()                      # roll is rare; re-reading the env here keeps S14/S15 armable
             assert self._slot is not None and self._mm is not None
             n = self._slot.active_segment
@@ -465,6 +483,9 @@ class TapeWriter:
         """Flush, SEG_END, seal, release the mapping. Idempotent."""
         with self._lock:
             if self._slot is None:
+                if self._head is not None:
+                    self._head.close()
+                    self._head = None
                 return
             if self._batch_spans:
                 self.publish()
@@ -508,7 +529,9 @@ class TapeWriter:
     # ── introspection ───────────────────────────────────────────────────────
     @property
     def head(self) -> head_mod.HeadSlot:
-        assert self._slot is not None
+        if self._slot is None:
+            raise TapeError("this writer is degraded: no segment could be allocated, so there is no head "
+                            "(see .degraded_reason)")
         return self._slot
 
     def stats(self) -> dict:

@@ -83,6 +83,38 @@ def run_child(tmp_path: Path, mode: str, fault: str) -> subprocess.CompletedProc
 
 
 @pytest.mark.parametrize("mode", ["process", "kernel"])
+def test_app_survives_enospc_at_the_first_segment(tmp_path, mode):
+    """S17 also covers the first preallocation: a recorder that cannot start is a sink, not a crash."""
+    d = Path(tempfile.mkdtemp(dir=tmp_path, prefix="first-seg-"))
+    script = textwrap.dedent(
+        f"""
+        import sys
+        sys.path.insert(0, {str(ROOT / 'src')!r})
+        from blackbox import constants as C
+        import blackbox.tape.prealloc as prealloc
+
+        def boom(path, size):
+            raise prealloc.PreallocError(28, "injected ENOSPC at the first preallocation")
+
+        prealloc.preallocate = boom
+        from blackbox.tape.writer import TapeWriter
+
+        w = TapeWriter({str(d)!r}, segment_bytes=64 * 1024, mode={mode!r}).open()
+        for i in range(50):
+            w.emit(C.KIND_MODEL_REQUEST, b"x")
+        w.flush()
+        w.close()
+        print("events=50 recording=%s degraded=%s dropped=%d" % (w.recording, w.degraded_reason, w.dropped_events))
+        """
+    )
+    r = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True,
+                       timeout=180, env={**os.environ, "PYTHONPATH": str(ROOT / "src")})
+    assert r.returncode == 0, r.stderr
+    assert r.stderr == ""
+    assert "recording=False" in r.stdout and "degraded=NO_SPACE" in r.stdout and "dropped=50" in r.stdout
+
+
+@pytest.mark.parametrize("mode", ["process", "kernel"])
 @pytest.mark.parametrize("fault", ["none", "posix_fallocate"])
 def test_app_survives_enospc_at_preallocation(tmp_path, mode, fault):
     base = run_child(tmp_path, mode, "none")
