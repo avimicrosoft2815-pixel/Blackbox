@@ -60,7 +60,7 @@ def test_enospc_at_roll_degrades_without_raising(tmp_path, monkeypatch):
     w = TapeWriter(str(tmp_path), segment_bytes=64 * 1024).open()
     w.append_and_publish(C.KIND_MODEL_REQUEST, b"a" * 100)
     segment_before = w.head.active_segment
-    mapping_before = w._mm
+    fd_before = w._seg_fd
     monkeypatch.setenv(prealloc.FAULT_ENV, "ENOSPC")
     assert w.roll() is False, "roll must report that it did not roll"
     monkeypatch.delenv(prealloc.FAULT_ENV)
@@ -68,7 +68,7 @@ def test_enospc_at_roll_degrades_without_raising(tmp_path, monkeypatch):
     assert w.degraded_reason == "NO_SPACE"
     assert w.head.flags & C.HEAD_FLAG_DEGRADED_NO_SPACE
     assert w.head.active_segment == segment_before, "no roll happened"
-    assert w._mm is mapping_before, "no new mapping was created"
+    assert w._seg_fd == fd_before, "the writer stayed on the same segment"
     w.close()
 
 

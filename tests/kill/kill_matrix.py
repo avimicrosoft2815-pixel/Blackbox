@@ -12,6 +12,11 @@ Invariants checked per trial, from the recovered tape alone:
 * the tape reopens and the interrupted roll (if any) is adopted;
 * `head_seq >= N` (the head never lags a frame that was published).
 
+C19: the kill timer starts only after the child prints `READY` (its `meta`, `head` and first segment exist), so
+every trial is an effective trial. A child that never gets that far is reported as a violation of the harness,
+never as a silent `not_started` pass. The matrix includes a low-rate cell (20 ev/s) where the kill usually lands
+inside the group-commit window, and a `kernel`-mode cell.
+
 Usage: PYTHONPATH=src python tests/kill/kill_matrix.py --trials 500 [--json PATH]
 """
 from __future__ import annotations
@@ -40,6 +45,9 @@ CONFIGS = [
     {"mode": "process", "segment_bytes": 64 << 10, "event_bytes": 1024},
     {"mode": "process", "segment_bytes": 1 << 20, "event_bytes": 256},
     {"mode": "kernel", "segment_bytes": 1 << 20, "event_bytes": 256},
+    # C19: a low rate, so most of every interval is spent *inside* the group-commit window (1-50 ev/s). The
+    # kill then lands on an unpublished frame as often as on a published one, which the burst cells never test.
+    {"mode": "process", "segment_bytes": 64 << 10, "event_bytes": 128, "rate": 20},
 ]
 BATCHES = [0, 4096]
 
@@ -49,9 +57,21 @@ def one_trial(tmp: Path, cfg: dict, batch: int, delay_s: float, seed: int) -> di
     env = dict(os.environ)
     env["PYTHONPATH"] = str(ROOT / "src")
     env.pop("BLACKBOX_DIE_AT", None)
+    rate = cfg.get("rate", 0)
     proc = subprocess.Popen([sys.executable, str(CHILD), str(data_dir), cfg["mode"],
-                             str(cfg["segment_bytes"]), str(cfg["event_bytes"]), str(batch)],
-                            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, env=env)
+                             str(cfg["segment_bytes"]), str(cfg["event_bytes"]), str(batch), str(rate)],
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
+    # C19: the timer starts when the child says its tape exists, so every trial is an effective one.
+    ready = False
+    if proc.stdout is not None:
+        line = proc.stdout.readline()
+        ready = line.strip() == b"READY"
+    if not ready:
+        proc.kill()
+        proc.communicate(timeout=60)
+        return {"seed": seed, "delay_ms": round(delay_s * 1000, 1), "batch_bytes": batch, **cfg,
+                "violations": ["child never signalled READY: the trial did not start"],
+                "not_started": True}
     time.sleep(delay_s)
     os.kill(proc.pid, signal.SIGKILL)
     _, err = proc.communicate(timeout=60)

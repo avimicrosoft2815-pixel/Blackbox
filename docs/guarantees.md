@@ -9,7 +9,7 @@ deterministic, first ever, unique, never done before.
 
 | Class | What survives | What is at risk |
 |---|---|---|
-| **F1** process death (`kill -9`, `SIGSEGV`, OOM kill) | everything in the OS page cache, including un-fsynced mmap writes | only bytes not yet copied into the mapping |
+| **F1** process death (`kill -9`, `SIGSEGV`, OOM kill) | everything in the OS page cache: each batch `pwrite` completes before the head store that commits it (ADR-005) | only bytes still in the writer's batch buffer, i.e. frames the head has not committed |
 | **F2** kernel crash / VM reset | only data that reached the device (`fdatasync`) | everything in page cache |
 | **F3** power loss | `fdatasync`ed data **if** the device honours flush and has no volatile write cache | page cache + device cache without barriers |
 | **F4** storage corruption | every frame whose CRC validates; the rest is reported as a declared hole | frames inside the damaged region |

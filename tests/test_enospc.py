@@ -57,7 +57,7 @@ for i in range(400):
             raise OSError(28, "injected ENOSPC in the zero-fill write")
 
         prealloc2.os.write = zero_boom
-    if not w._mm:
+    if not w.recording or w._seg_fd is None:
         break
 w.flush()
 # the app's own stdout carries nothing about the tape, so it must be byte-identical with and without the

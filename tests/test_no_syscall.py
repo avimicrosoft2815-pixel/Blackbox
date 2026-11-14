@@ -1,8 +1,9 @@
-"""C11 / P1-08: "no syscall on the append path" is a claim, so here is the evidence.
+"""C11 / P1-08: "one syscall per batch" is a claim, so here is the evidence.
 
 strace is not installed in this environment, so this is the counting-shim form the brief allows: the syscalls
 a write path could use are wrapped and counted across 100 000 appends in `process` mode, after `open()` has
-done its work. The mapping publish is `struct.pack_into` into a MAP_SHARED page, which is a store, not a call.
+done its work. Since ADR-005 the store is `pwrite`-append, so the claim is **not** "no syscall": it is exactly
+one `pwrite` per group-commit batch and nothing else — no per-event `write`, no `fsync`, no `lseek`, no `open`.
 """
 from __future__ import annotations
 
@@ -54,7 +55,11 @@ def test_process_mode_append_path_makes_no_syscall(tmp_path, monkeypatch):
             monkeypatch.setattr(os, name, real, raising=False)
 
     made = {name: n for name, n in counts.items() if n}
-    assert made == {}, f"syscalls on the append path: {made}"
+    assert set(made) <= {"pwrite"}, f"syscalls other than pwrite on the append path: {made}"
+    batches = made.get("pwrite", 0)
+    # 100 000 appends of 64 B payloads are ~13.7 MB, i.e. ~840 batches of 16 KiB: one pwrite each, plus the
+    # CHAIN frame and SEG_END written through the same buffer. Anything near one call per event fails here.
+    assert 1 <= batches <= APPENDS // 50, f"{batches} pwrites for {APPENDS} appends is not one per batch"
     w.close()
 
 

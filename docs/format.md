@@ -28,6 +28,14 @@ every reader (including the Go one) to implement it for nothing. Recorded as `DV
 | frame trailer | `BBXT` | `42 42 58 54` |
 Hashes are **BLAKE2b-256** unless stated. Reserved bytes are zero and MUST be ignored by readers.
 
+## The commit point is the head publish, not the store
+
+Frames reach the active segment with one `pwrite` per group-commit batch (ADR-005); they are **not** mapped.
+Nothing about a byte of this format changed when that decision was taken: a reader still trusts only frames
+below the published `head_off`, the head is still the two-slot CRC-checked record that commits a batch, and the
+`.seal` footer still covers the same byte range. What changed is that the writer can now report `ENOSPC` and
+degrade instead of taking a page fault, and that `mode=process` costs **one syscall per batch** instead of none.
+
 ## 1. Directory layout (one directory per writer)
 
 ```
@@ -36,7 +44,7 @@ Hashes are **BLAKE2b-256** unless stated. Reserved bytes are zero and MUST be ig
 <data_dir>/tape/<writer_uuid>/lock           ≤ 512 B writer lease (JSON, see §6)
 <data_dir>/tape/<writer_uuid>/00000001.seg           sealed segment (has 00000001.seal)
 <data_dir>/tape/<writer_uuid>/00000001.seal   256 B  footer sidecar, written once
-<data_dir>/tape/<writer_uuid>/00000002.seg           ACTIVE segment (preallocated, mmap'd)
+<data_dir>/tape/<writer_uuid>/00000002.seg           ACTIVE segment (preallocated, written by pwrite)
 ```
 
 `writer_uuid` is 16 random bytes, lower-case hex in filenames. Segment numbers are decimal, zero-padded to 8.

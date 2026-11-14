@@ -212,7 +212,7 @@ The product has two verbs: **record** and **read**. They have different reach, a
 | D10 | Timeline for `.bbx` v1 freeze | before or after viewer | **freeze after P6 acceptance**, not before | Format churn breaks trust | Owner |
 | **D11** | Compiled single binary for devices without Python | (a) never, (b) PyInstaller/Nuitka bundle of the Python core, (c) Go/Rust `proxy` + `recover` + `verify` as a second implementation of the tape format | **(c) as the first post-1.0 item (P12-02 re-scoped, ≈ 80 h), gated on the Go conformance reader P11-15**; 1.0 ships `.pyz` + `uvx` | The proxy is what attaches to anything; a static binary is what reaches every device; a second implementation is the only real test of the format | Owner (Q13) |
 | **D12** | Hash chain default | off / batch-level on / keyed | **batch-level on, unkeyed**; `chain.keyed` optional; Ed25519 opt-in | "Verifiable" is the honest word; cost is one hash per publish | Security |
-| **D13** | Tape layout | single mmap ring + spill (1.0) / rolling segments with mmap'd active segment / plain `write()` segments | **rolling segments, active segment mmap'd**; P1-19 may flip mmap → `write()` if within 20 % | Removes in-place overwrite and copy-on-spill; makes a 24 h buffer a retention setting | Architect |
+| **D13** | Tape layout | single mmap ring + spill (1.0) / rolling segments with mmap'd active segment / plain `write()` segments | **rolling segments, active segment written with one `pwrite` per batch**; P1-19 flipped mmap → `write()` on 2026-11-14 (ADR-005: write median p50 ratio 1.06 at 10 k and 40 k ev/s, p99 72 µs) | Removes in-place overwrite and copy-on-spill; makes a 24 h buffer a retention setting | Architect |
 | **D14** | TLS interception (`--mitm` + local CA) | never / v2 opt-in / default | **never in 1.x; v2 opt-in at most**; proxy is plaintext loopback → verified TLS upstream | Attach breadth vs becoming a MITM tool; pinned apps break anyway | Owner (Q12) |
 | **D15** | Hook adapters in 1.0 | none / Claude Code only / Claude Code + Codex / all four | **Claude Code + Codex**; Cursor + Gemini CLI in 1.x | Each adapter is a schema to track (R14) | Owner |
 | **D16** | Default capsule parts | minimal / standard (+ `events.jsonl`, OTLP, links, chain) / all (+ HAR) | **standard**; HAR duplicates bodies and is opt-in | Interop vs size and privacy surface | Owner |
@@ -483,7 +483,7 @@ Every adapter declares one of four completeness levels, surfaced in the capsule 
 | Postgres/Redis/Kafka | Requires a server. Contradicts "no account, no daemon, one command". |
 | True append-only file + `fdatasync` per event | Correct but ~0.1–5 ms/event on consumer SSDs, and the file grows unbounded; no in-place retention. Available as `mode=kernel`/`paranoid` for users who want it. |
 | Single fixed mmap ring with in-place eviction + copy-on-spill (the 1.0 design) | Works, but overwrites committed bytes behind a `GAP` (an invariant that needs a model checker), copies every closed run a second time, and makes a 24 h buffer a tuning exercise. Kept as an optional layout (Appendix E), not built in 1.0. |
-| **Rolling segment tape, active segment mmap'd** (chosen, D13) | Appends are `memmove` into the mapping of the active segment: no syscall per event; **page-cache** persistence (a property of any file write, not of mmap) gives **process-death** durability for free; roll-on-full gives immutable sealed segments with no copy; retention is "delete the oldest sealed segment"; one `fdatasync` per group commit upgrades to **kernel-crash** durability. P1-19 keeps a plain `write()`-append writer as a measured alternative. |
+| **Rolling segment tape, batch `pwrite`** (chosen, D13 as amended by ADR-005) | Frames are encoded with `pack_into` into one batch buffer and leave for the segment in one `pwrite` per group commit: one syscall per batch, not per event; **page-cache** persistence (a property of any file write, not of mmap) gives **process-death** durability for free; roll-on-full gives immutable sealed segments with no copy; retention is "delete the oldest sealed segment"; one `fdatasync` per group commit upgrades to **kernel-crash** durability. P1-19 keeps a plain `write()`-append writer as a measured alternative. |
 
 ### 8.2 One directory per writer: immutable identity, mutable head, rolling segments
 
@@ -495,7 +495,7 @@ Every adapter declares one of four completeness levels, surfaced in the capsule 
 ~/.blackbox/tape/<writer_uuid>/lock           # O_EXCL lease of the live writer (pid, start time, boot id)
 ~/.blackbox/tape/<writer_uuid>/00000001.seg   # sealed segment (has a .seal next to it)
 ~/.blackbox/tape/<writer_uuid>/00000001.seal  # 256 B footer sidecar, written once at close (tmp + replace)
-~/.blackbox/tape/<writer_uuid>/00000002.seg   # ACTIVE segment: preallocated segment_bytes (default 16 MiB), mmap'd
+~/.blackbox/tape/<writer_uuid>/00000002.seg   # ACTIVE segment: preallocated segment_bytes (default 16 MiB), written by pwrite
 ```
 
 **Why this and not the 1.0 ring (decision D13):**
@@ -506,7 +506,7 @@ Every adapter declares one of four completeness levels, surfaced in the capsule 
 | Cold path | keeper **copies** closed runs out of the ring (2× write amplification, a second code path to kill-test) | **none** — a sealed segment *is* the cold path; capsules read from it |
 | Retention | by ring size + spill policy + segment GC (three mechanisms) | delete oldest sealed segments by bytes/age (one mechanism) |
 | 24 h pre-incident buffer (SPEC vision) | needs spill tuning and a daemon | `retention.keep_hours = 24` |
-| Memory | one 16 MiB mapping | one 16 MiB mapping (same) |
+| Memory | one 16 MiB mapping | one batch buffer (≈ 16 KiB + the largest frame); **no mapping, so no `SIGBUS` class** |
 | Disk | ring + segments | `tape_max_bytes` per writer (default 256 MiB = 16 segments) |
 | Precedent | — | JFR disk repository, Chronicle Queue, LTTng, Kafka: all roll segments **[PRIOR-ART]** |
 | Cost | — | more files; one directory `fsync` per roll (≈ every 16 MiB); free-space planning |
@@ -560,7 +560,7 @@ The ring remains available as `tape.layout = "ring"` for hosts that must have on
 7. Otherwise: no syscall at all (page cache).
 
 **Linearization point (this exact sentence ships in the docs):**
-> An event is *committed* at the instant a head record with `head_seq ≥ event.seq` and a valid CRC is visible in the `head` mapping and the event lies at `offset + len ≤ head_off` of the active segment, or inside any segment with a valid `.seal`. Committed ⇒ visible to every subsequent reader, including one in another process. Committed does **not** imply survived a machine-level failure unless the durability mode says so.
+> An event is *committed* at the instant a head record with `head_seq ≥ event.seq` and a valid CRC is visible in the `head` file and the event lies at `offset + len ≤ head_off` of the active segment, or inside any segment with a valid `.seal`. Committed ⇒ visible to every subsequent reader, including one in another process. Committed does **not** imply survived a machine-level failure unless the durability mode says so.
 
 **What mmap buys and does not buy (C1, stated once):** mmap gives us no-syscall appends and cross-process visibility of the active segment. It does **not** give durability — any `write()` to a regular file also lands in the page cache and survives process death. P1-19 benchmarks a `write()`-append writer with identical framing; if it is within 20 % at the target event rates, ADR-001 is reopened in favour of the simpler semantics (no mapping lifetime, no SIGBUS class, no `FlushViewOfFile` path).
 
@@ -1913,7 +1913,7 @@ examples/{hello_agent.py, crash_demo.py, replay_demo.py}
 | P1-05 | `tape/frame.py` | `struct` layout for 48 B header + 8 B trailer, `encode`, `decode`, `validate`, `crc_scope` | round-trip property test; 12-byte offsets asserted per §8.3 table | 4 |
 | P1-06 | `tape/meta.py` | write-once meta, CRC over 0x000–0x0FF0, verify, version gate | corrupt meta ⇒ `BBX-E222`; version 99 ⇒ `BBX-E221` | 3 |
 | P1-07 | `tape/head.py` | two-slot head, `gen` monotonic, CRC, `read_best()` picks max valid gen | torn-slot simulation ⇒ older slot chosen (unit test per §16.2 S4) | 5 |
-| P1-08 | `tape/writer.py` | `TapeWriter.open(dir, segment_bytes, mode)`; `append(kind, payload, priority)`; batching; `publish()` with the `CHAIN` frame | 40k events/s single thread on test hardware; no syscall when mode=process | 12 |
+| P1-08 | `tape/writer.py` | `TapeWriter.open(dir, segment_bytes, mode)`; `append(kind, payload, priority)`; batching; `publish()` with the `CHAIN` frame | 40k events/s single thread on test hardware; **one `pwrite` per batch and no other syscall when mode=process** (ADR-005) | 12 |
 | P1-09 | `tape/segments.py` | **roll**: `SEG_END`, next-segment creation (`tmp` → header → `fdatasync` → `replace` → `fsync(dir)`), head update with `active_segment`, background pre-creation at 75 % | S14/S15 pass; 64 KiB segments with 1 KiB events stay consistent for 10k frames | 6 |
 | P1-09b | `tape/retention.py` | delete oldest sealed segments by bytes/age; `GAP{RETENTION}` committed before unlink when an open run is affected; seal-last unlink order; open-view handling on Windows | I1 and I9 hold under a randomized retain/kill test | 4 |
 | P1-10 | `tape/writer.py` | degraded modes: `ENOSPC`, `EACCES`, `IOError` ⇒ flags + `DEGRADED` frame + never raise | fault-injection tests assert app keeps running | 4 |

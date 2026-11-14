@@ -1,14 +1,21 @@
-"""The hot path: append frames into the mmap'd active segment and publish a two-slot head (P1-08).
+"""The hot path: encode a batch of frames, write it with one `pwrite`, publish the two-slot head (P1-08).
+
+The store is `pwrite`-append, not a mapping (ADR-005, C17). Frames are encoded with `pack_into` into one
+reusable batch buffer, the whole batch reaches the segment in **one syscall**, and the commit is the head
+store. A mapping would buy nothing here and costs three things the plan cannot have: a page-fault class the
+recorder cannot refuse (`SIGBUS` on a truncated segment), `FlushViewOfFile` as a second flush path on
+Windows, and a mapped file that cannot be deleted or rolled while the mapping lives.
+
+Order of operations on every publish is the linearization point: the batch `pwrite` completes before the
+head slot is published, and readers only trust frames below the published `head_off`.
 
 Guarantees this file is allowed to make (plan §10):
-  * `mode=process` → **F1** (process death) for committed frames, with no syscall on the append path.
+  * `mode=process` → **F1** (process death) for committed frames, with **one syscall per batch**, not per event.
   * `mode=kernel`/`paranoid` → additionally group-commit `fdatasync` for F2.
 It never claims F3, and never raises into user code: allocation failure degrades (P1-20).
 """
 from __future__ import annotations
 
-import contextlib
-import mmap
 import os
 import threading
 import time
@@ -76,8 +83,13 @@ class TapeWriter:
 
         self._slot: head_mod.HeadSlot | None = None
         self._head: head_mod.HeadMap | None = None
-        self._mm: mmap.mmap | None = None
         self._seg_fd: int | None = None
+        # The batch buffer: frames are encoded into it with `pack_into` and leave for the segment in one
+        # `pwrite` per batch. `_buf_base` is the segment offset of `_buf[0]`, so any frame's position in the
+        # segment is `_buf_base + <offset in buffer>`.
+        self._buf = bytearray(C.DEFAULT_BATCH_BYTES + C.FRAME_MAX_BYTES)
+        self._buf_base = C.SEGMENT_HEADER_BYTES
+        self._fill = 0
         self._seg_path: str | None = None
         self._chain = chain_mod.ChainState()
         self._batch_spans: list[tuple[int, int]] = []
@@ -195,15 +207,33 @@ class TapeWriter:
                         segment_bytes=self.segment_bytes, prev_chain=prev)
 
     def _map_segment(self, n: int) -> None:
-        if self._mm is not None:
-            self._mm.flush()
-            self._mm.close()
+        """Attach to segment n. The name is historical: there is no mapping any more, just the fd and a buffer."""
+        self._flush_buf()
         if self._seg_fd is not None:
             os.close(self._seg_fd)
-        path = segments.seg_path(self.tape_dir, n)
-        self._seg_path = path
-        self._seg_fd = os.open(path, os.O_RDWR)
-        self._mm = mmap.mmap(self._seg_fd, self.segment_bytes)
+        self._seg_path = segments.seg_path(self.tape_dir, n)
+        self._seg_fd = os.open(self._seg_path, os.O_RDWR)
+        # A reopened writer continues where the head says, not at the top of the segment.
+        self._buf_base = (self._slot.head_off
+                          if self._slot is not None and self._slot.active_segment == n
+                          else C.SEGMENT_HEADER_BYTES)
+        self._fill = 0
+
+    # ── the store ───────────────────────────────────────────────────────────
+    def _flush_buf(self) -> None:
+        """Hand the encoded batch to the kernel: ONE `pwrite`, and it is the only data syscall on the path."""
+        if self._fill and self._seg_fd is not None:
+            os.pwrite(self._seg_fd, memoryview(self._buf)[:self._fill], self._buf_base)
+            self._buf_base += self._fill
+        self._fill = 0
+
+    def _reserve(self, size: int) -> int:
+        """Make room for `size` bytes at the end of the buffer and return the offset inside it."""
+        if self._fill + size > len(self._buf):
+            self._flush_buf()
+            if size > len(self._buf):
+                self._buf = bytearray(size)
+        return self._fill    # `_buf_base + this` is the segment offset
 
     # ── append / publish ────────────────────────────────────────────────────
     def append(self, kind: int, payload: bytes = b"", *, priority: int = 1, flags: int = 0,
@@ -217,7 +247,7 @@ class TapeWriter:
         if not self.recording:
             self.dropped_events += 1        # sink: counted, never raised (S17)
             return 0
-        assert self._slot is not None and self._mm is not None
+        assert self._slot is not None and self._seg_fd is not None
         size = frame_mod.frame_size(len(payload))
         if size > self.segment_bytes - C.SEGMENT_HEADER_BYTES - C.RESERVED_HEAD_ROOM:
             raise bbx("BBX-E225", f"frame of {size} B does not fit a {self.segment_bytes} B segment")
@@ -231,15 +261,18 @@ class TapeWriter:
 
         seq = self._slot.head_seq + 1
         off = self._slot.head_off
+        at = self._reserve(size)
+        assert self._buf_base + at == off, "the buffer and the head must agree where the next frame goes"
         hook = _die if _ARMED else None
-        size = frame_mod.encode_into(self._mm, off, seq, kind, payload, flags=flags, priority=priority,
+        size = frame_mod.encode_into(self._buf, at, seq, kind, payload, flags=flags, priority=priority,
                                     run_slot=run_slot, node_slot=node_slot, wall_ns=wall_ns,
                                     mono_ns=mono_ns, hook=hook)
+        self._fill = at + size
         _die("S3")
 
         if not self._batch_spans:
             self._batch_first_seq = seq
-        self._batch_spans.append((off, size))
+        self._batch_spans.append((at, size))
         self._frame_count += 1
         self._pending += 1
         self._pending_bytes += size
@@ -255,7 +288,7 @@ class TapeWriter:
                 return None
             assert self._slot is not None
             if publish_chain and self.chain_enabled and self._batch_spans:
-                batch_hash = chain_mod.batch_hash_spans(self._mm, self._batch_spans)
+                batch_hash = chain_mod.batch_hash_spans(self._buf, self._batch_spans)
                 # Decide the roll *before* the CHAIN frame is written: the frame carries `last_seq`, and a roll
                 # advances `head_seq` (the SEG_END frame), so writing first would duplicate a seq number. The bound
                 # is the largest a CHAIN frame can be (32+32 byte hashes plus three u64s), so no probe encode.
@@ -266,13 +299,17 @@ class TapeWriter:
                     n = cbor.encode_chain_into(self._scratch, 0, self._chain.value, batch_hash,
                                                self._batch_first_seq, self._slot.head_seq)
                     off = self._slot.head_off
-                    written = frame_mod.encode_into(self._mm, off, self._slot.head_seq + 1, C.KIND_CHAIN,
+                    at = self._fill
+                    assert self._buf_base + at == off
+                    written = frame_mod.encode_into(self._buf, at, self._slot.head_seq + 1, C.KIND_CHAIN,
                                                     bytes(memoryview(self._scratch)[:n]), priority=0)
+                    self._fill = at + written
                     self._slot.head_seq += 1
                     self._slot.head_off = off + written
                     self._frame_count += 1
                     self._chain.value = chain_mod.chain_value(self._chain.value, batch_hash)
-            self._slot = self._publish()
+            self._flush_buf()                  # data first ...
+            self._slot = self._publish()       # ... then the commit, which is the linearization point
 
             if self.mode in ("kernel", "paranoid"):
                 self._maybe_sync(force=(self.mode == "paranoid"))
@@ -299,8 +336,7 @@ class TapeWriter:
         due = (now - self._last_sync_ns) >= self.sync_ms * 1_000_000 or self._unpublished_bytes >= self.sync_bytes
         if not (force or due):
             return
-        if self._mm is not None:
-            self._mm.flush()
+        self._flush_buf()
         if hasattr(os, "fdatasync"):
             os.fdatasync(self._seg_fd)
         else:
@@ -385,14 +421,18 @@ class TapeWriter:
             if not self.recording:
                 return False               # a sink has nothing to roll
             arm_die()                      # roll is rare; re-reading the env here keeps S14/S15 armable
-            assert self._slot is not None and self._mm is not None
+            assert self._slot is not None and self._seg_fd is not None
             n = self._slot.active_segment
             # 1. SEG_END commits the current head
             blob = frame_mod.encode(self._slot.head_seq + 1, C.KIND_SEG_END, b"", priority=0)
             if self._slot.head_off + len(blob) <= self.segment_bytes:
                 off = self._slot.head_off
-                self._mm[off:off + len(blob)] = blob
+                at = self._reserve(len(blob))
+                assert self._buf_base + at == off
+                self._buf[at:at + len(blob)] = blob
+                self._fill = at + len(blob)
                 self._slot = self._slot.with_(head_seq=self._slot.head_seq + 1, head_off=off + len(blob))
+            self._flush_buf()
             self._publish()
             _die("S14")     # after SEG_END published, before the next segment is durable
 
@@ -410,11 +450,9 @@ class TapeWriter:
                 return False
 
             # 3. capture the body of segment n and seal it (footer sidecar; P1-13)
-            body = bytes(self._mm[C.SEGMENT_HEADER_BYTES:self._slot.head_off])
+            self._flush_buf()
+            body = self._read_body(n)
             start_seq, end_seq, frame_count = self._segment_range(n)
-            self._mm.flush()
-            self._mm.close()
-            self._mm = None
             if self._seg_fd is not None:
                 os.close(self._seg_fd)
                 self._seg_fd = None
@@ -436,7 +474,7 @@ class TapeWriter:
 
     def _emit_degraded(self, reason: str) -> None:
         """Append one DEGRADED frame if it fits. Failures here are swallowed: recording must not raise."""
-        if self._mm is None or self._slot is None:
+        if self._seg_fd is None or self._slot is None:
             return
         try:
             payload = cbor.encode({"d": reason, "s": self._slot.active_segment,
@@ -444,11 +482,21 @@ class TapeWriter:
             blob = frame_mod.encode(self._slot.head_seq + 1, C.KIND_DEGRADED, payload, priority=0)
             if self._slot.head_off + len(blob) <= self.segment_bytes:
                 off = self._slot.head_off
-                self._mm[off:off + len(blob)] = blob
+                at = self._reserve(len(blob))
+                assert self._buf_base + at == off
+                self._buf[at:at + len(blob)] = blob
+                self._fill = at + len(blob)
                 self._slot = self._slot.with_(head_seq=self._slot.head_seq + 1, head_off=off + len(blob))
+                self._flush_buf()
                 self._publish()
         except Exception:
             return
+
+    def _read_body(self, n: int) -> bytes:
+        """The sealed prefix of segment n, read back from the file (there is no mapping to slice any more)."""
+        assert self._seg_fd is not None and self._slot is not None
+        end = self._slot.head_off if self._slot.active_segment == n else self.segment_bytes
+        return os.pread(self._seg_fd, max(end - C.SEGMENT_HEADER_BYTES, 0), C.SEGMENT_HEADER_BYTES)
 
     def _write_seal(self, n: int, *, body: bytes, start_seq: int, end_seq: int, frame_count: int,
                     reason: int) -> dict | None:
@@ -491,17 +539,17 @@ class TapeWriter:
                 self.publish()
             n = self._slot.active_segment
             blob = frame_mod.encode(self._slot.head_seq + 1, C.KIND_SEG_END, b"", priority=0)
-            if self._mm is not None and self._slot.head_off + len(blob) <= self.segment_bytes:
+            if self._seg_fd is not None and self._slot.head_off + len(blob) <= self.segment_bytes:
                 off = self._slot.head_off
-                self._mm[off:off + len(blob)] = blob
+                at = self._reserve(len(blob))
+                assert self._buf_base + at == off
+                self._buf[at:at + len(blob)] = blob
+                self._fill = at + len(blob)
                 self._slot = self._slot.with_(head_seq=self._slot.head_seq + 1, head_off=off + len(blob))
+            self._flush_buf()
             self._publish()
-            body = bytes(self._mm[C.SEGMENT_HEADER_BYTES:self._slot.head_off]) if self._mm else b""
+            body = self._read_body(n) if self._seg_fd is not None else b""
             start_seq, end_seq, frame_count = self._segment_range(n)
-            if self._mm is not None:
-                self._mm.flush()
-                self._mm.close()
-                self._mm = None
             if self._seg_fd is not None:
                 os.close(self._seg_fd)
                 self._seg_fd = None
@@ -514,11 +562,9 @@ class TapeWriter:
                 self._head = None
 
     def abort(self) -> None:
-        """Release mappings without committing anything (used by recovery and by idempotence tests)."""
-        if self._mm is not None:
-            with contextlib.suppress(ValueError, BufferError):
-                self._mm.close()
-            self._mm = None
+        """Drop the buffer without committing anything (used by recovery and by idempotence tests)."""
+        self._fill = 0                   # nothing staged is written: abort must not create bytes
+        self._buf_base = C.SEGMENT_HEADER_BYTES
         if self._seg_fd is not None:
             os.close(self._seg_fd)
             self._seg_fd = None
