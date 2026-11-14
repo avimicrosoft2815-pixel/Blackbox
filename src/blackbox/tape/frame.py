@@ -9,8 +9,7 @@ import struct
 import time
 
 from blackbox import constants as C
-from blackbox.codec.crc32 import crc32
-from blackbox.codec.crc32 import checksum_parts
+from blackbox.codec.crc32 import checksum_parts, crc32
 
 _HEADER = struct.Struct("<4sIqqqHHHHII")
 _TRAILER = struct.Struct("<4sI")
@@ -31,7 +30,7 @@ def frame_size(payload_len: int) -> int:
     return C.FRAME_OVERHEAD_BYTES + padded_len(payload_len)
 
 
-def encode_into(buf, off: int, seq: int, kind: int, payload: bytes = b"", *, flags: int = 0,
+def encode_into(buf, off: int, seq: int, kind: int, payload: bytes | memoryview = b"", *, flags: int = 0,
                 priority: int = 1, run_slot: int = 0, node_slot: int = 0, wall_ns: int | None = None,
                 mono_ns: int | None = None, body_first: bool = True, hook=None) -> int:
     """Write one frame at `off` inside `buf` (a bytearray or an mmap) and return its total length.

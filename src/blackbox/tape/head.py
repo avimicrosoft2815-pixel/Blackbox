@@ -5,15 +5,15 @@ never destroy the newest valid record: readers take the valid slot with the grea
 """
 from __future__ import annotations
 
+import contextlib
 import mmap
 import os
 import struct
-from struct import pack_into
 from dataclasses import dataclass, replace
+from struct import pack_into
 
 from blackbox import constants as C
 from blackbox.codec.crc32 import crc32
-from blackbox.errors import bbx
 
 
 @dataclass
@@ -37,7 +37,7 @@ class HeadSlot:
         return bytes(buf)
 
     @classmethod
-    def from_bytes(cls, buf: bytes) -> "HeadSlot | None":
+    def from_bytes(cls, buf: bytes) -> HeadSlot | None:
         if len(buf) != C.HEAD_SLOT_BYTES or buf[0:8] != C.MAGIC_HEAD:
             return None
         stored = struct.unpack_from("<I", buf, C.HEAD_CRC_OFF)[0]
@@ -48,11 +48,11 @@ class HeadSlot:
         return cls(gen=gen, head_seq=head_seq, head_off=head_off, tail_seq=tail_seq,
                    sealed_seq=sealed_seq, active_segment=active, flags=flags, dropped_events=dropped)
 
-    def with_(self, **kw) -> "HeadSlot":
+    def with_(self, **kw) -> HeadSlot:
         """Copy-with-overrides. Kept for readers; the writer's hot path mutates instead."""
         return replace(self, **kw)
 
-    def set(self, **kw) -> "HeadSlot":
+    def set(self, **kw) -> HeadSlot:
         for key, value in kw.items():
             setattr(self, key, value)
         return self
@@ -149,7 +149,7 @@ class HeadMap:
     `paranoid` add `flush` + `fdatasync(head_fd)` on the caller's schedule, never per event.
     """
 
-    __slots__ = ("path", "mm", "fd", "_dirty", "_slots", "half_hook", "_slotbuf")
+    __slots__ = ("_dirty", "_slotbuf", "_slots", "fd", "half_hook", "mm", "path")
 
     def __init__(self, path: str, *, create: bool = True) -> None:
         self.path = path
@@ -248,10 +248,8 @@ class HeadMap:
         self._dirty = False
 
     def close(self) -> None:
-        try:
+        with contextlib.suppress(ValueError, BufferError):
             self.mm.flush()
-        except (ValueError, BufferError):
-            pass
         try:
             self.mm.close()
         finally:

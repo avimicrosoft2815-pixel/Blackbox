@@ -5,12 +5,13 @@ import sys
 from pathlib import Path
 
 import pytest
-from hypothesis import given, settings, strategies as st
+from hypothesis import given, settings
+from hypothesis import strategies as st
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from blackbox import constants as C  # noqa: E402
-from blackbox.tape import frame as fm  # noqa: E402
+from blackbox import constants as C
+from blackbox.tape import frame as fm
 
 
 def test_header_is_48_bytes():

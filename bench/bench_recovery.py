@@ -22,13 +22,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from blackbox import constants as C          # noqa: E402
-from blackbox.tape import scanner            # noqa: E402
-from blackbox.tape.writer import TapeWriter  # noqa: E402
+from blackbox import constants as C
+from blackbox.tape import scanner
+from blackbox.tape.writer import TapeWriter
 
 sys.path.insert(0, str(ROOT / "bench"))
-from bench_frame import hardware              # noqa: E402
-import _fs                                    # noqa: E402
+import _fs
+from bench_frame import hardware
 
 CHILD = ROOT / "tests" / "kill" / "_append_loop.py"
 
@@ -133,7 +133,6 @@ def measure_column(column: dict, args) -> dict:
 
     # amplification with the default 16 MiB segment: a 64 MiB segment would measure the segment size
     tmp2 = _fs.scratch(column, "bbx-bench-amp-")
-    rss_before = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
     t0 = time.perf_counter()
     w = TapeWriter(tmp2, segment_bytes=C.DEFAULT_SEGMENT_BYTES, mode="process").open()
     payload = b"r" * args.event_bytes

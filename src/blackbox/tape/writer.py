@@ -7,20 +7,21 @@ It never claims F3, and never raises into user code: allocation failure degrades
 """
 from __future__ import annotations
 
+import contextlib
 import mmap
-import threading
 import os
+import threading
 import time
 
 from blackbox import constants as C
+from blackbox.codec import cbor
+from blackbox.codec.ids import new_writer_uuid
 from blackbox.errors import bbx
 from blackbox.tape import chain as chain_mod
 from blackbox.tape import frame as frame_mod
 from blackbox.tape import head as head_mod
 from blackbox.tape import meta as meta_mod
 from blackbox.tape import prealloc, segments
-from blackbox.codec import cbor
-from blackbox.codec.ids import new_writer_uuid
 
 DIE_ENV = "BLACKBOX_DIE_AT"
 
@@ -102,14 +103,14 @@ class TapeWriter:
         # critical section so a publish never sees a half-recorded batch.
         self._lock = threading.RLock()
         self.degraded_reason: str | None = None
-        self.adopted: dict | None = None      # set when open() completed an interrupted roll (S15)
+        self.adopted: dict[str, object] | None = None   # open() completed a roll or rebuilt the head
 
     # ── lifecycle ───────────────────────────────────────────────────────────
     def arm_die(self, stage: str | None = None) -> str | None:
         """Test hook (P2-08): arm a named crash point; `None` reads `BLACKBOX_DIE_AT`."""
         return arm_die(stage)
 
-    def open(self) -> "TapeWriter":
+    def open(self) -> TapeWriter:
         arm_die()
         os.makedirs(self.tape_dir, mode=0o700, exist_ok=True)
         if not os.path.exists(self.meta_path):
@@ -124,7 +125,7 @@ class TapeWriter:
 
         existing = segments.list_segments(self.tape_dir)
         self._head = head_mod.HeadMap(self.head_path)
-        self._head.half_hook = lambda: _die("S4")
+        self._head.half_hook = lambda: _die("S4")   # type: ignore[assignment]
         best = self._head.best()
         if best is None and existing:
             # Both slots unreadable but frames exist: the head is a hint, so rebuild it from the segments
@@ -166,18 +167,19 @@ class TapeWriter:
         report = repair.adopt_orphan(self.tape_dir, sealer=self.sealer_token)
         if report is None:
             return False
+        assert self._head is not None
         self._head.reload()
         self.adopted = report
         return True
 
     def _read_meta(self) -> bytes:
         with open(self.meta_path, "rb") as fh:
-            return fh.read(C.META_BYTES)
+            return bytes(fh.read(C.META_BYTES))
 
     def _segment_prev_chain(self, n: int) -> bytes:
         with open(segments.seg_path(self.tape_dir, n), "rb") as fh:
             hdr = segments.decode_header(fh.read(C.SEGMENT_HEADER_BYTES))
-        return hdr["prev_chain"]
+        return bytes(hdr["prev_chain"])
 
     def _create_segment(self, n: int) -> None:
         prev = self._chain.value
@@ -243,10 +245,9 @@ class TapeWriter:
                     self.roll()
                 n = cbor.encode_chain_into(self._scratch, 0, self._chain.value, batch_hash,
                                            self._batch_first_seq, self._slot.head_seq)
-                payload = memoryview(self._scratch)[:n]
                 off = self._slot.head_off
-                written = frame_mod.encode_into(self._mm, off, self._slot.head_seq + 1, C.KIND_CHAIN, payload,
-                                               priority=0)
+                written = frame_mod.encode_into(self._mm, off, self._slot.head_seq + 1, C.KIND_CHAIN,
+                                               bytes(memoryview(self._scratch)[:n]), priority=0)
                 self._slot.head_seq += 1
                 self._slot.head_off = off + written
                 self._frame_count += 1
@@ -313,8 +314,7 @@ class TapeWriter:
             self.publish()
         else:
             window_ms = (now - self._last_publish_ns) / 1_000_000
-            if window_ms > self.window_max_ms:
-                self.window_max_ms = window_ms      # a measured bound, not a promise
+            self.window_max_ms = max(self.window_max_ms, window_ms)      # a measured bound, not a promise
         return seq
 
     def publish_if_due(self, now_ns: int | None = None) -> bool:
@@ -332,8 +332,7 @@ class TapeWriter:
                 self.publish()
                 return True
             window_ms = (now - self._last_publish_ns) / 1_000_000
-            if window_ms > self.window_max_ms:
-                self.window_max_ms = window_ms
+            self.window_max_ms = max(self.window_max_ms, window_ms)
             return False
 
     def window_ms(self) -> float:
@@ -459,10 +458,8 @@ class TapeWriter:
     def abort(self) -> None:
         """Release mappings without committing anything (used by recovery and by idempotence tests)."""
         if self._mm is not None:
-            try:
+            with contextlib.suppress(ValueError, BufferError):
                 self._mm.close()
-            except (ValueError, BufferError):
-                pass
             self._mm = None
         if self._seg_fd is not None:
             os.close(self._seg_fd)
@@ -488,7 +485,7 @@ class TapeWriter:
             "degraded": self.degraded_reason, "chain": self._chain.value.hex(),
         }
 
-    def __enter__(self) -> "TapeWriter":
+    def __enter__(self) -> TapeWriter:
         return self.open() if self._slot is None else self
 
     def __exit__(self, exc_type, exc, tb) -> None:

@@ -21,8 +21,8 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from blackbox.tape import scanner, segments  # noqa: E402
-from blackbox.tape.writer import TapeWriter  # noqa: E402
+from blackbox.tape import scanner, segments
+from blackbox.tape.writer import TapeWriter
 
 CHILD = ROOT / "tests" / "_child.py"
 

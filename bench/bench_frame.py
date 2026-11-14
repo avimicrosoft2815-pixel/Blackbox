@@ -20,15 +20,16 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "bench"))
 
-from blackbox import constants as C                      # noqa: E402
-from blackbox.codec import cbor                          # noqa: E402
-from blackbox.codec.crc32 import crc32                  # noqa: E402
-from blackbox.codec.ids import blake2b                   # noqa: E402
-from blackbox.tape import chain as chain_mod             # noqa: E402
-from blackbox.tape import frame as frame_mod             # noqa: E402
-from blackbox.tape import head as head_mod               # noqa: E402
-from blackbox.tape.writer import TapeWriter              # noqa: E402
-import _fs                                              # noqa: E402
+import _fs
+
+from blackbox import constants as C
+from blackbox.codec import cbor
+from blackbox.codec.crc32 import crc32
+from blackbox.codec.ids import blake2b
+from blackbox.tape import chain as chain_mod
+from blackbox.tape import frame as frame_mod
+from blackbox.tape import head as head_mod
+from blackbox.tape.writer import TapeWriter
 
 
 def hardware() -> dict:
@@ -97,7 +98,7 @@ def measure_column(column: dict, args) -> dict:
     writer = TapeWriter(tmp, segment_bytes=64 << 20, mode="process").open()
     writer_nc = TapeWriter(nc_tmp, segment_bytes=64 << 20, mode="process", chain_enabled=False).open()
 
-    seg_mm = writer._mm                     # noqa: SLF001 - the bench measures the real mapping
+    seg_mm = writer._mm
     hmap = head_mod.HeadMap(os.path.join(tmp, "head_bench"))
 
     slot = head_mod.HeadSlot(gen=1, head_off=C.SEGMENT_HEADER_BYTES)

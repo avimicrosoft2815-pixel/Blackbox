@@ -8,7 +8,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from blackbox.codec.crc32 import CHECK_VALUE, crc32  # noqa: E402
+from blackbox.codec.crc32 import CHECK_VALUE, crc32
 
 VECTORS = ROOT / "tests" / "conformance" / "vectors" / "crc32.json"
 

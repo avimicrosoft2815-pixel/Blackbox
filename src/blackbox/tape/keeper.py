@@ -10,10 +10,8 @@ seal, retain, fold the inbox and evaluate triggers. It must never be able to hur
 """
 from __future__ import annotations
 
+import contextlib
 import threading
-import time
-
-from blackbox import constants as C
 
 TICK_S = 0.001          # 1 ms: finer than the 5 ms publish bound, cheap enough to ignore
 
@@ -30,7 +28,7 @@ class Keeper:
         self._thread: threading.Thread | None = None
 
     # ── lifecycle ───────────────────────────────────────────────────────────
-    def start(self) -> "Keeper":
+    def start(self) -> Keeper:
         if self._thread is not None:
             return self
         self._thread = threading.Thread(target=self._run, name="blackbox-keeper", daemon=True)
@@ -46,7 +44,7 @@ class Keeper:
         if not self.disabled:
             self.writer.flush()
 
-    def __enter__(self) -> "Keeper":
+    def __enter__(self) -> Keeper:
         return self.start()
 
     def __exit__(self, *exc) -> None:
@@ -57,13 +55,12 @@ class Keeper:
         while not self._stop.wait(self.tick_s):
             try:
                 self.tick()
-            except Exception as exc:                      # noqa: BLE001 - fail-open by design
+            except Exception as exc:
                 self.disabled = True
                 self.error = f"{type(exc).__name__}: {exc}"
-                try:                                      # best effort, and never re-raise
+                # best effort, and never re-raise
+                with contextlib.suppress(Exception):
                     self.writer.degraded_reason = self.writer.degraded_reason or "keeper_down"
-                except Exception:                         # noqa: BLE001
-                    pass
                 return
 
     def tick(self) -> None:

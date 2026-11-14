@@ -8,9 +8,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from blackbox import constants as C  # noqa: E402
-from blackbox.tape.keeper import Keeper  # noqa: E402
-from blackbox.tape.writer import TapeWriter  # noqa: E402
+from blackbox import constants as C
+from blackbox.tape.keeper import Keeper
+from blackbox.tape.writer import TapeWriter
 
 
 def _writer(tmp_path, **kw):
@@ -97,7 +97,7 @@ def test_keeper_and_app_thread_never_roll_twice(tmp_path):
         try:
             for _ in range(4_000):
                 w.emit(C.KIND_MODEL_REQUEST, payload)
-        except BaseException as exc:          # noqa: BLE001 - the point is to surface it
+        except BaseException as exc:          # the point is to surface it
             errors.append(exc)
 
     t = threading.Thread(target=app)

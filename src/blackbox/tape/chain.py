@@ -51,7 +51,7 @@ def decode_payload(payload: bytes) -> dict:
             raise cbor.CBORError("chain payload: bad hash field")
     if not isinstance(d["first"], int) or not isinstance(d["last"], int):
         raise cbor.CBORError("chain payload: bad seq range")
-    return d
+    return dict(d)
 
 
 class ChainState:

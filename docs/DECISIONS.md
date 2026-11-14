@@ -5,7 +5,7 @@ Plan defaults are taken unless a row here says otherwise. Each row names the pla
 | # | date | decision | plan ref | why |
 |---|---|---|---|---|
 | D-001 | 2026-11-14 | `requires-python >= 3.11`; build backend setuptools; console script deferred to P4-05 | P0-01 | 3.10 is EOL Oct 2026; `tomllib` avoids a dependency; hatchling would require an install |
-| D-002 | 2026-11-14 | Dev-only tools: `pytest`, `hypothesis`, `ruff`, `mypy`, `coverage` are allowed by brief Part B §2 and are installed in `.venv` only (C6); the shipped package still has zero runtime dependencies | §3 | `ruff check` and `mypy --strict` are part of `make fmt` / `make test-slow`; the core is stdlib-only, no dependency is ever added to `pyproject.toml` for them |
+| D-002 | 2026-11-14 | Dev-only tools: `pytest 8.3.4`, `hypothesis 6.122.3`, `ruff 0.17.5`, `mypy 2.4.1` are installed in `.venv` only (C6); the shipped package has zero runtime dependencies and `pyproject.toml` declares none | §3 | `make fmt` runs `ruff check` (0 findings) and `mypy` (**0 findings**, `strict = true` with exactly two knobs off — `type-arg` and `no-untyped-def` — tracked as row `P1-02b` in `docs/STATUS.md`) |
 | D-003 | 2026-11-14 | F8 re-scoped: keeper pre-creation of `<n+1>.seg` is the default; the synchronous roll path is measured per OS | §8.6 | owner instruction |
 | D-004 | 2026-11-14 | Event-kind and error-code registries live in `constants.py` / `errors.py`; only the lead edits them | §8.4, §19 | contract files |
 | D-005 | 2026-11-14 | The `head` file is `mmap`'d once at `open()`; publish is `struct.pack_into` into the alternate slot | §8.2 step 7 | "no syscall at all (page cache)" is the plan's own text |

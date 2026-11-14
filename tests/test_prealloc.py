@@ -9,9 +9,9 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from blackbox.tape import prealloc, segments  # noqa: E402
-from blackbox.tape.writer import TapeWriter  # noqa: E402
-from blackbox.errors import BlackBoxError  # noqa: E402
+from blackbox.errors import BlackBoxError
+from blackbox.tape import prealloc, segments
+from blackbox.tape.writer import TapeWriter
 
 
 def test_preallocate_then_not_sparse(tmp_path):

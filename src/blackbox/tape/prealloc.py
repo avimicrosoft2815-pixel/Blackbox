@@ -12,7 +12,6 @@ from __future__ import annotations
 import os
 import subprocess
 
-from blackbox import constants as C
 from blackbox.errors import bbx
 
 FAULT_ENV = "BLACKBOX_FAULT_PREALLOC"       # test hook: values "ENOSPC", "EACCES"
@@ -24,7 +23,8 @@ class PreallocError(OSError):
 
 def _du_kib(path: str) -> int:
     try:
-        out = subprocess.run(["du", "-k", path], capture_output=True, text=True, timeout=10)
+        # fixed argv, no shell
+        out = subprocess.run(["du", "-k", path], capture_output=True, text=True, timeout=10)  # noqa: S603,S607
         return int(out.stdout.split()[0])
     except Exception:
         return -1
@@ -41,7 +41,7 @@ def is_sparse(path: str, size: int) -> bool:
     blocks = getattr(st, "st_blocks", None)
     if blocks is None:
         return False                     # Windows: no st_blocks; treat as allocated
-    return blocks * 512 < size * 0.9
+    return bool(blocks * 512 < size * 0.9)
 
 
 def preallocate(path: str, size: int) -> str:

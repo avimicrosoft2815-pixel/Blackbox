@@ -6,6 +6,7 @@ progress. A live lease is never stolen.
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import time
@@ -83,10 +84,8 @@ def read(path: str) -> Lease | None:
 
 
 def release(path: str) -> None:
-    try:
+    with contextlib.suppress(FileNotFoundError):
         os.unlink(path)
-    except FileNotFoundError:
-        pass
 
 
 def is_live(path: str) -> bool:

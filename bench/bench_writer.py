@@ -27,13 +27,14 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "bench"))
 
-from blackbox import constants as C          # noqa: E402
-from blackbox.codec import cbor               # noqa: E402
-from blackbox.codec.ids import blake2b        # noqa: E402
-from blackbox.tape.keeper import Keeper       # noqa: E402
-from blackbox.tape.writer import TapeWriter   # noqa: E402
-from bench_frame import hardware              # noqa: E402
-import _fs                                    # noqa: E402
+import _fs
+from bench_frame import hardware
+
+from blackbox import constants as C
+from blackbox.codec import cbor
+from blackbox.codec.ids import blake2b
+from blackbox.tape.keeper import Keeper
+from blackbox.tape.writer import TapeWriter
 
 
 def event_dict(content: bytes) -> dict:
@@ -180,7 +181,7 @@ def main(argv=None) -> int:
     print(f"wrote {path}")
     for fs_name, block in out["results"].items():
         for r in block["rows"]:
-            print(f"  [{fs_name:6s}] chain={str(r['chain']):5s} batch={r['batch_bytes']:5d} mode={r['mode']:7s} "
+            print(f"  [{fs_name:6s}] chain={r['chain']!s:5s} batch={r['batch_bytes']:5d} mode={r['mode']:7s} "
                   f"p50={r['p50_us']:8.3f} p99={r['p99_us']:9.3f} stall_max={r['stall_max_us']} n={r['syncs']} "
                   f"{r['events_per_s']:>10.0f} ev/s  win={r['window_max_ms']} ms")
         for g in block["group_commit"]:

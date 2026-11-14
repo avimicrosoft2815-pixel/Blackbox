@@ -4,7 +4,17 @@
 Throwaway probe, not product code. Writes bench/results/<date>-env-probe.json.
 Every number below is measured in this process/container; nothing is copied from the plan.
 """
-import json, mmap, os, platform, shutil, signal, statistics, subprocess, sys, tempfile, time
+import json
+import mmap
+import os
+import platform
+import shutil
+import signal
+import statistics
+import subprocess
+import sys
+import tempfile
+import time
 
 RESULTS = {"probe": "env", "date": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
            "python": sys.version, "executable": sys.executable, "data": {}, "notes": []}
@@ -130,6 +140,7 @@ os.close(fd)
 
 # ---------- 5. os.replace atomicity (500x, concurrent reader) ---------------
 import threading
+
 dst = fh.name + ".replace-target"
 open(dst, "w").write("old")
 stop = threading.Event()
@@ -196,20 +207,27 @@ D["preallocation"] = {"size_bytes": S16, "method": method,
                       "du_kib_preallocated": du_kib(pre), "du_kib_sparse_truncate": du_kib(spa),
                       "verdict": "preallocation allocates blocks; truncate() leaves a hole (the SIGBUS hazard class)"}
 for p in (pre, spa, mp_path):
-    try: os.unlink(p)
-    except FileNotFoundError: pass
+    try:
+        os.unlink(p)
+    except FileNotFoundError:
+        pass
 
 # ---------- 8. two costs that feed the Stage 2 estimate ---------------------
 import hashlib
+
 buf = os.urandom(1024)
 t = []
 for _ in range(20000):
-    t0 = time.perf_counter_ns(); hashlib.blake2b(buf, digest_size=32).digest(); t.append(time.perf_counter_ns() - t0)
+    t0 = time.perf_counter_ns()
+    hashlib.blake2b(buf, digest_size=32).digest()
+    t.append(time.perf_counter_ns() - t0)
 D["blake2b_1KiB"] = summarize([x / 1000 for x in t], "us")
 big = os.urandom(1 << 20)
 t = []
 for _ in range(200):
-    t0 = time.perf_counter_ns(); hashlib.blake2b(big, digest_size=32).digest(); t.append(time.perf_counter_ns() - t0)
+    t0 = time.perf_counter_ns()
+    hashlib.blake2b(big, digest_size=32).digest()
+    t.append(time.perf_counter_ns() - t0)
 D["blake2b_1MiB"] = summarize([x / 1e6 for x in t], "ms")
 
 # ---------- 9. python versions available ------------------------------------

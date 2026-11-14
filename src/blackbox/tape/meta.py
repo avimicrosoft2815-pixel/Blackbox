@@ -9,6 +9,7 @@ from blackbox.codec.crc32 import crc32
 from blackbox.codec.ids import boot_id_hash, host_fingerprint
 from blackbox.errors import bbx
 
+
 class MetaError(ValueError):
     pass
 

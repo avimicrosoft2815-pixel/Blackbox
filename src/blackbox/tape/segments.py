@@ -1,12 +1,14 @@
 """Segment file creation, roll, and reading (P1-09, docs/format.md §5)."""
 from __future__ import annotations
 
+import contextlib
 import os
 import struct
 import time
 
 from blackbox import constants as C
 from blackbox.errors import bbx
+from blackbox.platform import posix
 from blackbox.tape import prealloc
 
 
@@ -84,16 +86,14 @@ def create(tape_dir: str, n: int, *, writer_uuid: bytes, segment_bytes: int, pre
     finally:
         os.close(fd)
     os.replace(tmp, path)
-    from blackbox.platform import posix
-    try:
+    # directory fsync is best effort on filesystems that refuse it
+    with contextlib.suppress(OSError):
         posix.fsync_dir(tape_dir)
-    except OSError:
-        pass                                 # directory fsync is best effort on filesystems that refuse it
     return path
 
 
 def list_segments(tape_dir: str) -> list[int]:
-    out = []
+    out: list[int] = []
     try:
         names = os.listdir(tape_dir)
     except FileNotFoundError:

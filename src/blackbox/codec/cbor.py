@@ -54,11 +54,11 @@ def encode(obj, _depth: int = 0) -> bytes:
     t = type(obj)
     if t is int:
         if 0 <= obj < 24:
-            return _SMALL[obj]
+            return bytes(_SMALL[obj])
         return _int(obj)
     if t is str:
         b = obj.encode("utf-8")
-        return _head(3, len(b)) + b
+        return bytes(_head(3, len(b)) + b)
     if t is bytes or t is bytearray or t is memoryview:
         b = obj if t is bytes else bytes(obj)
         return _head(2, len(b)) + b
@@ -216,14 +216,14 @@ def decode(buf: bytes, pos: int = 0, allow_trailing: bool = False, _depth: int =
         n, pos = _read_len(buf, pos, info)
         if n > MAX_MAP_KEYS:
             raise CBORError("map too large")
-        out = {}
+        mapping: dict[object, object] = {}
         for _ in range(n):
             k, pos = decode(buf, pos, _depth=_depth + 1)
             v, pos = decode(buf, pos, _depth=_depth + 1)
             if not isinstance(k, (str, bytes, int)):
                 raise CBORError("unsupported map key type")
-            out[k] = v
-        return out, pos
+            mapping[k] = v
+        return mapping, pos
     if major == 6:
         raise CBORError("tags are not allowed")
     if major == 7:

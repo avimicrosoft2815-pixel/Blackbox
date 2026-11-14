@@ -5,14 +5,22 @@ import sys
 from pathlib import Path
 
 import pytest
-from hypothesis import given, settings, strategies as st
+from hypothesis import given, settings
+from hypothesis import strategies as st
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from blackbox.codec import cbor  # noqa: E402
-from blackbox.codec.crc32 import crc32  # noqa: E402
-from blackbox.codec.ids import (blake2b, boot_id_hash, fingerprint, keyed_hash, new_run_id,  # noqa: E402
-                                new_writer_uuid, node_id)
+from blackbox.codec import cbor
+from blackbox.codec.crc32 import crc32
+from blackbox.codec.ids import (
+    blake2b,
+    boot_id_hash,
+    fingerprint,
+    keyed_hash,
+    new_run_id,
+    new_writer_uuid,
+    node_id,
+)
 
 
 def test_crc_check_values():
@@ -116,7 +124,7 @@ def test_magic_fields_are_exactly_their_width():
         assert len(getattr(C, name)) == width, name
     for name in ("MAGIC_FRAME", "MAGIC_FRAME_TAIL"):
         assert len(getattr(C, name)) == 4, name
-    assert C.MAGIC_SEG == bytes.fromhex("4242585345473200")     # "BBXSEG2" + NUL pad, frozen in hex
+    assert bytes.fromhex("4242585345473200") == C.MAGIC_SEG     # "BBXSEG2" + NUL pad, frozen in hex
 
 
 def test_host_fingerprint_hashes_a_real_hostname():

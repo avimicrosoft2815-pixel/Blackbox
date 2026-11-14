@@ -30,8 +30,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))
 
-from blackbox.tape import scanner  # noqa: E402
-from blackbox.tape.writer import TapeWriter  # noqa: E402
+from blackbox.tape import scanner
+from blackbox.tape.writer import TapeWriter
 
 CHILD = ROOT / "tests" / "kill" / "_append_loop.py"
 
@@ -132,7 +132,7 @@ def main(argv=None) -> int:
     ap.add_argument("--filesystem", default=None, help="label for the filesystem actually used")
     args = ap.parse_args(argv)
 
-    rng = random.Random(args.seed)
+    rng = random.Random(args.seed)      # noqa: S311 - scheduling jitter, not secrecy
     tmp = Path(__import__("tempfile").mkdtemp(prefix="bbx-kill-", dir=args.root))
     trials: list[dict] = []
     started = time.perf_counter()

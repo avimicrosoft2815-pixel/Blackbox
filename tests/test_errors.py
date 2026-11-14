@@ -8,7 +8,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from blackbox import errors  # noqa: E402
+from blackbox import errors
 
 
 def test_registry_is_populated_and_formatted():
@@ -41,7 +41,7 @@ def test_every_documented_code_exists_in_docs():
 
 
 # ── A5: the registry and the plan's appendix must agree in both directions ──
-import re  # noqa: E402
+import re
 
 ROOT = Path(__file__).resolve().parents[1]
 STOP = {"the", "and", "for", "with", "that", "this", "from", "into", "your", "when", "does", "not"}

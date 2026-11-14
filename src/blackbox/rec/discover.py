@@ -11,7 +11,8 @@ from dataclasses import dataclass, field
 from blackbox import constants as C
 from blackbox.tape import head as head_mod
 from blackbox.tape import meta as meta_mod
-from blackbox.tape import repair, segments, seal as seal_mod
+from blackbox.tape import repair, segments
+from blackbox.tape import seal as seal_mod
 
 
 @dataclass
@@ -42,7 +43,7 @@ def _stray_files(tape_dir: str) -> list[str]:
     out = []
     try:
         for name in sorted(os.listdir(tape_dir)):
-            if name.endswith(".tmp") or name.endswith(".stale"):
+            if name.endswith((".tmp", ".stale")):
                 out.append(name)
     except FileNotFoundError:
         pass

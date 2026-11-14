@@ -21,8 +21,12 @@ fuzz:            ## CBOR decoder fuzz (P1-03)
 docs:            ## regenerate the progress ledger from the plan
 	$(PY) tools/gen_progress.py
 
-fmt:
+fmt:             ## C6: lint and type-check (dev tools only; the package has no runtime deps)
+	$(PY) -m ruff check src tests bench tools
+	$(PY) -m mypy
 	$(PY) -m compileall -q src tests
+
+lint: fmt        ## alias
 
 clean:
 	rm -rf .pytest_cache **/__pycache__ src/**/__pycache__

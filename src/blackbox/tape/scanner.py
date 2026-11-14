@@ -14,8 +14,8 @@ from blackbox.errors import bbx
 from blackbox.tape import frame as frame_mod
 from blackbox.tape import head as head_mod
 from blackbox.tape import meta as meta_mod
-from blackbox.tape import segments
 from blackbox.tape import seal as seal_mod
+from blackbox.tape import segments
 
 
 @dataclass
@@ -185,7 +185,7 @@ def scan(data_dir: str, writer_uuid_hex: str, *, max_frames: int = 2_000_000) ->
 
 def scan_all(data_dir: str) -> list[ScanResult]:
     base = os.path.join(data_dir, "tape")
-    out = []
+    out: list[ScanResult] = []
     try:
         names = sorted(os.listdir(base))
     except FileNotFoundError:

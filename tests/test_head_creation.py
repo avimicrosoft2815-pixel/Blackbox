@@ -1,19 +1,16 @@
 """Kill matrix seed 120 — a kill during head creation must not leave a tape that refuses to reopen."""
 from __future__ import annotations
 
-import os
 import sys
 from pathlib import Path
-
-import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from blackbox import constants as C  # noqa: E402
-from blackbox.tape import head as head_mod  # noqa: E402
-from blackbox.tape import scanner, segments  # noqa: E402
-from blackbox.tape.writer import TapeWriter  # noqa: E402
+from blackbox import constants as C
+from blackbox.tape import head as head_mod
+from blackbox.tape import scanner, segments
+from blackbox.tape.writer import TapeWriter
 
 
 def test_head_file_is_created_atomically(tmp_path):

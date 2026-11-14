@@ -3,20 +3,21 @@ from __future__ import annotations
 
 import os
 import sys
+from itertools import pairwise
 from pathlib import Path
 
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from blackbox import constants as C  # noqa: E402
-from blackbox.errors import BlackBoxError  # noqa: E402
-from blackbox.tape import head as head_mod  # noqa: E402
-from blackbox.tape import lease as lease_mod  # noqa: E402
-from blackbox.tape import meta as meta_mod  # noqa: E402
-from blackbox.tape import scanner, segments  # noqa: E402
-from blackbox.tape import seal as seal_mod  # noqa: E402
-from blackbox.tape.writer import TapeWriter  # noqa: E402
+from blackbox import constants as C
+from blackbox.errors import BlackBoxError
+from blackbox.tape import head as head_mod
+from blackbox.tape import lease as lease_mod
+from blackbox.tape import meta as meta_mod
+from blackbox.tape import scanner, segments
+from blackbox.tape import seal as seal_mod
+from blackbox.tape.writer import TapeWriter
 
 
 # ── meta ────────────────────────────────────────────────────────────────────
@@ -39,6 +40,7 @@ def test_meta_checksum_and_version_guards():
     newer[8] = C.MAX_READER_FORMAT_VERSION + 1          # format_version low byte
     newer[-4:] = b"\x00\x00\x00\x00"
     import struct
+
     from blackbox.codec.crc32 import crc32
     struct.pack_into("<I", newer, C.META_CRC_OFF, crc32(bytes(newer[:C.META_CRC_OFF])))
     with pytest.raises(BlackBoxError) as exc:
@@ -120,7 +122,8 @@ def test_lease_excludes_a_live_writer(tmp_path):
 
 def test_lease_of_a_dead_pid_is_stale(tmp_path):
     path = tmp_path / "writer.lease"
-    import json, time
+    import json
+    import time
     path.write_text(json.dumps({"v": 1, "pid": 999_999, "proc_start_ns": None, "boot_id": None,
                                 "nonce": "x", "created_ns": time.time_ns()}), encoding="utf-8")
     stale, why = lease_mod.read(str(path)).is_stale()
@@ -148,7 +151,7 @@ def test_roll_produces_two_sealed_segments_and_a_full_scan(tmp_path):
         info = seal_mod.verify(segments.seg_path(tape_dir, n), segments.seal_path(tape_dir, n))
         assert info["frame_count"] > 0
     # P1-18: the chain links segments — segment n+1's header chains to segment n's seal
-    for prev, nxt in zip(segs, segs[1:]):
+    for prev, nxt in pairwise(segs):
         with open(segments.seg_path(tape_dir, nxt), "rb") as fh:
             header = segments.decode_header(fh.read(C.SEGMENT_HEADER_BYTES))
         assert header["prev_chain"] == seal_mod.read(segments.seal_path(tape_dir, prev))["chain"]

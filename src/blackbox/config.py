@@ -47,7 +47,7 @@ class Config:
     retention: RetentionConfig = field(default_factory=RetentionConfig)
 
     # ── validation ──────────────────────────────────────────────────────────
-    def validate(self) -> "Config":
+    def validate(self) -> Config:
         if self.mode not in C.MODES:
             raise bbx("BBX-E100", f"mode must be one of {C.MODES}")
         if self.content not in C.CONTENTS:
@@ -70,7 +70,7 @@ class Config:
         return dataclasses.asdict(self)
 
     @classmethod
-    def from_dict(cls, data: dict) -> "Config":
+    def from_dict(cls, data: dict) -> Config:
         known = {f.name for f in dataclasses.fields(cls)}
         unknown = {k: v for k, v in data.items() if k not in known}
         if unknown:

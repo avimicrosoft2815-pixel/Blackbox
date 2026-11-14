@@ -17,10 +17,11 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from blackbox.rec import discover  # noqa: E402
-from blackbox.tape import head as head_mod  # noqa: E402
-from blackbox.tape import scanner, segments, seal as seal_mod  # noqa: E402
-from blackbox.tape.writer import TapeWriter  # noqa: E402
+from blackbox.rec import discover
+from blackbox.tape import head as head_mod
+from blackbox.tape import scanner, segments
+from blackbox.tape import seal as seal_mod
+from blackbox.tape.writer import TapeWriter
 
 CHILD = ROOT / "tests" / "_child.py"
 

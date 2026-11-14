@@ -8,9 +8,9 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from blackbox import constants as C  # noqa: E402
-from blackbox.config import Config, TapeConfig, load_config  # noqa: E402
-from blackbox.errors import BlackBoxError  # noqa: E402
+from blackbox import constants as C
+from blackbox.config import Config, TapeConfig, load_config
+from blackbox.errors import BlackBoxError
 
 
 def test_defaults():
