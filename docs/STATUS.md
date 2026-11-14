@@ -26,25 +26,25 @@
 | Lint + types (C6) | `make fmt` (ruff 0.17.5, mypy 2.4.1) | **0 findings** both |
 | Forbidden words (C12) | `tests/test_forbidden_words.py` | green over the tree **and** `git log` |
 
-Total: **157 tests**, all green (`make test`).
+Total: **159 tests**, all green (`make test`).
 
 ## 2. §15.1 rows — gate column is ext4 (C1), tmpfs is the labelled second column
 
 Same protocol on both filesystems, both written into one JSON. Gate: **p50 ≤ 25 µs, p99 ≤ 250 µs,
 ≥ 40 000 ev/s** for a full event with `content=hash`, CHAIN included.
 
-| Row | ext4 (gate) | tmpfs (label only) | Source |
-|---|---|---|---|
-| writer event, group commit 16 KiB, chain on | **p50 4.477 µs · p99 46.259 µs · 75,255 ev/s** | p50 4.415 µs · p99 39.063 µs · 77,326 ev/s | `2026-11-14-writer-throughput.json` |
-| writer event, publish per event | p50 5.531 µs · p99 34.293 µs · 61,084 ev/s | p50 6.378 µs · p99 27.369 µs | same |
-| kernel mode (`sync_ms=250`, `sync_bytes=1 MiB`) | p50 4.741 µs · p99 64.509 µs · 64,954 ev/s · **sync stall max 3 019 µs** (28 syncs) | p50 4.573 · p99 55.261 · stall max 183 µs | same |
-| kernel mode, sync-dense (`sync_bytes=64 KiB`) | p50 4.922 · p99 64.446 · **stall max 3 746 µs** (453 syncs) | p50 4.618 · stall max 293 µs | same |
-| group-commit window | 4.401 ms @ 1 ev/s · 4.996 ms @ 1 000 ev/s · 4.979 ms unbounded | 0.0 / 5.0 / 1.65 ms | same |
-| recovery, 10 k frames | p50 120.25 ms (**58.0 ms per 10k**), p99 124.34 ms | p50 159.17 ms (45.4 ms/10k) | `2026-11-14-recovery.json` |
-| disk amplification | 1.22× per-event · 1.263× 4 KiB · **1.231× 16 KiB** · 1.222× 64 KiB | identical (frame-size property) | same |
-| RSS above baseline at a full 16 MiB segment (C8) | **5.15 MiB** (anon +0.25, file +4.9) | 5.05 MiB | same |
-| stage table | crc32 1 KiB 0.576 µs · blake2b 1 KiB 1.989 µs · cbor encode 9.14 µs · frame encode 3.089 µs · memcpy 0.219 µs · head publish 1.21 µs | within noise | `2026-11-14-frame.json` |
-| mmap vs `write()` (P1-19, ADR-001) | p50 ratio 1.020 / 1.193 / 1.191 at 1 k / 10 k / 40 k ev/s (run 2); run 1 gave 1.143 / 1.212 / 1.223 — the exact ratio is labelled `requires hardware` | — | `2026-11-14-writer-ab.json` |
+| Row | ext4 (gate) | tmpfs (label only) | §15.1 verdict | Source |
+|---|---|---|---|---|
+| **full event, group commit 16 KiB, CHAIN on** (the gate row) | **p50 4.457 µs · p95 9.877 µs · p99 45.057 µs · 75,672 ev/s** | p50 4.41 · p95 9.347 · p99 31.177 · 78,285 ev/s | **PASS** (25 / 250 µs, 40 000 ev/s) | `2026-11-14-writer-throughput.json` |
+| full event, publish per event | p50 4.366 · p99 26.957 · 76,871 ev/s | p50 4.329 · p99 14.06 | not the gate row (no group commit) | same |
+| kernel mode (`sync_ms=250`, `sync_bytes=1 MiB`) | p50 4.589 · p99 63.628 · 69,770 ev/s · sync stall max 5991 µs (28 syncs) | p50 4.427 · stall max 136 µs | reported, not gated (F2 durability path) | same |
+| kernel mode, sync-dense (`sync_bytes=64 KiB`) | p50 4.534 · p99 54.652 · stall max 3573 µs (454 syncs) | p50 4.468 · stall max 440 µs | reported, not gated | same |
+| group-commit window | 4.374 ms @ 1 ev/s · 4.998 ms @ 1 000 ev/s · 4.178 ms unbounded (120.93 ev/commit) | 0.0 / 5.0 / 1.65 ms | bound is 5 ms: **PASS** | same |
+| recovery, 10 k frames | p50 120.25 ms · p99 124.34 ms (**58.0 ms/10k**) | p50 159.17 ms | no §15.1 row exists for scan time; reported for P1-11 | `2026-11-14-recovery.json` |
+| disk amplification | 1.843× publish-per-event · 1.263× 4 KiB · **1.231× 16 KiB** · 1.222× 64 KiB | identical (frame-size property) | ≤ 1.25× at 16 KiB: **PASS** | same |
+| RSS above baseline at a full 16 MiB segment (C8) | **5.15 MiB** (anon +0.25, file +4.9) | 5.05 MiB | under the 24 MiB threshold: **PASS**, no `P1-08b` | same |
+| stage table | crc32 1 KiB 0.576 µs · blake2b 1 KiB 1.989 µs · cbor encode 9.14 µs · frame encode 3.089 µs · memcpy 0.219 µs · head publish 1.21 µs | within noise | stages are non-additive (see C2) | `2026-11-14-frame.json` |
+| mmap vs `write()` (P1-19, ADR-001) | interleaved p50 ratio 1.395 / 1.233 / 1.211 at 1 k / 10 k / 40 k ev/s | 1.18 / 1.185 at 10 k / 40 k | keep mmap; exact ratio `requires hardware` | `2026-11-14-writer-ab.json` |
 
 **C2 — the measured interval, stated once:** it starts from a Python `dict` holding a 1 KiB `content` field,
 with `content=hash` (BLAKE2b-256 of the body), and includes the CBOR encode, the frame encode, the append into
@@ -52,6 +52,20 @@ the active segment and the amortised **publish + CHAIN**. Redaction arrives at G
 **writer-level lower bound for the §15.1 row**. The bench does not pre-encode, and the stages are **not
 additive** (the CBOR encode allocates, the frame writes into the mapping) — `bench_frame.py` does not claim to
 sum to the event number, and the JSON says so.
+
+## 3a. The Stage 2 brief's nine CHANGE items
+
+| # | Item | State |
+|---|---|---|
+| 1 | P1-09, P1-13, P1-18 in Stage 2; order; CHAIN in the hot path; retention out | **yes** — roll, seal footer and the CHAIN frame are in, and every gate number includes CHAIN. Retention is still out and labelled "no-retention path" |
+| 2 | D1: `pytest` + `hypothesis` pinned in `[project.optional-dependencies].dev`; P0-13 fails if `src/` imports them | **yes** — `pytest==8.3.4`, `hypothesis==6.122.3`; `tests/test_stdlib_only.py` compares every import against `sys.stdlib_module_names` |
+| 3 | D2 + D7: floor `>= 3.11`, `tomllib`, compatibility doc, plan deviation note | **yes** — `requires-python = ">=3.11"`, plan P0-01 row + Appendix A amendment, `docs/compatibility.md` row for 3.10 |
+| 4 | E3: ubuntu/macos/windows workflow files; those gates never reported as passed | **yes** — `.github/workflows/{ci,nightly}.yml` with a 3.11/3.12/3.13 × 3-OS matrix, `fail-fast: false`; never run (see C7) |
+| 5 | D3/D5/D6: attach.md later, commit per ticket, never push | **yes** — no `docs/attach.md`, one commit per ticket, nothing pushed |
+| 6 | D4: F1–F13 — F4 only if layout-safe, F8 re-scoped, the rest held | **yes** — §5; F4 is DV-001 (layout unchanged), F8 is D-003 |
+| 7 | S17 wording; S17 covers the **first** preallocation too | **yes, now** — `open()` degrades to a sink instead of raising (DV-007/D-014). No report says "hazard class reproducible"; the claim is "injected fault, control case pending" |
+| 8 | Measurement discipline: a row per ticket, p50/p95/p99 with N and warm-up and the JSON path, interleaved P1-19, a verdict per §15.1 row | **yes** — `docs/progress.md` §"Hot-path numbers", §2's verdict column, `bench_writer_ab.py` interleaves `mmap, write, write, mmap` |
+| 9 | Mid-stage checkpoint STAGE 2A REPORT, then stop | **done earlier** — `docs/stage-2a-report.md`; the owner's reply superseded the stop, so the build continued under A1–A9 and C1–C13 |
 
 ## 3. The thirteen corrections (C1–C13), one line each
 
@@ -120,7 +134,7 @@ None of the held items changes a frozen byte or reverses a §3 decision, so noth
 
 | Check | State |
 |---|---|
-| `make test` from a clean clone | green, 157 tests (ran in `/tmp/clone` at `ee9b0f4`, with only the dev venv) |
+| `make test` from a clean clone | green at `ee9b0f4` with 157 tests; **159 now** (two S17-at-open cases added since) |
 | `make kill` (500 trials, ext4, from the clean clone) | 0 violations |
 | `make bench` into `bench/results/` | green, both columns, from the clean clone |
 | `make fuzz` | 100 000 iterations, 0 non-`CBORError` (clean clone too) |

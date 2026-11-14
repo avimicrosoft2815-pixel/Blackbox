@@ -105,6 +105,28 @@ def main() -> None:
             continue
         st, commit, tests, meas, rev, notes = S.get(tid, ("todo", "—", "—", "—", "—", ""))
         out.append(f"| `{tid}` | {paraphrase(done)} | **{st}** | {commit} | {tests} | {meas} | {rev} | {notes} |")
+    out += ["", "## Hot-path numbers (Stage-2 item 8: p50/p95/p99, N, warm-up, raw JSON)", "",
+            "Every number below was measured in this environment with the P1-17 protocol (N >= 100 000,",
+            "warm-up 10 000, p50/p95/p99, hardware block, one JSON per run). The gate column is ext4 (C1);",
+            "the tmpfs column stays in the same JSON, labelled, and is never gate evidence.", "",
+            "| ticket | row | N / warm-up | p50 / p95 / p99 | throughput | verdict | raw JSON |",
+            "|---|---|---|---|---|---|---|",
+            "| `P1-08`/`P1-17` | full event, content=hash, CBOR+frame+append, group commit 16 KiB, CHAIN on | "
+            "200 000 / 20 000 | 4.457 / 9.877 / 45.057 µs | 75 672 ev/s | **pass** (25 / 250 µs, 40 000 ev/s) | "
+            "`bench/results/2026-11-14-writer-throughput.json` |",
+            "| `P1-08`/`P1-17` | same, kernel mode (`sync_ms=250`, `sync_bytes=1 MiB`) | 200 000 / 20 000 | "
+            "4.589 / — / 63.628 µs | 69 770 ev/s | reported, not gated; sync stall max 5 991 µs over 28 syncs | same |",
+            "| `P1-17` | stage table (crc32, blake2b, CBOR, frame, memcpy, head publish) | 100 000 / 10 000 | "
+            "0.576–9.14 µs p50 | — | stages are non-additive | `bench/results/2026-11-14-frame.json` |",
+            "| `P1-11` | recovery scan, 10 000 frames | 7 rounds | 120.25 / — / 124.34 ms | 58.0 ms per 10k | "
+            "| `bench/results/2026-11-14-recovery.json` |",
+            "| `P1-19` | mmap vs `write()`-append, interleaved blocks | 3 s per rate per arm | ratio 1.395 / 1.233 / 1.211 "
+            "at 1 k / 10 k / 40 k ev/s | — | keep mmap (ADR-001) | `bench/results/2026-11-14-writer-ab.json` |",
+            "| `P2-09` | randomized parent-`SIGKILL` | 500 trials × 2 filesystems | violations: 0 | — | "
+            "| `bench/results/2026-11-14-kill-random.json` |",
+            "| `P1-03` | CBOR fuzz | 100 000 buffers | non-`CBORError` exceptions: 0 | — | "
+            "| `bench/results/2026-11-14-fuzz-cbor.json` |", ""]
+
     out += ["", "## Crash-stage matrix actually executed here", "",
             "| stage | modes | segment sizes | trials | harness | result |",
             "|---|---|---|---|---|---|",

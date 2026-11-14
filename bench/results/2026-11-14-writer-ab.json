@@ -1,7 +1,7 @@
 {
   "date": "2026-11-14",
   "probe": "P1-19 mmap vs write()-append (ADR-001 verdict)",
-  "protocol": "identical frame encoder, 16 KiB group commit, CHAIN frame and two-slot head publish; only the store differs; paced at the offered rate for --seconds",
+  "protocol": "identical frame encoder, 16 KiB group commit, CHAIN frame and two-slot head publish; only the store differs; INTERLEAVED blocks (mmap, write, write, mmap) at each offered rate",
   "gate_column": "ext4",
   "hardware": {
     "cpu": "Intel(R) Xeon(R) Processor @ 2.60GHz",
@@ -32,82 +32,89 @@
         "mmap": [
           {
             "offered_ev_s": 1000,
-            "events": 2859,
-            "achieved_ev_s": 953.0,
-            "p50_us": 21.898,
-            "p95_us": 105.274,
-            "p99_us": 158.842,
-            "cpu_us_per_event": 459.369
+            "events": 1431,
+            "achieved_ev_s": 954.0,
+            "p50_us": 13.4,
+            "p95_us": 52.732,
+            "p99_us": 77.195,
+            "cpu_us_per_event": 431.892,
+            "blocks": 2
           },
           {
             "offered_ev_s": 10000,
-            "events": 20645,
-            "achieved_ev_s": 6881.7,
-            "p50_us": 13.219,
-            "p95_us": 42.577,
-            "p99_us": 98.925,
-            "cpu_us_per_event": 71.078
+            "events": 9229,
+            "achieved_ev_s": 6152.7,
+            "p50_us": 12.093,
+            "p95_us": 29.278,
+            "p99_us": 58.807,
+            "cpu_us_per_event": 74.977,
+            "blocks": 2
           },
           {
             "offered_ev_s": 40000,
-            "events": 30499,
-            "achieved_ev_s": 10166.3,
-            "p50_us": 16.129,
-            "p95_us": 36.955,
-            "p99_us": 107.722,
-            "cpu_us_per_event": 55.12
+            "events": 16137,
+            "achieved_ev_s": 10758.0,
+            "p50_us": 12.064,
+            "p95_us": 20.938,
+            "p99_us": 64.681,
+            "cpu_us_per_event": 45.624,
+            "blocks": 2
           }
         ],
         "write": [
           {
             "offered_ev_s": 1000,
-            "events": 2860,
+            "events": 1430,
             "achieved_ev_s": 953.3,
-            "p50_us": 18.865,
-            "p95_us": 49.154,
-            "p99_us": 98.753,
-            "cpu_us_per_event": 436.606
+            "p50_us": 18.695,
+            "p95_us": 55.103,
+            "p99_us": 104.249,
+            "cpu_us_per_event": 431.322,
+            "blocks": 2
           },
           {
             "offered_ev_s": 10000,
-            "events": 24286,
-            "achieved_ev_s": 8095.3,
-            "p50_us": 18.471,
-            "p95_us": 41.192,
-            "p99_us": 94.865,
-            "cpu_us_per_event": 69.269
+            "events": 11167,
+            "achieved_ev_s": 7444.7,
+            "p50_us": 14.906,
+            "p95_us": 28.436,
+            "p99_us": 78.76,
+            "cpu_us_per_event": 66.773,
+            "blocks": 2
           },
           {
             "offered_ev_s": 40000,
-            "events": 30706,
-            "achieved_ev_s": 10235.3,
-            "p50_us": 17.814,
-            "p95_us": 34.94,
-            "p99_us": 91.771,
-            "cpu_us_per_event": 55.206
+            "events": 15883,
+            "achieved_ev_s": 10588.7,
+            "p50_us": 14.611,
+            "p95_us": 22.562,
+            "p99_us": 73.814,
+            "cpu_us_per_event": 47.473,
+            "blocks": 2
           }
         ]
       },
       "ratios": [
         {
           "offered_ev_s": 1000,
-          "p50_ratio": 0.861,
-          "p99_ratio": 0.622,
-          "cpu_ratio": 0.95
+          "p50_ratio": 1.395,
+          "p99_ratio": 1.35,
+          "cpu_ratio": 0.999
         },
         {
           "offered_ev_s": 10000,
-          "p50_ratio": 1.397,
-          "p99_ratio": 0.959,
-          "cpu_ratio": 0.975
+          "p50_ratio": 1.233,
+          "p99_ratio": 1.339,
+          "cpu_ratio": 0.891
         },
         {
           "offered_ev_s": 40000,
-          "p50_ratio": 1.104,
-          "p99_ratio": 0.852,
-          "cpu_ratio": 1.002
+          "p50_ratio": 1.211,
+          "p99_ratio": 1.141,
+          "cpu_ratio": 1.041
         }
-      ]
+      ],
+      "interleaving": "mmap, write, write, mmap per rate; block = seconds/4"
     },
     "tmpfs": {
       "filesystem": "tmpfs",
@@ -115,86 +122,93 @@
         "mmap": [
           {
             "offered_ev_s": 1000,
-            "events": 2872,
-            "achieved_ev_s": 957.3,
-            "p50_us": 21.386,
-            "p95_us": 93.509,
-            "p99_us": 125.584,
-            "cpu_us_per_event": 447.934
+            "events": 1433,
+            "achieved_ev_s": 955.3,
+            "p50_us": 17.376,
+            "p95_us": 71.003,
+            "p99_us": 112.844,
+            "cpu_us_per_event": 446.097,
+            "blocks": 2
           },
           {
             "offered_ev_s": 10000,
-            "events": 21187,
-            "achieved_ev_s": 7062.3,
-            "p50_us": 15.117,
-            "p95_us": 38.042,
-            "p99_us": 103.815,
-            "cpu_us_per_event": 67.683
+            "events": 9876,
+            "achieved_ev_s": 6584.0,
+            "p50_us": 12.197,
+            "p95_us": 25.97,
+            "p99_us": 65.026,
+            "cpu_us_per_event": 68.572,
+            "blocks": 2
           },
           {
             "offered_ev_s": 40000,
-            "events": 31256,
-            "achieved_ev_s": 10418.7,
-            "p50_us": 12.106,
-            "p95_us": 29.365,
-            "p99_us": 77.688,
-            "cpu_us_per_event": 49.888
+            "events": 15178,
+            "achieved_ev_s": 10118.7,
+            "p50_us": 12.314,
+            "p95_us": 40.191,
+            "p99_us": 86.163,
+            "cpu_us_per_event": 56.335,
+            "blocks": 2
           }
         ],
         "write": [
           {
             "offered_ev_s": 1000,
-            "events": 2866,
-            "achieved_ev_s": 955.3,
-            "p50_us": 22.491,
-            "p95_us": 51.9,
-            "p99_us": 109.309,
-            "cpu_us_per_event": 431.508
+            "events": 1438,
+            "achieved_ev_s": 958.7,
+            "p50_us": 17.205,
+            "p95_us": 35.203,
+            "p99_us": 77.166,
+            "cpu_us_per_event": 416.477,
+            "blocks": 2
           },
           {
             "offered_ev_s": 10000,
-            "events": 23011,
-            "achieved_ev_s": 7670.3,
-            "p50_us": 17.44,
-            "p95_us": 32.262,
-            "p99_us": 86.037,
-            "cpu_us_per_event": 65.949
+            "events": 11595,
+            "achieved_ev_s": 7730.0,
+            "p50_us": 14.389,
+            "p95_us": 20.668,
+            "p99_us": 70.811,
+            "cpu_us_per_event": 62.321,
+            "blocks": 2
           },
           {
             "offered_ev_s": 40000,
-            "events": 31152,
-            "achieved_ev_s": 10384.0,
-            "p50_us": 14.825,
-            "p95_us": 28.164,
-            "p99_us": 82.543,
-            "cpu_us_per_event": 50.159
+            "events": 15810,
+            "achieved_ev_s": 10540.0,
+            "p50_us": 14.597,
+            "p95_us": 37.275,
+            "p99_us": 79.723,
+            "cpu_us_per_event": 53.671,
+            "blocks": 2
           }
         ]
       },
       "ratios": [
         {
           "offered_ev_s": 1000,
-          "p50_ratio": 1.052,
-          "p99_ratio": 0.87,
-          "cpu_ratio": 0.963
+          "p50_ratio": 0.99,
+          "p99_ratio": 0.684,
+          "cpu_ratio": 0.934
         },
         {
           "offered_ev_s": 10000,
-          "p50_ratio": 1.154,
-          "p99_ratio": 0.829,
-          "cpu_ratio": 0.974
+          "p50_ratio": 1.18,
+          "p99_ratio": 1.089,
+          "cpu_ratio": 0.909
         },
         {
           "offered_ev_s": 40000,
-          "p50_ratio": 1.225,
-          "p99_ratio": 1.062,
-          "cpu_ratio": 1.005
+          "p50_ratio": 1.185,
+          "p99_ratio": 0.925,
+          "cpu_ratio": 0.953
         }
-      ]
+      ],
+      "interleaving": "mmap, write, write, mmap per rate; block = seconds/4"
     }
   },
   "verdict": {
-    "worst_p50_ratio": 1.397,
+    "worst_p50_ratio": 1.395,
     "within_20_percent": false,
     "decision": "keep mmap: write()-append is more than 20 % slower at some target rate"
   }

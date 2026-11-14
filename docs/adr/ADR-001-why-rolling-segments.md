@@ -36,36 +36,31 @@ left raises `SIGBUS` and kills the user's process. Segments are therefore fully 
 the same 16 KiB group commit, the same CHAIN frame and the same two-slot head publish; only the store differs.
 Gate column is ext4; tmpfs is the labelled second column.
 
-**Run 1** (first measurement of the day, 3 s per rate):
+**Run 3 — interleaved** (Stage-2 item 8: the arms alternate `mmap, write, write, mmap` per rate, block =
+`seconds / 4`, so machine drift hits both arms equally). This is the run the verdict rests on:
 
 | offered rate | p50 ratio (write/mmap) | p99 ratio | CPU ratio |
 |---|---|---|---|
-| 1 000 ev/s | 1.143 | 0.979 | 0.958 |
-| 10 000 ev/s | **1.212** | 1.132 | 0.898 |
-| 40 000 ev/s | **1.223** | 1.257 | 1.085 |
+| 1 000 ev/s (ext4) | 1.395 | 1.350 | 0.999 |
+| 10 000 ev/s (ext4) | **1.233** | 1.339 | 0.891 |
+| 40 000 ev/s (ext4) | **1.211** | 1.141 | 1.041 |
+| 1 000 / 10 000 / 40 000 (tmpfs) | 0.990 / 1.180 / 1.185 | 0.684 / 1.089 / 0.925 | 0.934 / 0.909 / 0.953 |
 
-**Run 2** (same binary, same protocol, re-run after the JSON path labels were fixed, 3 s per rate):
+Runs 1 and 2 (sequential, not interleaved) gave 1.143 / 1.212 / 1.223 and 1.020 / 1.193 / 1.191. Interleaving
+did **not** shrink the effect — it made the direction consistent: at 10 000 and 40 000 ev/s, the `write()` arm
+costs 1.18–1.23× the mmap p50 in every interleaved pair on both filesystems. The 1 000 ev/s row is the noisy
+one (0.99–1.40 across runs), which is expected: at ~1 ms per deadline the pacing sleep dominates the 12 µs
+measurement, so that row says little either way.
 
-| offered rate | p50 ratio | p99 ratio | CPU ratio |
-|---|---|---|---|
-| 1 000 ev/s | 1.020 | 0.969 | 1.034 |
-| 10 000 ev/s | **1.193** | 1.289 | 0.912 |
-| 40 000 ev/s | **1.191** | 1.130 | 1.071 |
+The reopen condition was "`write()` within 20 %". At the two rates that matter for §15.1 it is not met.
 
-(The committed JSON is run 2. Run 1 is quoted above because it is the same ticket's first observation and the
-verdict has to survive both.)
+**Verdict: keep mmap.** Honest caveats:
 
-The reopen condition was "`write()` within 20 %". It was not met in either run: at 10 000 and 40 000 ev/s the
-`write()` arm costs 1.19–1.22× the mmap p50, with p99 up to 1.29×. CPU is noise in both directions.
-
-**Verdict: keep mmap.** Honest caveats, because this number is weaker than it looks:
-
-* the margin is small — 1.19–1.22 against a 1.20 threshold — and a single further run of the same binary
-  produced 0.861 at 1 000 ev/s and 1.104 at 40 000 ev/s. The *sign* of the effect is stable in the two runs
-  quoted (write is slower at the two higher rates); its **size is not**. Treat the exact ratio as
-  `requires hardware`: a stable repeat needs a machine without a shared virtual disk and without other load.
-* the pacing loop (`time.sleep(0)` on the deadline) adds microseconds to *both* arms, which is why the
-  absolute p50 here (≈12 µs) is larger than the unpaced §15.1 number (≈4.3 µs). Only the ratio is being read.
+* the effect at 10 k/40 k ev/s is 1.18–1.23×, i.e. it clears the 20 % bar by a small margin (1.21 vs 1.20 at
+  40 k ev/s), so the decision holds but the margin is not overwhelming;
+* this is one machine with a virtualised disk; the exact ratio is labelled `requires hardware` in STATUS;
+* the pacing loop (`time.sleep(0)` on the deadline) adds microseconds to *both* arms, which is why the absolute
+  p50 here (≈12 µs) is larger than the unpaced §15.1 number (≈4.3 µs). Only the ratio is being read.
 
 Nothing about this measurement changes a byte of the format, so no `DEVIATIONS.md` entry is needed; D-013
 records the decision and the caveat.

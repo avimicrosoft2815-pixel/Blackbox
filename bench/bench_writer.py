@@ -141,7 +141,21 @@ def measure_column(column: dict, args, body: bytes) -> dict:
         run(column, args.n, args.warmup, body, C.DEFAULT_BATCH_BYTES, True,
             mode="kernel", keeper=True, sync_bytes=64 << 10),             # sync-dense: enough syncs for a p99
     ]
-    return {"rows": rows,
+    # Stage-2 item 8: every hot-path row carries its §15.1 verdict, not just a number. The gate is written
+    # against "one full event, content=hash, CHAIN included", i.e. the group-commit row with chain=True.
+    budget = {"p50_us_max": 25.0, "p99_us_max": 250.0, "events_per_s_min": 40_000}
+    for row in rows:
+        row["gate"] = bool(row["chain"] and row["mode"] == "process" and row["batch_bytes"])
+        if row["gate"]:
+            failure = []
+            if row["p50_us"] > budget["p50_us_max"]:
+                failure.append("p50")
+            if row["p99_us"] > budget["p99_us_max"]:
+                failure.append("p99")
+            if row["events_per_s"] < budget["events_per_s_min"]:
+                failure.append("throughput")
+            row["verdict"] = "pass" if not failure else "FAIL:" + ",".join(failure)
+    return {"budget": budget, "rows": rows,
             "group_commit": [paced(column, 1, 5, C.DEFAULT_BATCH_BYTES),
                              paced(column, 1_000, 3, C.DEFAULT_BATCH_BYTES),
                              paced(column, 0, 3, C.DEFAULT_BATCH_BYTES)]}
