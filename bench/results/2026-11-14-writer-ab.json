@@ -1,0 +1,201 @@
+{
+  "date": "2026-11-14",
+  "probe": "P1-19 mmap vs write()-append (ADR-001 verdict)",
+  "protocol": "identical frame encoder, 16 KiB group commit, CHAIN frame and two-slot head publish; only the store differs; paced at the offered rate for --seconds",
+  "gate_column": "ext4",
+  "hardware": {
+    "cpu": "Intel(R) Xeon(R) Processor @ 2.60GHz",
+    "cpu_count": 2,
+    "python": "3.11.2",
+    "implementation": "CPython",
+    "os": "Linux-6.1.158+-x86_64-with-glibc2.36",
+    "machine": "x86_64",
+    "mem_total_kib": 4034452
+  },
+  "threshold": "write() within 20 % of mmap at every rate -> ADR-001 reopened",
+  "columns": {
+    "ext4": {
+      "path": "/home/user/Blackbox/.bench/scratch",
+      "gate": true,
+      "note": "gate column: numbers here are measured on the repository's real filesystem"
+    },
+    "tmpfs": {
+      "path": "/dev/shm",
+      "gate": false,
+      "note": "labelled second column only: fdatasync is a no-op on tmpfs, so no durability claim"
+    }
+  },
+  "results": {
+    "ext4": {
+      "filesystem": "ext4",
+      "arms": {
+        "mmap": [
+          {
+            "offered_ev_s": 1000,
+            "events": 2866,
+            "achieved_ev_s": 955.3,
+            "p50_us": 15.8,
+            "p95_us": 68.307,
+            "p99_us": 99.927,
+            "cpu_us_per_event": 433.46
+          },
+          {
+            "offered_ev_s": 10000,
+            "events": 18822,
+            "achieved_ev_s": 6274.0,
+            "p50_us": 11.98,
+            "p95_us": 35.511,
+            "p99_us": 67.336,
+            "cpu_us_per_event": 73.971
+          },
+          {
+            "offered_ev_s": 40000,
+            "events": 31961,
+            "achieved_ev_s": 10653.7,
+            "p50_us": 11.948,
+            "p95_us": 24.451,
+            "p99_us": 63.664,
+            "cpu_us_per_event": 47.203
+          }
+        ],
+        "write": [
+          {
+            "offered_ev_s": 1000,
+            "events": 2871,
+            "achieved_ev_s": 957.0,
+            "p50_us": 18.066,
+            "p95_us": 40.598,
+            "p99_us": 97.87,
+            "cpu_us_per_event": 415.166
+          },
+          {
+            "offered_ev_s": 10000,
+            "events": 21416,
+            "achieved_ev_s": 7138.7,
+            "p50_us": 14.516,
+            "p95_us": 23.242,
+            "p99_us": 76.193,
+            "cpu_us_per_event": 66.4
+          },
+          {
+            "offered_ev_s": 40000,
+            "events": 31085,
+            "achieved_ev_s": 10361.7,
+            "p50_us": 14.612,
+            "p95_us": 29.417,
+            "p99_us": 79.996,
+            "cpu_us_per_event": 51.228
+          }
+        ]
+      },
+      "ratios": [
+        {
+          "offered_ev_s": 1000,
+          "p50_ratio": 1.143,
+          "p99_ratio": 0.979,
+          "cpu_ratio": 0.958
+        },
+        {
+          "offered_ev_s": 10000,
+          "p50_ratio": 1.212,
+          "p99_ratio": 1.132,
+          "cpu_ratio": 0.898
+        },
+        {
+          "offered_ev_s": 40000,
+          "p50_ratio": 1.223,
+          "p99_ratio": 1.257,
+          "cpu_ratio": 1.085
+        }
+      ]
+    },
+    "tmpfs": {
+      "filesystem": "tmpfs",
+      "arms": {
+        "mmap": [
+          {
+            "offered_ev_s": 1000,
+            "events": 2871,
+            "achieved_ev_s": 957.0,
+            "p50_us": 16.413,
+            "p95_us": 70.402,
+            "p99_us": 102.125,
+            "cpu_us_per_event": 423.968
+          },
+          {
+            "offered_ev_s": 10000,
+            "events": 18798,
+            "achieved_ev_s": 6266.0,
+            "p50_us": 11.987,
+            "p95_us": 27.984,
+            "p99_us": 63.107,
+            "cpu_us_per_event": 73.461
+          },
+          {
+            "offered_ev_s": 40000,
+            "events": 31396,
+            "achieved_ev_s": 10465.3,
+            "p50_us": 11.986,
+            "p95_us": 22.937,
+            "p99_us": 66.457,
+            "cpu_us_per_event": 48.41
+          }
+        ],
+        "write": [
+          {
+            "offered_ev_s": 1000,
+            "events": 2867,
+            "achieved_ev_s": 955.7,
+            "p50_us": 16.745,
+            "p95_us": 37.95,
+            "p99_us": 98.958,
+            "cpu_us_per_event": 438.385
+          },
+          {
+            "offered_ev_s": 10000,
+            "events": 21303,
+            "achieved_ev_s": 7101.0,
+            "p50_us": 14.303,
+            "p95_us": 28.472,
+            "p99_us": 81.319,
+            "cpu_us_per_event": 67.019
+          },
+          {
+            "offered_ev_s": 40000,
+            "events": 30247,
+            "achieved_ev_s": 10082.3,
+            "p50_us": 14.276,
+            "p95_us": 22.085,
+            "p99_us": 75.075,
+            "cpu_us_per_event": 51.827
+          }
+        ]
+      },
+      "ratios": [
+        {
+          "offered_ev_s": 1000,
+          "p50_ratio": 1.02,
+          "p99_ratio": 0.969,
+          "cpu_ratio": 1.034
+        },
+        {
+          "offered_ev_s": 10000,
+          "p50_ratio": 1.193,
+          "p99_ratio": 1.289,
+          "cpu_ratio": 0.912
+        },
+        {
+          "offered_ev_s": 40000,
+          "p50_ratio": 1.191,
+          "p99_ratio": 1.13,
+          "cpu_ratio": 1.071
+        }
+      ]
+    }
+  },
+  "verdict": {
+    "worst_p50_ratio": 1.223,
+    "within_20_percent": false,
+    "decision": "keep mmap: write()-append is more than 20 % slower at some target rate"
+  }
+}
