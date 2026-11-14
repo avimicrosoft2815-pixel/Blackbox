@@ -1873,7 +1873,7 @@ examples/{hello_agent.py, crash_demo.py, replay_demo.py}
 
 | ID | Path | Action | Done when | Est |
 |---|---|---|---|---|
-| P0-01 | `pyproject.toml` | hatchling, `requires-python>=3.10`, core `dependencies = []`, extras, `[project.scripts] blackbox=blackbox.cli.main:main` | `pip install -e .` in a clean 3.10 venv succeeds with zero deps | 2 |
+| P0-01 | `pyproject.toml` | hatchling, `requires-python>=3.10`, core `dependencies = []`, extras, `[project.scripts] blackbox=blackbox.cli.main:main` | `pip install -e .` in a clean 3.10 venv succeeds with zero deps. **Amendment 2026-11-14 (owner-approved):** floor is **`>=3.11`** (3.10 EOL Oct 2026; `tomllib` is 3.11+, and core must stay dependency-free), build backend is **setuptools** (already present — installing hatchling would violate the no-install rule), and the console script lands with **P4-05** | 2 |
 | P0-02 | `.github/workflows/ci.yml` | matrix lint+test on 3.10/3.12/3.13 × ubuntu/macos/windows | first PR runs green in all cells | 3 |
 | P0-03 | `.github/workflows/nightly.yml` | nightly kill-matrix (2 000 trials), bench smoke, capsule fuzz | scheduled run produces artifacts | 2 |
 | P0-04 | `docs/guarantees.md` | write the F1–F4 class definitions and the mode table **verbatim from §10**, including the "never claim" list | every row has a linked planned test ID | 2 |
@@ -2572,6 +2572,8 @@ max_attached = 16
 bind = "127.0.0.1"
 port = 0
 ```
+
+**Amendment 2026-11-14 (owner-approved):** `requires-python >= 3.11` — the TOML config is parsed with stdlib `tomllib`, so 3.10 is excluded rather than requiring a vendored parser. The schema below is unchanged.
 
 **Precedence:** CLI flag > `BLACKBOX_*` env > `./blackbox.toml` > `~/.blackbox/config.toml` > defaults. Every key has a documented type, range, and failure mode; unknown keys are a warning, not an error (forward compatibility).
 
