@@ -52,7 +52,7 @@ mapped-file-cannot-be-deleted problem. Every number below was re-measured on the
 | Lint + types (C6) | `make fmt` (ruff 0.17.5, mypy 2.4.1) | **0 findings** both |
 | Forbidden words (C12) | `tests/test_forbidden_words.py` | green over the tree **and** `git log` |
 
-Total: **.................................. tests**, all green.
+Total: **175 tests**, all green.
 
 ## 2. §15.1 rows — ext4 is the gate column (C1); every row carries its verdict
 
