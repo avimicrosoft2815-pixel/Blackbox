@@ -117,3 +117,28 @@ def test_magic_fields_are_exactly_their_width():
     for name in ("MAGIC_FRAME", "MAGIC_FRAME_TAIL"):
         assert len(getattr(C, name)) == 4, name
     assert C.MAGIC_SEG == bytes.fromhex("4242585345473200")     # "BBXSEG2" + NUL pad, frozen in hex
+
+
+def test_host_fingerprint_hashes_a_real_hostname():
+    """A6: the field must not hash an empty string, and it must not need the network to be filled."""
+    import platform
+
+    from blackbox.codec.ids import host_fingerprint
+
+    fp = host_fingerprint()
+    assert len(fp) == 32
+    assert fp[16:] == b"\x00" * 16
+    assert fp[:16] != blake2b(b"|")[:16], "host_fingerprint must not be a constant"
+
+    material = f"{platform.node()}|{platform.system()}|{platform.machine()}".encode()
+    expected = blake2b(material)[:16]
+    if platform.node():                                   # always true on the CI hosts we run on
+        assert fp[:16] == expected
+
+
+def test_no_socket_import_anywhere_in_the_core():
+    from pathlib import Path
+
+    hits = [p.name for p in (Path(__file__).resolve().parents[1] / "src").rglob("*.py")
+            if "import socket" in p.read_text(encoding="utf-8")]
+    assert not hits, f"the core must not import socket at all: {hits}"

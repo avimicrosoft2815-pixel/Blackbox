@@ -252,4 +252,4 @@ def decode_or_raise(buf: bytes):
     try:
         return decode_exact(buf)
     except CBORError as exc:
-        raise bbx("BBX-E151", str(exc)) from exc
+        raise bbx("BBX-E155", str(exc)) from exc

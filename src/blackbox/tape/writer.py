@@ -122,7 +122,7 @@ class TapeWriter:
                 self._create_segment(1)
             except prealloc.PreallocError as exc:
                 self.degraded_reason = "NO_SPACE"
-                raise bbx("BBX-E140", str(exc)) from exc
+                raise bbx("BBX-E132", str(exc)) from exc
             self._map_segment(1)
             self._publish()
         else:
@@ -328,7 +328,7 @@ class TapeWriter:
             self.degraded_reason = "NO_SPACE"
             self._slot = self._slot.with_(flags=self._slot.flags | C.HEAD_FLAG_DEGRADED_NO_SPACE)
             self._publish()
-            raise bbx("BBX-E140", "preallocation failed at roll; recording degraded") from None
+            raise bbx("BBX-E132", "preallocation failed at roll; recording degraded") from None
         _die("S14b")
         self._map_segment(next_no)
         _die("S15")     # segment n+1 exists (and its header is durable) but the head still names n

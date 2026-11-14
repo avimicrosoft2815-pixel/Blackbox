@@ -2680,6 +2680,19 @@ Removed keys: `ring_bytes`, `[rules]` (replaced by `[[trigger]]`). Precedence un
 | `BBX-E601` | serverless: `/tmp` not writable | set `data_dir` to a writable path |
 | `BBX-E602` | serverless: recovered a previous invocation's run | expected; the capsule path was handed to `on_capsule` |
 
+## Appendix B″ — error codes added by the 2026-11-14 build (append-only)
+
+| Code | Meaning | User action |
+|---|---|---|
+| `BBX-E133` | interrupted roll left an orphan segment (`n+1` exists, head still names `n`) | recovery adopts it automatically; `blackbox doctor --tape` prints the queue |
+| `BBX-E154` | retention blocked by a pin | `blackbox ls --pinned`, or raise the budget |
+| `BBX-E155` | invalid CBOR payload | a producer wrote a non-canonical or malformed payload |
+| `BBX-E156` | codec unavailable for a recorded body | install the optional codec extra, or re-record with `content=hash` |
+| `BBX-E225` | frame larger than one segment | externalise the payload or raise `segment_bytes` |
+
+`BBX-E140` was briefly reused for "segment preallocation failed" in this build; that is `BBX-E132` and the
+registry now matches this appendix in both directions (`tests/test_errors.py`).
+
 ## Appendix C — glossary (so reviewers use the same words)
 
 | Term | Definition used here |

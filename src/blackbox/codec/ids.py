@@ -83,12 +83,15 @@ def keyed_hash(key: bytes, data: bytes) -> bytes:
 
 
 def host_fingerprint() -> bytes:
-    """Stable-ish host identity without touching the network (no gethostname: it can hit NSS/DNS)."""
+    """blake2b-128 of "hostname|os|machine" (plan §8.2, offset 0x048), zero-padded to 32 bytes.
+
+    `platform.node()` reads the kernel hostname locally. `socket.gethostname()` is not used anywhere in the
+    core: it can trigger an NSS/DNS lookup, which P0-14 forbids outside the proxy.
+    """
     import platform as _platform
 
-    try:
-        host = os.uname().nodename                      # POSIX, local kernel call
-    except AttributeError:                              # Windows
-        host = os.environ.get("COMPUTERNAME", "unknown")
+    host = _platform.node()                             # no socket import, no resolver, no network
+    if not host:                                        # an empty hostname must not silently hash to a constant
+        host = os.environ.get("COMPUTERNAME") or os.environ.get("HOSTNAME") or "unknown-host"
     material = f"{host}|{_platform.system()}|{_platform.machine()}".encode()
     return blake2b(material)[:16] + b"\x00" * 16

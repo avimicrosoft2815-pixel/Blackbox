@@ -37,7 +37,7 @@ def test_enospc_at_open_degrades(tmp_path, monkeypatch):
     monkeypatch.setenv(prealloc.FAULT_ENV, "ENOSPC")
     with pytest.raises(BlackBoxError) as exc:
         TapeWriter(str(tmp_path), segment_bytes=64 * 1024).open()
-    assert exc.value.code == "BBX-E140"
+    assert exc.value.code == "BBX-E132"    # preallocation failure, not the proxy allowlist code
 
 
 def test_enospc_at_roll_records_degraded_flag(tmp_path, monkeypatch):

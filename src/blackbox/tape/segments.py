@@ -63,7 +63,7 @@ def create(tape_dir: str, n: int, *, writer_uuid: bytes, segment_bytes: int, pre
     """
     path = seg_path(tape_dir, n)
     if os.path.exists(path):
-        raise bbx("BBX-E140", f"segment {n} already exists")
+        raise bbx("BBX-E133", f"segment {n} already exists (an interrupted roll; recovery adopts it)")
     prealloc.preallocate(path, segment_bytes)
     header = encode_header(writer_uuid=writer_uuid, segment_no=n, start_seq=0,
                            segment_bytes=segment_bytes, prev_chain=prev_chain)

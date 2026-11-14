@@ -7,10 +7,19 @@ REGISTRY: dict[str, tuple[str, str]] = {
     "BBX-E120": ("unsupported filesystem for mmap mode", "move the data dir to a local disk or use layout=ring"),
     "BBX-E130": ("segment too small for the configured frame", "raise segment_bytes (minimum 65536)"),
     "BBX-E131": ("refusing to write a sparse segment", "check free space and filesystem; see docs/format.md §5"),
-    "BBX-E140": ("segment preallocation failed", "free disk space; the writer degrades instead of raising"),
-    "BBX-E150": ("retention blocked by a pin", "run `blackbox ls --pinned` or raise the budget"),
-    "BBX-E151": ("invalid CBOR payload", "a producer wrote a non-canonical or malformed payload"),
-    "BBX-E152": ("codec unavailable for a recorded body", "install the optional codec extra or re-record with content=hash"),
+    "BBX-E132": ("segment preallocation failed (ENOSPC/EDQUOT)", "recording degraded, app unaffected; free space or lower segment_bytes"),
+    "BBX-E133": ("interrupted roll left an orphan segment", "recovery adopts it automatically; `blackbox doctor --tape` shows the queue"),
+    "BBX-E140": ("proxy: upstream not in allowlist", "add `--upstream name=url` or fix the base URL path prefix"),
+    "BBX-E141": ("proxy: port in use", "`--port 0` or stop the other process"),
+    "BBX-E142": ("proxy: upstream TLS verification failed", "fix the certificate; `--insecure-upstream name` only for local servers"),
+    "BBX-E143": ("proxy: refused non-loopback bind", "use `--bind-unsafe` only if you understand the exposure"),
+    "BBX-E150": ("hook adapter: tool settings file not found", "run the tool once, or pass `--settings <path>`"),
+    "BBX-E153": ("hook ingest: stdin was not JSON", "the tool's hook payload changed; see the adapter notes"),
+    "BBX-E154": ("retention blocked by a pin", "run `blackbox ls --pinned` or raise the budget"),
+    "BBX-E151": ("hook adapter: unknown settings schema", "upgrade blackbox; the adapter never writes what it cannot parse"),
+    "BBX-E152": ("hook inbox: fold failed (corrupt entry)", "entry quarantined under inbox/.bad/; `doctor --hooks`"),
+    "BBX-E155": ("invalid CBOR payload", "a producer wrote a non-canonical or malformed payload"),
+    "BBX-E156": ("codec unavailable for a recorded body", "install the optional codec extra or re-record with content=hash"),
     "BBX-E210": ("writer is alive; recovery refused", "stop the process or pass --force-if-dead"),
     "BBX-E211": ("lease held by a reused pid (start time mismatch)", "run `blackbox doctor --locks`"),
     "BBX-E220": ("both head slots invalid", "run `blackbox recover --full-scan`"),
@@ -31,11 +40,14 @@ REGISTRY: dict[str, tuple[str, str]] = {
     "BBX-E408": ("capsule entry hash does not verify", "the capsule was modified or corrupted"),
     "BBX-E409": ("capsule extraction exceeded the declared size", "the capsule is hostile"),
     "BBX-E410": ("malformed capsule part", "the capsule is damaged"),
-    "BBX-E411": ("generated test failed the safety scan", "review the test before running it"),
+    "BBX-E411": ("capsule validation: generated test failed the safety scan", "review the test before running it"),
     "BBX-E412": ("derived capsule part drifted from the raw frames", "regenerate the capsule"),
     "BBX-E510": ("network blocked during replay", "remove the call or pass --allow-network"),
     "BBX-E520": ("replay divergence in exact mode", "read the diff; this is the feature working"),
     "BBX-E530": ("cassette exhausted", "re-record or use --mode loose"),
+    "BBX-E600": ("serverless: run left open at return (wrapper misuse)", "wrap the handler, not an inner function"),
+    "BBX-E601": ("serverless: /tmp not writable", "set data_dir to a writable path"),
+    "BBX-E602": ("serverless: recovered a previous invocation's run", "expected; the capsule path was handed to on_capsule"),
 }
 
 
@@ -57,3 +69,8 @@ class BlackBoxError(Exception):
 
 def bbx(code: str, detail: str = "") -> BlackBoxError:
     return BlackBoxError(code, detail)
+
+# Appendix B of the plan is an excerpt; the full registry is this table. `docs/errors.md` is generated from it
+# and `tests/test_errors.py` compares it against the plan's appendix in both directions, so a code can never be
+# reused for a different meaning (that is how BBX-E140 came to mean "preallocation failed"; DV-004).
+PLAN_APPENDIX_CODES = tuple(sorted(REGISTRY))
