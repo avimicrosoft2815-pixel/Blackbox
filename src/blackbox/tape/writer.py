@@ -8,6 +8,7 @@ It never claims F3, and never raises into user code: allocation failure degrades
 from __future__ import annotations
 
 import mmap
+import threading
 import os
 import time
 
@@ -53,7 +54,9 @@ class TapeWriter:
     def __init__(self, data_dir: str, *, writer_uuid: bytes | None = None,
                  segment_bytes: int = C.DEFAULT_SEGMENT_BYTES, mode: str = C.DEFAULT_MODE,
                  vantage: int = 1,
-                 chain_enabled: bool = True, sealer_token: bytes = b"") -> None:
+                 chain_enabled: bool = True, sealer_token: bytes = b"",
+                 sync_ms: int = C.DEFAULT_SYNC_MS, sync_bytes: int = C.DEFAULT_SYNC_BYTES,
+                 publish_ms: float = C.DEFAULT_PUBLISH_MS) -> None:
         if mode not in C.MODES:
             raise bbx("BBX-E100", f"unknown mode {mode!r}")
         if segment_bytes < C.MIN_SEGMENT_BYTES:
@@ -86,7 +89,18 @@ class TapeWriter:
         self._pending_bytes = 0        # bytes appended since the last publish (group-commit threshold)
         self._last_publish_ns = time.perf_counter_ns()
         self.batch_bytes = C.DEFAULT_BATCH_BYTES   # 0 = publish on every call (small batches by hand)
-        self.batch_ms = 0.0
+        self.batch_ms = publish_ms                # upper bound on the group-commit window (C3)
+        self.sync_ms = sync_ms                    # kernel/paranoid fdatasync interval
+        self.sync_bytes = sync_bytes
+        # group-commit observations (C3): the widest window actually left unpublished, in ms
+        self.window_max_ms = 0.0
+        self._window_start_ns = 0
+        self.publishes = 0
+        self.syncs = 0
+        # The keeper thread publishes on a tick while the app thread appends. Roll mutates the mapping,
+        # the head and the chain, so publish/flush/roll/close are serialised; append keeps its own short
+        # critical section so a publish never sees a half-recorded batch.
+        self._lock = threading.RLock()
         self.degraded_reason: str | None = None
         self.adopted: dict | None = None      # set when open() completed an interrupted roll (S15)
 
@@ -176,6 +190,11 @@ class TapeWriter:
     def append(self, kind: int, payload: bytes = b"", *, priority: int = 1, flags: int = 0,
                run_slot: int = 0, node_slot: int = 0, wall_ns: int | None = None,
                mono_ns: int | None = None) -> int:
+        with self._lock:
+            return self._append_locked(kind, payload, priority=priority, flags=flags, run_slot=run_slot,
+                                       node_slot=node_slot, wall_ns=wall_ns, mono_ns=mono_ns)
+
+    def _append_locked(self, kind, payload, *, priority, flags, run_slot, node_slot, wall_ns, mono_ns) -> int:
         assert self._slot is not None and self._mm is not None
         size = frame_mod.frame_size(len(payload))
         if size > self.segment_bytes - C.SEGMENT_HEADER_BYTES - C.RESERVED_HEAD_ROOM:
@@ -204,34 +223,36 @@ class TapeWriter:
 
     def publish(self, *, publish_chain: bool = True) -> head_mod.HeadSlot:
         """Publish the current head. Also commits a CHAIN frame for the batch when enabled."""
-        assert self._slot is not None
-        if publish_chain and self.chain_enabled and self._batch_spans:
-            batch_hash = chain_mod.batch_hash_spans(self._mm, self._batch_spans)
-            # Decide the roll *before* the CHAIN frame is written: the frame carries `last_seq`, and a roll
-            # advances `head_seq` (the SEG_END frame), so writing first would duplicate a seq number. The bound
-            # is the largest a CHAIN frame can be (32+32 byte hashes plus three u64s), so no probe encode.
-            if self._slot.head_off + chain_mod.MAX_CHAIN_FRAME_BYTES + C.RESERVED_HEAD_ROOM > self.segment_bytes:
-                self.roll()
-            n = cbor.encode_chain_into(self._scratch, 0, self._chain.value, batch_hash,
-                                       self._batch_first_seq, self._slot.head_seq)
-            payload = memoryview(self._scratch)[:n]
-            off = self._slot.head_off
-            written = frame_mod.encode_into(self._mm, off, self._slot.head_seq + 1, C.KIND_CHAIN, payload,
-                                           priority=0)
-            self._slot.head_seq += 1
-            self._slot.head_off = off + written
-            self._frame_count += 1
-            self._chain.value = chain_mod.chain_value(self._chain.value, batch_hash)
-        self._slot = self._publish()
+        with self._lock:
+            assert self._slot is not None
+            if publish_chain and self.chain_enabled and self._batch_spans:
+                batch_hash = chain_mod.batch_hash_spans(self._mm, self._batch_spans)
+                # Decide the roll *before* the CHAIN frame is written: the frame carries `last_seq`, and a roll
+                # advances `head_seq` (the SEG_END frame), so writing first would duplicate a seq number. The bound
+                # is the largest a CHAIN frame can be (32+32 byte hashes plus three u64s), so no probe encode.
+                if self._slot.head_off + chain_mod.MAX_CHAIN_FRAME_BYTES + C.RESERVED_HEAD_ROOM > self.segment_bytes:
+                    self.roll()
+                n = cbor.encode_chain_into(self._scratch, 0, self._chain.value, batch_hash,
+                                           self._batch_first_seq, self._slot.head_seq)
+                payload = memoryview(self._scratch)[:n]
+                off = self._slot.head_off
+                written = frame_mod.encode_into(self._mm, off, self._slot.head_seq + 1, C.KIND_CHAIN, payload,
+                                               priority=0)
+                self._slot.head_seq += 1
+                self._slot.head_off = off + written
+                self._frame_count += 1
+                self._chain.value = chain_mod.chain_value(self._chain.value, batch_hash)
+            self._slot = self._publish()
 
-        if self.mode in ("kernel", "paranoid"):
-            self._maybe_sync(force=(self.mode == "paranoid"))
-        self._batch_spans = []
-        self._batch_first_seq = 0
-        self._pending = 0
-        self._pending_bytes = 0        # bytes appended since the last publish (group-commit threshold)
-        self._last_publish_ns = time.perf_counter_ns()
-        return self._slot
+            if self.mode in ("kernel", "paranoid"):
+                self._maybe_sync(force=(self.mode == "paranoid"))
+            self.publishes += 1
+            self._batch_spans = []
+            self._batch_first_seq = 0
+            self._pending = 0
+            self._pending_bytes = 0        # bytes appended since the last publish (group-commit threshold)
+            self._last_publish_ns = time.perf_counter_ns()
+            return self._slot
 
     def _publish(self) -> head_mod.HeadSlot:
         """One publish = `gen += 1` and two stores into the mapped head. No syscall in process mode."""
@@ -245,7 +266,7 @@ class TapeWriter:
         if self._seg_fd is None:
             return
         now = time.perf_counter_ns()
-        due = (now - self._last_sync_ns) >= 250 * 1_000_000 or self._unpublished_bytes >= (1 << 20)
+        due = (now - self._last_sync_ns) >= self.sync_ms * 1_000_000 or self._unpublished_bytes >= self.sync_bytes
         if not (force or due):
             return
         if self._mm is not None:
@@ -258,6 +279,7 @@ class TapeWriter:
             self._head.sync()
         self._last_sync_ns = now
         self._unpublished_bytes = 0
+        self.syncs += 1
 
     def append_and_publish(self, kind: int, payload: bytes = b"", **kw) -> int:
         seq = self.append(kind, payload, **kw)
@@ -277,61 +299,93 @@ class TapeWriter:
         now = time.perf_counter_ns()
         due_bytes = self.batch_bytes and self._pending_bytes >= self.batch_bytes
         due_ms = self.batch_ms and (now - self._last_publish_ns) >= int(self.batch_ms * 1_000_000)
-        if due_bytes or due_ms:
+        due_priority = kind in C.PRIORITY_KINDS
+        if due_bytes or due_ms or due_priority:
             self.publish()
+        else:
+            window_ms = (now - self._last_publish_ns) / 1_000_000
+            if window_ms > self.window_max_ms:
+                self.window_max_ms = window_ms      # a measured bound, not a promise
         return seq
+
+    def publish_if_due(self, now_ns: int | None = None) -> bool:
+        """Called by the keeper: publish only if the window bound or the byte bound has expired.
+
+        Returns True if a publish happened. Never raises for "nothing to do" — the keeper must stay cheap.
+        """
+        with self._lock:
+            if not self._pending:
+                return False
+            now = time.perf_counter_ns() if now_ns is None else now_ns
+            due_ms = self.batch_ms and (now - self._last_publish_ns) >= int(self.batch_ms * 1_000_000)
+            due_bytes = self.batch_bytes and self._pending_bytes >= self.batch_bytes
+            if due_ms or due_bytes:
+                self.publish()
+                return True
+            window_ms = (now - self._last_publish_ns) / 1_000_000
+            if window_ms > self.window_max_ms:
+                self.window_max_ms = window_ms
+            return False
+
+    def window_ms(self) -> float:
+        """Age of the oldest unpublished frame, in ms (C3 evidence)."""
+        if not self._pending:
+            return 0.0
+        return (time.perf_counter_ns() - self._last_publish_ns) / 1_000_000
 
     def flush(self) -> head_mod.HeadSlot:
         """Publish whatever is pending (and sync in kernel/paranoid)."""
-        assert self._slot is not None
-        if self._batch_spans or self._slot.gen == 0:
-            return self.publish()
-        return self._slot
+        with self._lock:
+            assert self._slot is not None
+            if self._batch_spans or self._slot.gen == 0:
+                return self.publish()
+            return self._slot
 
     # ── roll ────────────────────────────────────────────────────────────────
     def roll(self) -> None:
         """Close the active segment and start the next one (P1-09, §8.6)."""
-        arm_die()                      # roll is rare; re-reading the env here keeps S14/S15 armable
-        assert self._slot is not None and self._mm is not None
-        n = self._slot.active_segment
-        # 1. SEG_END commits the current head
-        blob = frame_mod.encode(self._slot.head_seq + 1, C.KIND_SEG_END, b"", priority=0)
-        if self._slot.head_off + len(blob) <= self.segment_bytes:
-            off = self._slot.head_off
-            self._mm[off:off + len(blob)] = blob
-            self._slot = self._slot.with_(head_seq=self._slot.head_seq + 1, head_off=off + len(blob))
-        self._publish()
-        _die("S14")     # after SEG_END published, before the next segment is durable
-
-        # 2. capture the body of segment n and seal it (footer sidecar; P1-13)
-        body = bytes(self._mm[C.SEGMENT_HEADER_BYTES:self._slot.head_off])
-        start_seq, end_seq, frame_count = self._segment_range(n)
-        self._mm.flush()
-        self._mm.close()
-        self._mm = None
-        if self._seg_fd is not None:
-            os.close(self._seg_fd)
-            self._seg_fd = None
-        seal_info = self._write_seal(n, body=body, start_seq=start_seq, end_seq=end_seq,
-                                     frame_count=frame_count, reason=C.SEAL_REASON_ROLLED)
-        if seal_info is not None:
-            self._chain.value = seal_info["chain"]     # the next segment's header chains to this seal
-
-        # 3. preallocate + header the next segment. Failure degrades; it never raises into the app.
-        next_no = n + 1
-        try:
-            self._create_segment(next_no)
-        except prealloc.PreallocError:
-            self.degraded_reason = "NO_SPACE"
-            self._slot = self._slot.with_(flags=self._slot.flags | C.HEAD_FLAG_DEGRADED_NO_SPACE)
+        with self._lock:
+            arm_die()                      # roll is rare; re-reading the env here keeps S14/S15 armable
+            assert self._slot is not None and self._mm is not None
+            n = self._slot.active_segment
+            # 1. SEG_END commits the current head
+            blob = frame_mod.encode(self._slot.head_seq + 1, C.KIND_SEG_END, b"", priority=0)
+            if self._slot.head_off + len(blob) <= self.segment_bytes:
+                off = self._slot.head_off
+                self._mm[off:off + len(blob)] = blob
+                self._slot = self._slot.with_(head_seq=self._slot.head_seq + 1, head_off=off + len(blob))
             self._publish()
-            raise bbx("BBX-E132", "preallocation failed at roll; recording degraded") from None
-        _die("S14b")
-        self._map_segment(next_no)
-        _die("S15")     # segment n+1 exists (and its header is durable) but the head still names n
-        self._slot = self._slot.with_(active_segment=next_no, head_off=C.SEGMENT_HEADER_BYTES,
-                                      flags=self._slot.flags & ~C.HEAD_FLAG_ROLL_PENDING)
-        self._publish()
+            _die("S14")     # after SEG_END published, before the next segment is durable
+
+            # 2. capture the body of segment n and seal it (footer sidecar; P1-13)
+            body = bytes(self._mm[C.SEGMENT_HEADER_BYTES:self._slot.head_off])
+            start_seq, end_seq, frame_count = self._segment_range(n)
+            self._mm.flush()
+            self._mm.close()
+            self._mm = None
+            if self._seg_fd is not None:
+                os.close(self._seg_fd)
+                self._seg_fd = None
+            seal_info = self._write_seal(n, body=body, start_seq=start_seq, end_seq=end_seq,
+                                         frame_count=frame_count, reason=C.SEAL_REASON_ROLLED)
+            if seal_info is not None:
+                self._chain.value = seal_info["chain"]     # the next segment's header chains to this seal
+
+            # 3. preallocate + header the next segment. Failure degrades; it never raises into the app.
+            next_no = n + 1
+            try:
+                self._create_segment(next_no)
+            except prealloc.PreallocError:
+                self.degraded_reason = "NO_SPACE"
+                self._slot = self._slot.with_(flags=self._slot.flags | C.HEAD_FLAG_DEGRADED_NO_SPACE)
+                self._publish()
+                raise bbx("BBX-E132", "preallocation failed at roll; recording degraded") from None
+            _die("S14b")
+            self._map_segment(next_no)
+            _die("S15")     # segment n+1 exists (and its header is durable) but the head still names n
+            self._slot = self._slot.with_(active_segment=next_no, head_off=C.SEGMENT_HEADER_BYTES,
+                                          flags=self._slot.flags & ~C.HEAD_FLAG_ROLL_PENDING)
+            self._publish()
 
     def _write_seal(self, n: int, *, body: bytes, start_seq: int, end_seq: int, frame_count: int,
                     reason: int) -> dict | None:
@@ -363,33 +417,35 @@ class TapeWriter:
 
     # ── close ───────────────────────────────────────────────────────────────
     def close(self, *, reason: int = C.SEAL_REASON_SHUTDOWN) -> None:
-        if self._slot is None:
-            return
-        if self._batch_spans:
-            self.publish()
-        n = self._slot.active_segment
-        blob = frame_mod.encode(self._slot.head_seq + 1, C.KIND_SEG_END, b"", priority=0)
-        if self._mm is not None and self._slot.head_off + len(blob) <= self.segment_bytes:
-            off = self._slot.head_off
-            self._mm[off:off + len(blob)] = blob
-            self._slot = self._slot.with_(head_seq=self._slot.head_seq + 1, head_off=off + len(blob))
-        self._publish()
-        body = bytes(self._mm[C.SEGMENT_HEADER_BYTES:self._slot.head_off]) if self._mm else b""
-        start_seq, end_seq, frame_count = self._segment_range(n)
-        if self._mm is not None:
-            self._mm.flush()
-            self._mm.close()
-            self._mm = None
-        if self._seg_fd is not None:
-            os.close(self._seg_fd)
-            self._seg_fd = None
-        self._write_seal(n, body=body, start_seq=start_seq, end_seq=end_seq,
-                         frame_count=frame_count, reason=reason)
-        if self._head is not None:
-            if self.mode in ("kernel", "paranoid"):
-                self._head.sync()
-            self._head.close()
-            self._head = None
+        """Flush, SEG_END, seal, release the mapping. Idempotent."""
+        with self._lock:
+            if self._slot is None:
+                return
+            if self._batch_spans:
+                self.publish()
+            n = self._slot.active_segment
+            blob = frame_mod.encode(self._slot.head_seq + 1, C.KIND_SEG_END, b"", priority=0)
+            if self._mm is not None and self._slot.head_off + len(blob) <= self.segment_bytes:
+                off = self._slot.head_off
+                self._mm[off:off + len(blob)] = blob
+                self._slot = self._slot.with_(head_seq=self._slot.head_seq + 1, head_off=off + len(blob))
+            self._publish()
+            body = bytes(self._mm[C.SEGMENT_HEADER_BYTES:self._slot.head_off]) if self._mm else b""
+            start_seq, end_seq, frame_count = self._segment_range(n)
+            if self._mm is not None:
+                self._mm.flush()
+                self._mm.close()
+                self._mm = None
+            if self._seg_fd is not None:
+                os.close(self._seg_fd)
+                self._seg_fd = None
+            self._write_seal(n, body=body, start_seq=start_seq, end_seq=end_seq,
+                             frame_count=frame_count, reason=reason)
+            if self._head is not None:
+                if self.mode in ("kernel", "paranoid"):
+                    self._head.sync()
+                self._head.close()
+                self._head = None
 
     def abort(self) -> None:
         """Release mappings without committing anything (used by recovery and by idempotence tests)."""

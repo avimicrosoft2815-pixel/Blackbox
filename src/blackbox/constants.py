@@ -120,16 +120,23 @@ HEAD_FLAG_ROLL_PENDING = 1 << 3
 META_FLAG_LAYOUT_RING = 1 << 0
 META_FLAG_RESERVED_CHECKSUM = 1 << 2   # must be 0 in v1 (C4); readers reject a tape that sets it
 
-# checksum algorithm ids (meta.flags bit2 selects IEEE instead of CRC32C)
-
-# Default: IEEE CRC-32 through zlib (C speed). CRC32C is implemented and verified but costs ~110 us/KiB in
-# pure Python, which alone breaks the section 15.1 event budget; the algorithm is recorded in meta.flags bit 2,
-# so a reader never has to guess. See docs/DECISIONS.md D-007.
+# One checksum in v1: CRC-32/ISO-HDLC through zlib (C speed), check value 0xCBF43926. There is no algorithm
+# selector: meta.flags bit 2 is reserved and must be 0. See docs/adr/ADR-004-crc32-not-crc32c.md and DV-005.
 
 # Group-commit threshold (plan §8.2 "publish per batch, not per event"). Measured in
 # bench/results/2026-11-14-recovery.json: disk amplification is 1.843x when every event is its own commit,
 # 1.263x at 4 KiB, 1.231x at 16 KiB and 1.222x at 64 KiB; the §15.1 row is <= 1.25x, so 16 KiB is the default.
 DEFAULT_BATCH_BYTES = 16384
+
+# Latency bound on the group-commit window (C3): publish when the pending bytes reach DEFAULT_BATCH_BYTES, or
+# when the oldest unpublished frame is older than DEFAULT_PUBLISH_MS, or when a priority event arrives, or on
+# flush()/close(). A keeper thread drains then publishes. The window is measured, not assumed: see
+# bench/results/*-writer-*.json "group_commit" rows.
+DEFAULT_PUBLISH_MS = 5.0
+
+# Event kinds that must never sit in a commit window: a consumer that sees SEG_END, a GAP or a DEGRADED must be
+# able to trust that everything before it is on the tape already.
+PRIORITY_KINDS = frozenset({1, 4, 5, 34, 81})   # SEG_END, GAP, DEGRADED, MODEL_CHUNK, RUN_END
 
 # ── event kinds (append-only registry, docs/format.md §4) ───────────────────
 KIND_SEG_END = 1
