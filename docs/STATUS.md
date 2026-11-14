@@ -1,6 +1,6 @@
 # STATUS — BlackBox v1.0 build
 
-**Branch** `arena/e10fc603-blackbox` · **base** `30c9433` · **HEAD** `cd85a7f` (pushed after every ticket)
+**Branch** `arena/e10fc603-blackbox` · **base** `30c9433` · **HEAD** `1e518ca`+ (pushed after every ticket)
 **trunk: mergeable** — every C12 check passes from a clean clone and the README says what exists.
 **product: pre-alpha — storage and recovery layer only; no SDK, proxy or viewer yet.**
 
@@ -46,9 +46,9 @@ mapped-file-cannot-be-deleted problem. Every number below was re-measured on the
 | Randomized parent-`SIGKILL` (P2-09, C19) | `-kill-random.json`: **500 effective trials ext4 + 500 tmpfs** | **0 violations, 0 `not_started`** — the timer starts at the child's `READY`; cells include a 20 ev/s window cell and a `kernel` cell |
 | ENOSPC (S17) | `tests/test_enospc.py`, `tests/test_prealloc.py` | both segments **and the first one**: exit 0, identical stdout, `DEGRADED`; no first segment ⇒ sink (`recording=False`), never an exception |
 | Group-commit window + keeper | `tests/test_keeper.py` (6) | window ≤ 5 ms at 1 / 1 000 / unbounded ev/s |
-| Syscalls on the append path (C11) | `tests/test_no_syscall.py` | 100 000 appends ⇒ **`pwrite` only, one per batch**; no `write`, `fsync`, `open`, `lseek` per event |
+| Syscalls on the append path (C11) | `tests/test_no_syscall.py` | 100 000 appends ⇒ **exactly two `pwrite`s per batch** (segment data + 64 B head slot), nothing else |
 | Seal footer + chain link | `tests/test_tape.py` | green |
-| Platform shims (P2-03/P2-04, C20) | `tests/test_platform_shims.py` (21) | contract green on Linux; Windows start-time path exercised through a fake `kernel32`; `tested_here: False` for both OS cells |
+| Platform shims (P2-03/P2-04, C20) | `tests/test_platform_shims.py` (21) | contract green on Linux; Windows start-time path exercised through a fake `kernel32`; `is_current` is computed, so exactly one shim claims the machine |
 | Lint + types (C6) | `make fmt` (ruff 0.17.5, mypy 2.4.1) | **0 findings** both |
 | Forbidden words (C12) | `tests/test_forbidden_words.py` | green over the tree **and** `git log` |
 
@@ -68,7 +68,7 @@ Gate: **p50 ≤ 25 µs, p99 ≤ 250 µs, ≥ 40 000 ev/s** for one full event wi
 | recovery, 10 k frames | p50 117.09 ms (**53.9 ms/10k**) | p50 106.03 ms | no §15.1 row for scan time | `-recovery.json` |
 | disk amplification | 1.843× per-event · 1.231× 16 KiB | identical | ≤ 1.25×: **PASS** | same |
 | RSS above baseline | **1.15 MiB** (anon +1.02, file +0.12) at `head_off` 4,723,072 (28.13 % of the segment) | 1.15 MiB | under 24 MiB: **PASS**, no `P1-08b` | same |
-| mmap vs `pwrite` (P1-19 / ADR-005) | median p50 ratio 1.028 [0.906, 1.176] · **1.0594999999999999** · **1.065** at 1 k / 10 k / 40 k | 1.076 / 1.064 | **adopt `pwrite`** (inside 20 % at both decision rates) | `-writer-ab.json` |
+| mmap vs `pwrite` (P1-19 / ADR-005) | median p50 ratio 1.028 [0.906, 1.176] · **1.059** · **1.065** at 1 k / 10 k / 40 k | 1.076 / 1.064 | **adopt `pwrite`** (inside 20 % at both decision rates) | `-writer-ab.json` |
 
 **C16 — why the stage table never added up to the event p50, and the distribution that replaces the guess:**
 two mistakes, both now fixed. (a) The stage table's `cbor_encode_event` encodes a record with the **1 KiB body
@@ -81,8 +81,8 @@ number, and it is ~2× the old one. Now the parts roughly account for the whole:
 7.953 + frame encode 2.535 + batch
 `pwrite` 1.302 µs *per batch* + head publish 1.237 µs
 *per batch*, amortised over 110.0 events per publish.
-**Where the tail lives:** mean 13.479 vs p50 10.992 µs, p99 61.777, p99.9
-112.507, max 295.652 µs. The 99th percentile is the **batch boundary** — one event in
+**Where the tail lives:** mean 13.396 vs p50 11.057 µs, p99 51.662, p99.9
+116.94, max 244.472 µs. The 99th percentile is the **batch boundary** — one event in
 110.0 pays the 16 KiB `pwrite` + CHAIN + head publish (~5 µs, i.e. ~0.045 µs amortised
 across every event but a 5 µs spike on the one that pays it) — plus GC of the encoded payload. The 300 µs max is
 the scheduler, not the writer: with `_fs` on ext4 under a shared sandbox, one page-cache writeback can preempt.
@@ -90,7 +90,7 @@ the scheduler, not the writer: with `_fs` on ext4 under a shared sandbox, one pa
 the keeper is on it publishes from its own thread, and both share **one GIL**. The `keeper` row above is the same
 work with that second publisher present and costs 0.052 µs at p50.
 
-## 3. The Stage 2 CHANGE items and the corrections C1–C20
+## 3. The Stage 2 CHANGE items and the corrections C1–C24
 
 The nine CHANGE items are answered in §3a of the previous revision of this file and still hold, except that item
 8's "interleaved P1-19" is now the full C17 protocol (10 pairs, order alternating, both arms fair) — see §0.
@@ -104,7 +104,11 @@ Each correction is answered where a reviewer will look:
 | C18 | show the RSS procedure | **done** — §2 + `-recovery.json`: `head_off`, bytes written, `VmRSS`/`RssAnon`/`RssFile`/`RssShmem` before and after, cgroup limit, and a second run at 39 % of a segment showing the delta is Python heap, not segment fill |
 | C19 | 500 *effective* trials; low-rate and kernel cells | **done** — readiness pipe, 0 `not_started`, 20 ev/s window cell, `kernel` cell, 50 trials per cell |
 | C20 | P2-03 `OpenProcess`+`GetProcessTimes`; P2-04 `F_FULLFSYNC`; P1-09b is mine to decide; F13 is P2-11; `P1-02b` before G-Promise; ship `tools/s17_control.sh`; keeper maxima stay; name the stall thread; report CI | **done except P1-02b and P1-09b** — both are queued below; the stall is measured in the app thread's own `emit` (the sync happens inside `publish`, which the app thread calls; the keeper's own publishes are not charged to an event) |
-| C7 | CI must actually run | **it ran and it is red** — see §6 |
+| C7 | CI must actually run | **it ran: ubuntu and docs green, macOS and Windows red** — see §6 |
+| C21 | no mapping anywhere in `src/`; head written by `pwrite`, S4 as a torn-slot hook, two `pwrite`s per batch | **done** — §0, DV-010, `HeadFile`, `test_no_syscall` |
+| C22 | diagnose the red cells from the tree; `is_current`; `pwrite`/`pread` in every shim; `F_FULLFSYNC` claims derived from code | **done in code**; the cells are still red and the remaining cause is not readable from here |
+| C23 | compatibility evidence in a document fed by CI | **done** — `docs/compatibility.md`, per cell, with the run URL |
+| C24 | print STATUS verbatim with the numbers | **this file** |
 
 ## 4. Defects found and fixed (C9: seed → invariant → cause → fix → test)
 
@@ -130,7 +134,7 @@ to `P2-11`** (`blackbox run`), not P5 — corrected here and in `DECISIONS.md`.
 
 | Check | State |
 |---|---|
-| `make test` from a clean clone | green, .................................. tests |
+| `make test` from a clean clone | green, 175 tests |
 | `make kill` (500 trials, ext4) | 0 violations, 0 `not_started` |
 | `make bench` into `bench/results/` | green, both columns |
 | `make fuzz` | 100 000 iterations, 0 non-`CBORError` |
