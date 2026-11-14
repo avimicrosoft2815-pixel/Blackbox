@@ -24,6 +24,7 @@ from blackbox import constants as C
 from blackbox.codec import cbor
 from blackbox.codec.ids import new_writer_uuid
 from blackbox.errors import bbx
+from blackbox.platform import current as _plat_current
 from blackbox.tape import chain as chain_mod
 from blackbox.tape import frame as frame_mod
 from blackbox.tape import head as head_mod
@@ -31,6 +32,7 @@ from blackbox.tape import meta as meta_mod
 from blackbox.tape import prealloc, segments
 
 DIE_ENV = "BLACKBOX_DIE_AT"
+_plat = _plat_current()          # pwrite/pread, because Windows has neither (C22)
 
 
 class TapeError(RuntimeError):
@@ -139,7 +141,7 @@ class TapeWriter:
 
         existing = segments.list_segments(self.tape_dir)
         self._head = head_mod.HeadMap(self.head_path)
-        self._head.half_hook = lambda: _die("S4")   # type: ignore[assignment]
+        self._head.half_hook = lambda: _die("S4")   # type: ignore[assignment]  # only used when armed
         best = self._head.best()
         if best is None and existing:
             # Both slots unreadable but frames exist: the head is a hint, so rebuild it from the segments
@@ -223,7 +225,7 @@ class TapeWriter:
     def _flush_buf(self) -> None:
         """Hand the encoded batch to the kernel: ONE `pwrite`, and it is the only data syscall on the path."""
         if self._fill and self._seg_fd is not None:
-            os.pwrite(self._seg_fd, memoryview(self._buf)[:self._fill], self._buf_base)
+            _plat.pwrite(self._seg_fd, memoryview(self._buf)[:self._fill], self._buf_base)
             self._buf_base += self._fill
         self._fill = 0
 
@@ -325,7 +327,7 @@ class TapeWriter:
         """One publish = `gen += 1` and two stores into the mapped head. No syscall in process mode."""
         assert self._slot is not None and self._head is not None
         _die("S3")
-        self._head.publish(self._slot)      # gen += 1 and two stores into the mapping
+        self._head.publish(self._slot, split=_ARMED)   # gen += 1 and one 64 B pwrite
         _die("S5")
         return self._slot
 
@@ -496,7 +498,8 @@ class TapeWriter:
         """The sealed prefix of segment n, read back from the file (there is no mapping to slice any more)."""
         assert self._seg_fd is not None and self._slot is not None
         end = self._slot.head_off if self._slot.active_segment == n else self.segment_bytes
-        return os.pread(self._seg_fd, max(end - C.SEGMENT_HEADER_BYTES, 0), C.SEGMENT_HEADER_BYTES)
+        body: bytes = _plat.pread(self._seg_fd, max(end - C.SEGMENT_HEADER_BYTES, 0), C.SEGMENT_HEADER_BYTES)
+        return body
 
     def _write_seal(self, n: int, *, body: bytes, start_seq: int, end_seq: int, frame_count: int,
                     reason: int) -> dict | None:

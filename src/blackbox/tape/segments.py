@@ -8,8 +8,11 @@ import time
 
 from blackbox import constants as C
 from blackbox.errors import bbx
+from blackbox.platform import current as _plat_current
 from blackbox.platform import posix
 from blackbox.tape import prealloc
+
+_plat = _plat_current()
 
 
 def seg_path(tape_dir: str, n: int) -> str:
@@ -83,7 +86,7 @@ def finish(tape_dir: str, n: int, tmp: str, *, writer_uuid: bytes, segment_bytes
                            segment_bytes=segment_bytes, prev_chain=prev_chain)
     fd = os.open(tmp, os.O_RDWR)
     try:
-        os.pwrite(fd, header, 0)
+        _plat.pwrite(fd, header, 0)
         if hasattr(os, "fdatasync"):
             os.fdatasync(fd)
         else:                                # pragma: no cover - Windows

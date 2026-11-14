@@ -6,7 +6,6 @@ never destroy the newest valid record: readers take the valid slot with the grea
 from __future__ import annotations
 
 import contextlib
-import mmap
 import os
 import struct
 from dataclasses import dataclass, replace
@@ -14,6 +13,7 @@ from struct import pack_into
 
 from blackbox import constants as C
 from blackbox.codec.crc32 import crc32
+from blackbox.platform import current as _current_platform
 
 
 @dataclass
@@ -141,15 +141,22 @@ def publish(path: str | os.PathLike, slot: HeadSlot, *, mode: str = "process", f
     return new_slot
 
 
-class HeadMap:
-    """The `head` file mapped once; publishing a batch is two stores into the mapping (§8.2 step 5-7).
+class HeadFile:
+    """The `head` file, read and written with `pread`/`pwrite` — **no mapping anywhere** (ADR-005, C21).
 
-    In `process` mode there is no syscall on the publish path: the stores land in the page cache of a
-    MAP_SHARED mapping, which is what makes the commit visible to every other process (F1). `kernel` and
-    `paranoid` add `flush` + `fdatasync(head_fd)` on the caller's schedule, never per event.
+    Publishing a batch is one `pwrite` of the 64 B slot at the alternate slot offset: one syscall, into the page
+    cache, which is what makes the commit visible to every other process (F1) and what `kernel`/`paranoid`
+    upgrade with `fdatasync(head_fd)` on the caller's schedule, never per event.
+
+    A mapping was removed here for the same reason it was removed from the segment: a sparse file mapped on a
+    full filesystem faults on first store, and the fault kills the user's process. A 64 B `pwrite` cannot be
+    torn by a process kill (the kernel copies it atomically for this purpose), so the two-slot protocol now
+    exists for the case that *can* tear it: a machine dying mid-write (F2/F3), where the reader's
+    older-slot-CRC-wins rule is the recovery. `half_hook` keeps that case testable by forcing the body and the
+    CRC into two separate writes.
     """
 
-    __slots__ = ("_dirty", "_slotbuf", "_slots", "fd", "half_hook", "mm", "path")
+    __slots__ = ("_dirty", "_plat", "_slotbuf", "_slots", "fd", "half_hook", "path")
 
     def __init__(self, path: str, *, create: bool = True) -> None:
         self.path = path
@@ -181,21 +188,21 @@ class HeadMap:
                 os.ftruncate(self.fd, C.HEAD_BYTES)
                 if create:
                     os.fsync(self.fd)
-            self.mm = mmap.mmap(self.fd, C.HEAD_BYTES)
         except Exception:
             os.close(self.fd)
             raise
         self._dirty = False
+        self._plat = _current_platform()
         self._slotbuf = bytearray(C.HEAD_SLOT_BYTES)
-        self.half_hook = None      # fault injection: runs between the body store and the CRC store
+        self.half_hook = None      # fault injection: forces the body and the CRC into two pwrites (S4)
         self._slots: tuple[HeadSlot | None, HeadSlot | None] = (None, None)
         self.reload()
 
     # ── reading ─────────────────────────────────────────────────────────────
     def reload(self) -> tuple[HeadSlot | None, HeadSlot | None]:
-        s0 = HeadSlot.from_bytes(bytes(self.mm[0:C.HEAD_SLOT_BYTES]))
+        s0 = HeadSlot.from_bytes(self._plat.pread(self.fd, C.HEAD_SLOT_BYTES, 0))
         base = C.HEAD_SLOT_STRIDE
-        s1 = HeadSlot.from_bytes(bytes(self.mm[base:base + C.HEAD_SLOT_BYTES]))
+        s1 = HeadSlot.from_bytes(self._plat.pread(self.fd, C.HEAD_SLOT_BYTES, base))
         self._slots = (s0, s1)
         return self._slots
 
@@ -215,12 +222,13 @@ class HeadMap:
         return s0 if s0.gen >= s1.gen else s1
 
     # ── writing ─────────────────────────────────────────────────────────────
-    def publish(self, slot: HeadSlot) -> HeadSlot:
-        """`gen += 1` then two stores: the 60-byte body, then the CRC.
+    def publish(self, slot: HeadSlot, *, split: bool = False) -> HeadSlot:
+        """`gen += 1` then **one** `pwrite` of the whole 64 B slot at the alternate offset.
 
-        The CRC is written last on purpose: a crash between the two stores leaves a body that does not match
-        its CRC, so `best()` keeps the older slot. `process` mode does not flush: the stores are already in the
-        page cache of a MAP_SHARED mapping, which is what other processes read (F1).
+        The slot is built in a buffer and written once, so a process kill leaves either the old slot or the new
+        one, never a half. When `half_hook` is armed (S4) the body and the CRC go out as two writes, which is
+        how a machine-level tear is reproduced: the body then does not match its CRC and `best()` keeps the
+        older slot.
         """
         slot.gen += 1
         base = (slot.gen % 2) * C.HEAD_SLOT_STRIDE
@@ -229,18 +237,20 @@ class HeadMap:
         pack_into("<QQQQQQ", buf, C.HEAD_GEN_OFF, slot.gen, slot.head_seq, slot.head_off,
                   slot.tail_seq, slot.sealed_seq, slot.active_segment)
         pack_into("<II", buf, C.HEAD_FLAGS_OFF, slot.flags, slot.dropped_events)
-        mm = self.mm
-        mm[base:base + C.HEAD_CRC_OFF] = buf[0:C.HEAD_CRC_OFF]
-        if self.half_hook is not None:
-            self.half_hook()
-        pack_into("<I", mm, base + C.HEAD_CRC_OFF, crc32(buf[0:C.HEAD_CRC_OFF]))
+        pack_into("<I", buf, C.HEAD_CRC_OFF, crc32(buf[0:C.HEAD_CRC_OFF]))
+        if not split:
+            self._plat.pwrite(self.fd, buf, base)                 # the whole slot: one syscall, never torn
+        else:
+            self._plat.pwrite(self.fd, buf[0:C.HEAD_CRC_OFF], base)   # body first ...
+            if self.half_hook is not None:                            # ... crash here leaves a bad CRC
+                self.half_hook()
+            self._plat.pwrite(self.fd, buf[C.HEAD_CRC_OFF:C.HEAD_SLOT_BYTES], base + C.HEAD_CRC_OFF)
         self._dirty = True
         return slot
 
     def sync(self) -> None:
         if not self._dirty:
             return
-        self.mm.flush()
         if hasattr(os, "fdatasync"):
             os.fdatasync(self.fd)
         else:                                   # pragma: no cover - Windows
@@ -248,9 +258,11 @@ class HeadMap:
         self._dirty = False
 
     def close(self) -> None:
-        with contextlib.suppress(ValueError, BufferError):
-            self.mm.flush()
-        try:
-            self.mm.close()
-        finally:
-            os.close(self.fd)
+        with contextlib.suppress(OSError):
+            if self._dirty:
+                self.sync()
+        os.close(self.fd)
+
+
+# The name every caller used while this was a mapping; kept so the rename does not churn imports (C21).
+HeadMap = HeadFile

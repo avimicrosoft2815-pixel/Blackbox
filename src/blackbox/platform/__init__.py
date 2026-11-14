@@ -33,4 +33,4 @@ def capabilities() -> dict[str, object]:
         return caps
     return {"platform": mod.__name__.rsplit(".", 1)[-1], "prealloc": "posix_fallocate",
             "directory_fsync": True, "process_start_token": True, "boot_id": True,
-            "filesystem_type": "/proc/self/mountinfo", "tested_here": True}
+            "filesystem_type": "/proc/self/mountinfo", "is_current": True}

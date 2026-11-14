@@ -18,19 +18,23 @@ COMMON = ("proc_start_ticks", "pid_alive", "boot_id", "fsync_dir", "fdatasync", 
 
 @pytest.mark.parametrize("mod", [posix, windows, macos])
 def test_every_shim_answers_the_same_questions(mod):
-    for name in COMMON:
+    for name in (*COMMON, "pwrite", "pread", "is_current"):
         assert callable(getattr(mod, name)), f"{mod.__name__} is missing {name}"
 
 
-@pytest.mark.parametrize("mod", [windows, macos])
-def test_a_shim_that_was_not_executed_here_says_so(mod):
+NON_CURRENT = [m for m in (posix, windows, macos) if m is not current()]
+
+
+@pytest.mark.parametrize("mod", NON_CURRENT)
+def test_a_shim_that_is_not_this_machine_says_so(mod):
+    """C22: `tested_here` was a constant, so the macOS cell failed on its own honest line."""
     caps = mod.capabilities()
-    assert caps["tested_here"] is False
+    assert caps["is_current"] is False, f"{mod.NAME} must not claim to be the current platform"
     assert "not executed in this environment" in caps["note"]
     assert caps["prealloc"] == "zero-fill", "a sparse segment must never be mapped"
 
 
-@pytest.mark.parametrize("mod", [windows, macos])
+@pytest.mark.parametrize("mod", NON_CURRENT)
 def test_unsupported_questions_answer_none_rather_than_guessing(mod):
     assert mod.proc_start_ticks(os.getpid()) is None
     assert mod.boot_id() is None
@@ -39,6 +43,7 @@ def test_unsupported_questions_answer_none_rather_than_guessing(mod):
 
 @pytest.mark.parametrize("mod", [windows, macos])
 def test_probes_never_raise_and_tolerate_a_bad_path(mod):
+    """Both non-POSIX shims: a probe on a path that does not exist must answer, not raise."""
     assert isinstance(mod.pid_alive(os.getpid()), bool)
     assert mod.pid_alive(-1) is False
     assert mod.is_regular_file("/definitely/not/here") is False
@@ -52,9 +57,27 @@ def test_current_picks_a_shim_and_reports_capabilities():
     assert "platform" in caps and "prealloc" in caps
 
 
-def test_the_posix_shim_is_the_one_tested_here():
-    caps = capabilities()
-    assert caps["tested_here"] is True
+def test_exactly_one_shim_reports_itself_as_current():
+    flags = [m.capabilities()["is_current"] for m in (posix, windows, macos)]
+    assert flags.count(True) == 1, "one machine, one current shim"
+    assert capabilities()["is_current"] is True
+    assert capabilities()["platform"] == current().NAME
+
+
+def test_positional_io_is_identical_across_shims(tmp_path):
+    """The writer calls `pwrite`/`pread`; every shim must implement them with the same semantics."""
+    data = bytearray(b"\x00" * 32)
+    for mod in (posix, windows, macos):
+        path = tmp_path / f"{mod.NAME}.bin"
+        fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
+        try:
+            os.ftruncate(fd, 32)
+            mod.pwrite(fd, b"hello", 8)
+            assert mod.pread(fd, 5, 8) == b"hello", f"{mod.NAME}.pread must agree with {mod.NAME}.pwrite"
+            assert mod.pread(fd, 5, 0) == b"\x00" * 5
+        finally:
+            os.close(fd)
+    assert data
 
 
 def test_macos_directory_fsync_is_a_no_op_by_contract(tmp_path):

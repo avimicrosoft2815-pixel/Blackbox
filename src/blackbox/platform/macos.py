@@ -9,10 +9,11 @@ Written but **not run here** (this environment is Linux); the macOS CI cell is w
   which is the `SIGBUS` class S17 exists to prevent.
 * **Directory fsync.** `os.fsync` on a directory fd raises `EINVAL` on APFS/HFS+; the shim returns silently,
   which matches `posix.fsync_dir`'s best-effort contract.
-* **`F_FULLFSYNC`.** `os.fsync` on macOS does *not* flush the drive's write cache; only `fcntl(F_FULLFSYNC)`
-  does, and again it is not in stdlib. `fdatasync` therefore reports what it can honestly promise through
-  `DURABILITY_NOTE`, and `kernel` mode's F2 claim on macOS is labelled weaker than on Linux until P2-04 has a
-  measurement on a Mac.
+* **`F_FULLFSYNC`.** `os.fsync` on macOS is `fsync(2)`: it returns once the data is in the *device's* cache,
+  not on the media. `fcntl(F_FULLFSYNC)` is the call that forces it, and it **is** in the stdlib
+  (`fcntl.F_FULLFSYNC`, Availability: macOS). `fdatasync` below issues it whenever the constant exists, and
+  `capabilities()["f_fullfsync"]` / the durability note are derived from `f_fullfsync_supported()` rather than
+  asserting anything about this interpreter.
 """
 from __future__ import annotations
 
@@ -29,8 +30,18 @@ SUPPORTED = os.uname().sysname == "Darwin" if hasattr(os, "uname") else False
 PREALLOC_METHOD = "zero-fill"          # F_PREALLOCATE is not reachable from stdlib
 DIRECTORY_FSYNC = False                # fsync(dir) raises EINVAL on APFS/HFS+
 MAPPED_VIEW_FLUSH = "mmap.flush"       # msync(MS_SYNC) via CPython
-DURABILITY_NOTE = ("os.fsync flushes to the device but not through its write cache; F_FULLFSYNC is not "
-                   "available from stdlib, so F2 on macOS is weaker than on Linux until measured")
+def f_fullfsync_supported() -> bool:
+    """True when `fcntl.F_FULLFSYNC` can be issued from this interpreter (it usually cannot)."""
+    return fcntl is not None and hasattr(fcntl, "F_FULLFSYNC")
+
+
+def durability_note() -> str:
+    """What `kernel`/`paranoid` can actually promise here, derived from the runtime, not asserted in prose."""
+    if f_fullfsync_supported():
+        return ("fdatasync issues fcntl(F_FULLFSYNC), which is the call that flushes the drive's cache on "
+                "macOS; measured latency on a Mac is still unmeasured here")
+    return ("fcntl.F_FULLFSYNC is not available in this interpreter, so fdatasync falls back to os.fsync, "
+            "which does not flush the drive cache: F2 on macOS is weaker than on Linux and is labelled so")
 
 
 def proc_start_ticks(pid: int) -> int | None:
@@ -100,15 +111,26 @@ def is_regular_file(path: str) -> bool:
         return False
 
 
-def f_fullfsync_supported() -> bool:
-    """True when `fcntl.F_FULLFSYNC` can be issued from this interpreter (it usually cannot)."""
-    return fcntl is not None and hasattr(fcntl, "F_FULLFSYNC")
+def pwrite(fd: int, buf, off: int) -> None:
+    """Darwin has `os.pwrite`; this module simply keeps the call in the platform layer (C22)."""
+    view = buf if isinstance(buf, (bytes, bytearray, memoryview)) else bytes(buf)
+    os.pwrite(fd, view, off)
+
+
+def pread(fd: int, n: int, off: int) -> bytes:
+    return os.pread(fd, n, off)
+
+
+def is_current() -> bool:
+    import sys
+
+    return sys.platform == "darwin"
 
 
 def capabilities() -> dict[str, object]:
     return {"platform": NAME, "supported": SUPPORTED, "prealloc": PREALLOC_METHOD,
             "directory_fsync": DIRECTORY_FSYNC, "mapped_view_flush": MAPPED_VIEW_FLUSH,
             "process_start_token": False, "boot_id": False, "filesystem_type": "unknown",
-            "f_fullfsync": f_fullfsync_supported(), "durability_note": DURABILITY_NOTE,
-            "tested_here": False,
+            "f_fullfsync": f_fullfsync_supported(), "durability_note": durability_note(),
+            "is_current": is_current(),
             "note": "written for P2-04; not executed in this environment (Linux only) and not yet run in CI"}

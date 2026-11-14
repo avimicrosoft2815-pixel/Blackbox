@@ -38,6 +38,7 @@ def test_process_mode_append_path_makes_no_syscall(tmp_path, monkeypatch):
     w.flush()
 
     counts = dict.fromkeys(WATCHED, 0)
+    publishes_before = w.publishes
 
     def counting(name, real):
         def wrapper(*args, **kwargs):
@@ -62,10 +63,11 @@ def test_process_mode_append_path_makes_no_syscall(tmp_path, monkeypatch):
 
     made = {name: n for name, n in counts.items() if n}
     assert set(made) <= {"pwrite"}, f"syscalls other than pwrite on the append path: {made}"
-    batches = made.get("pwrite", 0)
-    # 100 000 appends of 64 B payloads are ~13.7 MB, i.e. ~840 batches of 16 KiB: one pwrite each, plus the
-    # CHAIN frame and SEG_END written through the same buffer. Anything near one call per event fails here.
-    assert 1 <= batches <= APPENDS // 50, f"{batches} pwrites for {APPENDS} appends is not one per batch"
+    publishes = w.publishes - publishes_before
+    # C21: exactly TWO pwrites per batch inside the measured window — the segment data and the 64 B head slot —
+    # and nothing else. The CHAIN frame rides in the data buffer; `flush` at the end publishes once more.
+    assert made.get("pwrite", 0) == 2 * publishes, (
+        f"{made.get('pwrite', 0)} pwrites for {publishes} publishes is not two per batch")
     w.close()
 
 

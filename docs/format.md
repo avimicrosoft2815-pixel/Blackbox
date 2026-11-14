@@ -30,11 +30,12 @@ Hashes are **BLAKE2b-256** unless stated. Reserved bytes are zero and MUST be ig
 
 ## The commit point is the head publish, not the store
 
-Frames reach the active segment with one `pwrite` per group-commit batch (ADR-005); they are **not** mapped.
+Frames reach the active segment with one `pwrite` per group-commit batch (ADR-005) and the commit is **one
+`pwrite` of the 64 B head slot** (C21); nothing in `src/` is mapped, and nothing is sparse-then-mapped.
 Nothing about a byte of this format changed when that decision was taken: a reader still trusts only frames
 below the published `head_off`, the head is still the two-slot CRC-checked record that commits a batch, and the
 `.seal` footer still covers the same byte range. What changed is that the writer can now report `ENOSPC` and
-degrade instead of taking a page fault, and that `mode=process` costs **one syscall per batch** instead of none.
+degrade instead of taking a page fault, and that `mode=process` costs **two syscalls per batch** (segment data, head slot) instead of none.
 
 ## 1. Directory layout (one directory per writer)
 

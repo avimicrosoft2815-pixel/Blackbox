@@ -13,8 +13,14 @@ What differs on Windows, and why each difference is safe:
 * **Directory fsync.** Windows has no handle-based directory flush from Python. `fsync_dir` is a no-op with a
   reason: `MoveFileEx`/`os.replace` on NTFS is metadata-journalled, and the plan already treats directory
   fsync as best-effort everywhere (`posix.fsync_dir` is wrapped in `contextlib.suppress(OSError)`).
-* **Mapped-view flush.** `mmap.flush()` calls `FlushViewOfFile` + `FlushFileBuffers` on CPython/Windows, which
-  is what `kernel` mode needs; there is no separate call to make.
+* **No positional I/O.** Windows has no `os.pwrite`/`os.pread`, so `pwrite`/`pread` below are `os.lseek` plus
+  `os.write`/`os.read`. That is legal here and only here, for one stated reason: every fd the tape opens has a
+  single user (the writer, or one reader), and the writer serialises publish/roll/close under its own lock, so
+  no second thread can move the file offset between the seek and the transfer. A shared fd would make this
+  wrong, and the docstring is the warning.
+* **No mapping anywhere.** Since ADR-005/C21 the recorder and its readers use `pread`/`pwrite` only, so
+  `FlushViewOfFile` is no longer on any path. `flush_mapped_view` remains for a caller that maps a sealed
+  segment itself (a capsule tool), where `mmap.flush()` is the right call.
 * **PID reuse token.** `OpenProcess` + `GetProcessTimes` are reached through `ctypes` (C20), because they are
   the Windows equivalent of `/proc/<pid>/stat` field 22: the process *creation* time, which is what defeats PID
   reuse. `PROCESS_QUERY_LIMITED_INFORMATION` keeps the call working for a process owned by another user where
@@ -119,6 +125,33 @@ def fdatasync(fd: int) -> None:
     os.fsync(fd)
 
 
+def pwrite(fd: int, buf, off: int) -> None:
+    """`pwrite` on Windows: seek, then write. See the module docstring for why the offset is safe to move."""
+    view = memoryview(buf)
+    os.lseek(fd, off, os.SEEK_SET)
+    while view:
+        written = os.write(fd, view)
+        view = view[written:]
+
+
+def pread(fd: int, n: int, off: int) -> bytes:
+    """`pread` on Windows: seek, then read exactly `n` bytes unless the file ends first."""
+    os.lseek(fd, off, os.SEEK_SET)
+    chunks = []
+    remaining = n
+    while remaining > 0:
+        chunk = os.read(fd, remaining)
+        if not chunk:
+            break
+        chunks.append(chunk)
+        remaining -= len(chunk)
+    return b"".join(chunks)
+
+
+def is_current() -> bool:
+    return os.name == "nt"
+
+
 def flush_mapped_view(mm) -> None:
     """`FlushViewOfFile`, for a caller that still holds a mapping: CPython's `mmap.flush()` does exactly that.
 
@@ -150,5 +183,5 @@ def capabilities() -> dict[str, object]:
     return {"platform": NAME, "supported": SUPPORTED, "prealloc": PREALLOC_METHOD,
             "directory_fsync": DIRECTORY_FSYNC, "mapped_view_flush": MAPPED_VIEW_FLUSH,
             "process_start_token": True, "boot_id": False, "filesystem_type": "unknown",
-            "tested_here": False,
+            "is_current": is_current(),
             "note": "written for P2-03; not executed in this environment (Linux only) and not yet run in CI"}

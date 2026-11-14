@@ -9,6 +9,8 @@ import os
 import stat as stat_mod
 from pathlib import Path
 
+NAME = "posix"
+
 _NETWORK_FS = {"nfs", "nfs4", "cifs", "smb3", "smbfs", "9p", "fuse.sshfs", "fuse.rclone", "afs"}
 
 
@@ -96,10 +98,28 @@ def is_regular_file(path: str) -> bool:
         return False
 
 
+def pwrite(fd: int, buf, off: int) -> None:
+    """Positional write. The only route to `os.pwrite` in this repository (C22)."""
+    view = buf if isinstance(buf, (bytes, bytearray, memoryview)) else bytes(buf)
+    os.pwrite(fd, view, off)
+
+
+def pread(fd: int, n: int, off: int) -> bytes:
+    """Positional read, the counterpart of `pwrite`."""
+    return os.pread(fd, n, off)
+
+
+def is_current() -> bool:
+    """True when this shim is the one `platform.current()` would return on this machine."""
+    import sys
+
+    return os.name != "nt" and sys.platform != "darwin"
+
+
 def capabilities() -> dict[str, object]:
     """What this shim promises, in the same shape as `windows.capabilities()` / `macos.capabilities()`."""
-    return {"platform": "posix", "supported": True, "prealloc": "posix_fallocate",
+    return {"platform": NAME, "supported": True, "prealloc": "posix_fallocate",
             "directory_fsync": True, "mapped_view_flush": "mmap.flush",
             "process_start_token": Path("/proc/self/stat").exists(), "boot_id": True,
-            "filesystem_type": "/proc/self/mountinfo", "tested_here": True,
+            "filesystem_type": "/proc/self/mountinfo", "is_current": is_current(),
             "note": "the shim every number in this repository was measured through"}
