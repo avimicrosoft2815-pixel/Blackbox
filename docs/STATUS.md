@@ -1,6 +1,6 @@
 # STATUS — BlackBox v1.0 build
 
-**Branch** `arena/e10fc603-blackbox` · **base** `30c9433` · **HEAD** `820d595` (+ this file's commit)
+**Branch** `arena/e10fc603-blackbox` · **base** `30c9433` · **HEAD** `98d3840`
 **Phase:** P0, P1 (partial), P2 (partial) — *storage and recovery layer only; no SDK, proxy or viewer yet.*
 **Not merge-ready.** Six of the plan's P1/P2 tickets are still `pending`; see §7.
 
@@ -120,10 +120,10 @@ None of the held items changes a frozen byte or reverses a §3 decision, so noth
 
 | Check | State |
 |---|---|
-| `make test` from a clean clone | green, 157 tests |
-| `make kill` (500 trials, ext4) | 0 violations |
-| `make bench` into `bench/results/` | green, both columns |
-| `make fuzz` | 100 000 iterations, 0 non-`CBORError` |
+| `make test` from a clean clone | green, 157 tests (ran in `/tmp/clone` at `ee9b0f4`, with only the dev venv) |
+| `make kill` (500 trials, ext4, from the clean clone) | 0 violations |
+| `make bench` into `bench/results/` | green, both columns, from the clean clone |
+| `make fuzz` | 100 000 iterations, 0 non-`CBORError` (clean clone too) |
 | `python -m blackbox --version` | `blackbox 0.1.0.dev0 (format v2)` |
 | `README.md` ≤ 60 lines + status line | **40 lines**, exact status line present |
 | `pyproject.toml` version | `0.1.0.dev0` |
