@@ -4,7 +4,7 @@ _Python 3.11.2 · Linux 6.1.158 x86_64 · tmpfs · single process per trial · 2
 
 ## 1. Named crash points (P2-08, `os._exit`)
 
-Deterministic stages, one trial each, in `tests/test_crash_points.py` (part of `make test`):
+Fixed stages, one trial each, in `tests/test_crash_points.py` (part of `make test`):
 
 | stage | where it dies | modes | segment sizes | trials | result |
 |---|---|---|---|---|---|

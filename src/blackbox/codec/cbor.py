@@ -154,17 +154,21 @@ def encode_chain_into(buf: bytearray, off: int, prev: bytes, batch: bytes, first
 
 
 # ── decoding ────────────────────────────────────────────────────────────────
+_WIDTH = {24: 1, 25: 2, 26: 4, 27: 8}
+_UNPACK = {24: ">B", 25: ">H", 26: ">I", 27: ">Q"}
+
+
 def _read_len(buf: bytes, pos: int, info: int) -> tuple[int, int]:
     if info < 24:
         return info, pos
-    if info == 24:
-        return buf[pos], pos + 1
-    if info == 25:
-        return struct.unpack_from(">H", buf, pos)[0], pos + 2
-    if info == 26:
-        return struct.unpack_from(">I", buf, pos)[0], pos + 4
-    if info == 27:
-        return struct.unpack_from(">Q", buf, pos)[0], pos + 8
+    # Every multi-byte length is bounds-checked *before* unmarshalling: `struct.unpack_from` raises
+    # `struct.error` on a short buffer, which is not a `CBORError` and would escape the decoder's contract.
+    # Found by the 100k-buffer fuzz (P1-03) on inputs as short as one byte.
+    if info in _UNPACK:
+        width = _WIDTH[info]
+        if pos + width > len(buf):
+            raise CBORError("truncated length field")
+        return struct.unpack_from(_UNPACK[info], buf, pos)[0], pos + width
     if info == 31:
         raise CBORError("indefinite length items are not allowed")
     raise CBORError("reserved additional-information value")
@@ -234,6 +238,8 @@ def decode(buf: bytes, pos: int = 0, allow_trailing: bool = False, _depth: int =
         if info == 22:
             return None, pos
         if info == 27:
+            if pos + 8 > len(buf):                 # same short-buffer trap as the length fields (P1-03)
+                raise CBORError("truncated float64")
             return struct.unpack_from(">d", buf, pos)[0], pos + 8
         raise CBORError("unsupported simple/float value")
     raise CBORError("unreachable")

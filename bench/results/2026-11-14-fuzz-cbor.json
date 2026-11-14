@@ -1,0 +1,12 @@
+{
+  "date": "2026-11-14",
+  "probe": "P1-03 CBOR decoder fuzz",
+  "iterations": 100000,
+  "seed": 20261114,
+  "decoded": 318,
+  "rejected": 99682,
+  "non_cbor_exceptions": [],
+  "elapsed_s": 0.6,
+  "inputs_per_s": 163563.9,
+  "claim": "100k random buffers raise nothing but CBORError"
+}

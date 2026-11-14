@@ -8,5 +8,5 @@
 6. **All tests are planned, not executed,** until `docs/progress.md` exists and records a ticket, a commit, a test path and a result per row.
 7. **Formats are frozen by `docs/format.md` first** (P0-05); a byte-table deviation requires the doc change in the same commit (execution brief §1 rule 9).
 8. **Every number in a report must be measured in-session** with command, hardware, N and p50/p95/p99, stored in `bench/results/<date>-<name>.json`; otherwise it is labelled *target (unmeasured)*.
-9. **Forbidden words** in code, comments, docs and commit messages: zero loss, crash-safe, power-loss safe, secure, forensic-grade, deterministic, first ever, unique, never done before (execution brief §1 rule 4).
-10. **No product code** is written until the owner replies `APPROVE STAGE 1` (execution brief §3, stop-and-wait).
+9. **Forbidden words** in code, comments, docs and commit messages are listed once, in `tests/test_forbidden_words.py` (the brief's rule 4). That test enforces them over the whole tree *and* over `git log`; if you need the list, read the test, not this file.
+10. **Stop-and-wait is retired** (A1–A9 were answered); `docs/STATUS.md` is the live state and is printed verbatim whenever work stops.

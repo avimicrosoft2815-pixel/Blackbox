@@ -1,4 +1,4 @@
-"""P2-05 — scan the data directory and return a deterministic work queue.
+"""P2-05 — scan the data directory and return a stable work queue.
 
 Ordering is by `(created_wall_ns, writer_uuid)` so two runs on the same directory produce the same queue and a
 resumed recovery does the same thing in the same order. Nothing is modified here: classification only.
@@ -88,7 +88,7 @@ def classify_tape(tape_dir: str) -> TapeEntry | None:
 
 
 def discover(data_dir: str) -> list[TapeEntry]:
-    """All tapes under `<data_dir>/tape`, ordered by creation time then uuid (deterministic)."""
+    """All tapes under `<data_dir>/tape`, ordered by creation time then uuid (stable order)."""
     base = os.path.join(data_dir, "tape")
     entries: list[TapeEntry] = []
     try:

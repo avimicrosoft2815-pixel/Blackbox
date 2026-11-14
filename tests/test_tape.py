@@ -163,7 +163,7 @@ def test_roll_produces_two_sealed_segments_and_a_full_scan(tmp_path):
     assert result.last_seq >= written
 
 
-def test_roll_exactly_at_chain_emission_keeps_seq_unique_and_dense(tmp_path):
+def test_roll_exactly_at_chain_emission_keeps_seq_dense(tmp_path):
     """A9 regression: the CHAIN frame used to be encoded before the roll decision.
 
     A roll inside `publish()` advances `head_seq` with the `SEG_END` frame, so an already-encoded CHAIN frame
@@ -183,7 +183,7 @@ def test_roll_exactly_at_chain_emission_keeps_seq_unique_and_dense(tmp_path):
 
     result = scanner.scan(str(tmp_path), uuid)
     seqs = [f["seq"] for f in result.frames]
-    assert seqs == list(range(1, len(seqs) + 1)), "seq numbers must be unique and dense"
+    assert seqs == list(range(1, len(seqs) + 1)), "seq numbers must be dense and gap-free"
     assert result.gaps == []
     assert result.completeness() == "full"
     assert len(segments.list_segments(str(tmp_path / "tape" / uuid))) >= 3

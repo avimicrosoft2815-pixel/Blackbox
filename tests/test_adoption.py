@@ -55,7 +55,7 @@ def test_s15_state_is_what_the_plan_says(tmp_path, crashed_roll):
     assert "adopt_orphan_segment" in state.actions
 
 
-def test_discover_is_deterministic(tmp_path, crashed_roll):
+def test_discover_order_is_stable(tmp_path, crashed_roll):
     first = [e.to_dict() for e in discover.discover(str(tmp_path))]
     second = [e.to_dict() for e in discover.discover(str(tmp_path))]
     assert first == second

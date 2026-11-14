@@ -1,24 +1,40 @@
 # BlackBox
 
-**Status:** planning — no product code yet.
+**pre-alpha: storage and recovery layer only; no SDK, proxy or viewer yet**
 
-*"Attach in one command to any program that calls a model over HTTP and lets you set its base URL — in any language — plus Claude Code and Codex through their hooks. Closed consumer apps are not observable and we say so."*
+A local-first flight recorder for programs that call a model over HTTP. This repository currently contains the
+storage primitives the rest of the product is built on: a rolling segment tape, a two-slot head, a hash chain,
+segment seals and a recovery scanner — with the crash behaviour tested, not asserted.
 
-## What BlackBox does not attach to (hard limits, verbatim from the authoritative plan §11.12)
+- **What is green, pending or not testable here:** [`docs/STATUS.md`](docs/STATUS.md)
+- **What is guaranteed, per failure class:** [`docs/guarantees.md`](docs/guarantees.md)
+- **The tape format, byte by byte:** [`docs/format.md`](docs/format.md)
+- **The plan and the ledger of record:** [`docs/BLACKBOX_FINAL_ARCHITECTURE_v1.1.md`](docs/BLACKBOX_FINAL_ARCHITECTURE_v1.1.md), [`docs/progress.md`](docs/progress.md)
 
-| Surface | Why not | What we offer instead |
-|---|---|---|
-| ChatGPT desktop / web, Claude desktop / web | no client-side hook or extension API for ChatGPT desktop **[Not found in this search]**; Claude Desktop exposes only MCP | MCP read access to capsules (Claude Desktop, §19.4); import of official data exports (P12-10) |
-| Consumer mobile apps | certificate pinning; one VPN at a time on Android; CA install required | none; stated |
-| gRPC-only providers | seams A–D are HTTP/1.1 JSON/SSE | `blackbox.capture()` manual route; v2 decoder work |
-| Request-signed APIs through the proxy (Bedrock SigV4) | the signature covers the `Host`; a forwarding proxy breaks it | in-process botocore event seam (v2, P10-09) |
-| Apps that ignore base-URL settings and pin TLS | nothing short of MITM or eBPF | D14 (v2 opt-in MITM) or nothing |
-| Already-running processes | no safe, portable injection without debugger privileges | restart under `blackbox run` |
-| "Everything the app does" (DB, files, subprocesses) | §6.3; Keploy shows the cost (eBPF, root, per-protocol decoders) | the LLM boundary only, deliberately |
+## What works today
 
-## Where the plan lives
+```console
+$ python -m blackbox --version
+blackbox 0.1.0.dev0 (format v2)
+```
 
-- **Authoritative:** `docs/BLACKBOX_FINAL_ARCHITECTURE_v1.1.md` (BBX-ARCH-1.1) — build order, byte tables, guarantees, ticket ledger.
-- **Review of record:** `docs/REVIEW_v1.1_FINDINGS.md` — 13 findings, 4 blockers, awaiting resolution.
-- **Superseded history:** `docs/archive/BBX-ARCH-1.0.md` — read-only.
-- Nothing here is implemented, benchmarked or released. Every test in the plan is *planned* until `docs/progress.md` exists and says otherwise.
+```console
+$ make test     # 157 tests: codec, framing, tape, adoption, crash points, ENOSPC, keeper, forbidden words
+$ make kill     # 500 randomized parent-SIGKILL trials, then a recovery scan of every tape
+$ make bench    # per-stage microbench into bench/results/ (ext4 gate column + labelled tmpfs column)
+$ make fuzz     # 100k random CBOR buffers; nothing but CBORError may escape
+```
+
+The tape survives process death for anything published to `head`; kernel-crash durability needs `mode=kernel`
+or `paranoid` and is measured separately. **Nothing here is a claim about power loss** — see
+`docs/guarantees.md` §1 for which failure class each test covers and which one it does not.
+
+## What this is not yet
+
+No capture API, no proxy, no viewer, no CLI beyond `--version`/`status`, no database, no retention, no capsules.
+Every one of those is a phase in the plan, and `docs/STATUS.md` says which phase is done.
+
+## Licence
+
+None yet. The owner has not chosen one, so there is no `LICENSE` file and no `license` field in
+`pyproject.toml`; please do not assume permission to redistribute.

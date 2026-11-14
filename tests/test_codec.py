@@ -81,7 +81,7 @@ def test_cbor_limits():
         cbor.encode({str(i): i for i in range(cbor.MAX_MAP_KEYS + 1)})
 
 
-def test_ids_are_unique_and_fixed_width():
+def test_ids_are_fixed_width_and_distinct():
     ids = {new_run_id() for _ in range(200)}
     assert len(ids) == 200
     assert all(i.startswith("r_") and len(i) == 28 for i in ids)      # 'r_' + 26 base32 chars
@@ -150,3 +150,13 @@ def test_no_socket_import_anywhere_in_the_core():
     hits = [p.name for p in (Path(__file__).resolve().parents[1] / "src").rglob("*.py")
             if "import socket" in p.read_text(encoding="utf-8")]
     assert not hits, f"the core must not import socket at all: {hits}"
+
+
+@pytest.mark.parametrize("data", [b"\x1b", b"\x5b", b"\x9b\x00", b"\xa7\x61m\x6b", b"\xfb\x00",
+                                  b"\x78", b"\x5a\x00\x00", b"\xbb\x00\x00\x00"])
+def test_truncated_headers_raise_cbor_error_not_struct_error(data):
+    """P1-03: found by fuzz. A short buffer must raise CBORError; struct.error is not part of the contract."""
+    from blackbox.codec.cbor import CBORError
+
+    with pytest.raises(CBORError):
+        cbor.decode(data)
