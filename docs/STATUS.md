@@ -1,6 +1,6 @@
 # STATUS — BlackBox v1.0 build
 
-**Branch** `arena/e10fc603-blackbox` · **base** `30c9433` · **HEAD** `e15a680` plus the STATUS commit that follows it
+**Branch** `arena/e10fc603-blackbox` · **base** `30c9433` · **HEAD** `b3c4e3c`
 **Phase:** P0, P1 (partial), P2 (partial) — *storage and recovery layer only; no SDK, proxy or viewer yet.*
 **Not merge-ready.** The plan's P1/P2 tickets that are still `pending` are listed in §7, with the reason for each.
 
@@ -84,7 +84,7 @@ sum to the event number, and the JSON says so.
 | C10 | F1–F13 decided, not waited on | **done** — §5 |
 | C11 | syscall evidence for "no syscall in process mode" | **done** — counting shim (strace is not installable: no root) |
 | C12 | merge-ready trunk | **partly** — §6; the trunk checks pass, the *product* is not merge-ready |
-| C13 | this order of work | followed through P1-19; the rest is in §7 |
+| C13 | this order of work | followed through P1-19 and `P2-03`/`P2-04`; the rest is in §7 |
 
 ## 4. Defects found and fixed (C9 format: seed → invariant broken → root cause → fix → regression test)
 
@@ -135,7 +135,7 @@ None of the held items changes a frozen byte or reverses a §3 decision, so noth
 
 | Check | State |
 |---|---|
-| `make test` from a clean clone | green at `ee9b0f4` with 157 tests; **159 now** (two S17-at-open cases added since) |
+| `make test` from a clean clone | green: cloned to `/tmp/clone2` at `e15a680` and ran **171 tests**, 3.9 s, dev venv only |
 | `make kill` (500 trials, ext4, from the clean clone) | 0 violations |
 | `make bench` into `bench/results/` | green, both columns, from the clean clone |
 | `make fuzz` | 100 000 iterations, 0 non-`CBORError` (clean clone too) |
