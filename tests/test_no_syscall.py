@@ -13,8 +13,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from blackbox import constants as C  # noqa: E402
-from blackbox.tape.writer import TapeWriter  # noqa: E402
+from blackbox import constants as C
+from blackbox.tape.writer import TapeWriter
 
 APPENDS = 100_000
 WATCHED = ("write", "pwrite", "writev", "pwritev", "fsync", "fdatasync", "open", "openat",
