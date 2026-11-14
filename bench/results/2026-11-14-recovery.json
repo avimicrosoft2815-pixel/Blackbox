@@ -31,24 +31,24 @@
       "head_off_at_sampling": 4723072,
       "bytes_written": 4718976,
       "segment_percent_written": 28.13,
-      "peak_kib": 19208,
-      "peak_mib": 18.76,
+      "peak_kib": 19148,
+      "peak_mib": 18.7,
       "above_baseline_mib": 1.15,
       "rss_anon_delta_mib": 1.02,
       "rss_file_delta_mib": 0.12,
       "baseline": {
-        "ru_maxrss_kib": 19208,
-        "VmRSS": 17528,
-        "RssAnon": 8428,
-        "RssFile": 9100,
+        "ru_maxrss_kib": 19148,
+        "VmRSS": 17664,
+        "RssAnon": 8420,
+        "RssFile": 9244,
         "RssShmem": 0,
         "VmSwap": 0
       },
       "after": {
-        "ru_maxrss_kib": 19208,
-        "VmRSS": 18704,
-        "RssAnon": 9476,
-        "RssFile": 9228,
+        "ru_maxrss_kib": 19148,
+        "VmRSS": 18840,
+        "RssAnon": 9468,
+        "RssFile": 9372,
         "RssShmem": 0,
         "VmSwap": 0
       }
@@ -60,24 +60,24 @@
       "head_off_at_sampling": 4723072,
       "bytes_written": 4718976,
       "segment_percent_written": 28.13,
-      "peak_kib": 19208,
-      "peak_mib": 18.76,
+      "peak_kib": 19148,
+      "peak_mib": 18.7,
       "above_baseline_mib": 1.15,
       "rss_anon_delta_mib": 1.02,
       "rss_file_delta_mib": 0.12,
       "baseline": {
-        "ru_maxrss_kib": 19208,
-        "VmRSS": 17592,
-        "RssAnon": 8428,
-        "RssFile": 9164,
+        "ru_maxrss_kib": 19148,
+        "VmRSS": 17504,
+        "RssAnon": 8424,
+        "RssFile": 9080,
         "RssShmem": 0,
         "VmSwap": 0
       },
       "after": {
-        "ru_maxrss_kib": 19208,
-        "VmRSS": 18768,
-        "RssAnon": 9476,
-        "RssFile": 9292,
+        "ru_maxrss_kib": 19148,
+        "VmRSS": 18680,
+        "RssAnon": 9472,
+        "RssFile": 9208,
         "RssShmem": 0,
         "VmSwap": 0
       }
@@ -88,27 +88,27 @@
       "filesystem": "ext4",
       "scratch": ".bench/scratch",
       "recovery": {
-        "frames_on_tape": 21736,
+        "frames_on_tape": 22144,
         "requested_frames": 10000,
         "rounds": 7,
-        "p50_ms": 117.09,
-        "p95_ms": 124.49,
-        "p99_ms": 124.58,
-        "min_ms": 108.67,
-        "max_ms": 124.31,
-        "per_10k_frames_ms": 53.9
+        "p50_ms": 115.46,
+        "p95_ms": 122.16,
+        "p99_ms": 122.28,
+        "min_ms": 113.0,
+        "max_ms": 121.93,
+        "per_10k_frames_ms": 52.1
       },
-      "rss_this_process_kib": 124348,
+      "rss_this_process_kib": 126204,
       "amplification_by_batch": [
         {
           "batch_bytes": 0,
-          "committed_frame_bytes": 3121744,
+          "committed_frame_bytes": 3121904,
           "payload_bytes": 2560000,
           "ratio": 1.219
         },
         {
           "batch_bytes": 4096,
-          "committed_frame_bytes": 3234416,
+          "committed_frame_bytes": 3234264,
           "payload_bytes": 2560000,
           "ratio": 1.263
         },
@@ -120,7 +120,7 @@
         },
         {
           "batch_bytes": 65536,
-          "committed_frame_bytes": 3127824,
+          "committed_frame_bytes": 3127664,
           "payload_bytes": 2560000,
           "ratio": 1.222
         }
@@ -130,24 +130,24 @@
         "committed_frame_bytes": 4718976,
         "ratio": 1.843,
         "reserved_segment_bytes": 16777216,
-        "append_events_per_s": 47127.9
+        "append_events_per_s": 37807.6
       }
     },
     "tmpfs": {
       "filesystem": "tmpfs",
       "scratch": "<scratch>/shm",
       "recovery": {
-        "frames_on_tape": 21898,
+        "frames_on_tape": 22280,
         "requested_frames": 10000,
         "rounds": 7,
-        "p50_ms": 106.03,
-        "p95_ms": 109.56,
-        "p99_ms": 109.62,
-        "min_ms": 103.16,
-        "max_ms": 109.44,
-        "per_10k_frames_ms": 48.4
+        "p50_ms": 110.55,
+        "p95_ms": 134.43,
+        "p99_ms": 138.96,
+        "min_ms": 100.67,
+        "max_ms": 125.95,
+        "per_10k_frames_ms": 49.6
       },
-      "rss_this_process_kib": 126000,
+      "rss_this_process_kib": 126700,
       "amplification_by_batch": [
         {
           "batch_bytes": 0,
@@ -179,26 +179,7 @@
         "committed_frame_bytes": 4718976,
         "ratio": 1.843,
         "reserved_segment_bytes": 16777216,
-        "append_events_per_s": 51332.4
-      }
-    }
-  },
-  "rss_flat_as_the_segment_fills": {
-    "note": "C18: with the batch store (ADR-005) there is no mapping, so RSS must not grow as the segment fills. Two probe runs, 470 B events, same 16 MiB segment.",
-    "runs": {
-      "10000": {
-        "head_off_at_sampling": 6883072,
-        "segment_percent_written": 41.0,
-        "above_baseline_mib": 1.15,
-        "rss_anon_delta_mib": 1.02,
-        "rss_file_delta_mib": 0.12
-      },
-      "34000": {
-        "head_off_at_sampling": 6622128,
-        "segment_percent_written": 39.45,
-        "above_baseline_mib": 3.19,
-        "rss_anon_delta_mib": 2.75,
-        "rss_file_delta_mib": 0.44
+        "append_events_per_s": 47964.5
       }
     }
   }

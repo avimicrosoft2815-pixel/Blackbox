@@ -1,12 +1,26 @@
 # STATUS — BlackBox v1.0 build
 
-**Branch** `arena/e10fc603-blackbox` · **base** `30c9433` · **HEAD** `PENDING` (pushed after every ticket)
+**Branch** `arena/e10fc603-blackbox` · **base** `30c9433` · **HEAD** `cd85a7f` (pushed after every ticket)
 **trunk: mergeable** — every C12 check passes from a clean clone and the README says what exists.
 **product: pre-alpha — storage and recovery layer only; no SDK, proxy or viewer yet.**
 
 ---
 
-## 0. The store changed: ADR-005 supersedes ADR-001
+## 0. No mapping anywhere: ADR-005 plus C21
+
+**ADR-005** removed the segment mapping; **C21** removed the last one, the `head`. `HeadFile.publish` writes the
+64 B slot with one `pwrite` at the alternate offset, readers `pread`, and `import mmap` no longer appears in
+`src/`. The head had been created sparse (`ftruncate`) and then mapped, so the first publish on a full
+filesystem would have had to allocate a block, failed, and killed the user's process with `SIGBUS` — the exact
+class S17 and P1-20 exist to remove, sitting under every publish. `half_hook` now splits body and CRC into two
+writes, which is how S4 reproduces a *machine-level* tear (a process kill cannot tear a 64 B `pwrite`).
+
+`mode=process` therefore costs **two syscalls per batch** — segment data and head slot — and nothing else;
+`tests/test_no_syscall.py` asserts exactly that over 100 000 appends. Consumers of positional I/O go through
+`platform.pwrite`/`platform.pread`: POSIX and macOS delegate to the `os` calls, Windows does `lseek` + `write`/
+`read` with the reason stated in its docstring. DV-010 records it.
+
+### The store decision behind it: ADR-005 supersedes ADR-001
 
 `P1-19` was decided under the plan's own rule (§8.2 / D13: if a plain `write()`-append writer is within 20 % of
 the mmap writer at the target rates, the simpler store wins). Measured with 10 interleaved pairs per rate on
@@ -46,7 +60,7 @@ Gate: **p50 ≤ 25 µs, p99 ≤ 250 µs, ≥ 40 000 ev/s** for one full event wi
 
 | Row | ext4 (gate) | tmpfs (label only) | Verdict | Source |
 |---|---|---|---|---|
-| **full event, group commit 16 KiB, CHAIN on** | **p50 10.992 · p90 16.005 · p95 24.272 · p99 61.777 µs · mean 13.479 · max 295.652 · 72,909 ev/s** (N 200,000, warm-up 20,000, 2.743 s) | p50 11.148 · p99 54.215 · 74,334 ev/s | **PASS** | `-writer-throughput.json` |
+| **full event, group commit 16 KiB, CHAIN on** | **p50 11.057 · p90 18.322 · p95 20.53 · p99 51.662 µs · mean 13.396 · max 244.472 · 73,338 ev/s** (N 200,000, warm-up 20,000, 2.727 s) | p50 11.148 · p99 54.215 · 74,334 ev/s | **PASS** | `-writer-throughput.json` |
 | same, keeper thread publishing | p50 11.044 · p99 54.527 · 73,471 ev/s | — | **PASS** | same |
 | kernel mode (`sync_ms=250`, `1 MiB`) | p50 11.278 · p99 89.903 · 60,368 ev/s · sync stall max 2866 µs over 28 syncs | p50 10.953 | reported, not gated | same |
 | kernel mode, sync-dense (64 KiB) | p50 11.387 · p99 81.232 · stall max 11875 µs over 453 syncs | — | reported, not gated | same |
@@ -126,7 +140,7 @@ to `P2-11`** (`blackbox run`), not P5 — corrected here and in `DECISIONS.md`.
 | docs + `bench/results/*.json` committed | yes |
 | no absolute sandbox paths | grep over `bench/results/` = 0 |
 | forbidden words, tree + commit messages | green |
-| **C7 CI** | **ran; partially green.** Push 4 (`ci:` fix): **docs green**, and **all three ubuntu cells green** (3.11, 3.12, 3.13). **macOS × 3 and Windows × 3 are still red** (exit 1), cause not yet identified — the job logs are outside this sandbox's egress (only `github.com`, `api.github.com`, `codeload`, npm and PyPI are reachable), so the Cells are reported as red/unknown, never as green. Fixed so far on the way: the docs job had no pytest; the kill step collected zero tests (exit 5); the Windows shim imported `fcntl` at module scope; two POSIX-only suites had no skip marker. The macOS/Windows failures need the Actions-tab log to name — that is the next CI ticket. |
+| **C7 CI** | **ran; partially green.** Runs `43645445224`/`43647132716`: **docs green**, **all three ubuntu cells green**. C23's table in `docs/compatibility.md` carries the per-cell verdict and the run URL. **macOS × 3 and Windows × 3 are still red** (exit 1), cause not yet identified — the job logs are outside this sandbox's egress (only `github.com`, `api.github.com`, `codeload`, npm and PyPI are reachable), so the Cells are reported as red/unknown, never as green. Fixed so far on the way: the docs job had no pytest; the kill step collected zero tests (exit 5); the Windows shim imported `fcntl` at module scope; two POSIX-only suites had no skip marker. The macOS/Windows failures need the Actions-tab log to name — that is the next CI ticket. |
 
 ## 7. Not done — and why that is the honest state
 
@@ -142,7 +156,7 @@ to `P2-11`** (`blackbox run`), not P5 — corrected here and in `DECISIONS.md`.
 | P2-09 week of nightlies | **requires time (nightly CI × 7 days)** | GitHub `schedule` runs only on the default branch; the clock starts at merge |
 | P11-05, P11-12 | **requires humans** | a human operator and a real incident |
 | S17 sparse control (C20) | **requires humans (root on any Linux box, two minutes)** | `tools/s17_control.sh` builds the 2 MiB tmpfs control and prints the signal; it cannot be run here (no superuser) |
-| Windows/macOS rows of the OS gates | **not testable in this environment** (Linux 6.x, x86-64 only) | the matrix is written and running (red, see §6) |
+| Windows/macOS rows of the OS gates | **CI cells red — cause not yet named** | `docs/compatibility.md` lists them per cell with the run URL; the job logs are outside this sandbox's egress. C22's two known causes are fixed (the hard-coded `tested_here`, and `os.pwrite`/`os.pread` on Windows, both now behind the platform layer) and a second layer remains |
 | P10, P12 | **not started** | P10 only after every v1.0 gate is green; P12 never without instruction |
 
 ## 8. Next, in order

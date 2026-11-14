@@ -68,10 +68,10 @@ def one_trial(tmp: Path, cfg: dict, batch: int, delay_s: float, seed: int) -> di
         ready = line.strip() == b"READY"
     if not ready:
         proc.kill()
-        proc.communicate(timeout=60)
+        _, err = proc.communicate(timeout=60)
         return {"seed": seed, "delay_ms": round(delay_s * 1000, 1), "batch_bytes": batch, **cfg,
                 "violations": ["child never signalled READY: the trial did not start"],
-                "not_started": True}
+                "stderr": (err or b"").decode(errors="replace")[-600:], "not_started": True}
     time.sleep(delay_s)
     os.kill(proc.pid, signal.SIGKILL)
     _, err = proc.communicate(timeout=60)
@@ -160,7 +160,12 @@ def main(argv=None) -> int:
         cfg = CONFIGS[i % len(CONFIGS)]
         batch = BATCHES[(i // len(CONFIGS)) % len(BATCHES)]
         delay = rng.uniform(0.05, args.max_delay_ms / 1000)
-        trials.append(one_trial(tmp, cfg, batch, delay, i))
+        trial = one_trial(tmp, cfg, batch, delay, i)
+        trials.append(trial)
+        # release this trial's tape now: a 500-trial matrix on a 2 GiB tmpfs used to fill the filesystem
+        # part-way through, and the children then died before READY (36 trials of that run were that, not
+        # protocol failures). Every fact the trial reports has already been read out of the tape.
+        __import__("shutil").rmtree(tmp / f"t{i}", ignore_errors=True)
         if (i + 1) % 50 == 0:
             bad = sum(1 for t in trials if t["violations"])
             print(f"  {i + 1}/{args.trials} trials, {bad} with violations", flush=True)
