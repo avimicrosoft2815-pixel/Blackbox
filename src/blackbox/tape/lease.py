@@ -14,7 +14,9 @@ from dataclasses import dataclass
 
 from blackbox import constants as C
 from blackbox.errors import bbx
-from blackbox.platform import posix
+from blackbox.platform import current as _plat_current
+
+_plat = _plat_current()      # C26: the lease must reach Windows/macOS through the dispatch, not `posix`
 
 
 @dataclass(frozen=True)
@@ -33,13 +35,13 @@ class Lease:
 
     def is_stale(self, *, now_ns: int | None = None) -> tuple[bool, str]:
         now = now_ns or time.time_ns()
-        current_boot = posix.boot_id()
+        current_boot = _plat.boot_id()
         if self.boot_id and current_boot and self.boot_id != current_boot:
             return True, "rebooted"
-        if not posix.pid_alive(self.pid):
+        if not _plat.pid_alive(self.pid):
             return True, "pid gone"
         if self.proc_start is not None:
-            current = posix.proc_start_ticks(self.pid)
+            current = _plat.proc_start_ticks(self.pid)
             if current is not None and current != self.proc_start:
                 return True, "pid reused"
         if now - self.created_ns > C.LEASE_MAX_AGE_NS:
@@ -49,8 +51,8 @@ class Lease:
 
 def acquire(path: str, *, pid: int | None = None) -> Lease:
     pid = pid or os.getpid()
-    start = posix.proc_start_ticks(pid)
-    lease = Lease(pid=pid, proc_start=start, boot_id=posix.boot_id(),
+    start = _plat.proc_start_ticks(pid)
+    lease = Lease(pid=pid, proc_start=start, boot_id=_plat.boot_id(),
                   nonce=os.urandom(8).hex(), created_ns=time.time_ns(), path=path)
     payload = lease.to_json()
     if len(payload) > C.LEASE_MAX_BYTES:

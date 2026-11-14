@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import os
 import stat as stat_mod
+from typing import Any
 
 try:                                    # `fcntl` does not exist on Windows, and this module must stay importable
     import fcntl
@@ -44,12 +45,64 @@ def durability_note() -> str:
             "which does not flush the drive cache: F2 on macOS is weaker than on Linux and is labelled so")
 
 
+def _libc() -> Any:
+    """`libc` through ctypes, cached on the function object so a repeated call costs one attribute lookup."""
+    import ctypes
+    import ctypes.util
+
+    cached = getattr(_libc, "_cached", None)
+    if cached is None:
+        path = ctypes.util.find_library("c") or "/usr/lib/libSystem.B.dylib"
+        lib = ctypes.CDLL(path, use_errno=True)
+        lib.sysctl.argtypes = [ctypes.POINTER(ctypes.c_int), ctypes.c_uint, ctypes.c_void_p,
+                               ctypes.POINTER(ctypes.c_size_t), ctypes.c_void_p, ctypes.c_size_t]
+        lib.sysctl.restype = ctypes.c_int
+        lib.sysctlbyname.argtypes = [ctypes.c_char_p, ctypes.c_void_p, ctypes.POINTER(ctypes.c_size_t),
+                                     ctypes.c_void_p, ctypes.c_size_t]
+        lib.sysctlbyname.restype = ctypes.c_int
+        cached = lib
+        _libc._cached = lib                     # type: ignore[attr-defined]
+    return cached          # the CDLL, typed as object: every attribute below is checked by hand
+
+
+CTL_KERN, KERN_PROC, KERN_PROC_PID = 1, 14, 1
+_KINFO_PROC_BYTES = 648                        # sizeof(struct kinfo_proc) on Darwin is 648 on both arches
+# `kp_proc.p_starttime` is a struct timeval at this offset inside kinfo_proc (Darwin 10+); it is the field
+# `ps -o lstart` and every PID-reuse defence uses.
+_P_STARTTIME_OFFSET = 104
+
+
 def proc_start_ticks(pid: int) -> int | None:
-    """No `/proc`. `sysctl(KERN_PROC_PID)` is not in stdlib, so liveness falls back to `pid_alive`."""
-    return None
+    """Process start time via `sysctl(KERN_PROC_PID)` → `kinfo_proc.kp_proc.p_starttime` (C26).
+
+    Returns microseconds since the epoch, the same unit the token is compared in. `None` means the call could
+    not be made (no libc, unknown pid, or an OS whose `kinfo_proc` layout differs) — the lease must treat that
+    as "cannot prove liveness" and fall back to the mtime staleness rule, never as "same process".
+    """
+    if pid <= 0:
+        return None
+    try:
+        import ctypes
+
+        lib = _libc()
+    except (OSError, ImportError, AttributeError):
+        return None
+    mib = (ctypes.c_int * 4)(CTL_KERN, KERN_PROC, KERN_PROC_PID, pid)
+    buf = ctypes.create_string_buffer(_KINFO_PROC_BYTES)
+    size = ctypes.c_size_t(_KINFO_PROC_BYTES)
+    if lib.sysctl(mib, 4, buf, ctypes.byref(size), None, 0) != 0 or size.value == 0:
+        return None
+    raw = bytes(buf.raw[:_KINFO_PROC_BYTES])
+    secs = int.from_bytes(raw[_P_STARTTIME_OFFSET:_P_STARTTIME_OFFSET + 8], "little", signed=True)
+    usecs = int.from_bytes(raw[_P_STARTTIME_OFFSET + 8:_P_STARTTIME_OFFSET + 16], "little", signed=True)
+    if secs <= 0:
+        return None
+    return secs * 1_000_000 + usecs
 
 
 def pid_alive(pid: int) -> bool:
+    if os.name != "posix":                       # C26: never executed off POSIX
+        raise NotImplementedError("os.kill(pid, 0) is not a liveness probe on this OS")
     if pid <= 0:
         return False
     try:
@@ -62,8 +115,25 @@ def pid_alive(pid: int) -> bool:
 
 
 def boot_id() -> str | None:
-    """`kern.boottime` is reachable via sysctl(3) only; `None` means "no boot identity available"."""
-    return None
+    """`kern.boottime` via `sysctlbyname` (C26): a per-boot timestamp, which is what the lease compares.
+
+    A reboot always changes `kern.boottime`, so two runs on the same machine differ. `None` when the call cannot
+    be made, which the lease reads as "cannot prove a reboot", never as "same boot".
+    """
+    try:
+        import ctypes
+
+        lib = _libc()
+    except (OSError, ImportError, AttributeError):
+        return None
+    buf = ctypes.create_string_buffer(16)      # struct timeval
+    size = ctypes.c_size_t(16)
+    if lib.sysctlbyname(b"kern.boottime", buf, ctypes.byref(size), None, 0) != 0 or size.value < 16:
+        return None
+    raw = bytes(buf.raw[:16])
+    secs = int.from_bytes(raw[0:8], "little", signed=True)
+    usecs = int.from_bytes(raw[8:16], "little", signed=True)
+    return f"darwin-boottime-{secs}.{usecs:06d}"
 
 
 def fsync_dir(path: str) -> None:
@@ -130,7 +200,8 @@ def is_current() -> bool:
 def capabilities() -> dict[str, object]:
     return {"platform": NAME, "supported": SUPPORTED, "prealloc": PREALLOC_METHOD,
             "directory_fsync": DIRECTORY_FSYNC, "mapped_view_flush": MAPPED_VIEW_FLUSH,
-            "process_start_token": False, "boot_id": False, "filesystem_type": "unknown",
+            "process_start_token": True, "boot_id": True, "filesystem_type": "unknown",
             "f_fullfsync": f_fullfsync_supported(), "durability_note": durability_note(),
             "is_current": is_current(),
-            "note": "written for P2-04; not executed in this environment (Linux only) and not yet run in CI"}
+            "note": ("this machine's shim" if is_current()
+                     else "not executed in this environment: written for another platform")}

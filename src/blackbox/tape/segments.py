@@ -9,7 +9,6 @@ import time
 from blackbox import constants as C
 from blackbox.errors import bbx
 from blackbox.platform import current as _plat_current
-from blackbox.platform import posix
 from blackbox.tape import prealloc
 
 _plat = _plat_current()
@@ -96,7 +95,7 @@ def finish(tape_dir: str, n: int, tmp: str, *, writer_uuid: bytes, segment_bytes
     os.replace(tmp, path)
     # directory fsync is best effort on filesystems that refuse it
     with contextlib.suppress(OSError):
-        posix.fsync_dir(tape_dir)
+        _plat.fsync_dir(tape_dir)
     return path
 
 

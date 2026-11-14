@@ -1,8 +1,13 @@
-"""P2-03/P2-04: the Windows and macOS shims exist, are honest about what they cannot do, and never raise.
+"""P2-03/P2-04: the platform shims, tested without assuming which machine runs the suite (C25/C28).
 
-They cannot be *run* on this machine (Linux), so what is tested here is the contract every shim must keep:
-the same function names as `posix`, a `capabilities()` dict that admits it was not executed, no claim of
-durability it cannot make, and no exception escaping a probe that the recorder calls on a hot path.
+The rules this file follows, on all three operating systems:
+
+* a shim that is **not** current is checked for shape and honesty only — `is_current()` is False, its `note`
+  says so, and the two non-POSIX shims declare `zero-fill` preallocation (their OS has no reachable
+  `F_PREALLOCATE`/`posix_fallocate`);
+* functions that *touch the OS* (`pid_alive`, `fsync_dir`, `pwrite`/`pread`, `fdatasync`) are exercised only on
+  the current shim, except the Windows `lseek`-based positional I/O, which is portable by construction and is
+  therefore checked from every OS.
 """
 from __future__ import annotations
 
@@ -25,25 +30,39 @@ def test_every_shim_answers_the_same_questions(mod):
 NON_CURRENT = [m for m in (posix, windows, macos) if m is not current()]
 
 
-@pytest.mark.parametrize("mod", NON_CURRENT)
+@pytest.mark.parametrize("mod", [windows, macos])
 def test_a_shim_that_is_not_this_machine_says_so(mod):
-    """C22: `tested_here` was a constant, so the macOS cell failed on its own honest line."""
+    """C25/C28: only the two non-POSIX shims, and only when they are not the current one."""
+    if mod is current():
+        pytest.skip(f"{mod.NAME} is this machine's shim")
     caps = mod.capabilities()
     assert caps["is_current"] is False, f"{mod.NAME} must not claim to be the current platform"
     assert "not executed in this environment" in caps["note"]
     assert caps["prealloc"] == "zero-fill", "a sparse segment must never be mapped"
 
 
-@pytest.mark.parametrize("mod", NON_CURRENT)
-def test_unsupported_questions_answer_none_rather_than_guessing(mod):
-    assert mod.proc_start_ticks(os.getpid()) is None
-    assert mod.boot_id() is None
-    assert mod.fs_type(".") == "unknown"
-
-
 @pytest.mark.parametrize("mod", [windows, macos])
-def test_probes_never_raise_and_tolerate_a_bad_path(mod):
-    """Both non-POSIX shims: a probe on a path that does not exist must answer, not raise."""
+def test_unsupported_questions_answer_without_guessing(mod):
+    """Both non-POSIX shims answer `pid`/`boot`/`fs` questions without the `/proc` they do not have.
+
+    They are *allowed* to return a real value (the Windows and macOS paths use `ctypes`/`winreg`), so the claim
+    tested here is weaker and honest: the call happens, returns `str`/`int`/`None`, and never raises.
+    """
+    ticks = mod.proc_start_ticks(os.getpid())
+    assert ticks is None or isinstance(ticks, int)
+    boot = mod.boot_id()
+    assert boot is None or isinstance(boot, str)
+    assert isinstance(mod.fs_type("."), str)
+
+
+def test_probes_never_raise_and_tolerate_a_bad_path():
+    """The OS calls are exercised on the *current* shim only (C28).
+
+    `macos.pid_alive` cannot run on Windows (`os.kill(pid, 0)` is a console signal there), and
+    `posix.pid_alive` now raises `NotImplementedError` off POSIX on purpose — so testing every shim's OS calls
+    from one machine was testing the wrong thing.
+    """
+    mod = current()
     assert isinstance(mod.pid_alive(os.getpid()), bool)
     assert mod.pid_alive(-1) is False
     assert mod.is_regular_file("/definitely/not/here") is False
@@ -65,9 +84,14 @@ def test_exactly_one_shim_reports_itself_as_current():
 
 
 def test_positional_io_is_identical_across_shims(tmp_path):
-    """The writer calls `pwrite`/`pread`; every shim must implement them with the same semantics."""
+    """The writer calls `pwrite`/`pread`; the current shim and the portable Windows one must agree.
+
+    `windows.pwrite` is `lseek` + `write`, which works on every POSIX filesystem too, so it is safe to check it
+    from any OS. `posix.pwrite`/`macos.pwrite` are `os.pwrite`, which Windows does not have — so those two are
+    only exercised when the module in question is the current one.
+    """
     data = bytearray(b"\x00" * 32)
-    for mod in (posix, windows, macos):
+    for mod in [m for m in (posix, windows, macos) if m is current() or m is windows]:
         path = tmp_path / f"{mod.NAME}.bin"
         fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
         try:

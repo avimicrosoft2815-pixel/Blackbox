@@ -32,6 +32,8 @@ def proc_start_ticks(pid: int) -> int | None:
 
 
 def pid_alive(pid: int) -> bool:
+    if os.name != "posix":                       # C26: on Windows signal 0 is CTRL_C_EVENT, not a probe
+        raise NotImplementedError("os.kill(pid, 0) is not a liveness probe on this OS")
     if pid <= 0:
         return False
     try:
@@ -52,9 +54,16 @@ def boot_id() -> str | None:
 
 
 def fsync_dir(path: str) -> None:
-    fd = os.open(path, os.O_RDONLY)
+    """Best effort by contract: a directory that cannot be opened or flushed is not an error for a caller
+    whose data write already succeeded (the same rule `macos.fsync_dir` follows)."""
+    try:
+        fd = os.open(path, os.O_RDONLY)
+    except OSError:
+        return
     try:
         os.fsync(fd)
+    except OSError:
+        return
     finally:
         os.close(fd)
 
@@ -122,4 +131,5 @@ def capabilities() -> dict[str, object]:
             "directory_fsync": True, "mapped_view_flush": "mmap.flush",
             "process_start_token": Path("/proc/self/stat").exists(), "boot_id": True,
             "filesystem_type": "/proc/self/mountinfo", "is_current": is_current(),
-            "note": "the shim every number in this repository was measured through"}
+            "note": ("the shim this machine runs: every number in this repository was measured through it"
+                     if is_current() else "not executed in this environment: another platform is current")}
