@@ -1,0 +1,63 @@
+{
+  "date": "2026-11-14",
+  "probe": "recovery time, RSS, amplification",
+  "hardware": {
+    "cpu": "Intel(R) Xeon(R) Processor @ 2.60GHz",
+    "cpu_count": 2,
+    "python": "3.11.2",
+    "implementation": "CPython",
+    "os": "Linux-6.1.158+-x86_64-with-glibc2.36",
+    "machine": "x86_64",
+    "mem_total_kib": 4034452
+  },
+  "recovery": {
+    "frames_on_tape": 16182,
+    "requested_frames": 10000,
+    "rounds": 7,
+    "p50_ms": 107.28,
+    "p95_ms": 119.47,
+    "p99_ms": 120.49,
+    "min_ms": 98.38,
+    "max_ms": 117.56
+  },
+  "rss_write_only_process": {
+    "peak_kib": 21952,
+    "peak_mib": 21.44,
+    "events": 10000,
+    "segment_bytes_mapped": 16777216
+  },
+  "rss_this_process_kib": 113920,
+  "amplification_by_batch": [
+    {
+      "batch_bytes": 0,
+      "committed_frame_bytes": 4718976,
+      "payload_bytes": 2560000,
+      "ratio": 1.843
+    },
+    {
+      "batch_bytes": 4096,
+      "committed_frame_bytes": 3234264,
+      "payload_bytes": 2560000,
+      "ratio": 1.263
+    },
+    {
+      "batch_bytes": 16384,
+      "committed_frame_bytes": 3150200,
+      "payload_bytes": 2560000,
+      "ratio": 1.231
+    },
+    {
+      "batch_bytes": 65536,
+      "committed_frame_bytes": 3127664,
+      "payload_bytes": 2560000,
+      "ratio": 1.222
+    }
+  ],
+  "amplification": {
+    "payload_bytes": 2560000,
+    "committed_frame_bytes": 4718976,
+    "ratio": 1.843,
+    "reserved_segment_bytes": 16777216,
+    "append_events_per_s": 46543.6
+  }
+}

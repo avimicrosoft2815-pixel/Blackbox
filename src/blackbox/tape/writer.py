@@ -86,7 +86,7 @@ class TapeWriter:
         self._pending = 0
         self._pending_bytes = 0        # bytes appended since the last publish (group-commit threshold)
         self._last_publish_ns = time.perf_counter_ns()
-        self.batch_bytes = 0            # 0 = publish on every explicit call
+        self.batch_bytes = C.DEFAULT_BATCH_BYTES   # 0 = publish on every call (small batches by hand)
         self.batch_ms = 0.0
         self.degraded_reason: str | None = None
         self.adopted: dict | None = None      # set when open() completed an interrupted roll (S15)

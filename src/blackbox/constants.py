@@ -128,6 +128,11 @@ CHECKSUM_IEEE = 1
 # so a reader never has to guess. See docs/DECISIONS.md D-007.
 DEFAULT_CHECKSUM = CHECKSUM_IEEE
 
+# Group-commit threshold (plan §8.2 "publish per batch, not per event"). Measured in
+# bench/results/2026-11-14-recovery.json: disk amplification is 1.843x when every event is its own commit,
+# 1.263x at 4 KiB, 1.231x at 16 KiB and 1.222x at 64 KiB; the §15.1 row is <= 1.25x, so 16 KiB is the default.
+DEFAULT_BATCH_BYTES = 16384
+
 # ── event kinds (append-only registry, docs/format.md §4) ───────────────────
 KIND_SEG_END = 1
 KIND_CHAIN = 2
