@@ -56,6 +56,32 @@ A † marks a Done-when cell paraphrased because the plan's wording uses a word 
 | `P2-11` | `blackbox run -- sh -c 'kill -9 $$'` yields a recovered run on the next line | **done** | HEAD | tests/test_launcher.py (6) | — | self | blackbox run -- cmd: spawn with BLACKBOX_RUN_ID/BLACKBOX_HOME, the launcher owns the tape (RUN_START/RUN_END), stall_ms watchdog, immediate recovery on exit, exit code propagated (128+n for a signal); the plan's acceptance line, `kill -9 $$`, leaves one capsule root |
 | `P2-12` | both pass on Linux+Windows | **done** | HEAD | tests/test_recovery.py::test_recovery_is_idempotent_ten_times | — | self | ten recoveries produce one capsule hash and one .bbx; a second recoverer process is refused with BBX-E210 while the holder is alive, and takes the stale lock over once it dies |
 | `P2-13` | a deliberately deadlocked child yields all thread stacks in `stall_tb.txt` within `stall_ms + 1 s` | **done** | HEAD | tests/test_launcher.py::test_a_stalled_child_is_detected_and_dumps_its_stacks | — | self | on stall the launcher writes stall.json and sends SIGUSR1; api.install() registers faulthandler(all_threads=True) on it, so two deliberately deadlocked threads both appear in stall_tb.txt within stall_ms + 1 s; Windows is documented as stall.json only, not claimed |
+| `P3-01` | double install ⇒ one writer; uninstall during call doesn't break it | **done** | 372006f | tests/test_api_lifecycle.py (6) | — | self | double install ⇒ one writer; uninstall during a call; BLACKBOX_DISABLED=1; unwritable data dir |
+| `P3-02` | `inspect.signature` unchanged; ≤ 1 µs overhead when disabled | **done** | 0271cef | tests/test_api_decorators.py (6) | — | self | five decorator kinds; signature/__name__/__doc__ preserved; ≤ 1 µs median when disabled |
+| `P3-03` | context nesting 50 deep works; `mark` lands in the right node | **done** | 86cd685 | tests/test_context_nodes.py (7) | — | self | run/step/mark/handled_error/capture/freeze/current; 50-deep nesting balanced; mark lands in its node |
+| `P3-04` | tests for sync/async/threadpool/multiprocessing | **done** | d5e1bb6 | tests/test_context_nodes.py (7) | — | self | contextvars node stack; threadpool and fork children write to their own tape; no fork-only test |
+| `P3-05a` | on unsupported httpx versions: one warning, next seam tried, app unaffected | **done** | 1112881 | tests/test_seam_hooks.py (7) | — | self | response hook wraps the still-unread stream, so A sees every chunk; request hook stamps the clock first, so first_byte_ms is end-to-end; already-buffered ⇒ partial=True, never zeroes |
+| `P3-05b` | bytes identical (sha256) with the tee on; works when the SDK owns the client | **done** | 0f81445 | tests/test_seam_transport.py (9) | — | self | sha256-identical to an unmodified client; recorded chunk count equals what the application read; truncated stream recorded short; mid-stream error recorded and re-raised; both installs restore |
+| `P3-05c` | fixture packs for both SDKs green; unknown SDK version ⇒ not patched | **todo** | — | — | — | — | seam C: openai/anthropic method patches (next ticket) |
+| `P3-05d` | each seam has a "forced failure" test proving the next one is chosen and recorded | **done** | 99a5164 | tests/test_preflight.py (8), SUPPORTED.md | — | self | forced failure of A chooses B and records why; all-fail is a printable state, not an exception; capture_seam in the decision — into a run.json only once P3-06 lands the sink |
+| `P3-06` | 2 000-token stream recorded as ≤ 40 chunk events; bytes forwarded identical (sha256 compare) | **todo** | — | — | — | — |  |
+| `P3-07` | fingerprints stable across dict order and whitespace | **todo** | — | — | — | — |  |
+| `P3-08` | 16 fixture cases green (§16.5) | **todo** | — | — | — | — |  |
+| `P3-09` | 12 fixture cases green | **todo** | — | — | — | — |  |
+| `P3-10` | local fixture green | **todo** | — | — | — | — |  |
+| `P3-11` | 60-secret corpus: 0 leaks; hook raising ⇒ `REDACTION_FAILED` | **todo** | — | — | — | — |  |
+| `P3-12` | rotation keeps old hashes verifiable (key id recorded) | **todo** | — | — | — | — |  |
+| `P3-13` | burst test: 1M events queued at 10× ingest rate ⇒ no P0 loss | **todo** | — | — | — | — |  |
+| `P3-14` | 100-call agent: identical outputs and exceptions vs no BlackBox | **todo** | — | — | — | — |  |
+| `P3B-01` | `curl`, a Node `openai` script and a Python `anthropic` script all work unchanged through it; SSE bytes received by the client are sha256-identical to upstream's | **todo** | — | — | — | — |  |
+| `P3B-02` | unknown host ⇒ `502 upstream-not-allowed`; `tests/test_no_egress.py` allowlist covers exactly `proxy/` and asserts the destination set | **todo** | — | — | — | — |  |
+| `P3B-03` | `blackbox run -- node app.js` and `blackbox run -- python app.py` both yield one run with linked nodes; `--no-proxy`, `--no-sdk`, `--force-proxy` behave as documented | **todo** | — | — | — | — |  |
+| `P3B-04` | header never observed at a mock "real provider" when unproxied; three link classes each have a fixture; inferred links carry evidence | **todo** | — | — | — | — |  |
+| `P3B-05` | install/remove round-trip on a settings file with unrelated keys leaves them untouched; all 9 events produce the mapped frames from recorded fixture payloads | **todo** | — | — | — | — |  |
+| `P3B-06` | fixture payloads for the 12 events mapped; unknown event ⇒ `MARK{tool_event}` | **todo** | — | — | — | — |  |
+| `P3B-07` | cold start ≤ 40 ms p95 on the bench box; S18 passes; 50 concurrent ingests produce 50 files, zero corruption | **todo** | — | — | — | — |  |
+| `P3B-08` | all green on Linux/macOS/Windows cells; bench JSON committed with hardware metadata | **todo** | — | — | — | — |  |
+| `P3B-09` | every row has either a verified version or the word "unverified" | **todo** | — | — | — | — |  |
 
 ## Hot-path numbers (Stage-2 item 8: p50/p95/p99, N, warm-up, raw JSON)
 

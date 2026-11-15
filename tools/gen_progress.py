@@ -79,6 +79,27 @@ S: dict[str, tuple[str, str, str, str, str, str]] = {
     "P1-20": ("done", "260bfd0", "test_prealloc.py (5)", "—", "self", "S17 still open, claim not made"),
     "P2-01": ("done", "8c99b96", "test_tape.py::test_lease_*", "—", "self", "stale/reboot/pid-reuse/live"),
     "P2-02": ("wip", "8c99b96", "—", "—", "—", "Linux only; macOS untested here"),
+    # L2 — capture. The mock provider is required by G-Capture but has no row in §18.5 (D-021): it is tracked in
+    # STATE.json's `extra_work`, not here, so that neither it nor the buffer (the plan's real P3-13) can be ticked by
+    # the other's evidence.
+    "P3-01": ("done", "372006f", "tests/test_api_lifecycle.py (6)", "—", "self",
+              "double install ⇒ one writer; uninstall during a call; BLACKBOX_DISABLED=1; unwritable data dir"),
+    "P3-02": ("done", "0271cef", "tests/test_api_decorators.py (6)", "—", "self",
+              "five decorator kinds; signature/__name__/__doc__ preserved; ≤ 1 µs median when disabled"),
+    "P3-03": ("done", "86cd685", "tests/test_context_nodes.py (7)", "—", "self",
+              "run/step/mark/handled_error/capture/freeze/current; 50-deep nesting balanced; mark lands in its node"),
+    "P3-04": ("done", "d5e1bb6", "tests/test_context_nodes.py (7)", "—", "self",
+              "contextvars node stack; threadpool and fork children write to their own tape; no fork-only test"),
+    "P3-05a": ("done", "1112881", "tests/test_seam_hooks.py (7)", "—", "self",
+               "response hook wraps the still-unread stream, so A sees every chunk; request hook stamps the clock "
+               "first, so first_byte_ms is end-to-end; already-buffered ⇒ partial=True, never zeroes"),
+    "P3-05b": ("done", "0f81445", "tests/test_seam_transport.py (9)", "—", "self",
+               "sha256-identical to an unmodified client; recorded chunk count equals what the application read; "
+               "truncated stream recorded short; mid-stream error recorded and re-raised; both installs restore"),
+    "P3-05c": ("todo", "—", "—", "—", "—", "seam C: openai/anthropic method patches (next ticket)"),
+    "P3-05d": ("done", "99a5164", "tests/test_preflight.py (8), SUPPORTED.md", "—", "self",
+               "forced failure of A chooses B and records why; all-fail is a printable state, not an exception; "
+               "capture_seam in the decision — into a run.json only once P3-06 lands the sink"),
     "P2-03": ("done", "HEAD", "tests/test_platform_shims.py, CI windows x 3", "—", "self",
               "ticked on run 43657997367 (reconfirmed 43659827155): the Windows cell ran OpenProcess + "
               "GetProcessTimes, winreg BootId, lseek-based positional I/O and zero-fill preallocation, and the "
@@ -151,7 +172,7 @@ def main() -> None:
            "| ticket | Done when (plan) | status | commit | tests | measurement | reviewer | notes |",
            "|---|---|---|---|---|---|---|---|"]
     for tid, path, done, est, _ in rows:
-        if not tid.startswith(("P0-", "P1-", "P2-")):
+        if not tid.startswith(("P0-", "P1-", "P2-", "P3", "P3B-")):
             continue
         st, commit, tests, meas, rev, notes = S.get(tid, ("todo", "—", "—", "—", "—", ""))
         out.append(f"| `{tid}` | {paraphrase(done)} | **{st}** | {commit} | {tests} | {meas} | {rev} | {notes} |")

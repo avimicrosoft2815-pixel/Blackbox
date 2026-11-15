@@ -5,10 +5,10 @@
     "docs/STATUS.md",
     "bench/results/*.json"
   ],
-  "next_ticket": "P3-05a",
-  "next_note": "L2 seams next: P3-05a (httpx response hooks), then 05b (transport byte tee), 05c (SDK methods against the mock provider), 05d (ordered preflight). L3 branch access is being written in parallel.",
-  "last_green_commit": "37d56df",
-  "last_green_commit_note": "all four corrections plus P2-11/P2-13 are green here; CI is the arbiter for the ten cells",
+  "next_ticket": "P3-05c",
+  "next_note": "Seam C (P3-05c) is next: openai/anthropic method patches against the mock provider. Seams A and B are green at 0f81445 (P3-05a/b) with the ordered preflight at 99a5164 (P3-05d); the 714554c red run is defect 21, fixed at 771f5ea. L3 (proxy, launcher, hooks, demo) is being written in parallel from the current trunk.",
+  "last_green_commit": "e1ebc73",
+  "last_green_commit_note": "newest CI-green commit (run 43692338730). 714554c is red — defect 21, a wall-clock assertion in a new test of mine, fixed at 771f5ea; 1112881/0f81445/99a5164/771f5ea were pending when this row was written",
   "gates": {
     "G-A": "pass",
     "G-Promise": "pass",
@@ -22,7 +22,7 @@
     "G-Sec": "pending",
     "G-Release": "pending"
   },
-  "gate_note": "a gate flips to pass only with a reviewer-signed docs/gates/G-<name>.md (AGENT_FINAL.md \u00a74); the builder never ticks its own gate",
+  "gate_note": "a gate flips to pass only with a reviewer-signed docs/gates/G-<name>.md (AGENT_FINAL.md §4); the builder never ticks its own gate",
   "open_blockers": [],
   "lane_status": {
     "L0": {
@@ -89,17 +89,18 @@
       "todo": []
     },
     "L2": {
-      "done": [],
-      "wip": [],
-      "todo": [
+      "done": [
         "P3-01",
         "P3-02",
         "P3-03",
         "P3-04",
         "P3-05a",
         "P3-05b",
+        "P3-05d"
+      ],
+      "wip": [],
+      "todo": [
         "P3-05c",
-        "P3-05d",
         "P3-06",
         "P3-07",
         "P3-08",
@@ -288,5 +289,15 @@
       }
     },
     "regression_rule": "tools/bench_smoke.py fails the build when any key is missing or a fresh run is worse than the baseline by more than 10 % in the key's own direction"
-  }
+  },
+  "extra_work": [
+    {
+      "id": "P3-13MP",
+      "name": "loopback mock provider (required by G-Capture, no row in the plan's §18.5 table)",
+      "status": "done",
+      "commit": "714554c",
+      "tests": "tests/test_mock_provider.py (9)",
+      "note": "D-021: the plan's own P3-13 is rec/buffer.py, still todo; the mock provider is tracked here so that neither ticket can be ticked by the other's evidence"
+    }
+  ]
 }

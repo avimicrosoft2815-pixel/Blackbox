@@ -1,10 +1,16 @@
-# BlackBox build status — 2026-11-14 — trunk `37d56df` — gates: **G-Promise pass** (built and self-reviewed at `af908bc`, independently counter-signed at `fdb3875`; see `docs/gates/G-Promise.md`), G-Capture, G-Attach, G-Capsule, G-Sec, G-Release not yet opened
+# BlackBox build status — 2026-11-15 — trunk `771f5ea` — gates: **G-Promise pass** (built and self-reviewed at `af908bc`, independently counter-signed at `fdb3875`; see `docs/gates/G-Promise.md`), G-Capture, G-Attach, G-Capsule, G-Sec, G-Release not yet opened
 
-**Branch** `arena/a781c68f-blackbox` · **base** `31241d6` · CI for `59aef18`: run `43689351726`, ten jobs, ten
-`success`. Every red run is named rather than buried: `af908bc` (`43678767989`, 9/10) is C40 — the gate was
-re-signed at `fdb3875`; `15cb55c` (`43689004423`, 7/10) **and** `6d52088` (`43689012017`, 7/10) are the same defect —
-a fork-only multiprocessing test of mine failing on the three Windows cells, fixed at `d5e1bb6` (defect 19).
-**product: pre-alpha — the recorder, the tape, recovery, the launcher and the SDK lifecycle/decorator/node layer are real and tested; the capture seams (P3-05), the mock provider, the proxy, the viewer and the diagnosis workflow are not built yet.**
+**Branch** `arena/a781c68f-blackbox` · **base** `31241d6` · CI for trunk `771f5ea`: PENDING — last completed run
+`43693106857` at `714554c` = **failure** (7/10, `py3.11 / windows-latest`), and the newest completed green run is
+`43692338730` at `e1ebc73`. Every red run is named rather than buried: `714554c` is defect 21, a wall-clock
+assertion in a test of mine (2 × 40 ms asserted ≥ 80 ms; the cell measured 79 ms), fixed at `771f5ea`; `af908bc`
+(`43678767989`, 9/10) is C40 — the gate was re-signed at `fdb3875`; `15cb55c` (`43689004423`, 7/10) **and** `6d52088`
+(`43689012017`, 7/10) are the same defect — a fork-only multiprocessing test of mine failing on the three Windows
+cells, fixed at `d5e1bb6` (defect 19).
+**product: pre-alpha — the recorder, the tape, recovery, the launcher, the SDK lifecycle/decorator/node layer, the
+loopback mock provider and capture seams A (httpx response hooks) and B (transport byte tee) with the ordered
+preflight are real and tested; seam C (SDK method patches), the tape sink that turns seam events into frames, the
+proxy, the launcher integration, the viewer and the diagnosis workflow are not built yet.**
 Suite: **Total: 397 tests** — 396 pass here and 1 is skipped on POSIX by name
 (`test_an_open_view_blocks_the_unlink_only_on_windows`: POSIX permits unlinking a file another fd still holds, so
 the open-view case exists only on Windows). ruff 0.17.5 and mypy 2.4.1 (`strict = true`, nothing disabled):
@@ -40,6 +46,11 @@ the open-view case exists only on Windows). ruff 0.17.5 and mypy 2.4.1 (`strict 
 | Group-commit window, per OS (C40) | §8.6, C3 | `tests/test_keeper.py::test_low_rate_event_is_published_within_the_window` starts its own window and `test_a_window_older_than_the_bound_publishes_inline` states the expired-window rule; the ≤ 5 ms row is measured on ext4/Linux only and the Windows bound (one 15.6 ms timer tick for a keeper-only drain, inline publish for arriving events) is stated in `docs/compatibility.md` and marked `not measured` |
 | **P3-02/P3-03/P3-04** decorators, node stack, context managers | §10.2, P3-02–04 | `src/blackbox/api.py`, `src/blackbox/rec/context.py`, `tests/test_api_decorators.py` (6), `tests/test_context_nodes.py` (7): one `NODE_OPEN`/`NODE_CLOSE` pair per call for all five decorator kinds; signature, `__name__` and `__doc__` survive; an exception closes the node with its type and is re-raised; a **disabled** decorated call costs under 1 µs of median overhead; async keeps its node across awaits; 50 nested steps stay balanced with each level's parent the level above; `mark` lands in the node it was called inside; `handled_error` records a handled exception where it was handled; a plain thread gets a `detached:` root (marked `detached: True`) instead of an orphan; a forked child writes to its own tape |
 | **P3-01** SDK lifecycle: `install`/`uninstall`/`shutdown` | §10.2, P3-01 | `src/blackbox/api.py`, `tests/test_api_lifecycle.py` (6): double install ⇒ one writer UUID and one `RUN_START`; 16 threads install at once ⇒ one writer and `refs` 16; `uninstall()` during an in-flight append leaves the tape open and the frame lands; `BLACKBOX_DISABLED=1` creates no tape and `emit()` returns 0; an unwritable data dir leaves the app running with the reason recorded; `shutdown()` is idempotent and install works after it |
+| **P3-13MP** loopback mock provider | §18.5 (G-Capture needs it), D-021 | `src/blackbox/cap_sdk/mock_provider.py`, `tests/test_mock_provider.py` (9): OpenAI and Anthropic SSE dialects over a real socket, driven with stdlib `http.client` so the test cannot be coupled to the library under test; knobs for chunk count, inter-chunk delay, first-byte delay, truncation, mid-stream error, non-200 status and payload size; the request log proves what arrived; the source is asserted to contain no wildcard bind and to bind an ephemeral loopback port |
+| **P3-05a** seam A, httpx response hooks | §18.5, D-022 | `src/blackbox/cap_sdk/seam_httpx_hooks.py` + `tee.py`, `tests/test_seam_hooks.py` (7): the hook wraps the still-unread stream, so every chunk is recorded — the recorder's count equals the number of chunks the application observed in the same run, and the body is sha256-identical with and without the seam; a request hook stamps the clock before the request goes out so `first_byte_ms`/`total_ms` are end-to-end; a response whose body is already gone is recorded `partial=True` with no byte count; a recorder that raises never reaches the application (fail-open); `uninstall` restores both client classes and is idempotent; the caller's own event hooks still run |
+| **P3-05b** seam B, transport byte tee | §18.5 | `src/blackbox/cap_sdk/seam_httpx_transport.py`, `tests/test_seam_transport.py` (9): the tee is compared against an unmodified client by sha256, the recorded chunk count against what the application actually read, a truncated stream is recorded short instead of completed, an error mid-stream is recorded and re-raised, an abandoned stream is closed with the bytes that arrived, and both `client=` (instance) and class-patch installs restore exactly what they patched |
+| **P3-05d** ordered preflight A→B, `capture_seam` | §18.5 | `src/blackbox/cap_sdk/preflight.py`, `tests/test_preflight.py` (8), `SUPPORTED.md`: forcing A picks B and records why, forcing both leaves the recorder installed-but-not-capturing with two reasons and no exception, an absent library is `unavailable` rather than `forced-failed`, an `install` that raises does not escape, a client handed to the preflight is wrapped rather than having its class patched. `capture_seam` is written into the decision (`as_dict()`) and tested; writing it into a `run.json` waits for the sink (P3-06) and is labelled pending in `SUPPORTED.md` |
+| Capture layer's network exception | P0-08, P0-13, D-020 | `tests/_capture_policy.py` + `tests/test_stdlib_only.py`, `tests/test_no_egress.py`, `tests/test_codec.py`: four named files are exempt and nothing outside `cap_sdk/` can be; `httpx` is allowed only **inside a function body**, so `import blackbox` works with httpx absent; the mock provider may bind loopback only and the wildcard-bind source check runs; `httpx==0.28.1` lives in its own `capture` extra, `[project].dependencies` is still empty |
 | Lint, types, forbidden words, egress, stdlib-only | C6, C12, P0-14 | `make fmt` 0 findings, `mypy` strict 0 findings, `tests/test_forbidden_words.py`, `tests/test_no_egress.py`, `tests/test_stdlib_only.py` |
 | CI on three OSes × three Pythons + docs | C7 | run `43689351726` at `59aef18` — ten jobs, ten `success`; `docs/compatibility.md` holds the per-cell verdicts and every historical red run |
 
@@ -54,6 +65,7 @@ the open-view case exists only on Windows). ruff 0.17.5 and mypy 2.4.1 (`strict 
 | S17 sparse-control run under `sudo` | requires humans | `tools/s17_control.sh` builds the 2 MiB tmpfs control and prints the signal; no superuser here. |
 | Windows / macOS benchmark rows | not measured | The **test** gates are green there (run `43678447134`); no §15.1 number in this repository comes from a runner, and none will. |
 | Real-provider capture (day-14 rule) | not testable here | No provider keys in the environment; the gate is the mock provider, as the plan allows. |
+| Async capture path (seams A and B) | not testable here | `AsyncClient` hooks and `handle_async_request` are implemented but no async HTTP harness is installed in this environment, so nothing exercises them (defect 20). `SUPPORTED.md` says so in the same words and no gate may cite it until a test exists. |
 | Licence decision, release tag, merge to `main` | requires humans | `release.yml` is prepared and **not** triggered; no tag, no `LICENSE`, no licence field. |
 | P10, P12 | blocked (not started by design) | P10 starts only after every v1.0 gate is green; P12 never without instruction. |
 
@@ -82,8 +94,9 @@ One line per §15.1 row: fs · N · warm-up · p50 / p95 / p99 · raw JSON.
 
 ## Deviations applied (DEVIATIONS.md) and held findings (F#)
 
-The defect list (seed → invariant → cause → fix → test) lives in `docs/defects.md` — nineteen entries. Three are
-from this turn: C40's Windows group-commit flake, the recovery row's mislabelled denominator (checked against the
+The defect list (seed → invariant → cause → fix → test) lives in `docs/defects.md` — twenty-one entries. Five are
+from this turn: two capture-layer gaps recorded rather than papered over (defect 20, the untested async path, still
+open; defect 21, a wall-clock assertion that reddened `43693106857` at `714554c`, fixed at `771f5ea`), C40's Windows group-commit flake, the recovery row's mislabelled denominator (checked against the
 reviewer's hypothesis: the division was right, the sentence and the n=7 sample were not), and a fork-only
 multiprocessing test of mine that reddened three Windows cells in `43689004423`.
 Twelve deviations, all dated and argued in `docs/DEVIATIONS.md`: DV-005 (one checksum, CRC-32), DV-006/007 (S17
@@ -106,18 +119,20 @@ row in the same commit.
 
 1. **G-Promise is signed** (`docs/gates/G-Promise.md`, verdict pass, self-signed — see §Labelled) and `STATE.json`
    carries `gates["G-Promise"] = "pass"`.
-2. **L2 ‖ L3 are running, not queued**: L2 has P3-01/P3-02/P3-03/P3-04 committed at `37d56df`; the next L2 tickets
-   are the seams (P3-05a→05d) against a mock provider (P3-13). L3 (the attach lane: proxy, launcher integration,
-   hooks, demo) starts from the current trunk, not from an older SHA.
+2. **L2 ‖ L3 are running, not queued**: L2 has P3-01…P3-04 committed at `37d56df`, the mock provider at `714554c`
+   (P3-13MP) and seams A, B and the preflight at `1112881`/`0f81445`/`99a5164` (P3-05a/b/d). The next L2 ticket is
+   **P3-05c** (seam C: `openai`/`anthropic` method patches against the mock provider), then P3-06 (the sink that
+   coalesces seam events into frames) — which is also what makes `capture_seam` reach a `run.json`. L3 (the attach
+   lane: proxy, launcher integration, hooks, demo) starts from the current trunk, not from an older SHA.
 3. **G-Capture** with the day-14 rule: an unmodified `openai`/`anthropic` script through seams A→B→C against the
    mock provider must keep its in-flight call across `kill -9` with correct `chunks_received`/`bytes_received`.
    Real-provider runs are `not testable here` (no keys) and the mock result is the gate, as the plan allows.
 4. **C40 is committed** with the counter-signature: the flaky Windows cell no longer depends on wall-clock speed,
    the window row is stated per OS, the gate is re-signed at `fdb3875`, and `STATE.last_green_commit` is `fdb3875`.
-5. **P3-02/P3-03/P3-04 are committed**: decorators, the contextvar node stack, `run`/`step`/`capture`/`mark`/
-   `handled_error`/`freeze`, 50-level nesting, the detached-root rule for threads and the async path — and the
-   Windows cells are green on them (`43689197151`). **Next ticket: P3-05a** (seam A, httpx response hooks), then
-   05b/05c/05d against the mock provider — the day-14 rule needs seams A→B→C before G-Capture can be attempted.
+5. **The capture seams are in, and the day-14 rule is one ticket away**: A and B both record every chunk and both
+   are compared byte-for-byte against an unmodified client; the preflight records which seam won and why the others
+   did not. What G-Capture still needs is seam C (P3-05c) and the sink (P3-06) — until the sink exists the chunks
+   live in a `Recorder`, not on a tape, so nothing survives a `kill -9` yet. **Next ticket: P3-05c.**
 6. The independent reviewer's loop is now the gate loop: a counter-signature at every gate, with the reproduce block
    in `docs/gates/` and `docs/reviews.md` as the ledger. It found C40 on its first pass, which is the argument for it.
 7. The 2 000-trial kill run starts in the background during L5–L8; it is not needed for L2/L3.
