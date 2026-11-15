@@ -116,3 +116,12 @@ plan's §10 shape, and it is append-only.
     `tests/test_gc_hygiene.py` proves it against an object that raises on `__getattr__` and `__class__` plus the
     SDK's real proxy. The annotations came from `tools/ci_summary.py`'s `::error::` lines (C27) — job logs are
     redirected to a storage host this sandbox cannot reach, the check-run annotations are readable through the API.
+26. **open, found on the Windows cells at `67b5ae5`** → `install(data_dir=<a path that is a file>)` reported
+    `enabled: True` on Windows, `enabled: False` with `NotADirectoryError` on Linux → 100 calls then ran with a
+    writer whose tape directory cannot exist, and the suite recorded `closed: 18` against `runs_started: 1`. Three
+    questions, none answered yet: what `os.makedirs` actually did there, whether any frame reached a directory,
+    and why 18 of 100 calls closed. Until it is answered the fail-open test claims this case on POSIX only and
+    **skips on Windows with this number in the reason**, and the strict all-OS breakage the suite uses is
+    `segment_bytes=1`. This is the same failure family as defect 23 — a recorder that looks like it is recording —
+    and it is why the writer's own `degraded_reason` path (S17) exists. It cannot be reproduced from this sandbox:
+    there is no Windows host here and the CI job log is unreachable, so the check-run annotation is the evidence.

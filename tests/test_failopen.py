@@ -99,11 +99,38 @@ def test_an_exception_from_the_application_is_the_same_exception_with_the_record
     assert recorded[1] == bare[1]
 
 
+def test_a_recorder_that_refuses_to_start_leaves_the_application_untouched(tmp_path):
+    """The breakage that is a breakage on all three operating systems: the configuration is impossible, so
+    `TapeWriter.__init__` raises `BBX-E130` before any directory is touched, `install()` reports `enabled: False` with
+    that error as its reason, and the application must not be able to tell.
+
+    This is the case the earlier versions of this file kept getting wrong. `chmod` a directory read-only and Windows
+    still creates files in it; point `data_dir` at a file and Windows let the writer open anyway (defect 26). A
+    configuration error refuses everywhere, so the strict "the recorder really is broken" assertion holds on all
+    three cells and cannot rot into a test that only ever exercises the happy path."""
+    with MockProvider(Scenario(chunks=2)) as provider:
+        bare = _run(provider.base_url)
+
+        installed = api.install(data_dir=str(tmp_path), segment_bytes=1)   # below MIN_SEGMENT_BYTES, by design
+        recorder = SinkRecorder(TapeSink(api.emit))
+        handle = install_hooks(recorder)
+        try:
+            recorded = _run(provider.base_url)
+        finally:
+            handle.uninstall()
+            api.uninstall()
+
+    assert recorded[2] is None
+    assert recorded[1] == bare[1] and recorded[0] == bare[0]
+    assert installed["enabled"] is False, "this test proves nothing unless the recorder really is broken here"
+    assert "BBX-E130" in (installed.get("disabled_reason") or ""), installed
+
+
+@pytest.mark.skipif(os.name == "nt",
+                    reason="Windows let the writer open against a data directory that is a file (defect 26); the "
+                           "case is unproven there, so it is not claimed there")
 def test_a_data_directory_that_cannot_be_created_leaves_the_application_untouched(tmp_path):
-    """The breakage that works on all three operating systems: the data directory is a *file*. Someone's
-    `BLACKBOX_HOME` points at a path that is not a directory, or the mount is what it is; either way the tape cannot
-    be made, and the application must not notice. (On Windows the permission bits do not stop a file being created,
-    so a read-only directory would prove nothing there — the POSIX-only case is the test below.)"""
+    """The data directory is a *file*: someone's `BLACKBOX_HOME` points at a path that is not a directory."""
     with MockProvider(Scenario(chunks=2)) as provider:
         bare = _run(provider.base_url)
 

@@ -104,11 +104,11 @@ S: dict[str, tuple[str, str, str, str, str, str]] = {
               "2 000 chunks => 8 chunk frames, payloads concatenate to the identical body; 8 KiB / 100 ms bounds; "
               "request/chunks/response ordering; unfinished call left as chunks for INTERRUPTED_MID_STREAM; "
               "fail-open counted, never raised"),
-    "P3-14": ("done", "HEAD", "tests/test_failopen.py (7)", "—", "self",
+    "P3-14": ("done", "HEAD", "tests/test_failopen.py (8)", "—", "self",
               "100-call agent, bare vs recorded: identical return value and identical stdout; raises at call 37 with "
-              "the same exception type and message; three real breakages (read-only data dir where install() reports "
-              "enabled: False + PermissionError, a keeper that raises on every publish, a tape truncated by 512 B) "
-              "each repeat the whole comparison"),
+              "the same exception type and message; breakages that hold on every OS (segment_bytes=1 refused with "
+              "BBX-E130, a keeper that raises on every publish, a tape truncated by 512 B) each repeat the whole "
+              "comparison; data dir that is a file is POSIX-only, Windows let the writer open (defect 26)"),
     "P3-05d": ("done", "99a5164", "tests/test_preflight.py (8), SUPPORTED.md", "—", "self",
                "forced failure of A chooses B and records why; all-fail is a printable state, not an exception; "
                "capture_seam in the decision — into a run.json only once P3-06 lands the sink"),

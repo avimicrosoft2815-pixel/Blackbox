@@ -36,10 +36,12 @@ def main(argv: list[str]) -> int:
     tail = "\n".join(lines[-TAIL:])
     # C27 follow-up: the step summary is JS-rendered and the job log needs a login, but a `::error::` workflow
     # command becomes an ANNOTATION, which `gh run view` prints without any of that. One annotation per failed
-    # test id, so a red cell names its tests from the CLI.
+    # test id, so a red cell names its tests from the CLI. 600 characters rather than 200: an assertion message is
+    # usually a dict, and the field that explains the failure is rarely in the first 200 (defect 26 was found by
+    # reading these annotations, and the truncated tail was the part that would have explained it).
     for line in lines:
         if line.startswith(("FAILED ", "ERROR ")):
-            print(f"::error title={title}::{line.strip()[:200]}", flush=True)
+            print(f"::error title={title}::{line.strip()[:600]}", flush=True)
     status = "passed" if proc.returncode == 0 else f"**failed** (exit {proc.returncode})"
     block = (f"\n### `{title}` — {status}\n\n"
              f"```\n{tail}\n```\n")
