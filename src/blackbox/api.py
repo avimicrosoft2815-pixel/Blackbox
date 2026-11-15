@@ -1,16 +1,29 @@
-"""What a process imports to be recorded (`blackbox.api`), and the stall dump that goes with it (P2-13).
+"""What a process imports to be recorded (`blackbox.api`), and the stall dump that goes with it (P2-13/P3-01).
 
-`install()` is deliberately tiny and dependency-free: on POSIX it registers `faulthandler` on `SIGUSR1` and points it
-at `stall_tb.txt` beside the tape's `stall.json`, so when the launcher's watchdog decides the process has stopped
-committing, the *process itself* writes every thread's stack. A watchdog running in the launcher could never do that
-from outside — `faulthandler.register` is the only supported way to get stacks out of a running interpreter without
-ptrace, and it is in the standard library.
+Two jobs live here, and they are deliberately in one file because they have the same constraint: **nothing in this
+module may raise into user code, and nothing may cost a measurable amount when recording is off.**
 
-Windows has no `SIGUSR1` and `faulthandler.register` only accepts `SIGABRT`/`SIGFPE`/`SIGILL`/`SIGSEGV`/`SIGTERM`
-there, so `install()` records `stacks=False` and the launcher reports `stall.json` only. The plan allows that
-asymmetry; it does not allow claiming stacks that were never written.
+Lifecycle (P3-01)
+    `install()` opens the tape and starts the keeper, and is refcounted and idempotent: two `install()` calls make
+    one writer and one `RUN_START`, and the second `uninstall()` — not the first — closes it. The state lives behind
+    one `threading.RLock`, so installing from two threads at once cannot produce two writers, which would mean two
+    `RUN_START` frames in one tape directory.
 
-Nothing here raises into user code: an `install()` that cannot register returns a dict saying why.
+    `uninstall()` while a call is in flight does not break that call: an acquisition (`recording()`) registers in
+    `_inflight`, and `uninstall()` that finds one defers the close to the last exit. Closing a tape under a frame
+    that is half-written would be the worst possible moment to be tidy.
+
+    `BLACKBOX_DISABLED=1` (or `BLACKBOX_HOME` pointing at an unwritable place) makes `install()` return
+    `{"enabled": False}` without creating anything; `emit()` is then a no-op that returns 0. This is the fail-open
+    path in its cheapest form — the decorators check `enabled()` first, so a disabled process pays one attribute
+    read per event.
+
+Stall dump (P2-13)
+    On POSIX `install()` also registers `faulthandler` on `SIGUSR1` pointed at `stall_tb.txt` beside `stall.json`,
+    so when the launcher's watchdog decides the process has stopped committing, the *process itself* writes every
+    thread's stack. A watchdog outside the process could never do that without ptrace. Windows has no `SIGUSR1` and
+    `faulthandler.register` only accepts a few signals there, so `install()` records `stacks=False` and the launcher
+    reports `stall.json` only.
 """
 from __future__ import annotations
 
@@ -19,10 +32,196 @@ import faulthandler
 import os
 import signal
 import sys
+import threading
 from typing import Any
 
+from blackbox import constants as C
+
 STALL_TXT = "stall_tb.txt"
-_registered: dict[str, Any] = {"installed": False, "signal": None, "path": None, "stacks": False, "reason": None}
+TRUTHY = {"1", "true", "yes", "on"}
+
+
+
+class _Lifecycle:
+    """One process-wide recorder. Everything mutable is behind `lock`."""
+
+    def __init__(self) -> None:
+        self.lock = threading.RLock()
+        self.refs = 0
+        self.inflight = 0
+        self.writer: Any = None
+        self.keeper: Any = None
+        self.data_dir: str | None = None
+        self.disabled_reason: str | None = None
+        self.runs_started = 0
+        self.owns_run = False        # True when *this* process wrote RUN_START and therefore owes a RUN_END
+        self.closed = 0
+        self._stall: dict[str, Any] = {"installed": False, "signal": None, "path": None, "stacks": False,
+                                       "reason": None}
+        self._stall_handle: Any = None
+
+    # ── state ───────────────────────────────────────────────────────────────
+    def status(self) -> dict[str, Any]:
+        with self.lock:
+            return {
+                "enabled": self.writer is not None,
+                "refs": self.refs,
+                "inflight": self.inflight,
+                "data_dir": self.data_dir,
+                "disabled_reason": self.disabled_reason,
+                "runs_started": self.runs_started,
+                "closed": self.closed,
+                "writer_uuid": None if self.writer is None else self.writer.writer_uuid.hex(),
+                "stall": dict(self._stall),
+            }
+
+
+_STATE = _Lifecycle()
+
+
+# ── install / uninstall / shutdown ──────────────────────────────────────────
+
+
+def disabled() -> bool:
+    return os.environ.get("BLACKBOX_DISABLED", "").strip().lower() in TRUTHY
+
+
+def enabled() -> bool:
+    """The fast path every decorator takes: one attribute read, no lock, no exception."""
+    return _STATE.writer is not None
+
+
+def install(*, data_dir: str | None = None, signal_number: int | None = None,
+            mode: str = "process", keeper: bool = True, **writer_kw: Any) -> dict[str, Any]:
+    """Open the tape for this process. Refcounted, idempotent, thread-safe, never raises."""
+    with _STATE.lock:
+        _install_stall_dump(data_dir, signal_number)
+        if _STATE.writer is not None:
+            _STATE.refs += 1
+            return _STATE.status()
+        if disabled():
+            _STATE.disabled_reason = "BLACKBOX_DISABLED is set"
+            return _STATE.status()
+        try:
+            from blackbox.tape.keeper import Keeper
+            from blackbox.tape.writer import TapeWriter
+
+            root = os.path.abspath(data_dir or os.environ.get("BLACKBOX_HOME") or ".blackbox")
+            writer = TapeWriter(root, mode=mode, **writer_kw).open()
+            _STATE.writer = writer
+            _STATE.data_dir = root
+            # Under `blackbox run` the launcher owns the run boundary and sets BLACKBOX_RUN_ID in the child's
+            # environment; the SDK must not write a second RUN_START into that tape. Standalone, it must.
+            if not os.environ.get("BLACKBOX_RUN_ID"):
+                from blackbox.codec import cbor
+
+                writer.emit(C.KIND_RUN_START, cbor.encode({"run_id": writer.writer_uuid.hex(), "argv": None,
+                                                           "pid": os.getpid(), "source": "sdk"}))
+                writer.flush()
+                _STATE.runs_started += 1
+                _STATE.owns_run = True
+            if keeper:
+                _STATE.keeper = Keeper(writer).start()
+        except Exception as exc:                      # fail-open: the app keeps running, unrecorded and told why
+            _STATE.writer = None
+            _STATE.keeper = None
+            _STATE.disabled_reason = f"{type(exc).__name__}: {exc}"
+            return _STATE.status()
+        _STATE.refs = 1
+        return _STATE.status()
+
+
+def uninstall() -> dict[str, Any]:
+    """Drop one reference. The tape closes when the last reference goes *and* nothing is in flight."""
+    with _STATE.lock:
+        if _STATE.refs > 0:
+            _STATE.refs -= 1
+        if _STATE.refs == 0 and _STATE.writer is not None and _STATE.inflight == 0:
+            _close_locked()
+        return _STATE.status()
+
+
+def shutdown() -> dict[str, Any]:
+    """Close now, whatever the count. Idempotent; an in-flight append is allowed to finish first."""
+    with _STATE.lock:
+        _STATE.refs = 0
+        if _STATE.writer is not None and _STATE.inflight == 0:
+            _close_locked()
+        return _STATE.status()
+
+
+def _close_locked() -> None:
+    keeper, writer = _STATE.keeper, _STATE.writer
+    owns_run = _STATE.owns_run
+    _STATE.keeper = None
+    _STATE.writer = None                                  # `enabled()` is False from here, before the slow close
+    _STATE.owns_run = False
+    _STATE.closed += 1
+    if keeper is not None:
+        with contextlib.suppress(Exception):
+            keeper.stop()
+    if writer is not None:
+        if owns_run:
+            with contextlib.suppress(Exception):
+                from blackbox.codec import cbor
+
+                writer.emit(C.KIND_RUN_END, cbor.encode({"run_id": writer.writer_uuid.hex(),
+                                                         "exit_code": None, "signaled": False, "stalled": False}))
+                writer.flush()
+        with contextlib.suppress(Exception):
+            writer.close()
+
+
+@contextlib.contextmanager
+def recording() -> Any:
+    """Hold the tape open for the duration of one call, so `uninstall()` cannot close it underneath."""
+    with _STATE.lock:
+        _STATE.inflight += 1
+        writer = _STATE.writer
+    try:
+        yield writer
+    finally:
+        with _STATE.lock:
+            _STATE.inflight -= 1
+            if _STATE.refs == 0 and _STATE.inflight == 0 and _STATE.writer is not None:
+                _close_locked()
+
+
+def emit(kind: int, payload: bytes = b"", **kw: Any) -> int:
+    """Append one frame if recording is on. Returns the seq (0 when nothing was written); never raises."""
+    if _STATE.writer is None:
+        return 0
+    with recording() as writer:
+        if writer is None:
+            return 0
+        try:
+            return int(writer.emit(kind, payload, **kw))
+        except Exception:                             # a recorder that raises is worse than one that misses a frame
+            return 0
+
+
+# ── stall dump (P2-13) ──────────────────────────────────────────────────────
+
+
+def _install_stall_dump(data_dir: str | None, signal_number: int | None) -> None:
+    if _STATE._stall["installed"] or _STATE._stall["reason"]:
+        return                                        # one registration per process, and no retry loop
+    path = stall_dump_path(data_dir)
+    if not hasattr(signal, "SIGUSR1"):
+        _STATE._stall.update({"installed": False, "path": path, "stacks": False,
+                              "reason": "SIGUSR1 does not exist on this platform: stall.json only"})
+        return
+    sig = signal.SIGUSR1 if signal_number is None else signal_number
+    try:
+        os.makedirs(os.path.dirname(path) or ".", mode=0o700, exist_ok=True)
+        handle = open(path, "a", encoding="utf-8")     # faulthandler owns this handle for the life of the process
+        faulthandler.register(sig, file=handle, all_threads=True, chain=False)
+    except (OSError, RuntimeError, ValueError) as exc:
+        _STATE._stall.update({"installed": False, "path": path, "stacks": False,
+                              "reason": f"{type(exc).__name__}: {exc}"})
+        return
+    _STATE._stall_handle = handle
+    _STATE._stall.update({"installed": True, "signal": int(sig), "path": path, "stacks": True, "reason": None})
 
 
 def stall_dump_path(data_dir: str | None = None) -> str:
@@ -30,37 +229,8 @@ def stall_dump_path(data_dir: str | None = None) -> str:
     return os.path.join(root, STALL_TXT)
 
 
-def install(*, data_dir: str | None = None, signal_number: int | None = None) -> dict[str, Any]:
-    """Register the stall stack dump. Idempotent; never raises."""
-    if _registered["installed"]:
-        return dict(_registered)
-    path = stall_dump_path(data_dir)
-    if not hasattr(signal, "SIGUSR1"):
-        _registered.update({"installed": False, "path": path, "stacks": False,
-                            "reason": "SIGUSR1 does not exist on this platform: stall.json only"})
-        return dict(_registered)
-    sig = signal.SIGUSR1 if signal_number is None else signal_number
-    try:
-        os.makedirs(os.path.dirname(path) or ".", mode=0o700, exist_ok=True)
-        handle = open(path, "a", encoding="utf-8")   # the faulthandler owns this handle for the process
-        faulthandler.register(sig, file=handle, all_threads=True, chain=False)
-    except (OSError, RuntimeError, ValueError) as exc:
-        _registered.update({"installed": False, "path": path, "stacks": False,
-                            "reason": f"{type(exc).__name__}: {exc}"})
-        return dict(_registered)
-    _registered.update({"installed": True, "signal": int(sig), "path": path, "stacks": True, "reason": None})
-    return dict(_registered)
-
-
-def uninstall() -> None:
-    if _registered.get("installed") and hasattr(signal, "SIGUSR1"):
-        with contextlib.suppress(RuntimeError, ValueError):
-            faulthandler.unregister(_registered["signal"])
-    _registered.update({"installed": False, "stacks": False})
-
-
 def stall_status() -> dict[str, Any]:
-    return dict(_registered)
+    return dict(_STATE._stall)
 
 
 if __name__ == "__main__":                       # pragma: no cover - manual probe

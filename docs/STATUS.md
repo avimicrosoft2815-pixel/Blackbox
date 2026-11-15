@@ -4,7 +4,7 @@
 ten jobs, ten `success`. (The previous green run, `43678447134` at `4619b90`, belongs to an earlier commit and is
 not evidence for this one.)
 **product: pre-alpha — storage, recovery, launcher and capsule layer only; no SDK, proxy or viewer yet.**
-Suite: **Total: 332 tests** — 331 pass here and 1 is skipped on POSIX by name
+Suite: **Total: 338 tests** — 337 pass here and 1 is skipped on POSIX by name
 (`test_an_open_view_blocks_the_unlink_only_on_windows`: POSIX permits unlinking a file another fd still holds, so
 the open-view case exists only on Windows). ruff 0.17.5 and mypy 2.4.1 (`strict = true`, nothing disabled):
 0 findings.
@@ -36,6 +36,7 @@ the open-view case exists only on Windows). ruff 0.17.5 and mypy 2.4.1 (`strict 
 | Budget: disk amplification ≤ 1.25× (2× hard fail) | §15.1 | 16 KiB group commit 1.231× (3 150 352 / 2 560 000) — `bench/results/2026-11-15-recovery.json` |
 | Budget: RSS ≤ 24 MiB above baseline | §15.1 | 1.56 MiB at 28.13 % of a segment — `bench/results/2026-11-15-recovery.json` |
 | Budget: 64 KiB `content=full` incl. blob write (C32) | §15.1 | p50 226.864 · p99 461.281 µs · 4 356.4 ev/s — `bench/results/2026-11-15-payload-blob.json` |
+| **P3-01** SDK lifecycle: `install`/`uninstall`/`shutdown` | §10.2, P3-01 | `src/blackbox/api.py`, `tests/test_api_lifecycle.py` (6): double install ⇒ one writer UUID and one `RUN_START`; 16 threads install at once ⇒ one writer and `refs` 16; `uninstall()` during an in-flight append leaves the tape open and the frame lands; `BLACKBOX_DISABLED=1` creates no tape and `emit()` returns 0; an unwritable data dir leaves the app running with the reason recorded; `shutdown()` is idempotent and install works after it |
 | Lint, types, forbidden words, egress, stdlib-only | C6, C12, P0-14 | `make fmt` 0 findings, `mypy` strict 0 findings, `tests/test_forbidden_words.py`, `tests/test_no_egress.py`, `tests/test_stdlib_only.py` |
 | CI on three OSes × three Pythons + docs | C7 | run `43678447134` at `4619b90` — ten jobs, ten `success`; `docs/compatibility.md` holds the per-cell verdicts |
 
@@ -104,6 +105,7 @@ row in the same commit.
 3. **G-Capture** with the day-14 rule: an unmodified `openai`/`anthropic` script through seams A→B→C against the
    mock provider must keep its in-flight call across `kill -9` with correct `chunks_received`/`bytes_received`.
    Real-provider runs are `not testable here` (no keys) and the mock result is the gate, as the plan allows.
-4. **Next ticket: P3-01** (`api.py` install/uninstall/shutdown — refcount, disabled fast path, idempotent,
-   thread-safe), with L3 work filling the same turn.
+4. **P3-01 is committed** (`api.py` lifecycle + `tests/test_api_lifecycle.py`). **Next ticket: P3-02** — the
+   `workflow/agent/tool/retrieval/step` decorators through `functools.wraps`, with a disabled path that costs ≤ 1 µs;
+   L3 work takes the rest of the turn.
 5. The 2 000-trial kill run starts in the background during L5–L8; it is not needed for L2/L3.
