@@ -136,3 +136,13 @@ plan's §10 shape, and it is append-only.
     `tests/test_capture_failopen.py` (18) covers `open_call`/`receive`/`close_call` × sync/async × seams A and B, plus
     cancellation, a provider 429 reaching the application unchanged, the bounded failure sample and the rule that the
     message is never recorded (D-027).
+28. **found by auditing the nightly workflow on `main` (owner said a merge had happened; it had not)** → a scheduled
+    workflow that names files which do not exist fails every night and looks like a code problem → `nightly.yml`
+    ran `python tests/kill/randomized_kills.py --trials 2000 --out …` and `pytest tests/test_cbor_fuzz.py`; neither
+    path exists (the driver is `tests/kill/kill_matrix.py` with `--json`, the fuzzer is `bench/fuzz_cbor.py` and it
+    is a script, not a test module). The one scheduled run this repository has ever had — `43675454143` on `main` at
+    `31241d6`, 2026-11-15 04:08Z — failed both jobs with exit 2 and exit 4, which are Python's
+    "no such file" and pytest's "usage error". → both steps now call the real drivers (`--trials 2000 --json`,
+    `--iterations 100000 --out`), verified locally with a 3-trial and a 500-buffer smoke run. **The P2-09 clock still
+    has not started**: the schedule only runs on the default branch, `main` has not moved past the branch base
+    `31241d6`, and the fix therefore takes effect only when the owner merges.
