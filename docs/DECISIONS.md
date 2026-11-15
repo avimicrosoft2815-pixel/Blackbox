@@ -392,3 +392,38 @@ an exception. `test_a_broken_hook_body_never_fails_the_agent` asserts the exit c
 exactly what `install` wrote — a proof (`_serialise(_with_ours(backup)) == bytes_on_disk`) rather than a hope. If the
 user edited their settings in between, their edit survives and only our block is stripped, and the result says which of
 the two happened. An unknown schema raises `BBX-E151` and writes nothing, before any backup is taken.
+## D-040 — the hook inbox gets its own tape, opened lazily, and folded one last time at exit
+
+*Date: 2026-11-14. Plan refs: §11.9 step 6, §11.10, P3B-07, C23. Follows D-039.*
+
+§11.9's step 6 says "immediate recovery of every tape of this run (**SDK, proxy, hook inbox**)", and §11.10 correlates
+them. The launcher therefore does not fold hook events into its own tape, even though that would have been three lines
+shorter:
+
+* **Its own tape, with `vantage = 3`.** The hook adapter is a vantage point, and the distinction is not decoration: a
+  capsule that cannot tell a `PreToolUse` written by *the tool* from a frame written by *the recorder* has lost exactly
+  the thing it was built to preserve. `meta.vantage` records it, `docs/format.md` names the four values, and the hook
+  tape's `RUN_START` carries the **same `run_id`** as the launcher's — which is what makes `exact` possible, because
+  `exact` means "the same run id on both sides".
+* **Lazily opened.** A run that fires no hooks leaves **no** hook tape. An empty tape is an artefact that looks like a
+  measurement ("the hook vantage was active and saw nothing"); the absence of frames says the same thing without
+  pretending. `test_a_child_that_fires_no_hooks_leaves_no_hook_tape` asserts both halves — no tape, and no frames.
+* **Every 250 ms, and once more at exit, in that order.** The interval is the plan's. The final fold is what puts a
+  session's last events (`SessionEnd`, the `PostToolUse` of the tool that was running when the user quit) into the tape
+  even when the child exits the instant after writing them: `folder.close()` folds, then writes the hook tape's
+  `RUN_END`, then the launcher writes its own. A kill still loses whatever arrived after the last fold — that window is
+  one interval wide, it is stated here, and it is why folding is at-least-once rather than a promise of zero loss.
+
+**What this buys, and it is the claim the plan actually makes.** `tests/test_hook_launcher.py` runs a child that fires
+five real hooks through `blackbox ingest`, and then asserts the whole chain end to end: the hook tape exists with
+`vantage 3`; the five events became `RUN_START`, a `MARK` for the prompt (hash and byte count, never the text), a
+`NODE_OPEN`/`NODE_CLOSE` pair sharing a slot, and `RUN_END`; `correlate.resolve_one` returns **`exact`** with
+`carried_by: x-blackbox-run`; and the launcher's own capsule carries that link in its `links.json`. Two processes, one
+timeline, and the class of the claim written on the tape — which is the difference between "we have links" and "we have
+a recording that explains itself".
+
+**The boring failure modes are tests too**, because a recorder's reputation is made of them: a corrupt entry is
+quarantined without changing the child's exit code; the fold thread is finished when `launch()` returns (a thread per
+run is a leak that shows up in week two); and **S18** — a real `kill -9` between the `tmp` write and the rename
+(`BLACKBOX_DIE_AT=INGEST.after_tmp`) leaves nothing a reader can mistake for an event, and the next hook in the same
+session folds normally.

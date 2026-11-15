@@ -18,6 +18,7 @@ The launcher never raises into the child's exit path: a failure to recover is re
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import signal
@@ -58,6 +59,7 @@ class RunResult:
     recovered: dict[str, Any] = field(default_factory=dict)
     recovery_error: str | None = None
     proxy: dict[str, Any] = field(default_factory=dict)      # P3B-03: url, port, exports, adopted, rebinds
+    hooks: dict[str, Any] = field(default_factory=dict)      # P3B-07: inbox, tape, events, frames, quarantined
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -158,6 +160,111 @@ class _Watch:
                   f"(stall_ms {self.stall_ms}, last seq {seq}) — {where}", file=self.out)
 
 
+class _InboxFolder:
+    """Folds a coding agent's hook inbox into its **own** tape while the child runs (P3B-07, §11.9 step 6).
+
+    Three decisions, and each one is a test:
+
+    * **Its own tape, and its own vantage.** §11.9 step 6 lists "every tape of this run (SDK, proxy, hook inbox)", and
+      §11.10 correlates them afterwards. Folding hook events into the launcher's tape would work and would be wrong:
+      the hook adapter is a vantage point, it says so in `meta.vantage = 3`, and a capsule that cannot tell a hook's
+      `PreToolUse` from the launcher's own frames has lost the distinction the whole design rests on. The tape carries
+      the **same `run_id`** as the launcher's, which is exactly what makes the `exact` link class possible later.
+    * **Lazily opened.** A run that fires no hooks leaves no empty tape behind. An empty tape is noise, and "no hooks
+      happened" is already the absence of frames.
+    * **Every 250 ms, and once more before `RUN_END`.** The interval is the plan's; the final fold is what makes the
+      last events of a session — the ones a `SessionEnd` hook fires — land in the tape even when the child exits the
+      instant after writing them. Folding never raises into the child's exit path: a failure is counted and reported.
+    """
+
+    def __init__(self, data_dir: str, run_id: str, out: IO[str] | None = None, interval_s: float = 0.25) -> None:
+        self.data_dir = data_dir
+        self.inbox_dir = os.path.join(data_dir, "inbox")
+        self.run_id = run_id
+        self.out = out
+        self.interval_s = interval_s
+        self.events = 0
+        self.frames = 0
+        self.files = 0
+        self.quarantined: list[str] = []
+        self.errors: list[str] = []
+        self.tape: str | None = None
+        self._writer: TapeWriter | None = None
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._run, name="blackbox-inbox-fold", daemon=True)
+
+    # -- lifecycle -----------------------------------------------------------------------------------------------
+    def start(self) -> _InboxFolder:
+        self._thread.start()
+        return self
+
+    def stop(self) -> None:
+        self._stop.set()
+        if self._thread.is_alive():
+            self._thread.join(timeout=2.0)
+
+    @property
+    def alive(self) -> bool:
+        return self._thread.is_alive()
+
+    def _run(self) -> None:
+        while not self._stop.wait(self.interval_s):
+            with contextlib.suppress(Exception):
+                self.fold_once()
+
+    # -- work ----------------------------------------------------------------------------------------------------
+    def _open(self) -> TapeWriter | None:
+        if self._writer is not None:
+            return self._writer
+        from blackbox.hooks import inbox as inbox_mod
+
+        if not inbox_mod.pending(self.inbox_dir):
+            return None
+        writer = TapeWriter(self.data_dir, vantage=3).open()      # 3 = hook-inbox, docs/format.md 0x03C
+        writer.emit(C.KIND_RUN_START, cbor.encode({"run_id": self.run_id, "vantage": "hook",
+                                                   "inbox": self.inbox_dir}))
+        self._writer = writer
+        self.tape = writer.writer_uuid.hex()
+        return writer
+
+    def fold_once(self) -> int:
+        """Fold everything pending. Returns how many entries were folded; never raises."""
+        from blackbox.hooks import inbox as inbox_mod
+
+        try:
+            writer = self._open()
+            if writer is None:
+                return 0
+            result = inbox_mod.fold(self.inbox_dir, writer)
+        except Exception as exc:                       # a hook folder must never cost the run
+            self.errors.append(f"{type(exc).__name__}: {exc}")
+            return 0
+        self.files += result.files
+        self.frames += result.frames
+        self.events += result.files
+        self.quarantined.extend(result.quarantined)
+        return result.files
+
+    def close(self) -> None:
+        """One last fold, then `RUN_END` on the hook tape — the exit path, in that order."""
+        self.stop()
+        self.fold_once()
+        writer, self._writer = self._writer, None
+        if writer is None:
+            return
+        try:
+            writer.emit(C.KIND_RUN_END, cbor.encode({"run_id": self.run_id, "reason": "child_exited",
+                                                     "files": self.files, "frames": self.frames,
+                                                     "quarantined": len(self.quarantined)}))
+            writer.flush()
+        finally:
+            writer.close()
+
+    def summary(self) -> dict[str, Any]:
+        return {"inbox": self.inbox_dir, "tape": self.tape, "events": self.events, "frames": self.frames,
+                "quarantined": list(self.quarantined), "errors": list(self.errors)}
+
+
 def launch(argv: list[str], *, data_dir: str | None = None, stall_ms: int = 5_000,
            env: dict[str, str] | None = None, out: IO[str] | None = None, recover: bool = True,
            run_id: str | None = None, proxy: bool = False, proxy_routes: Any = None,
@@ -179,6 +286,9 @@ def launch(argv: list[str], *, data_dir: str | None = None, stall_ms: int = 5_00
     child_env["BLACKBOX_RUN_ID"] = run_id
     child_env["BLACKBOX_HOME"] = data_dir
     child_env["BLACKBOX_STALL_MS"] = str(stall_ms)
+    # A hook runs in the child's environment, so this is what tells `blackbox ingest` where *this* run's inbox is —
+    # and therefore which tape the events will be folded into (P3B-07).
+    child_env["BLACKBOX_INBOX"] = os.path.join(data_dir, "inbox")
     # ---- the proxy (P3B-03): started before the child, because the child's environment names its port ----------
     proxy_thread, proxy_plan = (None, None)
     if proxy:
@@ -192,11 +302,14 @@ def launch(argv: list[str], *, data_dir: str | None = None, stall_ms: int = 5_00
     writer.flush()
     started = time.monotonic()
     # no shell: argv is the caller's list, and nothing here is built from a string
+    folder = _InboxFolder(data_dir, run_id, out)
+    folder.start()
     try:
         child = subprocess.Popen(argv, env=child_env)  # noqa: S603
     except BaseException:                      # a command that does not exist must not leave a listener behind
         if proxy_thread is not None:
             proxy_thread.stop()
+        folder.close()
         keeper.stop()
         writer.close()
         raise
@@ -228,6 +341,8 @@ def launch(argv: list[str], *, data_dir: str | None = None, stall_ms: int = 5_00
         finally:
             proxy_thread.stop()
     try:
+        folder.close()                       # the last hook events of a session belong inside the run
+        result.hooks = folder.summary()
         writer.emit(C.KIND_RUN_END, cbor.encode({"run_id": run_id, "exit_code": result.exit_code,
                                                  "signaled": result.signaled, "stalled": watch.stalled,
                                                  "duration_ms": int(result.duration_s * 1000)}))
@@ -277,6 +392,10 @@ def _summary_line(result: RunResult) -> str:
     if result.proxy:
         bits.append(f"proxy {result.proxy['url']} ({len(result.proxy['exports'])} vars exported"
                     + (f", {len(result.proxy['adopted'])} adopted" if result.proxy["adopted"] else "") + ")")
+    if result.hooks and result.hooks.get("tape"):
+        bits.append(f"hooks {result.hooks['events']} events ({result.hooks['frames']} frames) → tape "
+                    f"{str(result.hooks['tape'])[:8]}"
+                    + (f", {len(result.hooks['quarantined'])} quarantined" if result.hooks["quarantined"] else ""))
     if result.signaled:
         bits.append(f"signal {result.signaled}")
     if result.stalled:

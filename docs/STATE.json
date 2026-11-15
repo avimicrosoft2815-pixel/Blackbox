@@ -6,7 +6,7 @@
     "bench/results/*.json"
   ],
   "next_ticket": "P3B-06",
-  "next_note": "L3: the hook path is real — `blackbox ingest` writes one atomic inbox file, the fold maps §11.9's ten Claude Code events into frames (allocation of node slots survives the process), and the Claude Code adapter installs/removes byte-identically (P3B-05 done, D-039). Cold start measured here at p50 32.0 ms / p95 40.2 ms end to end. Left in P3B-07: the launcher's keeper folding the inbox every 250 ms. Suite 786. Next: P3B-06 (the Codex adapter), then P3B-09 docs/attach.md.",
+  "next_note": "L3: the hook path is real — `blackbox ingest` writes one atomic inbox file, the fold maps §11.9's ten Claude Code events into frames (allocation of node slots survives the process), and the Claude Code adapter installs/removes byte-identically (P3B-05 done, D-039). Cold start measured here at p50 32.0 ms / p95 40.2 ms end to end. Left in P3B-07: the launcher's keeper folding the inbox every 250 ms. Suite 792. Next: P3B-06 (the Codex adapter), then P3B-09 docs/attach.md.",
   "last_green_commit": "1390c9b",
   "last_green_commit_note": "main at the merge of PR #10: run 43748356918, ten jobs ten success, and the first green nightly (dispatch 43748375862, both jobs). This branch is a fresh checkout of that merge and carries PR #11's six commits as cherry-picks (44eb786…18d6008); on the branch they came from those same contents ran green twice (897803f / 43751123140 and 4b49f9c / 43751657114), but a cherry-pick is a new commit and this file may only name a sha this branch can verify — so it names the merge until this branch's own run lands.",
   "gates": {

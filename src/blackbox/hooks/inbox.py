@@ -38,6 +38,11 @@ from blackbox.platform import current as _plat_current
 _plat = _plat_current()
 
 ENVELOPE_VERSION = 1
+# S18's crash hook: `BLACKBOX_DIE_AT=INGEST.after_tmp` kills the process between the `tmp` write and the rename, which is
+# the only window in which a hook can leave anything invisible behind. It exists so the test can kill a real process at
+# the real moment instead of reasoning about it.
+DIE_ENV = "BLACKBOX_DIE_AT"
+DIE_STAGE = "INGEST.after_tmp"
 BAD_DIR = ".bad"
 STATE_NAME = "state.json"
 _SUFFIX = ".json"
@@ -115,6 +120,8 @@ def write_event(inbox_dir: str, *, tool: str, event: str, session_id: str,
             fh.write(blob)
             fh.flush()
             _plat.fdatasync(fh.fileno())
+        if os.environ.get(DIE_ENV) == DIE_STAGE:
+            os._exit(137)                     # S18: the tool's hook timeout is honoured; the event is lost, visibly
         os.replace(tmp, path)
     except BaseException:
         with contextlib.suppress(OSError):

@@ -189,7 +189,10 @@ routes = Routes([Route(name="openai", base="https://api.openai.com")], default="
   happens, because a hook that fails is a hook that breaks *your* prompt. The fold maps all ten of §11.9's Claude Code
   events to frames — prompts and tool arguments leave hashes and fingerprints, never content — pairs
   `PreToolUse`/`PostToolUse` on a node slot that survives the process, and writes an unmapped event as
-  `MARK{tool_event}` instead of dropping it (D-039). `blackbox ingest` cold start measures p50 32.0 ms / p95 40.2 ms end
+  `MARK{tool_event}` instead of dropping it (D-039). Under `blackbox run` the launcher folds the inbox every 250 ms into
+  a tape of its own (vantage 3, same run id), one last time at exit, and the recovered capsule then carries an **`exact`
+  link** between that tape and the launcher's — two processes, one timeline, with the class of the claim written down
+  (D-040). `blackbox ingest` cold start measures p50 32.0 ms / p95 40.2 ms end
   to end in the development sandbox; the bench box's number is still owed.
-* **Not built yet**: the bench of §15.1's proxy rows (P3B-08), the Codex adapter (P3B-06), the launcher's 250 ms inbox
-  fold (the rest of P3B-07), and `docs/attach.md` (P3B-09).
+* **Not built yet**: the bench of §15.1's proxy rows (P3B-08), the Codex adapter (P3B-06), the bench-box cold-start row
+  for `blackbox ingest`, and `docs/attach.md` (P3B-09).

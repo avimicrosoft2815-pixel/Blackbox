@@ -262,3 +262,28 @@ def test_a_broken_hook_body_never_fails_the_agent(tmp_path: Path, stdin: bytes) 
     if stdin == b"not json at all":
         assert b"not JSON" in finished.stderr
         assert inbox.pending(str(tmp_path / "inbox")) == []
+
+
+def test_s18_a_kill_between_the_tmp_write_and_the_rename_leaves_nothing_visible(tmp_path: Path) -> None:
+    """S18, as a real kill of a real process at the real moment: no partial entry is ever visible, and the next event
+    is unaffected."""
+    inbox_dir = tmp_path / "inbox"
+    body = json.dumps({"session_id": "s1", "tool_name": "Bash"}).encode()
+    env = {**os.environ, "PYTHONPATH": str(ROOT / "src"), "BLACKBOX_DIE_AT": "INGEST.after_tmp"}
+    killed = subprocess.run([sys.executable, "-m", "blackbox", "ingest", "--tool", "claude-code",
+                             "--event", "PreToolUse", "--inbox", str(inbox_dir)],
+                            input=body, capture_output=True, env=env, timeout=60)
+    assert killed.returncode == 137, "the process died where the crash hook says it died"
+    assert inbox.pending(str(inbox_dir)) == [], "a half-written entry is never visible to the folder"
+    stray = list(inbox_dir.rglob("*.tmp"))
+    assert stray and all(p.name.startswith(".") for p in stray), (
+        "the leftover is a dotted temp file: `pending` cannot see it, and no reader mistakes it for an event")
+
+    # The tool carries on: the next hook, in the same session, folds normally.
+    env.pop("BLACKBOX_DIE_AT")
+    ok = subprocess.run([sys.executable, "-m", "blackbox", "ingest", "--tool", "claude-code",
+                         "--event", "PreToolUse", "--inbox", str(inbox_dir)],
+                        input=body, capture_output=True, env=env, timeout=60)
+    assert ok.returncode == 0
+    writer = _writer(tmp_path)
+    assert inbox.fold(str(inbox_dir), writer).files == 1
