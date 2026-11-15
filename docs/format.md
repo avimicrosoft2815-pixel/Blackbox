@@ -199,6 +199,37 @@ UTF-8 text (invalid sequences are base64ed under a `~b64` key), and no tags/inde
 explicitly allowed. Decoder MUST reject: nesting > 32, maps > 4096 keys, tags, indefinite items, trailing bytes.
 Violations raise `CBORError` (`BBX-E151`).
 
+### 7.1 Blob store — `blob/<h[0:2]>/<h[2:4]>/<hash>.bin` (P1-14 / P1-15)
+
+Payloads above `blob_inline_max` (1024 B) leave the frame and become a file named by the BLAKE2b-256 of the
+**original** payload; the frame keeps `{"b": <hash>, "n": <orig_len>, "c": <codec>, "s": [start,end]}` (`has_blob`).
+
+| Offset | Size | Field |
+|---|---|---|
+| 0 | 8 | magic `BBXBLOB1` (`42 42 58 42 4c 4f 42 31`) |
+| 8 | 2 | version = 1 |
+| 10 | 1 | codec: 0 raw, 1 zlib |
+| 11 | 1 | flags (reserved, 0) |
+| 12 | 8 | orig_len (u64; the length **before** compression) |
+| 20 | body_len | `body` (raw payload, or `zlib.compress(level=6)` of it) |
+| 20+body_len | 4 | body_crc32 over `body` as stored |
+| 24+body_len | 32 | hash of the original payload |
+
+`body_len = file_size − 56`, so there is no length field to disagree with the file.
+
+**Write path:** `hash → tmp (O_EXCL) → write → fdatasync → os.replace → fsync(dir)`. A visible blob is therefore a
+complete blob; a kill before the rename leaves only `*.tmp-*`, swept by `blobs.sweep_tmp`. Two crash stages exist
+for tests: `S9` (after the tmp body, before the rename) and `S9b` (after the rename, before the directory fsync).
+**Read path:** the CRC is checked before the body is trusted, the codec is dispatched, and the payload hash is
+recomputed on every read; a mismatch is `BBX-E162`, a short/garbled container `BBX-E161`, a missing file `BBX-E160`.
+The **name is part of the claim** — a file whose content hash differs from its own filename is refused, not
+returned.
+**Compression** happens on the keeper (`CompressionQueue`), never on the app thread: the blob is stored raw and
+rewritten atomically (`tmp` + `replace`) with `codec = 1` above 2 KiB. Readers accept both, and a kill mid-compress
+leaves the raw blob readable and a tmp file behind.
+**Streams** are chunk-coalesced into 8 KiB blobs (`ChunkCoalescer`), so a 2 000-chunk token stream does not create
+2 000 files.
+
 ## 8. Writer lease `lock` (JSON, ≤ 512 B)
 
 ```json

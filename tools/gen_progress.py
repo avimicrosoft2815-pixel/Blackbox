@@ -48,6 +48,12 @@ S: dict[str, tuple[str, str, str, str, str, str]] = {
                "GAP{RETENTION} committed and published before every unlink; 8 seeds x 60 randomized steps, "
                "133 kills, 65 retention passes, 34 segments pruned, 0 violations of I1 or I9; tombstone "
                "segments are pinned and merged so a declared hole outlives the segment that announced it"),
+    "P1-14": ("done", "HEAD", "tests/test_blobs.py (14 of 18)", "—", "self",
+              "hash to tmp to fsync to replace; a kill at S9 leaves a tmp file and no visible blob, and S9b leaves "
+              "a complete one; reads verify CRC and hash and refuse a blob stored under another name"),
+    "P1-15": ("done", "HEAD", "tests/test_blobs.py (4 of 18)", "—", "self",
+              "keeper-driven CompressionQueue rewrites raw blobs to zlib-6 atomically; the rename is observed with "
+              "the old file still raw and the new one whole; ChunkCoalescer turns 2 000 chunks into 3 blobs"),
     "P1-16": ("done", "HEAD", "tests/property/test_tape_model.py (6)",
               "bench/results/p1-16-counterexamples.json", "self",
               "exhaustive interleavings of append/publish/roll/retain up to 6 steps, 8-frame segments, "

@@ -2702,6 +2702,9 @@ Removed keys: `ring_bytes`, `[rules]` (replaced by `[[trigger]]`). Precedence un
 | `BBX-E155` | invalid CBOR payload | a producer wrote a non-canonical or malformed payload |
 | `BBX-E156` | codec unavailable for a recorded body | install the optional codec extra, or re-record with `content=hash` |
 | `BBX-E225` | frame larger than one segment | externalise the payload or raise `segment_bytes` |
+| `BBX-E160` | blob not found in the store | the blob was collected or never committed; `blackbox verify` lists missing refs |
+| `BBX-E161` | blob header invalid | the file is not a readable BBXBLOB1 container; quarantine it |
+| `BBX-E162` | blob body does not match its hash | the blob was corrupted or modified; do not trust it, re-record |
 
 `BBX-E140` was briefly reused for "segment preallocation failed" in this build; that is `BBX-E132` and the
 registry now matches this appendix in both directions (`tests/test_errors.py`).

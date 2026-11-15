@@ -17,9 +17,13 @@ TICK_S = 0.001          # 1 ms: finer than the 5 ms publish bound, cheap enough 
 
 
 class Keeper:
-    def __init__(self, writer, *, tick_s: float = TICK_S) -> None:
+    def __init__(self, writer, *, tick_s: float = TICK_S, blob_queue=None, blob_jobs_per_tick: int = 4) -> None:
         self.writer = writer
         self.tick_s = tick_s
+        # P1-15: compression is off the writer thread by construction — the app never touches this queue, and a
+        # failure inside it is counted by the queue (the raw blob stays readable) instead of disabling the keeper.
+        self.blob_queue = blob_queue
+        self.blob_jobs_per_tick = blob_jobs_per_tick
         self.ticks = 0
         self.publishes = 0
         self.disabled = False
@@ -67,9 +71,12 @@ class Keeper:
         self.ticks += 1
         if self.writer.publish_if_due():
             self.publishes += 1
+        if self.blob_queue is not None and len(self.blob_queue):
+            self.blob_queue.drain(limit=self.blob_jobs_per_tick)
 
     # ── introspection ───────────────────────────────────────────────────────
     def stats(self) -> dict:
         return {"ticks": self.ticks, "publishes": self.publishes, "disabled": self.disabled,
                 "error": self.error, "tick_s": self.tick_s,
+                "blob_queue": self.blob_queue.stats() if self.blob_queue is not None else None,
                 "window_max_ms": round(self.writer.window_max_ms, 3)}

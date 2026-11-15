@@ -51,10 +51,12 @@ mapped-file-cannot-be-deleted problem. Every number below was re-measured on the
 | Platform shims (P2-03/P2-04, C20) | `tests/test_platform_shims.py` (21) | contract green on Linux; Windows start-time path exercised through a fake `kernel32`; `is_current` is computed, so exactly one shim claims the machine |
 | Retention + declared holes (`P1-09b`) | `tests/test_retention.py` (13), `tests/property/test_retention_random.py` (9) | **8 seeds × 60 randomized steps: 133 kills, 65 retention passes, 34 segments pruned, 0 violations of I1 or I9** (`bench/results/p1-09b-retention.json`) |
 | Chain walk across a hole (`P1-09b`, I9) | `tape.scanner.verify_chain` | per-segment `prev_chain` links + every `CHAIN` frame's `prev`; every declared hole's `prev` must be a value on that walk |
+| Blob store write/read (`P1-14`) | `tests/test_blobs.py` | hash → tmp → fsync → replace; **a kill at `S9` leaves a tmp file and no visible blob**, `S9b` leaves a complete one; every read re-verifies CRC and hash and refuses a blob stored under another name (`BBX-E162`) |
+| Blob compression queue (`P1-15`) | `tests/test_blobs.py`, `tape/keeper.py` | keeper-driven, 1 job per tick in the test; the rename is observed with the old file still raw and the new one whole; `ChunkCoalescer` turns 2 000 chunks into 3 blobs |
 | Lint + types (C6) | `make fmt` (ruff 0.17.5, mypy 2.4.1) | **0 findings** both |
 | Forbidden words (C12) | `tests/test_forbidden_words.py` | green over the tree **and** `git log` |
 
-Total: **213 tests** — 212 pass here and 1 is skipped on POSIX by name (`test_an_open_view_blocks_the_unlink_only_on_windows`: POSIX permits unlinking a file another fd still holds, so the open-view case only exists on Windows). ruff and mypy: 0 findings.
+Total: **234 tests** — 233 pass here and 1 is skipped on POSIX by name (`test_an_open_view_blocks_the_unlink_only_on_windows`: POSIX permits unlinking a file another fd still holds, so the open-view case only exists on Windows). ruff and mypy: 0 findings.
 
 ## 2. §15.1 rows — ext4 is the gate column (C1); every row carries its verdict
 
@@ -143,7 +145,7 @@ to `P2-11`** (`blackbox run`), not P5 — corrected here and in `DECISIONS.md`.
 
 | Check | State |
 |---|---|
-| `make test` from a clean clone | green, `213 passed, 1 skipped` (5.9 s) |
+| `make test` from a clean clone | green, `233 passed, 1 skipped` (7.3 s) |
 | `make kill` (500 trials, ext4) | 0 violations, 0 `not_started` |
 | `make bench` into `bench/results/` | green, both columns |
 | `make fuzz` | 100 000 iterations, 0 non-`CBORError` |
@@ -161,7 +163,7 @@ to `P2-11`** (`blackbox run`), not P5 — corrected here and in `DECISIONS.md`.
 |---|---|---|
 | `P1-09b` retention + `GAP{RETENTION}` | **done** | `tape/retention.py`; F2/F3 decided as D-016/D-017, tombstone pinning/merging as D-018, `GAP` payload frozen in `format.md` §4.1; acceptance = 8 seeds × 60 steps, 133 kills, 0 violations of I1/I9 |
 | `P1-13` seal verifier + compaction | **partial** | footer writer + verifier tested; `arch/` compaction not written |
-| `P1-14` / `P1-15` `store/blobs.py` | **pending** | blob write/read, compression queue |
+| `P1-14` / `P1-15` `store/blobs.py` | **done** | container frozen in `format.md` §7.1; crash stages `S9`/`S9b`; compression runs on the keeper, not the app thread |
 | `P1-16` small-model state machine | **done** | `tests/property/test_tape_model.py`; the retention ordering (`GAP` before unlink) is modelled now and is the spec `P1-09b` has to satisfy |
 | `P1-02b` mypy `type-arg` + `no-untyped-def` | **pending, closes before G-Promise** | 75 strict findings in the two disabled categories |
 | `P2-03` / `P2-04` OS gates | **ticked — CI, run `43657997367`** | all ten cells green: Windows ran `OpenProcess`+`GetProcessTimes`, `winreg` `BootId`, `lseek`-based positional I/O and zero-fill preallocation, and the lease tests through `platform.current()`; macOS ran `sysctl(KERN_PROC_PID)`, `kern.boottime` and `F_FULLFSYNC`. Benchmark rows stay `not measured` for those OSes |
@@ -174,6 +176,6 @@ to `P2-11`** (`blackbox run`), not P5 — corrected here and in `DECISIONS.md`.
 
 ## 8. Next, in order
 
-1. `P1-14` / `P1-15` — `store/blobs.py`: blob write/read and the compression queue (F2/F3 were decided in `P1-09b`, so nothing is deferred there).
-2. `P2-06` / `P2-07` / `P2-10`…`P2-13` (recovery and CLI surface) → `P1-02b` (mypy `type-arg` + `no-untyped-def`) → **G-Promise on ext4** → STATUS.
-3. `P1-13` compaction of sealed segments; `P2-09` nights start at merge.
+1. `P2-06` / `P2-07` / `P2-10`…`P2-13` (recovery and CLI surface) → `P1-02b` (mypy `type-arg` + `no-untyped-def`) → **G-Promise on ext4** → STATUS.
+2. `P1-13` compaction of sealed segments; the blob GC (§9.9) when segments start referencing blobs.
+3. `P2-09` nights start at merge.

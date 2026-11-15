@@ -22,6 +22,9 @@ same table, so a code in a log line always has a next step attached to it.
 | `BBX-E154` | retention blocked by a pin | run `blackbox ls --pinned` or raise the budget |
 | `BBX-E155` | invalid CBOR payload | a producer wrote a non-canonical or malformed payload |
 | `BBX-E156` | codec unavailable for a recorded body | install the optional codec extra or re-record with content=hash |
+| `BBX-E160` | blob not found in the store | the blob was collected or never committed; `blackbox verify` lists missing refs |
+| `BBX-E161` | blob header invalid | the file is not a readable BBXBLOB1 container; quarantine it |
+| `BBX-E162` | blob body does not match its hash | the blob was corrupted or modified; do not trust it, re-record |
 | `BBX-E210` | writer is alive; recovery refused | stop the process or pass --force-if-dead |
 | `BBX-E211` | lease held by a reused pid (start time mismatch) | run `blackbox doctor --locks` |
 | `BBX-E220` | both head slots invalid | run `blackbox recover --full-scan` |

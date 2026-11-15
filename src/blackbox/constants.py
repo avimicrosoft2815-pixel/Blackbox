@@ -8,6 +8,7 @@ MAGIC_FRAME = b"BBXF"
 MAGIC_FRAME_TAIL = b"BBXT"
 MAGIC_SEG = b"BBXSEG2\x00"   # 7 chars + NUL pad to 8
 MAGIC_SEAL = b"BBXSEAL1"
+MAGIC_BLOB = b"BBXBLOB1"
 
 FORMAT_VERSION = 2
 MAX_READER_FORMAT_VERSION = 2
@@ -188,5 +189,7 @@ LEASE_MAX_BYTES = 512
 LEASE_MAX_AGE_NS = 24 * 3600 * 1_000_000_000
 
 # Every on-disk magic is a fixed-width field; a shorter literal silently shifts the whole record.
+BLOB_VERSION = 1
+BLOB_HEADER_BYTES = 20               # magic 8 + version 2 + codec 1 + flags 1 + orig_len 8
 assert len(MAGIC_META) == 8 and len(MAGIC_HEAD) == 8 and len(MAGIC_SEG) == 8 and len(MAGIC_SEAL) == 8
 assert len(MAGIC_FRAME) == 4 and len(MAGIC_FRAME_TAIL) == 4
