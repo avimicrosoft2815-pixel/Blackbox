@@ -148,6 +148,9 @@ routes = Routes([Route(name="openai", base="https://api.openai.com")], default="
   (`stats.record_errors` counts them).
 * **TLS**: `ssl.create_default_context()` upstream; a route built with `verify_tls=False` (the plan's
   `--insecure-upstream`) is the only way to skip verification, and `Routes.verify_all()` undoes it.
-* **Not built yet**: `blackbox run` starting the proxy and exporting `OPENAI_BASE_URL`/`ANTHROPIC_BASE_URL`
-  (P3B-03), the bench of §15.1's proxy rows and the kill/disconnect classes (P3B-08), the header links (P3B-04) and
+* **The variable plan** (`proxy/supervisor.py`) decides what the child sees: an unset base-URL variable is pointed at
+  the proxy; a **set** one is left exactly as it is and becomes an upstream, so the recorder never moves traffic the
+  user put somewhere on purpose. `ProxyThread` runs the listener on its own thread with a watchdog that rebinds a dead
+  listener **on the port the child was told**.
+* **Not built yet**: `blackbox run` calling that thread and applying the plan (P3B-03's second half), the bench of §15.1's proxy rows and the kill/disconnect classes (P3B-08), the header links (P3B-04) and
   the hook adapters (P3B-05/06).

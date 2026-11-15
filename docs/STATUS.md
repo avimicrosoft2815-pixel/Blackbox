@@ -30,7 +30,7 @@ with the ordered preflight are real and tested, as is seam C (SDK method patches
 provider pushed. The proxy's **core and routing** are real and tested (P3B-01/P3B-02: loopback listener, byte-exact
 passthrough, the route table as the egress allowlist); the launcher integration, the hooks, the viewer and the
 diagnosis workflow are not built yet.**
-Suite: **Total: 675 tests** — 674 pass here and 1 is skipped on POSIX by name
+Suite: **Total: 684 tests** — 683 pass here and 1 is skipped on POSIX by name
 (`test_an_open_view_blocks_the_unlink_only_on_windows`: POSIX permits unlinking a file another fd still holds, so
 the open-view case exists only on Windows). ruff 0.17.5 and mypy 2.4.1 (`strict = true`, nothing disabled):
 0 findings.
@@ -39,6 +39,7 @@ the open-view case exists only on Windows). ruff 0.17.5 and mypy 2.4.1 (`strict 
 
 | Gate or budget row | Plan ref | Evidence (test path, results JSON, or CI run URL) |
 |---|---|---|
+| **P3B-03, first half** the proxy as a supervised thread, and the variable plan | P3B-03, D-033 | `src/blackbox/proxy/supervisor.py`, `tests/test_proxy_supervisor.py` (8): `plan_exports()` is the only place the child's environment and the proxy's routes are decided, in one pass, so they cannot drift — an unset `OPENAI_BASE_URL`/`ANTHROPIC_BASE_URL`/`OLLAMA_HOST`/`GOOGLE_GEMINI_BASE_URL` is pointed at the proxy, a **set** one is adopted as an upstream and never overwritten (a recorder that moves traffic is not a recorder), a value that is not a URL is adopted but not routed rather than guessed at, and when every variable was already set nothing claims to be the default. `ProxyThread` runs the listener on its own loop in its own thread, and its watchdog rebinds a dead listener **on the port the child was told** — measured at ≤ 100 ms in the test that closes the listener behind the supervisor's back |
 | **P3B-01** the proxy core: loopback in, the provider out, a tee onto the tape | §13, P3B-01 | `src/blackbox/proxy/server.py`, `tests/test_proxy_server.py` (12): an origin and the proxy share one background loop and the test body speaks HTTP to it **synchronously**, so nothing passes because two coroutines agreed; a POST arrives with its body and the upstream sees the routed path and its own `Host`; an SSE response is **sha256-identical** to what the origin pushed and is still relayed as `Transfer-Encoding: chunked`; hop-by-hop headers are not forwarded in either direction and an `x-blackbox-*` header from upstream never reaches the client; an unknown route is `502` + `x-blackbox-error: upstream-not-allowed` with the caller's input **not** echoed back; a dead route is `504 upstream-unreachable` and the listener survives it; `Expect: 100-continue` is answered **before** the body is read; two requests share one keep-alive connection; a client that hangs up mid-stream leaves the proxy serving; behind a real `TapeWriter` + `TapeSink` (`coalesce_bytes=1`) the scan finds one `MODEL_REQUEST`, one `MODEL_RESPONSE` and chunks whose concatenation hashes to the body; and a recorder that raises on every hook changes nothing the client receives (stat `record_errors` rises) |
 | **P3B-02** routing: the table is the allowlist | P3B-02 | `src/blackbox/proxy/routes.py`, `tests/test_proxy_routes.py` (10) + `tests/test_no_egress.py::test_the_proxy_can_only_reach_its_configured_upstreams`: the single default route takes what no prefix claims; the **longest** prefix wins, is stripped, and the base path is kept (`/local/v1/models` → `/v1/v1/models` against `http://127.0.0.1:8000/v1`); the bare prefix is the base path; the `x-blackbox-upstream` header names a route and an unknown name is `BBX-E140`, never a fallback; no default + no match is an error; a non-loopback bind is `BBX-E143` unless `bind_unsafe` is said out loud; destinations are a closed set (`{("api.openai.com", 443), ("127.0.0.1", 8000)}` in the test); a route can be made to skip verification and `verify_all()` moves only towards verification; `proxy/` is the second declared network exception (`asyncio`, `ssl`, `socket`, and `urllib.parse` **only** — `urllib.request` stays banned), and the single `open_connection` call site is handed `route.destination` by an AST assertion |
 | Canonical CBOR; decoder hardening | §8.4, P1-03 | `tests/test_codec.py`, `bench/fuzz_cbor.py` → `bench/results/2026-11-14-fuzz-cbor.json`: 100 000 buffers, 0 non-`CBORError` |
@@ -184,8 +185,9 @@ row in the same commit.
    with and without the recorder, under three real breakages); P3-11's redaction (60-shape corpus at every split
    offset, three modes, default policy, fail-closed, keyed pseudonyms); and the five §15.1 capture rows, measured.
    What is left of P3-11 is **mask offsets** (DV-014), which belong with the viewer that would use them, and the gate
-   itself needs a reviewer's counter-signature on `docs/gates/G-Capture.md`. **Next ticket: L3 — P3B-01, the proxy
-   core** (`blackbox run -- <anything>` is the universality promise, and it has no commits yet).
+   itself needs a reviewer's counter-signature on `docs/gates/G-Capture.md`. **Next ticket: P3B-03's
+   second half** — `launch()` starting that thread, exporting the plan's variables into the child and supervising the
+   listener through the run — then P3B-08's bench and kill classes.
 3. **Defect 26 is open and cannot be closed here**: on Windows, `install(data_dir=<a file>)` reported `enabled: True`
    and let 100 calls run against a tape directory that cannot exist. Three questions are written down in
    `docs/defects.md`; answering them needs a Windows host, which this sandbox does not have.
@@ -193,10 +195,10 @@ row in the same commit.
    `anthropic` packages are built on `httpx2`, which is why seam A reported `installed` and captured nothing until
    the day-14 test found it (defect 23, D-025). No seam, and no unit test of a seam, could have found it from the
    inside.
-5. **L3 starts from `d43b208`, not from an older SHA**: the attach lane (proxy core and routes, launcher integration,
-   header links, Claude Code / Codex hooks, inbox, proxy bench, `docs/attach.md`) has no commits yet; the error codes
-   it will use (`BBX-E140`–`E143`) are already in the registry and `tests/test_no_egress.py` already names `proxy/` as
-   the one place allowed to open a socket.
+5. **L3 is under way from `50d6b37`**: the proxy's core (`proxy/server.py`), its routes (`proxy/routes.py`) and its
+   supervised thread plus variable plan (`proxy/supervisor.py`) are built and tested. Still to come: `launch()`
+   starting that thread (P3B-03's second half), the header links (P3B-04), the Claude Code / Codex hooks and the
+   inbox (P3B-05–07), the proxy bench and kill classes (P3B-08), and `docs/attach.md` (P3B-09).
 6. The independent reviewer's loop is the gate loop: a counter-signature at every gate, with the reproduce block in
    `docs/gates/` and `docs/reviews.md` as the ledger. It found C40 on its first pass and defect 25 on this one, which
    is the argument for it.
