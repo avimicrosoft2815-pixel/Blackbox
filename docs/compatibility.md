@@ -34,6 +34,28 @@ report `not testable in this environment`, never "supported".
 | tmpfs | best-effort | no machine-failure guarantee; F1 only |
 | NFS / SMB / 9p / sshfs | **refused** | `BBX-E120`; mmap coherence and rename atomicity are not guaranteed |
 
+## Timers: the group-commit window per OS (C40)
+
+The §15.1 row *group-commit window ≤ 5 ms* is **measured on ext4/Linux only** (`bench/results/2026-11-14-writer-throughput.json`:
+4.603 ms at 1 ev/s, 4.999 ms at 1 000 ev/s, 3.572 ms unbounded). It is asserted on POSIX, where
+`threading.Condition.wait`/`Event.wait` wake at the requested millisecond.
+
+On Windows the row is stated, not asserted, and this paragraph is the statement. `Event.wait(timeout)` becomes
+`WaitForSingleObjectEx`, which rounds to the system timer tick — 15.6 ms by default, and `time.sleep`'s
+high-resolution path in 3.11+ does not apply to a wait on an event or condition. So:
+
+* an event that **arrives** is still published within the window, because `emit` publishes inline when the window
+  has expired (`test_a_window_older_than_the_bound_publishes_inline`), and that path is the app thread's own clock;
+* a window that only the **keeper** would close can be closed up to one timer tick late (≈15.6 ms) on Windows.
+  The frame is not lost and no reader sees a torn tape; the latency bound is simply one OS tick rather than 5 ms.
+
+The Windows bound is **not measured** — there are no runner numbers in this repository — and the keeper is
+deliberately not raised to high-resolution timers (`timeBeginPeriod`), because a recorder that changes the host
+process's global timer resolution to shave 10 ms off its own publish latency is making the application pay for its
+bookkeeping. A test that asserted the Linux number on the Windows cell is exactly how the flake in C40 (run
+`43678767989`, `py3.13 / windows-latest`) was born; the test now measures the invariant (the keeper drains a window
+the app left open) instead of the wall clock.
+
 ## Provider SDKs
 
 Not yet applicable — no capture layer exists (phase P3). The declared matrix lands with P3-05 and `SUPPORTED.md`.
@@ -45,15 +67,21 @@ Not yet applicable — no capture layer exists (phase P3). The declared matrix l
 Cell values are the **test** verdict only. No benchmark number in this repository comes from a CI runner: those
 rows stay `smoke only` on a runner and `not measured` for an OS that has not run the benchmark.
 
-Last update: run [`43659827155`](https://github.com/avimicrosoft2815-pixel/Blackbox/actions/runs/43659827155)
-(commit `8e2256e`) — **all ten cells green**, read with `gh run view`. This is the run that first carries the blob
-store, the retention randomizer, the recovery machine (24 real kill-resume trials) and the capsule v0.
+Last update: run `43697198262` at `846e01a` — **ten of ten, the first all-OS green since `c7919f9`**. The three
+Windows cells had been red for four commits on one defect (25): the Windows teardown fixture in `tests/conftest.py`
+probed every object in `gc.get_objects()` with `getattr(obj, "_head", None)`, and `anthropic` keeps its optional
+dependencies behind a `LazyProxy` whose `__getattr__` raises `MissingDependencyError` — so nine innocent property
+tests reported `ERROR … anthropic.lib._extras._common.MissingDependencyError`, on Windows only (the block returns
+early elsewhere), once `capture-sdks` put the SDK in the environment. It was found by reading the check-run
+**annotations**, because the job log is redirected to a host the build sandbox cannot reach. The next Windows red,
+at `67b5ae5`, was a fail-open test of mine whose breakage did not break there (defect 26, open). Before that:
+`43695177370` at `27b82a3`, ten of ten.
 
 | OS | 3.11 | 3.12 | 3.13 | Evidence |
 |---|---|---|---|---|
-| ubuntu-latest (Linux 6.x, x86-64) | **green** | **green** | **green** | `gh run view 43659827155` |
-| macos-latest (arm64 runner) | **green** | **green** | **green** | same run |
-| windows-latest | **green** | **green** | **green** | same run — `os.replace` over an existing blob, `O_EXCL` tmp files, the sharing-violation retry and a second recoverer process all ran there |
+| ubuntu-latest (Linux 6.x, x86-64) | **green** | **green** | **green** | run `43697198262` |
+| macos-latest (arm64 runner) | **green** | **green** | **green** | run `43697198262` — including the commit-boundary sync test that had failed in three macOS cells for six runs (C36) |
+| windows-latest | **green** | **green** | **green** | run `43697198262` — the day-14 test skips there by design (no `SIGKILL`), the read-only-directory case skips (defects 25/26 are why), and everything else ran, `os.replace` over an existing blob, `O_EXCL` tmp files and the sharing-violation retry included |
 | docs job | green | — | — | same run |
 
 Cumulative effect on the OS gates, now that the cells are real:

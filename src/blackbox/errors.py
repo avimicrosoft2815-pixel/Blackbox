@@ -1,6 +1,8 @@
 """Typed error registry (P0-11). Every code used in code must be declared here."""
 from __future__ import annotations
 
+from typing import Any
+
 # code -> (short message, remediation shown to the user)
 REGISTRY: dict[str, tuple[str, str]] = {
     "BBX-E100": ("capture hook install failed", "run `blackbox doctor --capture`; recording continues in safe mode"),
@@ -65,7 +67,7 @@ class BlackBoxError(Exception):
         msg, fix = REGISTRY[code]
         super().__init__(f"{code}: {msg}" + (f" [{detail}]" if detail else "") + f" — {fix}")
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         msg, fix = REGISTRY[self.code]
         return {"code": self.code, "message": msg, "detail": self.detail, "remediation": fix}
 

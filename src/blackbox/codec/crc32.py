@@ -12,16 +12,17 @@ See `docs/adr/ADR-004-crc32-not-crc32c.md` and `docs/DEVIATIONS.md` DV-005.
 from __future__ import annotations
 
 import zlib
+from collections.abc import Iterable
 
 CHECK_VALUE = 0xCBF43926
 
 
-def crc32(data, crc: int = 0) -> int:
+def crc32(data: bytes | bytearray | memoryview, crc: int = 0) -> int:
     """CRC-32/ISO-HDLC of `data`, continuing from `crc`. Accepts bytes-like objects, including memoryviews."""
     return zlib.crc32(data, crc) & 0xFFFFFFFF
 
 
-def checksum_parts(parts, crc: int = 0) -> int:
+def checksum_parts(parts: Iterable[bytes | memoryview], crc: int = 0) -> int:
     """Fold several buffers without joining them (a frame's CRC covers header + payload + trailer)."""
     for part in parts:
         crc = crc32(part, crc)

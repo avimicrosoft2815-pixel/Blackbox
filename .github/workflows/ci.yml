@@ -13,14 +13,19 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
         python: ["3.11", "3.12", "3.13"]
     steps:
+      # C35: full history. A depth-1 clone has one commit, so `git merge-base --is-ancestor` can only ever see
+      # HEAD, the forbidden-word scan over `git log` sees exactly one message, and the ancestry tests fail for
+      # every sha — which is what turned every run on this branch red while the same tests passed locally.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
       - name: Install (core deps must be empty; dev extras only)
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e ".[dev]"
+          python -m pip install -e ".[dev,capture,capture-sdks]"
       # C27: every step that can fail goes through tools/ci_summary.py, so the run Summary page (readable
       # without a login) carries the tail of the failure instead of hiding it behind the job log.
       - name: Guard rails (stdlib-only core, no egress)
@@ -40,11 +45,16 @@ jobs:
   docs:
     runs-on: ubuntu-latest
     steps:
+      # C35: full history. A depth-1 clone has one commit, so `git merge-base --is-ancestor` can only ever see
+      # HEAD, the forbidden-word scan over `git log` sees exactly one message, and the ancestry tests fail for
+      # every sha — which is what turned every run on this branch red while the same tests passed locally.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
       - name: Install dev extras (this job needs pytest)
-        run: python -m pip install --upgrade pip && python -m pip install -e ".[dev]"
+        run: python -m pip install --upgrade pip && python -m pip install -e ".[dev,capture,capture-sdks]"
       - name: Docs cross-references and table integrity
         run: python tools/ci_summary.py --title "docs" -- python -m pytest tests/test_docs_links.py -q -rfE --tb=short

@@ -19,6 +19,7 @@ from __future__ import annotations
 import os
 import threading
 import time
+from typing import Any
 
 from blackbox import constants as C
 from blackbox.codec import cbor
@@ -112,6 +113,7 @@ class TapeWriter:
         self._window_start_ns = 0
         self.publishes = 0
         self.syncs = 0
+        self.blob_writer = None      # set by `attach_blobs` when the recorder owns a blob store (C32)
         self.dropped_events = 0
         # The keeper thread publishes on a tick while the app thread appends. Roll mutates the mapping,
         # the head and the chain, so publish/flush/roll/close are serialised; append keeps its own short
@@ -135,7 +137,7 @@ class TapeWriter:
             with open(self.meta_path, "wb") as fh:
                 fh.write(blob)
                 fh.flush()
-                os.fsync(fh.fileno())
+                _plat.fdatasync(fh.fileno())
         meta = meta_mod.decode(self._read_meta())
         self.segment_bytes = meta["segment_bytes"]
 
@@ -245,7 +247,8 @@ class TapeWriter:
             return self._append_locked(kind, payload, priority=priority, flags=flags, run_slot=run_slot,
                                        node_slot=node_slot, wall_ns=wall_ns, mono_ns=mono_ns)
 
-    def _append_locked(self, kind, payload, *, priority, flags, run_slot, node_slot, wall_ns, mono_ns) -> int:
+    def _append_locked(self, kind: int, payload: bytes, *, priority: int, flags: int, run_slot: int,
+                       node_slot: int, wall_ns: int | None, mono_ns: int | None) -> int:
         if not self.recording:
             self.dropped_events += 1        # sink: counted, never raised (S17)
             return 0
@@ -331,7 +334,18 @@ class TapeWriter:
         _die("S5")
         return self._slot
 
+    def attach_blobs(self, blob_writer: Any) -> None:
+        """C32/D-019: whoever syncs the tape syncs the blobs it references first, in that order.
+
+        The keeper's tick already calls `sync_pending()` before `publish_if_due()`; this hook covers the other path,
+        a group-commit publish that happens on the calling thread, where deferring the blob would leave a durable
+        frame pointing at a blob that is only in the page cache.
+        """
+        self.blob_writer = blob_writer
+
     def _maybe_sync(self, *, force: bool = False) -> None:
+        if self.blob_writer is not None:
+            self.blob_writer.sync_pending()      # blob before tape, always, and in that order
         if self._seg_fd is None:
             return
         now = time.perf_counter_ns()
@@ -339,22 +353,19 @@ class TapeWriter:
         if not (force or due):
             return
         self._flush_buf()
-        if hasattr(os, "fdatasync"):
-            os.fdatasync(self._seg_fd)
-        else:
-            os.fsync(self._seg_fd)
+        _plat.fdatasync(self._seg_fd)
         if self._head is not None:
             self._head.sync()
         self._last_sync_ns = now
         self._unpublished_bytes = 0
         self.syncs += 1
 
-    def append_and_publish(self, kind: int, payload: bytes = b"", **kw) -> int:
+    def append_and_publish(self, kind: int, payload: bytes = b"", **kw: Any) -> int:
         seq = self.append(kind, payload, **kw)
         self.publish()
         return seq
 
-    def emit(self, kind: int, payload: bytes = b"", **kw) -> int:
+    def emit(self, kind: int, payload: bytes = b"", **kw: Any) -> int:
         """Group commit: append now, publish when `batch_bytes` / `batch_ms` says so (or on `flush`).
 
         Under light load the window is one event; under load the batch grows by itself, which is why the
@@ -517,7 +528,7 @@ class TapeWriter:
         return body
 
     def _write_seal(self, n: int, *, body: bytes, start_seq: int, end_seq: int, frame_count: int,
-                    reason: int) -> dict | None:
+                    reason: int) -> dict[str, Any] | None:
         from blackbox.tape import seal as seal_mod
         prev = self._segment_prev_chain(n)
         return seal_mod.write(segments.seal_path(self.tape_dir, n), segment_no=n, reason=reason,
@@ -598,7 +609,7 @@ class TapeWriter:
                             "(see .degraded_reason)")
         return self._slot
 
-    def stats(self) -> dict:
+    def stats(self) -> dict[str, Any]:
         return {
             "writer_uuid": self.writer_uuid.hex(), "tape_dir": self.tape_dir,
             "head_seq": self._slot.head_seq if self._slot else 0,
@@ -612,5 +623,5 @@ class TapeWriter:
     def __enter__(self) -> TapeWriter:
         return self.open() if self._slot is None else self
 
-    def __exit__(self, exc_type, exc, tb) -> None:
+    def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
         self.close(reason=C.SEAL_REASON_SHUTDOWN if exc_type is None else C.SEAL_REASON_RUN_END)

@@ -42,11 +42,14 @@ S: dict[str, tuple[str, str, str, str, str, str]] = {
     "P1-11": ("done", "HEAD", "test_crash_points.py, tests/kill/kill_matrix.py", "bench/results/2026-11-14-kill-random.json",
               "self", "500 randomized kills recover exactly the committed prefix, 0 violations"),
     "P1-12": ("done", "55b4d42", "test_tape.py (implicit)", "—", "self", "gap marker yielded"),
-    "P1-13": ("done", "260bfd0", "test_tape.py::test_seal_*", "—", "self", "F4 applied; re-seal idempotence todo"),
+    "P1-13": ("done", "HEAD", "tests/test_tape.py (seal), tests/test_compact.py (7)", "—", "self",
+              "footer writer + verifier (F4: body hash over the uncompressed body, codec in the header); "
+              "compaction into arch/<writer>/<n>.seg at codec zlib, tmp + fsync + replace, idempotent, the "
+              ".seal file untouched (re-verify passes on the archived bytes) and the frames read back identical"),
     "P1-09b": ("done", "HEAD", "tests/test_retention.py (13), tests/property/test_retention_random.py (9)",
                "bench/results/p1-09b-retention.json", "self",
                "GAP{RETENTION} committed and published before every unlink; 8 seeds x 60 randomized steps, "
-               "133 kills, 65 retention passes, 34 segments pruned, 0 violations of I1 or I9; tombstone "
+               "8 seeds x 60 steps per run, 320 recorded runs (`totals.runs`), 0 violations of I1 or I9; tombstone "
                "segments are pinned and merged so a declared hole outlives the segment that announced it"),
     "P1-14": ("done", "HEAD", "tests/test_blobs.py (14 of 18)", "—", "self",
               "hash to tmp to fsync to replace; a kill at S9 leaves a tmp file and no visible blob, and S9b leaves "
@@ -62,15 +65,65 @@ S: dict[str, tuple[str, str, str, str, str, str]] = {
     "P1-17": ("done", "HEAD", "bench/bench_frame.py", "bench/results/2026-11-14-frame.json",
               "self", "N=100k, 10k warm-up, paired toggles; protocol for every §15.1 row"),
     "P1-18": ("done", "55b4d42", "test_tape.py::test_roll_* (chain link)", "—", "self", "mutation walk todo"),
+    "P1-19": ("done", "HEAD", "bench/bench_writer_ab.py", "bench/results/2026-11-14-writer-ab.json",
+              "self", "ADR-005 supersedes ADR-001: median p50 ratio 1.059 / 1.065 at 10k / 40k ev/s, inside the "
+              "plan's 20 % rule, so the simpler store won and the mapping is gone"),
+    "P2-11": ("done", "HEAD", "tests/test_launcher.py (6)", "—", "self",
+              "blackbox run -- cmd: spawn with BLACKBOX_RUN_ID/BLACKBOX_HOME, the launcher owns the tape (RUN_START/"
+              "RUN_END), stall_ms watchdog, immediate recovery on exit, exit code propagated (128+n for a signal); "
+              "the plan's acceptance line, `kill -9 $$`, leaves one capsule root"),
+    "P2-13": ("done", "HEAD", "tests/test_launcher.py::test_a_stalled_child_is_detected_and_dumps_its_stacks", "—",
+              "self", "on stall the launcher writes stall.json and sends SIGUSR1; api.install() registers "
+              "faulthandler(all_threads=True) on it, so two deliberately deadlocked threads both appear in "
+              "stall_tb.txt within stall_ms + 1 s; Windows is documented as stall.json only, not claimed"),
     "P1-20": ("done", "260bfd0", "test_prealloc.py (5)", "—", "self", "S17 still open, claim not made"),
     "P2-01": ("done", "8c99b96", "test_tape.py::test_lease_*", "—", "self", "stale/reboot/pid-reuse/live"),
     "P2-02": ("wip", "8c99b96", "—", "—", "—", "Linux only; macOS untested here"),
-    "P2-03": ("wip", "HEAD", "tests/test_platform_shims.py", "—", "—",
-              "shim written (zero-fill prealloc, no directory fsync, no start token) and its contract is "
-              "tested on Linux; the Windows cell itself has never run (C7)"),
-    "P2-04": ("wip", "HEAD", "tests/test_platform_shims.py", "—", "—",
-              "shim written and contract-tested; F_FULLFSYNC is not in stdlib so F2 on macOS is labelled weaker; "
-              "no fsync latency measured on a Mac"),
+    # L2 — capture. The mock provider is required by G-Capture but has no row in §18.5 (D-021): it is tracked in
+    # STATE.json's `extra_work`, not here, so that neither it nor the buffer (the plan's real P3-13) can be ticked by
+    # the other's evidence.
+    "P3-01": ("done", "372006f", "tests/test_api_lifecycle.py (6)", "—", "self",
+              "double install ⇒ one writer; uninstall during a call; BLACKBOX_DISABLED=1; unwritable data dir"),
+    "P3-02": ("done", "0271cef", "tests/test_api_decorators.py (6)", "—", "self",
+              "five decorator kinds; signature/__name__/__doc__ preserved; ≤ 1 µs median when disabled"),
+    "P3-03": ("done", "86cd685", "tests/test_context_nodes.py (7)", "—", "self",
+              "run/step/mark/handled_error/capture/freeze/current; 50-deep nesting balanced; mark lands in its node"),
+    "P3-04": ("done", "d5e1bb6", "tests/test_context_nodes.py (7)", "—", "self",
+              "contextvars node stack; threadpool and fork children write to their own tape; no fork-only test"),
+    "P3-05a": ("done", "1112881", "tests/test_seam_hooks.py (7)", "—", "self",
+               "response hook wraps the still-unread stream, so A sees every chunk; request hook stamps the clock "
+               "first, so first_byte_ms is end-to-end; already-buffered ⇒ partial=True, never zeroes"),
+    "P3-05b": ("done", "0f81445", "tests/test_seam_transport.py (9)", "—", "self",
+               "sha256-identical to an unmodified client; recorded chunk count equals what the application read; "
+               "truncated stream recorded short; mid-stream error recorded and re-raised; both installs restore"),
+    "P3-05c": ("done", "HEAD", "tests/test_seam_sdk_methods.py (10)", "—", "self",
+               "real openai 3.51.0 and anthropic 2.8.0 against the mock provider: chat/embeddings/messages, sync and "
+               "async streams counted, SDK signature preserved, unknown SDK shape skipped not guessed; counts events, "
+               "not bytes (D-023)"),
+    "P3-11": ("wip", "HEAD", "tests/test_redaction.py (139), tests/_secrets.py", "—", "self",
+              "60 synthetic secrets of 10 kinds, every split offset of every one, 20 random chunkings, byte-at-a-time, "
+              "binary payloads; ordinary SSE byte-identical; off proved off; hash a stable pseudonym; bounded buffer; "
+              "a real tape grepped and 0 leaks; default policy redacts without being asked (D-029). NOT built: keyed "
+              "HMAC (DV-013), mask offsets, pure/patterns.py split"),
+    "P3-06": ("done", "HEAD", "tests/test_sink.py (8)", "—", "self",
+              "2 000 chunks => 8 chunk frames, payloads concatenate to the identical body; 8 KiB / 100 ms bounds; "
+              "request/chunks/response ordering; unfinished call left as chunks for INTERRUPTED_MID_STREAM; "
+              "fail-open counted, never raised"),
+    "P3-14": ("done", "HEAD", "tests/test_failopen.py (8)", "—", "self",
+              "100-call agent, bare vs recorded: identical return value and identical stdout; raises at call 37 with "
+              "the same exception type and message; breakages that hold on every OS (segment_bytes=1 refused with "
+              "BBX-E130, a keeper that raises on every publish, a tape truncated by 512 B) each repeat the whole "
+              "comparison; data dir that is a file is POSIX-only, Windows let the writer open (defect 26)"),
+    "P3-05d": ("done", "99a5164", "tests/test_preflight.py (8), SUPPORTED.md", "—", "self",
+               "forced failure of A chooses B and records why; all-fail is a printable state, not an exception; "
+               "capture_seam in the decision — into a run.json only once P3-06 lands the sink"),
+    "P2-03": ("done", "HEAD", "tests/test_platform_shims.py, CI windows x 3", "—", "self",
+              "ticked on run 43657997367 (reconfirmed 43659827155): the Windows cell ran OpenProcess + "
+              "GetProcessTimes, winreg BootId, lseek-based positional I/O and zero-fill preallocation, and the "
+              "lease tests went through platform.current(); benchmark rows stay not measured"),
+    "P2-04": ("done", "HEAD", "tests/test_platform_shims.py, CI macOS x 3", "—", "self",
+              "ticked on run 43657997367 (reconfirmed 43659827155): sysctl(KERN_PROC_PID) start token, "
+              "kern.boottime and F_FULLFSYNC ran in the macOS cells; F_FULLFSYNC latency is not measured there"),
     "P2-05": ("done", "HEAD", "tests/test_adoption.py::test_discover_order_is_stable", "—", "self",
               "stable queue by created_ns then uuid; classifies orphan/missing-seal/damaged/.tmp"),
     "P2-06": ("done", "HEAD", "tests/test_recovery.py (36)", "—", "self",
@@ -136,7 +189,7 @@ def main() -> None:
            "| ticket | Done when (plan) | status | commit | tests | measurement | reviewer | notes |",
            "|---|---|---|---|---|---|---|---|"]
     for tid, path, done, est, _ in rows:
-        if not tid.startswith(("P0-", "P1-", "P2-")):
+        if not tid.startswith(("P0-", "P1-", "P2-", "P3", "P3B-")):
             continue
         st, commit, tests, meas, rev, notes = S.get(tid, ("todo", "—", "—", "—", "—", ""))
         out.append(f"| `{tid}` | {paraphrase(done)} | **{st}** | {commit} | {tests} | {meas} | {rev} | {notes} |")
@@ -155,8 +208,9 @@ def main() -> None:
             "0.576–9.14 µs p50 | — | stages are non-additive | `bench/results/2026-11-14-frame.json` |",
             "| `P1-11` | recovery scan, 10 000 frames | 7 rounds | 120.25 / — / 124.34 ms | 58.0 ms per 10k | "
             "| `bench/results/2026-11-14-recovery.json` |",
-            "| `P1-19` | mmap vs `write()`-append, interleaved blocks | 3 s per rate per arm | ratio 1.395 / 1.233 / 1.211 "
-            "at 1 k / 10 k / 40 k ev/s | — | keep mmap (ADR-001) | `bench/results/2026-11-14-writer-ab.json` |",
+            "| `P1-19` | mmap vs `pwrite`-append, interleaved blocks | 3 s per rate per arm | median p50 ratio "
+            "1.059 / 1.065 at 10 k / 40 k ev/s | — | **pwrite** (ADR-005 supersedes ADR-001) | "
+            "`bench/results/2026-11-14-writer-ab.json` |",
             "| `P2-09` | randomized parent-`SIGKILL` | 500 trials × 2 filesystems | violations: 0 | — | "
             "| `bench/results/2026-11-14-kill-random.json` |",
             "| `P1-03` | CBOR fuzz | 100 000 buffers | non-`CBORError` exceptions: 0 | — | "

@@ -79,7 +79,7 @@ def preallocate(path: str, size: int) -> str:
             n = min(len(chunk), size - written)
             os.write(fd, chunk[:n])
             written += n
-        os.fsync(fd)
+        _plat.fdatasync(fd)
         return "write-zeros"
     finally:
         os.close(fd)

@@ -1,188 +1,199 @@
-# STATUS — BlackBox v1.0 build
+# BlackBox build status — 2026-11-16 — trunk `d43b208` — gates: **G-Promise pass** (built and self-reviewed at `af908bc`, independently counter-signed at `fdb3875`; see `docs/gates/G-Promise.md`), G-Capture, G-Attach, G-Capsule, G-Sec, G-Release not yet opened
 
-**Branch** `arena/e10fc603-blackbox` · **base** `30c9433` · **HEAD** `f3e7765`+ (pushed after every ticket)
-**trunk: mergeable** — every C12 check passes from a clean clone and the README says what exists.
-**product: pre-alpha — storage and recovery layer only; no SDK, proxy or viewer yet.**
+**Branch** `arena/a781c68f-blackbox` · **base** `31241d6` · CI at `d43b208`: run `43706220024`, ten jobs, ten
+`success`; `705fc59` (`43705488648`) and `9fe6d72` (`43705818997`) are **red and stay red** (defect 31: seven cells
+failed on the new key code — the creator of the key file creates it before writing it, so a reader could see zero
+bytes; and two tests asserted POSIX-only facts), and `d43b208` is the fix verified on Windows, macOS and Linux.
+Before that `4f42397` (`43705007628`), `4ce0f7c` (`43704041733`), `07e5c29` (`43703761892`) and `ce1439b`
+(`43701652852`) were ten of ten, and the five before those — `47ec45a` (`43701107412`), `da6ef3e` (`43694261034`), `d901811` (`43698231222`),
+`43697929744` at `54c3aba` — ended four commits of Windows red on defect 25, with `846e01a` (`43697198262`) the
+**first all-OS green since `c7919f9`**.
+This note's own commit is docs-only and its run is pending when it is written, which is what the `STOPPED` line
+reports. The three Windows cells had been red for four commits and the
+cause was mine: the Windows teardown fixture in `tests/conftest.py` called `getattr(obj, "_head", None)` on every
+object in `gc.get_objects()`, `anthropic` keeps its optional dependencies behind a `LazyProxy` that raises
+`MissingDependencyError` when the extra is absent, and the teardown error landed on nine innocent property tests once
+`capture-sdks` put the SDK in the environment (defect 25). Found through the check-run **annotations**, not the job
+log: GitHub redirects logs to a host this sandbox cannot reach, so `tools/ci_summary.py`'s `::error::` lines are the
+only readable failure trail — they now carry 600 characters instead of 200. Before that, `d075a32` (`43695573285`)
+and `4bb722d` (`43696068136`) were 7/10 on that same Windows defect and `67b5ae5` (`43696841639`) was 7/10 on a
+fail-open test of mine whose breakage did not break on Windows (defect 26, still open). The run before this gate work
+is `43695177370` at `27b82a3`, ten of ten. Older red runs keep their numbers and their verdicts — `af908bc`
+(`43678767989`, 9/10, C40), `15cb55c` and `6d52088` (7/10, a fork-only multiprocessing test) — because a later green
+tree is not a green commit.
 
----
+**product: pre-alpha — the recorder, the tape, recovery, the launcher, the SDK lifecycle/decorator/node layer, the
+loopback mock provider and capture seams A (client hooks over `httpx` **and** `httpx2`) and B (transport byte tee)
+with the ordered preflight are real and tested, as is seam C (SDK method patches, against the real `openai` 3.51.0 and
+`anthropic` 2.8.0), the tape sink that turns seam events into `MODEL_CHUNK` frames, and the day-14 rule: an unmodified
+`openai` script killed with `SIGKILL` mid-stream is recovered with chunk and byte counts that never exceed what the
+provider pushed. The proxy, the launcher integration, the viewer and the diagnosis workflow are not built yet.**
+Suite: **Total: 649 tests** — 648 pass here and 1 is skipped on POSIX by name
+(`test_an_open_view_blocks_the_unlink_only_on_windows`: POSIX permits unlinking a file another fd still holds, so
+the open-view case exists only on Windows). ruff 0.17.5 and mypy 2.4.1 (`strict = true`, nothing disabled):
+0 findings.
 
-## 0. No mapping anywhere: ADR-005 plus C21
+## Fulfilled (test exists, ran, passed / number measured)
 
-**ADR-005** removed the segment mapping; **C21** removed the last one, the `head`. `HeadFile.publish` writes the
-64 B slot with one `pwrite` at the alternate offset, readers `pread`, and `import mmap` no longer appears in
-`src/`. The head had been created sparse (`ftruncate`) and then mapped, so the first publish on a full
-filesystem would have had to allocate a block, failed, and killed the user's process with `SIGBUS` — the exact
-class S17 and P1-20 exist to remove, sitting under every publish. `half_hook` now splits body and CRC into two
-writes, which is how S4 reproduces a *machine-level* tear (a process kill cannot tear a 64 B `pwrite`).
-
-`mode=process` therefore costs **two syscalls per batch** — segment data and head slot — and nothing else;
-`tests/test_no_syscall.py` asserts exactly that over 100 000 appends. Consumers of positional I/O go through
-`platform.pwrite`/`platform.pread`: POSIX and macOS delegate to the `os` calls, Windows does `lseek` + `write`/
-`read` with the reason stated in its docstring. DV-010 records it.
-
-### The store decision behind it: ADR-005 supersedes ADR-001
-
-`P1-19` was decided under the plan's own rule (§8.2 / D13: if a plain `write()`-append writer is within 20 % of
-the mmap writer at the target rates, the simpler store wins). Measured with 10 interleaved pairs per rate on
-ext4: **median p50 ratio 1.059 at 10 k ev/s and 1.065 at 40 k ev/s**, `write` p99 **71.9 / 68.4 µs**, one
-`pwrite` per ~52 events. Both decision rates are inside the rule, so **the active segment is written with
-`pwrite`, not mapped**. Per event it is ~6 % *slower*, and ADR-005 says so instead of pretending otherwise; what
-it removes is a hazard the recorder cannot refuse (a page fault on a segment whose blocks are gone kills the
-process; `pwrite` returns `ENOSPC` and the writer degrades), plus `FlushViewOfFile` and the
-mapped-file-cannot-be-deleted problem. Every number below was re-measured on the new store.
-
-## 1. What is actually green (each row: a test that ran here)
-
-| Area | Evidence | Result |
+| Gate or budget row | Plan ref | Evidence (test path, results JSON, or CI run URL) |
 |---|---|---|
-| Canonical CBOR | `tests/test_codec.py` | 42 tests green |
-| CBOR decoder hardening (P1-03) | `bench/fuzz_cbor.py` → `-fuzz-cbor.json` | 100 000 buffers, **0 non-`CBORError`** |
-| Frame encode/decode, CRC scope | `tests/test_frame.py`, `tests/test_conformance.py` | green |
-| Checksum (one algorithm, C4) | `tests/conformance/vectors/crc32.json` | check value `0xCBF43926` |
-| Head, two-slot publish, rebuild | `tests/test_head_creation.py` | green |
-| Segmentation, roll, adoption (S15) | `tests/test_adoption.py` (7), `tests/test_tape.py` | adoption idempotent in writer **and** `rec/discover.py` |
-| Crash points S1–S5, S14, S15 | `tests/test_crash_points.py` | green **on the new store** |
-| Crash states read back | `tests/test_scan_states.py` (seeds 388/209/396) | green |
-| Randomized parent-`SIGKILL` (P2-09, C19) | `-kill-random.json`: **500 effective trials ext4 + 500 tmpfs** | **0 violations, 0 `not_started`** — the timer starts at the child's `READY`; cells include a 20 ev/s window cell and a `kernel` cell |
-| ENOSPC (S17) | `tests/test_enospc.py`, `tests/test_prealloc.py` | both segments **and the first one**: exit 0, identical stdout, `DEGRADED`; no first segment ⇒ sink (`recording=False`), never an exception |
-| Group-commit window + keeper | `tests/test_keeper.py` (6) | window ≤ 5 ms at 1 / 1 000 / unbounded ev/s |
-| Syscalls on the append path (C11) | `tests/test_no_syscall.py` | 100 000 appends ⇒ **exactly two `pwrite`s per batch** (segment data + 64 B head slot), nothing else |
-| Seal footer + chain link | `tests/test_tape.py` | green |
-| Platform shims (P2-03/P2-04, C20) | `tests/test_platform_shims.py` (21) | contract green on Linux; Windows start-time path exercised through a fake `kernel32`; `is_current` is computed, so exactly one shim claims the machine |
-| Retention + declared holes (`P1-09b`) | `tests/test_retention.py` (13), `tests/property/test_retention_random.py` (9) | **8 seeds × 60 randomized steps: 133 kills, 65 retention passes, 34 segments pruned, 0 violations of I1 or I9** (`bench/results/p1-09b-retention.json`) |
-| Chain walk across a hole (`P1-09b`, I9) | `tape.scanner.verify_chain` | per-segment `prev_chain` links + every `CHAIN` frame's `prev`; every declared hole's `prev` must be a value on that walk |
-| Blob store write/read (`P1-14`) | `tests/test_blobs.py` | hash → tmp → fsync → replace; **a kill at `S9` leaves a tmp file and no visible blob**, `S9b` leaves a complete one; every read re-verifies CRC and hash and refuses a blob stored under another name (`BBX-E162`) |
-| Blob compression queue (`P1-15`) | `tests/test_blobs.py`, `tape/keeper.py` | keeper-driven, 1 job per tick in the test; the rename is observed with the old file still raw and the new one whole; `ChunkCoalescer` turns 2 000 chunks into 3 blobs |
-| Recovery state machine (`P2-06`) | `tests/test_recovery.py` | 8 steps × 3 kill modes (before/mid/after) all resume to the **identical capsule root**; each step writes `recovery.done.<STEP>` with input/output hashes; an archived run is a no-op |
-| Interrupted nodes (`P2-07`) | `tests/test_recovery.py` | the five §14.4 strings exactly; mid-stream carries `chunks`, `partial_stream_bytes`, `last_chunk_age_ms`; `TOOL_REQUEST` without result says the side effect may have happened |
-| Capsule v0 (`P2-10`) | `tests/test_capsule.py` (9) | raw frames + `chain.json` + manifest + `INTEGRITY.sha256`; `.partial` → `os.replace`; re-seal is byte-identical, one changed byte breaks the root, traversal/duplicate/newer-manifest rejected |
-| Recovery idempotence (`P2-12`) | `tests/test_recovery.py` | 10 recoveries ⇒ 1 capsule hash, 1 `.bbx`; a second recoverer process gets `BBX-E210`, and a dead holder's lock is taken over |
-| Lint + types (C6) | `make fmt` (ruff 0.17.5, mypy 2.4.1) | **0 findings** both |
-| Forbidden words (C12) | `tests/test_forbidden_words.py` | green over the tree **and** `git log` |
+| Canonical CBOR; decoder hardening | §8.4, P1-03 | `tests/test_codec.py`, `bench/fuzz_cbor.py` → `bench/results/2026-11-14-fuzz-cbor.json`: 100 000 buffers, 0 non-`CBORError` |
+| One checksum (CRC-32/ISO-HDLC), conformance vectors | §8.3, DV-005 | `tests/test_conformance.py`, `tests/conformance/vectors/crc32.json` check value `0xCBF43926` |
+| Frame layout, CRC scope, head two-slot publish + rebuild | §8.3, §8.5 | `tests/test_frame.py`, `tests/test_head_creation.py` |
+| Segments, roll, adoption (S15) | §8.7, P1-12 | `tests/test_tape.py`, `tests/test_adoption.py`: adoption idempotent in the writer and in `rec/discover.py` |
+| Crash stages S1–S5, S14, S15 green on the new store | §16.2 | `tests/test_crash_points.py`, `tests/test_scan_states.py` (seeds 388/209/396) |
+| S17 ENOSPC, first segment included | §16.2, P1-20 | `tests/test_enospc.py`, `tests/test_prealloc.py`: exit 0, identical stdout, `DEGRADED`; no first segment ⇒ sink, never an exception |
+| Randomized parent-`SIGKILL`, P2-09 | §14, C19 | `tests/kill/kill_matrix.py --trials 500` in a fresh clone of `af908bc`: **500/500 effective trials, 0 violations, 0 `not_started`**, 10 cells × 50 (includes a 20 ev/s window cell and a `kernel` cell) |
+| Append-path syscalls, C11 | §8.6 | `tests/test_no_syscall.py`: 100 000 appends ⇒ exactly two `pwrite`s per batch (data + 64 B head slot) and nothing else |
+| Group-commit window ≤ 5 ms; keeper | §8.6, P1-08 | `tests/test_keeper.py`: window measured at 1 ev/s, 1 000 ev/s and unbounded |
+| Launcher `blackbox run -- cmd`, stall dump (P2-11, P2-13) | §10.3, F13 | `tests/test_launcher.py`; fresh clone: `run r_40ead954098fb5df · exit 137 · signal 9 · recovered c_40b2ebb29e649534.bbx (SEAL_INTERRUPTED, root 14f1737e50b6)`; a real deadlock yields `stall.json` + both thread stacks in `stall_tb.txt` |
+| Capsule v0 root verifies; P2-12 idempotence | §12, P2-10 | `tests/test_capsule.py`, `tests/test_recovery.py`: 10 recoveries ⇒ 1 capsule hash, 1 `.bbx`; second recoverer `BBX-E210`; dead holder's lock taken over |
+| Recovery state machine (P2-06) and node classification (P2-07) | §14.4 | `tests/test_recovery.py`: 8 steps × 3 kill modes all resume to the identical capsule root; the five interrupted-node strings exactly |
+| Retention + declared holes (P1-09b) | §9.5, D-016/17/18 | `tests/test_retention.py`, `tests/property/test_retention_random.py`: 8 seeds × 60 steps per run, 320 recorded runs in `bench/results/p1-09b-retention.json` (`totals`: 19 200 steps, 5 400 kills, 0 violations of I1/I9); the file is written only with `BLACKBOX_RECORD_RESULTS=1` |
+| Seal footer, verifier, compaction into `arch/` (P1-13) | §8.7, F4 | `tests/test_tape.py`, `tests/test_compact.py`: re-seal byte-identical; archived segment reads back frame-identical; second compaction a no-op |
+| Blob store (P1-14), compression on the keeper (P1-15) | §9.9, §7.1 | `tests/test_blobs.py`: hash → tmp → write → replace, every read re-verifies CRC and hash, `BBX-E162` on a renamed blob, `ChunkCoalescer` 2 000 chunks → 3 blobs |
+| Blob durability per mode, **D-019**: the calling thread never syncs a blob | §7.1, C32 | `tests/test_blob_durability.py`, `tests/test_no_syscall.py`: `process` records no sync at all; `kernel` syncs blob + directory in the keeper tick **before** the tape sync; `paranoid` before the frame is appended; 64 KiB event = open/write/close/replace + 2 `pwrite`s + **0** syncs |
+| Platform shims, P2-03/P2-04 | §7 | `tests/test_platform_shims.py`, `tests/test_platform_dispatch.py`: `is_current` computed (no `tested_here` constant); no shim imported by name outside `platform/`; Windows `OpenProcess`+`GetProcessTimes`, macOS `sysctl` + `F_FULLFSYNC` exercised on the real cells — run `43678447134` |
+| no mapping anywhere (`import mmap` gone from `src/`) | ADR-005, DV-010 | `tests/test_no_mapping.py`: no module in `src/` imports `mmap` and no `mmap.*` attribute is referenced; the head is published with one `pwrite` per batch |
+| Budget: 1 KiB `content=hash` p50/p99, throughput | §15.1 | p50 11.057 · p99 51.662 µs · 73 338 ev/s — `bench/results/2026-11-14-writer-throughput.json` |
+| Budget: recovery ≤ 120 ms / 10 k frames | §15.1 | 106.1 ms/10 k, n 30 — `bench/results/2026-11-15-recovery.json` |
+| Budget: disk amplification ≤ 1.25× (2× hard fail) | §15.1 | 16 KiB group commit 1.231× (3 150 352 / 2 560 000) — `bench/results/2026-11-15-recovery.json` |
+| Budget: Disabled overhead per decorated call | §15.1 | **p50 0.12 µs · p99 0.16 µs** against a ≤ 1 / ≤ 3 µs target, hard fail 5 µs — `bench/results/2026-11-15-capture-overhead.json` `results.ext4.disabled.overhead_us` (n=5 000, measured against the same function undecorated in the same process) |
+| Budget: `content=off` event enqueue | §15.1 | **p50 1.42 µs · p99 2.09 µs** against ≤ 8 / ≤ 40 µs, hard fail 100 µs — `bench/results/2026-11-15-capture-overhead.json` `results.ext4.enqueue_off.us` (n=5 000, 1 KiB reads, in-memory emitter so the number is the recorder's own work) |
+| Budget: `content=hash`, 1 KiB payload (redact + digest + frame) | §15.1 | **p50 10.95 µs · p99 31.79 µs** against ≤ 25 / ≤ 250 µs, hard fail 1 ms — `bench/results/2026-11-15-capture-overhead.json` `results.ext4.enqueue_hash.us`. The **worst case is published too**: a 1 KiB body containing the word `token` costs p50 138.7 µs (p99 242.3, max 1 092) because that is the literal the `assignment` pattern hunts, and it is still under the hard fail. `enqueue_hash_keyword` |
+| Budget: provider call latency Δ p95 (700 ms streamed call) | §15.1 | **−1.02 %** on 20 recorded against 20 bare calls of a 14 × 50 ms stream (p95 691.8 ms recorded vs 698.9 ms bare) against a ≤ 3 % target and 10 % hard fail — `bench/results/2026-11-15-capture-overhead.json` `results.ext4.provider_latency`. A negative delta is noise, not a speed-up: n=20 per side and the p95 of a 700 ms call is dominated by the mock provider's 14 sleeps |
+| Budget: startup `install()` | §15.1 | **p50 2.90 ms · p99 3.89 ms** against ≤ 25 ms, hard fail 150 ms — `bench/results/2026-11-15-capture-overhead.json` `results.ext4.startup.ms` (n=20, from nothing: open the tape, write `RUN_START`, start the keeper) |
+| **The content mode is honoured, and it is what the configuration says** | D-030, Appendix A, defect 30, §15.1 | `src/blackbox/cap_sdk/sink.py`, `tests/test_content_modes.py` (9): the default is the plan's `hash` and not whatever was convenient; `full` keeps the body byte-for-byte, `hash` keeps `[bbx-hash sha256=… bytes=N]` and the digest of each group recomputes from the body, `off` keeps the count alone and no byte of the text; the request and summary frames declare the mode; a secret in the body does not reach a `hash` tape; and `recovery` reports the same partial byte total from the frames in all three modes, which is what lets a `kill -9` still answer "how much arrived" |
+| Budget: RSS ≤ 24 MiB above baseline | §15.1 | 1.56 MiB at 28.13 % of a segment — `bench/results/2026-11-15-recovery.json` |
+| Budget: 64 KiB `content=full` incl. blob write (C32) | §15.1 | p50 226.864 · p99 461.281 µs · 4 356.4 ev/s — `bench/results/2026-11-15-payload-blob.json` |
+| Group-commit window, per OS (C40) | §8.6, C3 | `tests/test_keeper.py::test_low_rate_event_is_published_within_the_window` starts its own window and `test_a_window_older_than_the_bound_publishes_inline` states the expired-window rule; the ≤ 5 ms row is measured on ext4/Linux only and the Windows bound (one 15.6 ms timer tick for a keeper-only drain, inline publish for arriving events) is stated in `docs/compatibility.md` and marked `not measured` |
+| **P3-02/P3-03/P3-04** decorators, node stack, context managers | §10.2, P3-02–04 | `src/blackbox/api.py`, `src/blackbox/rec/context.py`, `tests/test_api_decorators.py` (6), `tests/test_context_nodes.py` (7): one `NODE_OPEN`/`NODE_CLOSE` pair per call for all five decorator kinds; signature, `__name__` and `__doc__` survive; an exception closes the node with its type and is re-raised; a **disabled** decorated call costs under 1 µs of median overhead; async keeps its node across awaits; 50 nested steps stay balanced with each level's parent the level above; `mark` lands in the node it was called inside; `handled_error` records a handled exception where it was handled; a plain thread gets a `detached:` root (marked `detached: True`) instead of an orphan; a forked child writes to its own tape |
+| **P3-01** SDK lifecycle: `install`/`uninstall`/`shutdown` | §10.2, P3-01 | `src/blackbox/api.py`, `tests/test_api_lifecycle.py` (6): double install ⇒ one writer UUID and one `RUN_START`; 16 threads install at once ⇒ one writer and `refs` 16; `uninstall()` during an in-flight append leaves the tape open and the frame lands; `BLACKBOX_DISABLED=1` creates no tape and `emit()` returns 0; an unwritable data dir leaves the app running with the reason recorded; `shutdown()` is idempotent and install works after it |
+| **P3-13MP** loopback mock provider | §18.5 (G-Capture needs it), D-021 | `src/blackbox/cap_sdk/mock_provider.py`, `tests/test_mock_provider.py` (9): OpenAI and Anthropic SSE dialects over a real socket, driven with stdlib `http.client` so the test cannot be coupled to the library under test; knobs for chunk count, inter-chunk delay, first-byte delay, truncation, mid-stream error, non-200 status and payload size; the request log proves what arrived; the source is asserted to contain no wildcard bind and to bind an ephemeral loopback port |
+| **P3-05a** seam A, httpx response hooks | §18.5, D-022 | `src/blackbox/cap_sdk/seam_httpx_hooks.py` + `tee.py`, `tests/test_seam_hooks.py` (7): the hook wraps the still-unread stream, so every chunk is recorded — the recorder's count equals the number of chunks the application observed in the same run, and the body is sha256-identical with and without the seam; a request hook stamps the clock before the request goes out so `first_byte_ms`/`total_ms` are end-to-end; a response whose body is already gone is recorded `partial=True` with no byte count; a recorder that raises never reaches the application (fail-open); `uninstall` restores both client classes and is idempotent; the caller's own event hooks still run |
+| **P3-05a/05b async** — the path that was implemented and unexercised | §18.5, defect 20 | `tests/test_seam_async.py` (4), `src/blackbox/cap_sdk/tee.py`: `wrap_stream` picks the tee from the stream (`__aiter__` ⇒ `AsyncTeeStream`), so an async response is recorded chunk-by-chunk instead of being handed a sync wrapper that fails the moment it is iterated; both seams are tested through `AsyncClient` for chunk count, byte total and sha256 equality against an unseamed client |
+| **P3-05b** seam B, transport byte tee | §18.5 | `src/blackbox/cap_sdk/seam_httpx_transport.py`, `tests/test_seam_transport.py` (9): the tee is compared against an unmodified client by sha256, the recorded chunk count against what the application actually read, a truncated stream is recorded short instead of completed, an error mid-stream is recorded and re-raised, an abandoned stream is closed with the bytes that arrived, and both `client=` (instance) and class-patch installs restore exactly what they patched |
+| **P3-05d** ordered preflight A→B, `capture_seam` | §18.5 | `src/blackbox/cap_sdk/preflight.py`, `tests/test_preflight.py` (8), `SUPPORTED.md`: forcing A picks B and records why, forcing both leaves the recorder installed-but-not-capturing with two reasons and no exception, an absent library is `unavailable` rather than `forced-failed`, an `install` that raises does not escape, a client handed to the preflight is wrapped rather than having its class patched. `capture_seam` is written into the decision (`as_dict()`) and tested; writing it into a `run.json` waits for the sink (P3-06) and is labelled pending in `SUPPORTED.md` |
+| **P3-05c** seam C, SDK method patches | §18.5, D-023 | `src/blackbox/cap_sdk/seam_sdk_methods.py`, `tests/test_seam_sdk_methods.py` (10) against **real** `openai` 3.51.0 and `anthropic` 2.8.0 pointed at the mock provider: `chat.completions.create` (streaming and not), `embeddings.create`, `messages.create`, sync and async; the SDK signature survives the patch (`inspect.signature` compared); an unrecognised SDK shape is skipped and listed, never guessed; a 429 is recorded as an error and re-raised. Every record is `partial=True` with `bytes_received = 0` because a parsed event is not a wire byte (D-023) |
+| **P3-06** the sink: seam events become frames | §18.5, D-024 | `src/blackbox/cap_sdk/sink.py`, `tests/test_sink.py` (8): 2 000 chunks become **8 chunk frames** (bound 40) with the payloads concatenating back to the identical body; the time bound flushes at 100 ms without waiting for 8 KiB; `MODEL_REQUEST` before every chunk and `MODEL_RESPONSE`/`MODEL_ERROR` after the last; frames land on a real tape and the same `scanner` a recovery uses reads them back with a sha256 match against the body; an unfinished call is left as chunks with no response, which is the shape `recovery` classifies as `INTERRUPTED_MID_STREAM`; a sink that raises is counted and never reaches the application |
+| **P3-11** redaction before persistence (the corpus, the modes, the default policy) | §12.2, P3-11, D-029, DV-013 | `src/blackbox/redact.py`, `tests/_secrets.py` + `tests/test_redaction.py` (139): 60 synthetic secrets of 10 kinds, each caught alone and then **at every split offset of every one of the 60** (the network chooses where a read ends, and a secret cut in half is exactly what a per-chunk regex cannot see), plus 20 random chunkings of the whole corpus in one stream, one byte at a time, and binary payloads around a secret; ordinary SSE JSON comes out byte-for-byte identical; `off` is proved off rather than quietly redacting; `hash` is a stable pseudonym; the buffer is bounded and empty after `flush()`; and the end-to-end test pushes the corpus through a real seam, a real sink and a real tape, then greps the tape and the `MODEL_RESPONSE` frame. **Not built, and named here rather than implied:** the keyed HMAC of §12.2/D8 (DV-013), mask offsets, and the `pure/patterns.py` split — P3-11 stays `wip` |
+| **P3-11d** the keyed pseudonym: HMAC under a per-machine key | DV-013 → DV-014, D-031, §12.2 stage 7, D8 | `src/blackbox/keys.py`, `src/blackbox/patterns.py`, `tests/test_redaction_key.py` (11): the key is created once at `0600` in a `0700` directory and reused; **four processes starting at once agree on one key** (`O_EXCL` plus a read-back); the pseudonym equals `HMAC-SHA256(key, secret)[:8]` and provably not the bare digest; the same key correlates across processes and a different key does not; a capsule records `key_id` and contains neither the key nor its hex; an unusable key path falls back to the unkeyed digest **and records `keyed: false`** rather than implying a key it never used; `full` and `off` create no key file at all. The pattern tables now live in `src/blackbox/patterns.py`, so the rules can be reviewed without the state machine. **Still absent**: mask offsets (DV-014) |
+| **Redaction is a default, holds only what is unfinished, and fails closed** | D-029, P3-11, C4 | `src/blackbox/cap_sdk/sink.py`, `tests/test_redaction.py`: `TapeSink(emit)` with no argument redacts (`Redactor.from_config()`, `BLACKBOX_REDACTION`, default `full`, a misspelt mode falling back to `full`); a chunk is held only while it is unfinished, so **an ordinary SSE line is released on the read that brought it** and the day-14 `SIGKILL` test — which the first, fixed-tail design broke by recovering no chunks at all — passes again (defect 29); a redactor that raises writes `[REDACTION_FAILED]`, keeps the call's place in the stream and counts `redaction.failures` instead of dropping bytes silently; and the summary reports `chunks_raw` (reads) apart from `chunks_stored`/`bytes_stored` (what the tape got), which is the first half of the directive's P0 item 4 — counts are not a content fingerprint — done by naming both numbers and their difference |
+| **The zero-code-change row, both SDKs** (G-Capture §15.1) | §4, G-Capture, P3-11b | `tests/_day14_child.py` + `tests/_day14_child_anthropic.py` driven by `tests/test_day14_kill.py` (6): the same experiment run against **`openai` 3.51.0 and `anthropic` 2.8.0** — an unmodified SDK script, killed with `SIGKILL` mid-stream, recovered as `INTERRUPTED_MID_STREAM` with chunk and byte counts that never exceed the mock provider's own tally; the anthropic control records the whole stream as `MODEL_RESPONSE` with `path` `/v1/messages` and bytes equal to the concatenated chunk payloads; and the two SDKs are shown to take **the same seam** in the same run, which is what makes "zero code changes" one claim rather than two |
+| **Day-14 rule** (the gate's core mechanism; **G-Capture itself is still open**) | §4, G-Capture, D-025 | `tests/_day14_child.py` + `tests/test_day14_kill.py` (3): an **unmodified** `openai` script (client built after install, `chat.completions.create(stream=True)` as documented) is killed with `SIGKILL` mid-stream; `recovery.recover()` then reports the node as `INTERRUPTED_MID_STREAM` with `chunks ≥ 1`, `partial_stream_bytes > 0`, and **both no larger than the mock provider's own tally of what it pushed down the socket**; the control run (no kill) records the whole stream and ends with `MODEL_RESPONSE` whose byte count equals the sum of its `MODEL_CHUNK` payloads; `capture_seam` and the coalescing parameters are readable in the request frame |
+| **Fail-open, measured as identical application behaviour** | P3-14, §4 | `tests/test_failopen.py` (8): a 100-call agent run twice — once bare, once with seam A and the sink installed — with **identical return value, identical stdout**, and when it raises at call 37, the **same exception type and message**. The recorder is then broken three real ways and the comparison repeated: an impossible configuration (`segment_bytes=1`, which `TapeWriter` refuses with `BBX-E130` on **every** OS: `install()` returns `enabled: False` and that error as its reason, asserted, so the test cannot pass against a recorder that was never broken), a data directory that is a file (POSIX, because Windows let the writer open anyway — defect 26), a keeper that raises on every publish, and a tape truncated by 512 bytes the way a previous `kill -9` leaves one |
+| **The Windows teardown fixture touches nothing it did not identify** | defect 25 | `tests/_hygiene.py` + `tests/test_gc_hygiene.py` (3): the fixture finds a leaked writer by **exact type**, proved against an object that raises on any attribute access and a subclass that must not be mistaken for its parent; the SDK's real `LazyProxy` is instantiated to show the shape still raises. This is why three Windows cells were red from `c7919f9`: the old fixture called `getattr(obj, "_head")` on every live object, `anthropic` keeps optional dependencies behind a proxy that raises on load, and the resulting `ERROR` landed on nine innocent property tests |
+| **The nightly workflow actually runs** | defect 28, P2-09 | `.github/workflows/nightly.yml`: both steps named files that do not exist, so the only scheduled run this repository has had failed with exit 2 (`kill-matrix`) and exit 4 (`cbor-fuzz`). Now `tests/kill/kill_matrix.py --trials 2000 --json …` and `bench/fuzz_cbor.py --iterations 100000 --out …`, each smoke-run here before the workflow was touched |
+| **Both client modules, both directions, and cancellation** | P0 §"verify, do not infer" | `tests/test_capture_modules.py` (11): the same five claims run against **`httpx` 0.28.1 and `httpx2` 2.16.0** directly (not through an SDK): a stream is byte-identical to an unseamed client with `call.chunks` equal to the reads the application actually made, a plain POST is one call and one chunk with `stream is False`, a truncated stream is recorded short and never completed, an async stream is identical with every read counted, and a **cancelled** task keeps `CancelledError` while the call is left `partial=True` with the chunks that arrived. The chunk expectations are the *observed* read count, never a fixed number — a six-chunk stream can arrive as four reads on a slow runner, and asserting otherwise is a flake (C40) |
+| **A stream closed early is marked `partial`** | D-023 applied end to end | `tests/test_capture_modules.py::test_cancellation_mid_stream_stays_cancelled_and_leaves_the_call_open` (both modules), `src/blackbox/cap_sdk/tee.py`: `break`, timeout or cancellation closes the tee, which sets `call.partial = True` and records the status that actually arrived; a completed iteration records the same call without the marker. The mock provider now labels a non-streaming answer `application/json` and a stream `text/event-stream`, so `call.stream` is decided from the header the provider really sent rather than from a fixture that said SSE to everything |
+| **Capture scope: an explicit allowlist, with skips counted** | D-026, P0 §"immediate" | `src/blackbox/cap_sdk/scope.py`, `tests/test_capture_scope.py` (12): the default scope is `api.openai.com`, `api.anthropic.com` and loopback — nothing else; `capture_hosts=` / `BLACKBOX_CAPTURE_HOSTS` extend it, `"*"` is the only way to capture everything and it says so in `source`; ports and schemes are ignored, `*.example.com` matches subdomains and **not** the bare domain. Seam A and seam B both consult it and return before opening a call, so nothing half-written is left on the tape; the skip is counted in `detail["scope"]["stats"]["out_of_scope"]`, because an absence is not evidence. Proved in both directions: an out-of-scope loopback request yields **zero** calls and byte-identical output, and an unreachable unrelated host fails with the *same* exception type as it does unseamed |
+| **A data directory that is a file is refused by name, on every OS** | defect 26, closed | `src/blackbox/api.py`, `tests/test_failopen.py::test_a_data_directory_that_is_a_file_is_refused_on_every_os`: `install()` now rejects an existing non-directory before any directory is touched (`NotADirectoryError`, "exists and is not a directory") instead of relying on `os.makedirs` to refuse — which on Windows it did not, and the writer opened against a tape directory that cannot exist. The test asserts the reason string, so a platform that starts tolerating the case cannot pass silently. **Windows evidence is the CI cell, not an observation made here** |
+| **Fail-open is per callback, not per seam** (the reviewer's P0 at `ee210ae`) | P0 §"immediate", D-027, defect 27 | `src/blackbox/cap_sdk/failopen.py`, `tests/test_capture_failopen.py` (18): `open_call`, `receive` and `close_call` each raising, on seam A and seam B, sync **and** async — the application gets every byte, the same body and no exception, and the failure is counted. Reproduced first in a clean worktree at `ee210ae` (the reviewer's script printed `ESCAPED RuntimeError: recorder blew up on a chunk`); after the fix the same script prints `SURVIVED bytes=849`. Also asserted: `CancelledError` is not swallowed, a provider 429 arrives as 429 with the library's own error, the failure sample is bounded at 64, and no exception *message* is ever recorded |
+| Capture layer's network exception | P0-08, P0-13, D-020 | `tests/_capture_policy.py` + `tests/test_stdlib_only.py`, `tests/test_no_egress.py`, `tests/test_codec.py`: four named files are exempt and nothing outside `cap_sdk/` can be; `httpx` is allowed only **inside a function body**, so `import blackbox` works with httpx absent; the mock provider may bind loopback only and the wildcard-bind source check runs; `httpx==0.28.1` lives in its own `capture` extra, `[project].dependencies` is still empty |
+| Lint, types, forbidden words, egress, stdlib-only | C6, C12, P0-14 | `make fmt` 0 findings, `mypy` strict 0 findings, `tests/test_forbidden_words.py`, `tests/test_no_egress.py`, `tests/test_stdlib_only.py` |
+| CI on three OSes × three Pythons + docs | C7 | run `43697198262` at `846e01a` — ten jobs, ten `success`, Windows included; `docs/compatibility.md` holds the per-cell verdicts and every historical red run |
 
-Total: **281 tests** — 280 pass here and 1 is skipped on POSIX by name (`test_an_open_view_blocks_the_unlink_only_on_windows`: POSIX permits unlinking a file another fd still holds, so the open-view case only exists on Windows). ruff and mypy: 0 findings.
+## Labelled
 
-## 2. §15.1 rows — ext4 is the gate column (C1); every row carries its verdict
-
-Gate: **p50 ≤ 25 µs, p99 ≤ 250 µs, ≥ 40 000 ev/s** for one full event with `content=hash`, CHAIN included.
-
-| Row | ext4 (gate) | tmpfs (label only) | Verdict | Source |
-|---|---|---|---|---|
-| **full event, group commit 16 KiB, CHAIN on** | **p50 11.057 · p90 18.322 · p95 20.53 · p99 51.662 µs · mean 13.396 · max 244.472 · 73,338 ev/s** (N 200,000, warm-up 20,000, 2.727 s) | p50 11.148 · p99 54.215 · 74,334 ev/s | **PASS** | `-writer-throughput.json` |
-| same, keeper thread publishing | p50 11.044 · p99 54.527 · 73,471 ev/s | — | **PASS** | same |
-| kernel mode (`sync_ms=250`, `1 MiB`) | p50 11.278 · p99 89.903 · 60,368 ev/s · sync stall max 2866 µs over 28 syncs | p50 10.953 | reported, not gated | same |
-| kernel mode, sync-dense (64 KiB) | p50 11.387 · p99 81.232 · stall max 11875 µs over 453 syncs | — | reported, not gated | same |
-| group-commit window | 4.603 ms @ 1 ev/s · 4.999 ms @ 1 000 ev/s · 3.572 ms unbounded (120.99 ev/commit) | 0.0 / 5.0 / 1.65 ms | bound 5 ms: **PASS** | same |
-| recovery, 10 k frames | p50 117.09 ms (**53.9 ms/10k**) | p50 106.03 ms | no §15.1 row for scan time | `-recovery.json` |
-| disk amplification | 1.843× per-event · 1.231× 16 KiB | identical | ≤ 1.25×: **PASS** | same |
-| RSS above baseline | **1.15 MiB** (anon +1.02, file +0.12) at `head_off` 4,723,072 (28.13 % of the segment) | 1.15 MiB | under 24 MiB: **PASS**, no `P1-08b` | same |
-| mmap vs `pwrite` (P1-19 / ADR-005) | median p50 ratio 1.028 [0.906, 1.176] · **1.059** · **1.065** at 1 k / 10 k / 40 k | 1.076 / 1.064 | **adopt `pwrite`** (inside 20 % at both decision rates) | `-writer-ab.json` |
-
-**C16 — why the stage table never added up to the event p50, and the distribution that replaces the guess:**
-two mistakes, both now fixed. (a) The stage table's `cbor_encode_event` encodes a record with the **1 KiB body
-inline** (9.144 µs) while the throughput bench writes `content=hash`, i.e. only the
-hash plus the small envelope (7.953 µs) — a new row measures that record and
-its frame encode (2.535 µs), and the JSON carries the explanation.
-(b) Far more of the gap: the bench's clock started **after** `cbor.encode(...)`, so the gate number was missing
-its own encode. The clock now starts at the Python `dict`, as C2 defines the interval; the row above is that
-number, and it is ~2× the old one. Now the parts roughly account for the whole: hash-record encode
-7.953 + frame encode 2.535 + batch
-`pwrite` 1.302 µs *per batch* + head publish 1.237 µs
-*per batch*, amortised over 110.0 events per publish.
-**Where the tail lives:** mean 13.396 vs p50 11.057 µs, p99 51.662, p99.9
-116.94, max 244.472 µs. The 99th percentile is the **batch boundary** — one event in
-110.0 pays the 16 KiB `pwrite` + CHAIN + head publish (~5 µs, i.e. ~0.045 µs amortised
-across every event but a 5 µs spike on the one that pays it) — plus GC of the encoded payload. The 300 µs max is
-the scheduler, not the writer: with `_fs` on ext4 under a shared sandbox, one page-cache writeback can preempt.
-**Threads:** the app thread appends *and* publishes (the timed region is its own call, CBOR encode included); when
-the keeper is on it publishes from its own thread, and both share **one GIL**. The `keeper` row above is the same
-work with that second publisher present and costs 0.052 µs at p50.
-
-## 3. The Stage 2 CHANGE items and the corrections C1–C24
-
-The nine CHANGE items are answered in §3a of the previous revision of this file and still hold, except that item
-8's "interleaved P1-19" is now the full C17 protocol (10 pairs, order alternating, both arms fair) — see §0.
-Each correction is answered where a reviewer will look:
-
-| # | Asked | State |
+| Item | Label (requires humans / requires time / not testable here / blocked) | Reason / fix attempts |
 |---|---|---|
-| C15 | trunk vs product are different properties | **done** — the two header lines at the top |
-| C16 | reconcile the stage table with the event p50; full distribution; name the tail and the threads | **done** — §2 (the encode was outside the clock; it is inside now) |
-| C17 | one final A/B by the plan's rule, then closed | **done** — ADR-005, `pwrite` adopted, every gate re-run on the new store |
-| C18 | show the RSS procedure | **done** — §2 + `-recovery.json`: `head_off`, bytes written, `VmRSS`/`RssAnon`/`RssFile`/`RssShmem` before and after, cgroup limit, and a second run at 39 % of a segment showing the delta is Python heap, not segment fill |
-| C19 | 500 *effective* trials; low-rate and kernel cells | **done** — readiness pipe, 0 `not_started`, 20 ev/s window cell, `kernel` cell, 50 trials per cell |
-| C20 | P2-03 `OpenProcess`+`GetProcessTimes`; P2-04 `F_FULLFSYNC`; P1-09b is mine to decide; F13 is P2-11; `P1-02b` before G-Promise; ship `tools/s17_control.sh`; keeper maxima stay; name the stall thread; report CI | **done except P1-02b** — both are queued below; the stall is measured in the app thread's own `emit` (the sync happens inside `publish`, which the app thread calls; the keeper's own publishes are not charged to an event) |
-| C7 | CI must actually run | **it ran: ubuntu and docs green, macOS and Windows red** — see §6 |
-| C21 | no mapping anywhere in `src/`; head written by `pwrite`, S4 as a torn-slot hook, two `pwrite`s per batch | **done** — §0, DV-010, `HeadFile`, `test_no_syscall` |
-| C22 | diagnose the red cells from the tree; `is_current`; `pwrite`/`pread` in every shim; `F_FULLFSYNC` claims derived from code | **done in code**; the cells are still red and the remaining cause is not readable from here |
-| C23 | compatibility evidence in a document fed by CI | **done** — `docs/compatibility.md`, per cell, with the run URL |
-| C24 | print STATUS verbatim with the numbers | **this file** |
-| C29 | `O_BINARY` on every descriptor; guard; byte-exact regression test | **done** — DV-012, `platform.open_fd`, `test_positional_io_is_byte_exact_for_all_256_values` |
-| C30 | `test_sparse_detection` is false on NTFS, not unmeasurable | **done** — skipped with that sentence; `prealloc.is_sparse` documents the `FSCTL_SET_SPARSE` fact |
+| **Independent gate review** | G-Promise: **independent review pass (owner-relayed)**; every other ticket row: requires humans | G-Promise was counter-signed by a different model family on a different machine (fresh clone of `fdb3875`, CPython 3.13.18, ext4): 337 passed / 1 skipped, 100/100 kill trials with 0 violations, smoke 9 keys, launcher recovery, and it was that reviewer who found C40. The signature and a copy-paste reproduce block are in `docs/gates/G-Promise.md`. **Ticket rows in `docs/reviews.md` stay `self`** until a second model is wired into the loop; none of them counts as independent. |
+| P2-09 week of nightlies | requires time | **One scheduled run has ever happened**: `43675454143` on `main` at `31241d6`, 2026-11-15 04:08Z, and both jobs failed on defect 28 — the steps named `tests/kill/randomized_kills.py` and `tests/test_cbor_fuzz.py`, which do not exist (exit 2 and exit 4). Both now call the real drivers, smoke-run locally (3 trials, 500 buffers). The clock cannot start until this work is merged: `origin/main` is still at `31241d6`, the branch's base — verified with `git merge-base --is-ancestor`, not assumed from a report. |
+| 3-person stranger test | requires humans | Prepared to one command: `docs/onboarding.md` holds the setup line and three tasks; nobody outside this session has run it. |
+| Blinded diagnosis benchmark | requires humans | Prepared: `docs/benchmarks/diagnosis.md` holds the checklist and the capsule set is reproducible with `blackbox recover`. Needs a second and third person. |
+| S17 sparse-control run under `sudo` | requires humans | `tools/s17_control.sh` builds the 2 MiB tmpfs control and prints the signal; no superuser here. |
+| Windows / macOS benchmark rows | not measured | The **test** gates are green there (run `43698231222`); no §15.1 number in this repository comes from a runner, and none will. |
+| Real-provider capture (day-14 rule) | not testable here | No provider keys in the environment; the gate is the mock provider, as the plan allows. |
+| Licence decision, release tag, merge to `main` | requires humans | `release.yml` is prepared and **not** triggered; no tag, no `LICENSE`, no licence field. |
+| P10, P12 | blocked (not started by design) | P10 starts only after every v1.0 gate is green; P12 never without instruction. |
 
-## 4. Defects found and fixed (C9: seed → invariant → cause → fix → test)
+## Measurements
 
-1. **seed 352** → adoption demanded a `SEG_END` → roll can legally omit it → seal exactly `[4096, head_off)` → `test_adoption_does_not_require_a_seg_end_frame`.
-2. **seed 388** → a segment created in place left a half-written header → tmp + header + `fdatasync` + `replace` + `fsync(dir)` → `test_segment_creation_publishes_the_header_atomically`.
-3. **seeds 209/307/386** → an empty tape was called corruption → `test_scan_of_an_empty_tape_is_not_corruption`.
-4. **seed 396** → "holds frames" judged by file size → decode a frame → `test_a_preallocated_segment_without_frames_is_not_treated_as_full`.
-5. **seed 120** → kill during head creation left `segments exist, head unreadable` → atomic head creation + `repair.rebuild_head` → three tests.
-6. **bench-found** → keeper and app thread could both `roll()` → one re-entrant lock → `test_keeper_and_app_thread_never_roll_twice`.
-7. **fuzz** → `struct.error` escaped the CBOR decoder → bounds-check every field → `test_truncated_headers_raise_cbor_error_not_struct_error`.
-8. **S17** → `roll()` raised `E132` into the app → reserve before closing, degrade in place → `tests/test_enospc.py`.
-9. **seed 120/S17-at-open** → `open()` raised when the first segment could not be allocated → sink mode → `test_enospc_at_the_first_segment` (both modes).
-10. **bench-found (C16)** → the gate number excluded its own CBOR encode, and `statistics.quantiles(method="exclusive")` produced a p90 *below* the p50 → clock starts at the dict, all percentiles from one sorted array → the row itself is the regression test (`verdict` is computed from those numbers).
-11. **Windows (C29)** → every `os.open` gave a text-mode CRT descriptor, so `0x0A` expanded to `0x0D 0x0A`, `0x0D 0x0A` collapsed back, and `0x1A` ended reads → `platform.open_fd` ORs `O_BINARY`, the dispatch test forbids bare `os.open`, and `test_positional_io_is_byte_exact_for_all_256_values` writes all 256 values and demands byte identity.
-12. **bench-found (C17)** → the `write()` arm issued one `pwrite` per event and allocated a slot object per event → batch buffer + plain ints → `profile_arms()` asserts the difference stays under 200 ns/event.
-13. **`P1-09b` random retain/kill, seed 0 step 38** → seqs 1–13 vanished with no `GAP` anywhere → a later retention pass had pruned the segment that held the *first* `GAP` → tombstone segments are pinned, and a merged `GAP` replaces them in the same pass → `test_gap_chain_link_matches_the_writer_chain` (two passes), `test_i1_and_i9_hold_under_random_retain_and_kill`.
-14. **`P1-09b` control case** → a whole leading segment deleted behind retention's back was invisible: the scan simply *began* at seq 30, so no hole was reported → the hole range now starts at `min(first recovered, first declared, tail_seq + 1)` → `test_a_retention_hole_is_declared_not_silently_missing`.
-15. **`P1-09b`** → the `GAP` range stopped one seq short of the deleted segment, because `SEG_END` is a committed frame that dies with its segment → the range includes it → `test_gap_is_committed_and_published_before_the_unlink` (asserts every declared `to` is inside the committed range at unlink time).
-16. **`P1-09b`** → `codec.cbor.decode` returns `(obj, pos)`, so the scanner's new `isinstance(body, dict)` check silently rejected every `GAP` → `decode_exact` plus `ScanResult.gaps_unreadable`, so an undecodable declaration is reported rather than swallowed.
+Hardware for every ext4 row: Intel Xeon @ 2.60 GHz, 2 cores, 4 034 452 KiB RAM · Linux 6.1.158+ x86_64 (glibc
+2.36) · CPython 3.11.2 · ext4 (tmpfs is a labelled second column and is never gate evidence, D-010).
+One line per §15.1 row: fs · N · warm-up · p50 / p95 / p99 · raw JSON.
 
-## 5. F1–F13 — decided, one line each (C10)
+- 1 KiB `content=hash`, group commit 16 KiB, CHAIN on · ext4 · N 200 000 · warm-up 20 000 · p50 11.057 · p95 20.53 · p99 51.662 µs · 73 338 ev/s · `bench/results/2026-11-14-writer-throughput.json` (`results.ext4.rows[gate=true]`)
+- same row, keeper thread publishing · ext4 · N 200 000 · warm-up 20 000 · p50 11.044 · p95 20.6 · p99 54.527 µs · 73 471 ev/s · `bench/results/2026-11-14-writer-throughput.json`
+- kernel mode (`sync_ms=250`, 1 MiB) · ext4 · N 200 000 · p50 11.278 · p99 89.903 µs · 60 368 ev/s · sync stall max 2 866 µs over 28 syncs · `bench/results/2026-11-14-writer-throughput.json` (reported, not a gate row)
+- kernel mode, sync-dense (64 KiB) · ext4 · p50 11.387 · p99 81.232 µs · stall max 11 875 µs over 453 syncs · `bench/results/2026-11-14-writer-throughput.json` (reported)
+- group-commit window · ext4 (Linux only; the Windows bound is stated, not measured — `docs/compatibility.md`) · 1 ev/s 4.603 ms · 1 000 ev/s 4.999 ms · unbounded 3.572 ms (120.99 ev/commit) · `bench/results/2026-11-14-writer-throughput.json`
+- recovery, 22 312-frame tape from 10 000 events · ext4 · n 30 rounds · min 231.59 · p50 236.83 · p95 248.36 · p99 250.78 ms → **106.1 ms/10 k** (p99 = max because n < 100) · `bench/results/2026-11-15-recovery.json` (`results.ext4.recovery`)
+- disk amplification, 16 KiB group commit · ext4 · N 10 000 events, 2 560 000 payload bytes · 1.231× (3 150 352 / 2 560 000) · `bench/results/2026-11-15-recovery.json` (`results.ext4.amplification_by_batch[batch_bytes=16384]`)
+- disk amplification, publish-per-event · ext4 · 1.843× (4 718 976 / 2 560 000) · `bench/results/2026-11-15-recovery.json` (`results.ext4.amplification`) — reported, above the 1.25× row, below the 2× hard fail
+- disk amplification, 4 KiB batch · ext4 · 1.263× (3 234 416 / 2 560 000) · `bench/results/2026-11-15-recovery.json` (`amplification_by_batch[batch_bytes=4096]`) — reported
+- disk amplification, 64 KiB batch · ext4 · 1.222× (3 127 816 / 2 560 000) · `bench/results/2026-11-15-recovery.json` (`amplification_by_batch[batch_bytes=65536]`) — reported
+- RSS above baseline · ext4 · 10 000 events, `head_off` 4 723 072 (28.13 %) · anon +1.27 MiB, file +0.29 MiB → 1.56 MiB · `bench/results/2026-11-15-recovery.json` (`rss_write_only_process.ext4`)
+- 64 KiB `content=full`, keeper on · ext4 · N 20 000 · warm-up 2 000 · p50 226.864 · p95 325.83 · p99 461.281 µs · 4 356.4 ev/s · 0 tape syncs, 0 blob syncs on the calling thread · `bench/results/2026-11-15-payload-blob.json` (`results.ext4.rows[gate=true]`)
+- same row, keeper off · ext4 · p50 167.899 · p99 304.614 µs · `bench/results/2026-11-15-payload-blob.json` (reported)
+- same row, `kernel` mode · ext4 · p50 194.982 · p99 477.095 µs · 1 024 blob syncs · `bench/results/2026-11-15-payload-blob.json` (reported)
+- randomized parent-`SIGKILL` · ext4 · 500 effective trials, 10 cells × 50 · 0 violations, 0 `not_started` · fresh clone of `af908bc`, `tests/kill/kill_matrix.py`
+- tmpfs labelled column for every row above · tmpfs · recovery 79.9 ms/10 k, amplification identical · `bench/results/2026-11-15-recovery.json` (`results.tmpfs`) — never gate evidence
 
-F1 hold · F2 hold · F3 hold · **F4 apply** (DV-001, layout unchanged) · F5 hold · F6 hold · F7 hold ·
-**F8 apply** (D-003) · **F9 apply** (E225) · F10 reject · F11 hold · **F12 reject** · **F13 hold, and it belongs
-to `P2-11`** (`blackbox run`), not P5 — corrected here and in `DECISIONS.md`.
+## Deviations applied (DEVIATIONS.md) and held findings (F#)
 
-## 6. C12 checklist and C7 (CI)
+The defect list (seed → invariant → cause → fix → test) lives in `docs/defects.md` — twenty-six entries. Six are
+from this stretch of work: defects 23 and 24 (a seam that installed, reported `installed`, and captured nothing because both real SDKs speak
+`httpx2`; and a request frame that could say `model: null`), defect 25 (the Windows teardown fixture that probed
+every object in the collector and turned `anthropic`'s `LazyProxy` into nine teardown errors), defect 26 (open: on
+Windows `install()` accepted a data directory that is a file), and the two older capture-layer gaps (defect 20, the
+untested async path, still open; defect 21, a wall-clock assertion that reddened `43693106857` at `714554c`, fixed at
+`771f5ea`).
+Fourteen deviations, all dated and argued in `docs/DEVIATIONS.md`: DV-005 (one checksum, CRC-32), DV-006/007 (S17
+degrades instead of raising, including the first segment), DV-008 (P2-03/P2-04 written with an honest
+`capabilities()`), DV-009/010 (ADR-005 store change; the head is no longer mapped), DV-011 (every OS call through
+`platform.current()`), DV-012 (`O_BINARY` on every descriptor). Findings F1–F13 are decided, not pending: F4 became
+DV-001 (seal hashes over the uncompressed body), F13 lives in P2-11 (launcher stall dump), and the remainder are
+recorded in `docs/errors.md` with the defect that motivated each. No finding is "awaiting a word".
 
-| Check | State |
-|---|---|
-| `make test` from a clean clone | green, `280 passed, 1 skipped` (8.5 s) |
-| `make kill` (500 trials, ext4) | 0 violations, 0 `not_started` |
-| `make bench` into `bench/results/` | green, both columns |
-| `make fuzz` | 100 000 iterations, 0 non-`CBORError` |
-| `python -m blackbox --version` | `blackbox 0.1.0.dev0 (format v2)` |
-| `README.md` ≤ 60 lines + status line | 40 lines, status line present |
-| no `LICENSE` file or field | confirmed |
-| docs + `bench/results/*.json` committed | yes |
-| no absolute sandbox paths | grep over `bench/results/` = 0 |
-| forbidden words, tree + commit messages | green |
-| **C7 CI** | **ran; eight of nine cells green.** Run `43656191825`: **docs, ubuntu × 3 and macOS × 3 green**; **Windows × 3 red**, and now *named* — C27's follow-up turns every failure into a `::error::` annotation, so `gh run view` lists the eight failing test ids without a log or a login. Run `43657997367`: **all ten cells green** (ubuntu × 3, macOS × 3, Windows × 3, docs) after C29's `O_BINARY` fix; run `43659827155` (commit `8e2256e`) repeats it with the blob store, the retention randomizer, the 24 kill-resume trials and the capsule v0 in the tree. Earlier run `43656494686` had named **nine** Windows failures and surfaces the smoking gun: **`BBX-E224: sealed segment does not match its footer`** — a header CRC and a seal body that do not match the bytes the writer just wrote, on the path that now goes through `platform.windows.pwrite` (`lseek` + `os.write`). `docs/compatibility.md` lists the nine ids, the two candidate causes (a buffered `open("wb")` left on the header/seal path, or a caller still doing a single `os.read` and getting a short read) and the one id that is only a POSIX-only assertion (`st_blocks`). That is the next ticket. |
+## Decisions taken with plan defaults (DECISIONS.md)
 
-## 7. Not done — and why that is the honest state
+Thirty-one decisions, D-001 … D-031. The ones taken since the last checkpoint, each with the plan default and the
+reason beside it: **D-026…D-028** (capture scope is an explicit host allowlist; fail-open is per callback; a stream
+closed early is `partial` and chunk counts are only compared with the reads the application made), **D-029** (redaction
+before persistence, on by default, holding only what is unfinished), **D-030** (the content mode is honoured and its
+default is Appendix A's `hash`), **D-031** (the pseudonym is an HMAC under a per-machine key, and a missing key is
+recorded as unkeyed). The two knobs of `P1-02b` were the
+last thing switched off in `mypy`; nothing is switched off now. Format-freeze decisions carry their `DEVIATIONS.md`
+row in the same commit.
 
-| Ticket | State | Note |
-|---|---|---|
-| `P1-09b` retention + `GAP{RETENTION}` | **done** | `tape/retention.py`; F2/F3 decided as D-016/D-017, tombstone pinning/merging as D-018, `GAP` payload frozen in `format.md` §4.1; acceptance = 8 seeds × 60 steps, 133 kills, 0 violations of I1/I9 |
-| `P1-13` seal verifier + compaction | **partial** | footer writer + verifier tested; `arch/` compaction not written |
-| `P1-14` / `P1-15` `store/blobs.py` | **done** | container frozen in `format.md` §7.1; crash stages `S9`/`S9b`; compression runs on the keeper, not the app thread |
-| `P1-16` small-model state machine | **done** | `tests/property/test_tape_model.py`; the retention ordering (`GAP` before unlink) is modelled now and is the spec `P1-09b` has to satisfy |
-| `P1-02b` mypy `type-arg` + `no-untyped-def` | **pending, closes before G-Promise** | 75 strict findings in the two disabled categories |
-| `P2-03` / `P2-04` OS gates | **ticked — CI, run `43657997367`** | all ten cells green: Windows ran `OpenProcess`+`GetProcessTimes`, `winreg` `BootId`, `lseek`-based positional I/O and zero-fill preallocation, and the lease tests through `platform.current()`; macOS ran `sysctl(KERN_PROC_PID)`, `kern.boottime` and `F_FULLFSYNC`. Benchmark rows stay `not measured` for those OSes |
-| `P2-11` / `P2-13` launcher + stall watchdog | **pending** | `rec/launcher.py`: spawn, env, child lock, `stall_ms` watchdog, immediate recovery, exit-code propagation; `SIGUSR1` + `faulthandler` stack dump on POSIX |
-| `P2-06` / `P2-07` / `P2-10` / `P2-12` | **done** | recovery machine, node classification, capsule v0 and idempotence, each with the test named in §1 |
-| P2-09 week of nightlies | **requires time (nightly CI × 7 days)** | GitHub `schedule` runs only on the default branch; the clock starts at merge |
-| P11-05, P11-12 | **requires humans** | a human operator and a real incident |
-| S17 sparse control (C20) | **requires humans (root on any Linux box, two minutes)** | `tools/s17_control.sh` builds the 2 MiB tmpfs control and prints the signal; it cannot be run here (no superuser) |
-| Windows/macOS **benchmark** rows | `not measured` | the test gates are green (run `43657997367`); no §15.1 number in this repository comes from a runner, and none will |
-| P10, P12 | **not started** | P10 only after every v1.0 gate is green; P12 never without instruction |
+## What is next
 
-## 8. Next, in order
-
-1. `P2-11` / `P2-13` — `rec/launcher.py`: `blackbox run -- cmd`, the child lock, the stall watchdog and the
-   `SIGUSR1` stack dump.
-2. `P1-02b` (mypy `type-arg` + `no-untyped-def`) → **G-Promise on ext4** → STATUS.
-3. `P1-13` compaction of sealed segments; the blob GC (§9.9) once segments reference blobs; `P2-09` nights start
-   at merge.
+0. **The reviewer's three P0s are fixed and reproduced first** (`ecf8b88`): a receiver exception no longer reaches
+   the application through any callback (defect 27 — reproduced at `ee210ae` with the reviewer's script, which printed
+   `ESCAPED RuntimeError` before the fix and `SURVIVED bytes=849` after it), capture is scoped to an explicit host
+   allowlist with skips counted (D-026), and a data directory that is a file is refused by name on every OS
+   (defect 26). `47ec45a` then verified both client modules directly for streaming, truncation, async and
+   cancellation, and found two things that were only true by assumption (D-028).
+0b. **The nightly has never succeeded and `main` has not moved**: `origin/main` is at `31241d6`, this branch's base,
+   so the scheduled workflow's clock has not started; its one historical run failed because it named files that do not
+   exist (defect 28, fixed here). Merge is the owner's.
+0c. **`d43b208` is green on all ten cells** (`43706220024`) — the fix for defect 31, which reddened seven of ten
+   cells at `705fc59` and kept `9fe6d72` red with it. Before that `4f42397` (`43705007628`), `4ce0f7c`
+   (`43704041733`), `07e5c29` (`43703761892`) and `ce1439b` (`43701652852`) were ten of ten. `STATE.last_green_commit`
+   is `d43b208`; the red pair keep their numbers and their verdicts (C40).
+1. **G-Promise is signed** (`docs/gates/G-Promise.md`, verdict pass, self-signed — see §Labelled) and `STATE.json`
+   carries `gates["G-Promise"] = "pass"`.
+2. **G-Capture's mechanism rows are all green and the gate needs a signature that is not mine.** Green: the day-14
+   rule for **both** SDKs (unmodified `openai` 3.51.0 and `anthropic` 2.8.0 scripts killed mid-stream, recovered with
+   counts that never exceed the mock provider's own tally, taking the same seam); P3-14 (a 100-call agent identical
+   with and without the recorder, under three real breakages); P3-11's redaction (60-shape corpus at every split
+   offset, three modes, default policy, fail-closed, keyed pseudonyms); and the five §15.1 capture rows, measured.
+   What is left of P3-11 is **mask offsets** (DV-014), which belong with the viewer that would use them, and the gate
+   itself needs a reviewer's counter-signature on `docs/gates/G-Capture.md`. **Next ticket: L3 — P3B-01, the proxy
+   core** (`blackbox run -- <anything>` is the universality promise, and it has no commits yet).
+3. **Defect 26 is open and cannot be closed here**: on Windows, `install(data_dir=<a file>)` reported `enabled: True`
+   and let 100 calls run against a tape directory that cannot exist. Three questions are written down in
+   `docs/defects.md`; answering them needs a Windows host, which this sandbox does not have.
+4. **The capture seams each cover both client modules** (`httpx` and `httpx2`) — the published `openai` and
+   `anthropic` packages are built on `httpx2`, which is why seam A reported `installed` and captured nothing until
+   the day-14 test found it (defect 23, D-025). No seam, and no unit test of a seam, could have found it from the
+   inside.
+5. **L3 starts from `d43b208`, not from an older SHA**: the attach lane (proxy core and routes, launcher integration,
+   header links, Claude Code / Codex hooks, inbox, proxy bench, `docs/attach.md`) has no commits yet; the error codes
+   it will use (`BBX-E140`–`E143`) are already in the registry and `tests/test_no_egress.py` already names `proxy/` as
+   the one place allowed to open a socket.
+6. The independent reviewer's loop is the gate loop: a counter-signature at every gate, with the reproduce block in
+   `docs/gates/` and `docs/reviews.md` as the ledger. It found C40 on its first pass and defect 25 on this one, which
+   is the argument for it.
+7. The 2 000-trial kill run starts in the background during L5–L8; it is not needed for L2/L3.

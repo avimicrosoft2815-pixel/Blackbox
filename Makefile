@@ -1,13 +1,16 @@
 PY ?= .venv/bin/python
 PYTHONPATH := src
 
-.PHONY: test test-fast bench kill fuzz docs fmt clean verify
+.PHONY: test test-fast smoke bench kill fuzz docs fmt clean verify
 
 test:            ## full suite (stdlib guards, property tests, crash matrix)
 	PYTHONPATH=$(PYTHONPATH) $(PY) -m pytest tests -q
 
 test-fast:       ## skip the process-spawning crash matrix
 	PYTHONPATH=$(PYTHONPATH) $(PY) -m pytest tests -q -k "not crash_points and not kill"
+
+smoke:           ## bench smoke against docs/STATE.json (C31): fails on a missing key or a 10 % regression
+	$(PY) tools/bench_smoke.py
 
 bench:           ## P1-17 per-stage microbench into bench/results/
 	PYTHONPATH=$(PYTHONPATH) $(PY) bench/bench_frame.py

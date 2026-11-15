@@ -70,7 +70,7 @@ def acquire(path: str, *, pid: int | None = None) -> Lease:
     with os.fdopen(fd, "wb") as fh:
         fh.write(payload)
         fh.flush()
-        os.fsync(fh.fileno())
+        _plat.fdatasync(fh.fileno())
     return lease
 
 

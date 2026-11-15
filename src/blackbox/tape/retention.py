@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import os
 import time
+from typing import Any
 
 from blackbox import constants as C
 from blackbox.codec import cbor
@@ -48,12 +49,12 @@ MAX_BYTES_ENV = "BLACKBOX_TAPE_MAX_BYTES"
 KEEP_HOURS_ENV = "BLACKBOX_TAPE_KEEP_HOURS"
 
 
-def limits_from_env(env: dict[str, str] | None = None) -> dict:
+def limits_from_env(env: dict[str, str] | None = None) -> dict[str, Any]:
     """(max_bytes, keep_hours) as configured, `None` for "no limit". Bad values raise instead of being ignored."""
     src = os.environ if env is None else env
     max_bytes = src.get(MAX_BYTES_ENV)
     keep_hours = src.get(KEEP_HOURS_ENV)
-    out: dict = {"max_bytes": None, "keep_hours": None}
+    out: dict[str, Any] = {"max_bytes": None, "keep_hours": None}
     if max_bytes is not None:
         out["max_bytes"] = int(max_bytes)
         if out["max_bytes"] < 0:
@@ -70,7 +71,7 @@ def _is_sharing_violation(exc: OSError) -> bool:
 
 
 def unlink_with_retries(path: str, *, attempts: int = SHARING_VIOLATION_RETRIES,
-                        delay_s: float = SHARING_VIOLATION_DELAY_S) -> dict:
+                        delay_s: float = SHARING_VIOLATION_DELAY_S) -> dict[str, Any]:
     """Unlink `path`, tolerating a reader that still has it open (open-view handling, P1-09b).
 
     Returns `{"path", "ok", "attempts", "error"}`; `ok=False` means the file is *still there* and the caller
@@ -136,9 +137,9 @@ def _merge(ranges: list[tuple[int, int]]) -> list[tuple[int, int]]:
     return out
 
 
-def candidates(tape_dir: str, *, active_segment: int) -> list[dict]:
+def candidates(tape_dir: str, *, active_segment: int) -> list[dict[str, Any]]:
     """Sealed segments, oldest first, with the seq range each one holds. The active segment is never listed."""
-    out: list[dict] = []
+    out: list[dict[str, Any]] = []
     for n in seg_mod.list_segments(tape_dir):
         if n == active_segment:
             continue
@@ -153,7 +154,7 @@ def candidates(tape_dir: str, *, active_segment: int) -> list[dict]:
 
 
 def select(tape_dir: str, *, active_segment: int, max_bytes: int | None = None,
-           keep_hours: float | None = None, now_ns: int | None = None) -> dict:
+           keep_hours: float | None = None, now_ns: int | None = None) -> dict[str, Any]:
     """Which sealed segments to delete, and why. Pure: nothing is unlinked here.
 
     A segment holding a `GAP` frame is a *tombstone segment*: deleting it would delete the only record that the
@@ -170,11 +171,11 @@ def select(tape_dir: str, *, active_segment: int, max_bytes: int | None = None,
     active_bytes = os.path.getsize(active_path) if os.path.exists(active_path) else 0
     sealed = sum(c["bytes"] for c in cands)
     total = sealed + active_bytes
-    by_age: list[dict] = []
+    by_age: list[dict[str, Any]] = []
     if keep_hours is not None:
         horizon = now - int(keep_hours * 3600 * 1e9)
         by_age = [c for c in deletable if c["mtime_ns"] < horizon]
-    by_size: list[dict] = []
+    by_size: list[dict[str, Any]] = []
     remaining = total
     if max_bytes is not None:
         for c in sorted(deletable, key=lambda c: (c["segment"],)):
@@ -182,7 +183,7 @@ def select(tape_dir: str, *, active_segment: int, max_bytes: int | None = None,
                 break
             by_size.append(c)
             remaining -= c["bytes"]
-    victims: list[dict] = []
+    victims: list[dict[str, Any]] = []
     seen: set[int] = set()
     for c in sorted({c["segment"]: c for c in by_age + by_size}.values(), key=lambda c: c["segment"]):
         if c["segment"] not in seen:
@@ -195,9 +196,9 @@ def select(tape_dir: str, *, active_segment: int, max_bytes: int | None = None,
             "max_bytes": max_bytes, "keep_hours": keep_hours}
 
 
-def _unlink_segment(tape_dir: str, c: dict) -> tuple[list[dict], bool]:
+def _unlink_segment(tape_dir: str, c: dict[str, Any]) -> tuple[list[dict[str, Any]], bool]:
     """Unlink one segment's `.seg` then its `.seal`. Returns (blocked entries, whether the segment is gone)."""
-    blocked: list[dict] = []
+    blocked: list[dict[str, Any]] = []
     seg_res = unlink_with_retries(c["path"])
     seal_res = unlink_with_retries(seg_mod.seal_path(tape_dir, c["segment"]))
     if not seg_res["ok"]:
@@ -212,8 +213,8 @@ def _unlink_segment(tape_dir: str, c: dict) -> tuple[list[dict], bool]:
     return blocked, True
 
 
-def apply(writer, *, max_bytes: int | None = None, keep_hours: float | None = None,
-          now_ns: int | None = None, dry_run: bool = False) -> dict:
+def apply(writer: Any, *, max_bytes: int | None = None, keep_hours: float | None = None,
+          now_ns: int | None = None, dry_run: bool = False) -> dict[str, Any]:
     """Commit the `GAP` that covers what is about to disappear, then unlink. Fails closed: no GAP, no unlink.
 
     Ordering, per group: commit `GAP` → publish → unlink `.seg` → unlink `.seal` → fsync the directory.
@@ -226,14 +227,14 @@ def apply(writer, *, max_bytes: int | None = None, keep_hours: float | None = No
     plan = select(writer.tape_dir, active_segment=writer.head.active_segment,
                   max_bytes=max_bytes, keep_hours=keep_hours, now_ns=now_ns)
     tape_dir = writer.tape_dir
-    victims: list[dict] = plan["victims"]
-    pinned: list[dict] = plan["pinned"]
-    deleted: list[dict] = []
-    blocked: list[dict] = []
+    victims: list[dict[str, Any]] = plan["victims"]
+    pinned: list[dict[str, Any]] = plan["pinned"]
+    deleted: list[dict[str, Any]] = []
+    blocked: list[dict[str, Any]] = []
     if not victims:
         return {**plan, "deleted": deleted, "blocked": blocked, "merged": False, "dry_run": dry_run}
 
-    groups: list[tuple[list[dict], tuple[int, int]]] = []
+    groups: list[tuple[list[dict[str, Any]], tuple[int, int]]] = []
     merged = False
     tent = victims + pinned
     if all(c["first_seq"] and c["last_seq"] for c in tent):

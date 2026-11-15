@@ -1,0 +1,218 @@
+{
+  "date": "2026-11-15",
+  "probe": "recovery time, RSS, amplification",
+  "gate_column": "ext4",
+  "hardware": {
+    "cpu": "Intel(R) Xeon(R) Processor @ 2.60GHz",
+    "cpu_count": 2,
+    "python": "3.11.2",
+    "implementation": "CPython",
+    "os": "Linux-6.1.158+-x86_64-with-glibc2.36",
+    "machine": "x86_64",
+    "mem_total_kib": 4034452
+  },
+  "columns": {
+    "ext4": {
+      "path": ".bench/scratch",
+      "gate": true,
+      "note": "gate column: numbers here are measured on the repository's real filesystem"
+    },
+    "tmpfs": {
+      "path": "<scratch>/shm",
+      "gate": false,
+      "note": "labelled second column only: fdatasync is a no-op on tmpfs, so no durability claim"
+    }
+  },
+  "rss_write_only_process": {
+    "ext4": {
+      "events": 10000,
+      "segment_bytes": 16777216,
+      "procedure": "read /proc/self/status twice - before `open()` and after the last append - and report the difference; since ADR-005 the segment is not mapped, so a shared file mapping's RssFile accounting does not apply and the batch buffer (16 KiB + 1 MiB worst case) is RssAnon",
+      "head_off_at_sampling": 4723072,
+      "bytes_written": 4718976,
+      "segment_percent_written": 28.13,
+      "peak_kib": 19028,
+      "peak_mib": 18.58,
+      "above_baseline_mib": 1.56,
+      "rss_anon_delta_mib": 1.27,
+      "rss_file_delta_mib": 0.29,
+      "baseline": {
+        "ru_maxrss_kib": 18512,
+        "VmRSS": 17432,
+        "RssAnon": 8168,
+        "RssFile": 9264,
+        "RssShmem": 0,
+        "VmSwap": 0
+      },
+      "after": {
+        "ru_maxrss_kib": 19028,
+        "VmRSS": 19028,
+        "RssAnon": 9468,
+        "RssFile": 9560,
+        "RssShmem": 0,
+        "VmSwap": 0
+      }
+    },
+    "tmpfs": {
+      "events": 10000,
+      "segment_bytes": 16777216,
+      "procedure": "read /proc/self/status twice - before `open()` and after the last append - and report the difference; since ADR-005 the segment is not mapped, so a shared file mapping's RssFile accounting does not apply and the batch buffer (16 KiB + 1 MiB worst case) is RssAnon",
+      "head_off_at_sampling": 4723072,
+      "bytes_written": 4718976,
+      "segment_percent_written": 28.13,
+      "peak_kib": 19028,
+      "peak_mib": 18.58,
+      "above_baseline_mib": 1.56,
+      "rss_anon_delta_mib": 1.27,
+      "rss_file_delta_mib": 0.29,
+      "baseline": {
+        "ru_maxrss_kib": 18512,
+        "VmRSS": 17432,
+        "RssAnon": 8168,
+        "RssFile": 9264,
+        "RssShmem": 0,
+        "VmSwap": 0
+      },
+      "after": {
+        "ru_maxrss_kib": 19028,
+        "VmRSS": 19028,
+        "RssAnon": 9468,
+        "RssFile": 9560,
+        "RssShmem": 0,
+        "VmSwap": 0
+      }
+    }
+  },
+  "results": {
+    "ext4": {
+      "filesystem": "ext4",
+      "scratch": ".bench/scratch",
+      "recovery": {
+        "frames_on_tape": 22312,
+        "requested_frames": 10000,
+        "rounds": 30,
+        "n": 30,
+        "min_ms": 231.59,
+        "p50_ms": 236.83,
+        "p95_ms": 248.36,
+        "p99_ms": 250.78,
+        "max_ms": 250.78,
+        "per_10k_frames_ms": 106.1
+      },
+      "rss_this_process_kib": 137040,
+      "amplification_by_batch": [
+        {
+          "batch_bytes": 0,
+          "config": "one publish per event",
+          "committed_frame_bytes": 3123024,
+          "payload_bytes": 2560000,
+          "ratio": 1.22,
+          "chain": true,
+          "counts": "bytes between the segment header and the committed head offset: frame headers, payloads and one CHAIN frame per publish, CRC trailers included; excludes the reservation, the segment header and the head slots"
+        },
+        {
+          "batch_bytes": 4096,
+          "config": "group commit, 4096 B batch",
+          "committed_frame_bytes": 3234416,
+          "payload_bytes": 2560000,
+          "ratio": 1.263,
+          "chain": true,
+          "counts": "bytes between the segment header and the committed head offset: frame headers, payloads and one CHAIN frame per publish, CRC trailers included; excludes the reservation, the segment header and the head slots"
+        },
+        {
+          "batch_bytes": 16384,
+          "config": "group commit, 16384 B batch",
+          "committed_frame_bytes": 3150352,
+          "payload_bytes": 2560000,
+          "ratio": 1.231,
+          "chain": true,
+          "counts": "bytes between the segment header and the committed head offset: frame headers, payloads and one CHAIN frame per publish, CRC trailers included; excludes the reservation, the segment header and the head slots"
+        },
+        {
+          "batch_bytes": 65536,
+          "config": "group commit, 65536 B batch",
+          "committed_frame_bytes": 3127816,
+          "payload_bytes": 2560000,
+          "ratio": 1.222,
+          "chain": true,
+          "counts": "bytes between the segment header and the committed head offset: frame headers, payloads and one CHAIN frame per publish, CRC trailers included; excludes the reservation, the segment header and the head slots"
+        }
+      ],
+      "amplification": {
+        "payload_bytes": 2560000,
+        "committed_frame_bytes": 4718976,
+        "ratio": 1.843,
+        "reserved_segment_bytes": 16777216,
+        "append_events_per_s": 25960.8,
+        "config": "one publish per event (no group commit)",
+        "chain": true,
+        "counts": "committed_frame_bytes = bytes written between the segment header and the committed head offset: frame headers, payloads and one CHAIN frame per publish, CRC trailers included. Excludes the 16 MiB reservation, the segment header and the 64 B head slots"
+      }
+    },
+    "tmpfs": {
+      "filesystem": "tmpfs",
+      "scratch": "<scratch>/shm",
+      "recovery": {
+        "frames_on_tape": 20328,
+        "requested_frames": 10000,
+        "rounds": 30,
+        "n": 30,
+        "min_ms": 116.77,
+        "p50_ms": 162.42,
+        "p95_ms": 207.89,
+        "p99_ms": 211.23,
+        "max_ms": 211.23,
+        "per_10k_frames_ms": 79.9
+      },
+      "rss_this_process_kib": 137040,
+      "amplification_by_batch": [
+        {
+          "batch_bytes": 0,
+          "config": "one publish per event",
+          "committed_frame_bytes": 3123024,
+          "payload_bytes": 2560000,
+          "ratio": 1.22,
+          "chain": true,
+          "counts": "bytes between the segment header and the committed head offset: frame headers, payloads and one CHAIN frame per publish, CRC trailers included; excludes the reservation, the segment header and the head slots"
+        },
+        {
+          "batch_bytes": 4096,
+          "config": "group commit, 4096 B batch",
+          "committed_frame_bytes": 3234416,
+          "payload_bytes": 2560000,
+          "ratio": 1.263,
+          "chain": true,
+          "counts": "bytes between the segment header and the committed head offset: frame headers, payloads and one CHAIN frame per publish, CRC trailers included; excludes the reservation, the segment header and the head slots"
+        },
+        {
+          "batch_bytes": 16384,
+          "config": "group commit, 16384 B batch",
+          "committed_frame_bytes": 3150352,
+          "payload_bytes": 2560000,
+          "ratio": 1.231,
+          "chain": true,
+          "counts": "bytes between the segment header and the committed head offset: frame headers, payloads and one CHAIN frame per publish, CRC trailers included; excludes the reservation, the segment header and the head slots"
+        },
+        {
+          "batch_bytes": 65536,
+          "config": "group commit, 65536 B batch",
+          "committed_frame_bytes": 3127816,
+          "payload_bytes": 2560000,
+          "ratio": 1.222,
+          "chain": true,
+          "counts": "bytes between the segment header and the committed head offset: frame headers, payloads and one CHAIN frame per publish, CRC trailers included; excludes the reservation, the segment header and the head slots"
+        }
+      ],
+      "amplification": {
+        "payload_bytes": 2560000,
+        "committed_frame_bytes": 4718976,
+        "ratio": 1.843,
+        "reserved_segment_bytes": 16777216,
+        "append_events_per_s": 21984.3,
+        "config": "one publish per event (no group commit)",
+        "chain": true,
+        "counts": "committed_frame_bytes = bytes written between the segment header and the committed head offset: frame headers, payloads and one CHAIN frame per publish, CRC trailers included. Excludes the 16 MiB reservation, the segment header and the 64 B head slots"
+      }
+    }
+  }
+}

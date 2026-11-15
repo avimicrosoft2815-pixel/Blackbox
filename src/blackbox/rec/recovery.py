@@ -24,9 +24,11 @@ import json
 import os
 import time
 from dataclasses import dataclass, field
+from typing import Any
 
 from blackbox import constants as C
 from blackbox.cap import format as cap
+from blackbox.cap_sdk.sink import chunk_bytes
 from blackbox.codec.ids import blake2b
 from blackbox.errors import bbx
 from blackbox.platform import current as _plat_current
@@ -67,10 +69,7 @@ def _write_atomic(path: str, blob: bytes) -> None:
     fd = _plat.open_fd(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     try:
         _plat.pwrite(fd, memoryview(blob), 0)
-        if hasattr(os, "fdatasync"):
-            os.fdatasync(fd)
-        else:
-            os.fsync(fd)
+        _plat.fdatasync(fd)
     finally:
         os.close(fd)
     os.replace(tmp, path)
@@ -78,7 +77,7 @@ def _write_atomic(path: str, blob: bytes) -> None:
         _plat.fsync_dir(directory)
 
 
-def _read_json(path: str) -> dict | None:
+def _read_json(path: str) -> dict[str, Any] | None:
     try:
         with open(path, "rb") as fh:
             loaded = json.loads(fh.read().decode("utf-8"))
@@ -100,7 +99,7 @@ class NodeRecord:
     tool_requests: int = 0
     tool_results: int = 0
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         out = {"node_slot": self.node_slot, "status": self.status, "detail": self.detail,
                "model_requests": self.model_requests, "tool_requests": self.tool_requests,
                "tool_results": self.tool_results}
@@ -110,7 +109,7 @@ class NodeRecord:
         return out
 
 
-def classify_nodes(frames: list[dict], *, now_wall_ns: int | None = None) -> list[NodeRecord]:
+def classify_nodes(frames: list[dict[str, Any]], *, now_wall_ns: int | None = None) -> list[NodeRecord]:
     """Apply the §14.4 table to the frames of one run.
 
     A node is open when it has no `NODE_CLOSE`; the classification then asks what the last thing we saw was. The
@@ -145,7 +144,7 @@ def classify_nodes(frames: list[dict], *, now_wall_ns: int | None = None) -> lis
             r = rec(slot)
             r.chunks += 1
             payload = f.get("payload") or b""
-            r.partial_stream_bytes += len(payload)
+            r.partial_stream_bytes += chunk_bytes(payload)
             r.last_chunk_wall_ns = int(f.get("wall_ns") or 0)
             last_kind[slot] = kind
         elif kind in (C.KIND_MODEL_RESPONSE, C.KIND_MODEL_ERROR):
@@ -193,7 +192,7 @@ def classify_nodes(frames: list[dict], *, now_wall_ns: int | None = None) -> lis
     return out
 
 
-def run_status(frames: list[dict], *, sealed: bool) -> tuple[str, str | None]:
+def run_status(frames: list[dict[str, Any]], *, sealed: bool) -> tuple[str, str | None]:
     """`(status, status_cause)` for the run itself: `SEAL_INTERRUPTED` when the run ended but was never sealed."""
     has_end = any(f["kind"] == C.KIND_RUN_END for f in frames)
     if has_end and not sealed:
@@ -211,11 +210,11 @@ class RecoveryResult:
     capsule_path: str | None = None
     capsule_root: str | None = None
     state: str = "DISCOVERED"
-    node_statuses: list[dict] = field(default_factory=list)
+    node_statuses: list[dict[str, Any]] = field(default_factory=list)
     run_status: str = "recovered"
     status_cause: str | None = None
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         return {"run_id": self.run_id, "run_dir": self.run_dir, "steps_run": self.steps_run,
                 "steps_skipped": self.steps_skipped, "capsule_path": self.capsule_path,
                 "capsule_root": self.capsule_root, "state": self.state,
@@ -241,7 +240,7 @@ class Recovery:
         self._scan: scanner.ScanResult | None = None
 
     # ── infrastructure ──────────────────────────────────────────────────────
-    def _read_meta(self) -> dict:
+    def _read_meta(self) -> dict[str, Any]:
         try:
             with open(os.path.join(self.tape_dir, "meta"), "rb") as fh:
                 return meta_mod.decode(fh.read(C.META_BYTES))
@@ -251,7 +250,7 @@ class Recovery:
     def _marker_path(self, step: str) -> str:
         return os.path.join(self.run_dir, f"recovery.done.{step}")
 
-    def _marker(self, step: str) -> dict | None:
+    def _marker(self, step: str) -> dict[str, Any] | None:
         return _read_json(self._marker_path(step))
 
     def _save_marker(self, step: str, *, input_hash: str, output_hash: str, artifact: str | None) -> None:
@@ -350,15 +349,12 @@ class Recovery:
                 return False                          # lost the race to another recoverer, which is fine
         try:
             _plat.pwrite(fd, memoryview(content), 0)
-            if hasattr(os, "fdatasync"):
-                os.fdatasync(fd)
-            else:
-                os.fsync(fd)
+            _plat.fdatasync(fd)
         finally:
             os.close(fd)
         return True
 
-    def _lock_is_live(self, held: dict) -> bool:
+    def _lock_is_live(self, held: dict[str, Any]) -> bool:
         try:
             pid = int(held["pid"])
         except (KeyError, TypeError, ValueError):
@@ -434,8 +430,10 @@ class Recovery:
     def _segments_entries(self) -> dict[str, bytes]:
         out: dict[str, bytes] = {}
         for n in segments.list_segments(self.tape_dir):
-            with open(segments.seg_path(self.tape_dir, n), "rb") as fh:
-                out[cap.seg_entry_name(n)] = fh.read()
+            path = segments.seg_path_any(self.tape_dir, n)
+            if path is None:
+                continue
+            out[cap.seg_entry_name(n)] = segments.logical_bytes(path)
         return out
 
     def step_sealed(self) -> str:
@@ -559,6 +557,21 @@ class Recovery:
             if len(self.result.steps_skipped) == before:
                 self.result.steps_run.append(step)
         return self.result
+
+
+def run_id_for(data_dir: str, writer_uuid_hex: str) -> str:
+    """The tape's canonical run id: the same value every recovery of this tape derives (so ids stay stable).
+
+    The launcher needs it *before* the child starts (`BLACKBOX_RUN_ID` is how hooks and the proxy link to the run),
+    and deriving it here rather than in the launcher keeps one definition of "which run is this".
+    """
+    tape_dir = os.path.join(data_dir, "tape", writer_uuid_hex)
+    try:
+        with open(os.path.join(tape_dir, "meta"), "rb") as fh:
+            meta = meta_mod.decode(fh.read(C.META_BYTES))
+    except FileNotFoundError:
+        meta = {}
+    return "r_" + _hash(writer_uuid_hex, meta.get("created_wall_ns", 0))[:16]
 
 
 def recover(data_dir: str, writer_uuid_hex: str | None = None, *, now_ns: int | None = None) -> RecoveryResult:

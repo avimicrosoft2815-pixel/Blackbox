@@ -10,6 +10,7 @@ import os
 import struct
 from dataclasses import dataclass, replace
 from struct import pack_into
+from typing import Any
 
 from blackbox import constants as C
 from blackbox.codec.crc32 import crc32
@@ -48,11 +49,11 @@ class HeadSlot:
         return cls(gen=gen, head_seq=head_seq, head_off=head_off, tail_seq=tail_seq,
                    sealed_seq=sealed_seq, active_segment=active, flags=flags, dropped_events=dropped)
 
-    def with_(self, **kw) -> HeadSlot:
+    def with_(self, **kw: Any) -> HeadSlot:
         """Copy-with-overrides. Kept for readers; the writer's hot path mutates instead."""
         return replace(self, **kw)
 
-    def set(self, **kw) -> HeadSlot:
+    def set(self, **kw: Any) -> HeadSlot:
         for key, value in kw.items():
             setattr(self, key, value)
         return self
@@ -62,7 +63,7 @@ def empty_head_file() -> bytes:
     return b"\x00" * C.HEAD_BYTES
 
 
-def read_slots(path: str | os.PathLike) -> tuple[HeadSlot | None, HeadSlot | None]:
+def read_slots(path: str | os.PathLike[str]) -> tuple[HeadSlot | None, HeadSlot | None]:
     try:
         with open(path, "rb") as fh:
             data = fh.read(C.HEAD_BYTES)
@@ -80,7 +81,7 @@ def read_best_in(tape_dir: str) -> HeadSlot | None:
     return read_best(os.path.join(tape_dir, "head"))
 
 
-def read_best(path: str | os.PathLike) -> HeadSlot | None:
+def read_best(path: str | os.PathLike[str]) -> HeadSlot | None:
     s0, s1 = read_slots(path)
     if s0 is None and s1 is None:
         return None
@@ -110,8 +111,8 @@ def next_slot_index(slot: HeadSlot | None) -> int:
     return slot_index_for(slot.gen + 1)
 
 
-def publish(path: str | os.PathLike, slot: HeadSlot, *, mode: str = "process", fd=None,
-            die_point=None) -> HeadSlot:
+def publish(path: str | os.PathLike[str], slot: HeadSlot, *, mode: str = "process", fd: int | None = None,
+            die_point: Any = None) -> HeadSlot:
     """Publish `slot` (with gen+1) into the non-current slot and flush it."""
     current = read_best(path)
     index = next_slot_index(current)
@@ -134,10 +135,7 @@ def publish(path: str | os.PathLike, slot: HeadSlot, *, mode: str = "process", f
         fh.write(bytes(buf[base + 32:base + C.HEAD_SLOT_BYTES]))
         fh.flush()
         if mode in ("kernel", "paranoid"):
-            if hasattr(os, "fdatasync"):
-                os.fdatasync(fh.fileno())
-            else:  # Windows
-                os.fsync(fh.fileno())
+            _current_platform().fdatasync(fh.fileno())
     return new_slot
 
 
@@ -169,18 +167,12 @@ class HeadFile:
             fd = _current_platform().open_fd(tmp, os.O_RDWR | os.O_CREAT | os.O_TRUNC, 0o600)
             try:
                 os.ftruncate(fd, C.HEAD_BYTES)
-                os.fsync(fd)
+                _current_platform().fdatasync(fd)
             finally:
                 os.close(fd)
             os.replace(tmp, path)
-            try:
-                dfd = os.open(os.path.dirname(path) or ".", os.O_RDONLY)
-                try:
-                    os.fsync(dfd)
-                finally:
-                    os.close(dfd)
-            except OSError:
-                pass
+            with contextlib.suppress(OSError):
+                _current_platform().fsync_dir(os.path.dirname(path) or ".")
             existed = True
         self._plat = _current_platform()
         self.fd = self._plat.open_fd(path, os.O_RDWR)
@@ -188,7 +180,7 @@ class HeadFile:
             if not existed or os.fstat(self.fd).st_size < C.HEAD_BYTES:
                 os.ftruncate(self.fd, C.HEAD_BYTES)
                 if create:
-                    os.fsync(self.fd)
+                    self._plat.fdatasync(self.fd)
         except Exception:
             os.close(self.fd)
             raise
@@ -252,10 +244,7 @@ class HeadFile:
     def sync(self) -> None:
         if not self._dirty:
             return
-        if hasattr(os, "fdatasync"):
-            os.fdatasync(self.fd)
-        else:                                   # pragma: no cover - Windows
-            os.fsync(self.fd)
+        self._plat.fdatasync(self.fd)
         self._dirty = False
 
     def close(self) -> None:

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
+from typing import Any
 
 from blackbox import constants as C
 from blackbox.codec import cbor
@@ -23,14 +24,14 @@ from blackbox.tape import segments
 @dataclass
 class ScanResult:
     writer_uuid: str
-    meta: dict
+    meta: dict[str, Any]
     head: head_mod.HeadSlot | None
-    frames: list[dict] = field(default_factory=list)
-    gaps: list[dict] = field(default_factory=list)
+    frames: list[dict[str, Any]] = field(default_factory=list)
+    gaps: list[dict[str, Any]] = field(default_factory=list)
     truncated_tail: bool = False
     lost_from_seq: int | None = None
-    gaps_declared: list[dict] = field(default_factory=list)   # committed `GAP` frames (declared holes)
-    gaps_unreadable: list[dict] = field(default_factory=list)  # GAP frames we cannot decode: NOT declared
+    gaps_declared: list[dict[str, Any]] = field(default_factory=list)   # committed `GAP` frames (declared holes)
+    gaps_unreadable: list[dict[str, Any]] = field(default_factory=list)  # GAP frames we cannot decode: NOT declared
     segments_seen: list[int] = field(default_factory=list)
     sealed_segments: list[int] = field(default_factory=list)
     bad_segments: list[int] = field(default_factory=list)
@@ -56,7 +57,7 @@ class ScanResult:
             return "partial"
         return "full"
 
-    def summary(self) -> dict:
+    def summary(self) -> dict[str, Any]:
         return {
             "writer_uuid": self.writer_uuid, "frames": self.frame_count,
             "first_seq": self.first_seq, "last_seq": self.last_seq,
@@ -70,15 +71,14 @@ class ScanResult:
 
 
 def _seg_paths(tape_dir: str) -> list[str]:
-    return [segments.seg_path(tape_dir, n) for n in segments.list_segments(tape_dir)]
+    return [p for p in (segments.seg_path_any(tape_dir, n) for n in segments.list_segments(tape_dir)) if p]
 
 
 def _segment_has_frames(path: str) -> bool:
     """Content check, not a size check: every segment is preallocated to its full size, so size proves nothing."""
     try:
-        with open(path, "rb") as fh:
-            fh.seek(C.SEGMENT_HEADER_BYTES)
-            head = fh.read(C.FRAME_OVERHEAD_BYTES)
+        head = segments.logical_bytes(path, limit=C.SEGMENT_HEADER_BYTES + C.FRAME_OVERHEAD_BYTES)[
+            C.SEGMENT_HEADER_BYTES:C.SEGMENT_HEADER_BYTES + C.FRAME_OVERHEAD_BYTES]
     except OSError:
         return False
     if len(head) < C.FRAME_OVERHEAD_BYTES:
@@ -91,8 +91,8 @@ def _segment_has_frames(path: str) -> bool:
 
 
 def _read_file(path: str, limit: int | None = None) -> bytes:
-    with open(path, "rb") as fh:
-        return fh.read() if limit is None else fh.read(limit)
+    """Logical bytes: a compacted segment is decompressed, so every caller above sees the same frame region."""
+    return segments.logical_bytes(path, limit=limit)
 
 
 def scan(data_dir: str, writer_uuid_hex: str, *, max_frames: int = 2_000_000) -> ScanResult:
@@ -116,7 +116,7 @@ def scan(data_dir: str, writer_uuid_hex: str, *, max_frames: int = 2_000_000) ->
         return result
 
     n_active = head.active_segment
-    collected: dict[int, dict] = {}
+    collected: dict[int, dict[str, Any]] = {}
 
     # 1. the active segment: walk backwards from the committed cursor
     active_path = segments.seg_path(tape_dir, n_active)
@@ -140,8 +140,8 @@ def scan(data_dir: str, writer_uuid_hex: str, *, max_frames: int = 2_000_000) ->
     for n in sorted(segs):
         if n >= n_active:
             continue
-        path = segments.seg_path(tape_dir, n)
-        if not os.path.exists(path):
+        path = segments.seg_path_any(tape_dir, n)
+        if path is None:
             result.bad_segments.append(n)
             continue
         seal = seal_mod.read(segments.seal_path(tape_dir, n))
@@ -153,7 +153,7 @@ def scan(data_dir: str, writer_uuid_hex: str, *, max_frames: int = 2_000_000) ->
         if seal is not None:
             body_end = C.SEGMENT_HEADER_BYTES + seal["body_len"]
             result.sealed_segments.append(n)
-            if os.path.getsize(path) < body_end:
+            if len(buf) < body_end:          # logical length: a compacted segment is smaller on disk (P1-13)
                 result.bad_segments.append(n)
                 continue
         else:
@@ -222,7 +222,7 @@ def scan(data_dir: str, writer_uuid_hex: str, *, max_frames: int = 2_000_000) ->
     return result
 
 
-def verify_chain(result: ScanResult, tape_dir: str) -> dict:
+def verify_chain(result: ScanResult, tape_dir: str) -> dict[str, Any]:
     """I9 over a scan result: walk the two-level chain and check that every declared hole is linked into it.
 
     Level 1 links the `CHAIN` frames inside a segment; level 2 links the segments through the next segment's
@@ -233,7 +233,7 @@ def verify_chain(result: ScanResult, tape_dir: str) -> dict:
     """
     problems: list[str] = []
     values: set[bytes] = set()
-    per_segment: dict[int, list[dict]] = {}
+    per_segment: dict[int, list[dict[str, Any]]] = {}
     for f in result.frames:
         if f["kind"] == C.KIND_CHAIN:
             per_segment.setdefault(int(f.get("segment", 0)), []).append(f)

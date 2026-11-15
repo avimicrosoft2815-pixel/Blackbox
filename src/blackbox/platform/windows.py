@@ -50,7 +50,7 @@ PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 FILETIME_TICKS_PER_SECOND = 10_000_000
 
 
-def _kernel32() -> tuple:
+def _kernel32() -> tuple[Any, ...]:
     """The loaded `kernel32`, or `None` when ctypes/the DLL is not there (then the caller must not guess)."""
     import ctypes
     from ctypes import wintypes
@@ -68,7 +68,7 @@ def _kernel32() -> tuple:
         k32.CloseHandle.argtypes = [wintypes.HANDLE]
         k32.CloseHandle.restype = wintypes.BOOL
         _kernel32._cached = (k32, FILETIME)      # type: ignore[attr-defined]
-    cached: tuple = _kernel32._cached            # type: ignore[attr-defined]
+    cached: tuple[Any, ...] = _kernel32._cached            # type: ignore[attr-defined]
     return cached
 
 
@@ -172,7 +172,7 @@ def open_fd(path: str, flags: int, mode: int = 0o600) -> int:
     return os.open(path, flags | O_BINARY, mode)
 
 
-def pwrite(fd: int, buf, off: int) -> None:
+def pwrite(fd: int, buf: bytes | memoryview, off: int) -> None:
     """`pwrite` on Windows: seek, then write. See the module docstring for why the offset is safe to move."""
     view = memoryview(buf)
     os.lseek(fd, off, os.SEEK_SET)
@@ -199,7 +199,7 @@ def is_current() -> bool:
     return os.name == "nt"
 
 
-def flush_mapped_view(mm) -> None:
+def flush_mapped_view(mm: Any) -> None:
     """`FlushViewOfFile`, for a caller that still holds a mapping: CPython's `mmap.flush()` does exactly that.
 
     With ADR-005 the recorder has no mapping, so `kernel`/`paranoid` reach the device through `fdatasync` above

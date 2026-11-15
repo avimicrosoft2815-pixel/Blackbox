@@ -10,6 +10,7 @@ import os
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from blackbox import constants as C
 from blackbox.errors import bbx
@@ -66,11 +67,11 @@ class Config:
         return self
 
     # ── (de)serialisation: round-trip is a property test (P0-12) ─────────────
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         return dataclasses.asdict(self)
 
     @classmethod
-    def from_dict(cls, data: dict) -> Config:
+    def from_dict(cls, data: dict[str, Any]) -> Config:
         known = {f.name for f in dataclasses.fields(cls)}
         unknown = {k: v for k, v in data.items() if k not in known}
         if unknown:
@@ -100,7 +101,7 @@ _ENV_MAP = {
 }
 
 
-def _load_toml(path: Path) -> dict:
+def _load_toml(path: Path) -> dict[str, Any]:
     try:
         with open(path, "rb") as fh:
             return tomllib.load(fh)
@@ -110,9 +111,9 @@ def _load_toml(path: Path) -> dict:
         raise bbx("BBX-E100", f"invalid TOML in {path}: {exc}") from exc
 
 
-def _flatten_document(doc: dict) -> dict:
+def _flatten_document(doc: dict[str, Any]) -> dict[str, Any]:
     """Map Appendix A TOML sections onto Config fields."""
-    out: dict = {}
+    out: dict[str, Any] = {}
     core = doc.get("core", {})
     for key in ("project", "data_dir", "mode", "content", "sync_ms", "sync_bytes",
                 "blob_inline", "blob_max", "queue_max", "sample", "inherit_threads"):
@@ -136,7 +137,7 @@ def _flatten_document(doc: dict) -> dict:
     return out
 
 
-def _merge(base: dict, overlay: dict) -> dict:
+def _merge(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
     out = dict(base)
     for k, v in overlay.items():
         if isinstance(v, dict) and isinstance(out.get(k), dict):
@@ -146,7 +147,7 @@ def _merge(base: dict, overlay: dict) -> dict:
     return out
 
 
-def _set_dotted(data: dict, dotted: str, value) -> None:
+def _set_dotted(data: dict[str, Any], dotted: str, value: Any) -> None:
     if "." in dotted:
         head, tail = dotted.split(".", 1)
         data.setdefault(head, {})[tail] = value
@@ -154,9 +155,9 @@ def _set_dotted(data: dict, dotted: str, value) -> None:
         data[dotted] = value
 
 
-def load_config(path: str | os.PathLike | None = None,
-                overrides: dict | None = None,
-                env: dict | None = None) -> Config:
+def load_config(path: str | os.PathLike[str] | None = None,
+                overrides: dict[str, Any] | None = None,
+                env: dict[str, Any] | None = None) -> Config:
     """Build a validated Config from defaults ← user TOML ← project TOML ← env ← explicit overrides."""
     env = dict(os.environ if env is None else env)
     user_toml = _load_toml(Path(os.path.expanduser("~/.blackbox/config.toml")))

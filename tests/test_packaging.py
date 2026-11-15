@@ -26,11 +26,19 @@ def test_no_runtime_dependencies():
 
 
 def test_dev_extra_is_pinned_and_minimal():
-    dev = _pyproject()["project"]["optional-dependencies"]["dev"]
+    extras = _pyproject()["project"]["optional-dependencies"]
+    dev = extras["dev"]
     names = {re.split(r"[=<>!]=?", d)[0].strip(): d for d in dev}
     assert set(names) == {"pytest", "hypothesis"}, names
     for spec in dev:
         assert "==" in spec, f"dev dependency must be pinned exactly: {spec}"
+    # D-020: the optional HTTP integration lives in its own extra so `dev` stays the two test tools. Nothing here is
+    # a runtime dependency — `[project].dependencies` is asserted empty above, and that is what keeps the core
+    # stdlib-only.
+    for extra, contents in extras.items():
+        assert extra in {"dev", "capture", "capture-sdks"}, f"unexpected optional extra {extra!r}"
+        for spec in contents:
+            assert "==" in spec, f"{extra} dependency must be pinned exactly: {spec}"
 
 
 def test_version_matches_package():

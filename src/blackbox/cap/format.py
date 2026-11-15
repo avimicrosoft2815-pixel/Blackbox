@@ -33,6 +33,7 @@ import json
 import os
 import zipfile
 from dataclasses import dataclass, field
+from typing import Any
 
 from blackbox.errors import bbx
 from blackbox.platform import current as _plat_current
@@ -76,7 +77,7 @@ def integrity_root(lines: bytes) -> str:
     return hashlib.sha256(lines).hexdigest()
 
 
-def capsule_bytes(entries: dict[str, bytes], manifest: dict) -> tuple[bytes, dict]:
+def capsule_bytes(entries: dict[str, bytes], manifest: dict[str, Any]) -> tuple[bytes, dict[str, Any]]:
     """Build the whole container in memory. `manifest` is completed here (counts + integrity root)."""
     body = {k: v for k, v in entries.items()
             if k not in (INTEGRITY_NAME, MANIFEST_NAME)}
@@ -115,7 +116,7 @@ def capsule_bytes(entries: dict[str, bytes], manifest: dict) -> tuple[bytes, dic
 @dataclass
 class Capsule:
     entries: dict[str, bytes]
-    manifest: dict
+    manifest: dict[str, Any]
     root_ok: bool
     problems: list[str] = field(default_factory=list)
 
@@ -193,7 +194,7 @@ def read_capsule(path: str, *, max_bytes: int = 1 << 30) -> Capsule:
     return Capsule(entries=entries, manifest=manifest, root_ok=not problems, problems=problems)
 
 
-def write_capsule(dest: str, entries: dict[str, bytes], manifest: dict) -> dict:
+def write_capsule(dest: str, entries: dict[str, bytes], manifest: dict[str, Any]) -> dict[str, Any]:
     """Write `dest` atomically: `.<name>.partial` → fsync → `os.replace` → fsync(dir).
 
     Returns `{"path", "root", "bytes", "entries"}`. If `dest` already exists with the same content the file is
@@ -218,10 +219,7 @@ def write_capsule(dest: str, entries: dict[str, bytes], manifest: dict) -> dict:
         written = 0
         while written < len(blob):
             written += os.write(fd, view[written:])
-        if hasattr(os, "fdatasync"):
-            os.fdatasync(fd)
-        else:
-            os.fsync(fd)
+        _plat.fdatasync(fd)
     finally:
         os.close(fd)
     os.replace(tmp, dest)
@@ -250,7 +248,7 @@ def frame_count(raw: bytes) -> int:
     return n
 
 
-def zinfo_unpack(path: str) -> list[dict]:
+def zinfo_unpack(path: str) -> list[dict[str, Any]]:
     """Entry metadata without reading bodies: used by `doctor` and by the determinism test."""
     out = []
     with zipfile.ZipFile(path) as zf:

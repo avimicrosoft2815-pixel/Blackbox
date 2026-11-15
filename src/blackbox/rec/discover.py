@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
+from typing import Any
 
 from blackbox import constants as C
 from blackbox.tape import head as head_mod
@@ -30,7 +31,7 @@ class TapeEntry:
     stray_tmp: list[str] = field(default_factory=list)
     actions: list[str] = field(default_factory=list)
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "writer_uuid": self.writer_uuid, "active_segment": self.active_segment, "head_gen": self.head_gen,
             "segments": self.segments, "sealed": self.sealed, "orphan_segment": self.orphan_segment,

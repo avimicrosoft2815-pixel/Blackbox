@@ -122,6 +122,37 @@ Kind registry (append-only): `1 SEG_END`, `2 CHAIN`, `3 INTERN`, `4 GAP`, `5 DEG
 `16 NODE_OPEN`, `17 NODE_CLOSE`, `18 EDGE`, `32 MODEL_REQUEST`, `33 MODEL_RESPONSE`, `34 MODEL_CHUNK`,
 `35 MODEL_ERROR`, `48 TOOL_REQUEST`, `49 TOOL_RESULT`, `80 RUN_START`, `81 RUN_END`, `96 EXCEPTION`, `112 MARK`.
 
+### 4.0 Model-frame payloads (JSON, not CBOR)
+
+`MODEL_REQUEST` (32), `MODEL_CHUNK` (34), `MODEL_RESPONSE` (33) and `MODEL_ERROR` (35) carry canonical JSON in their
+payload; the chunk payload depends on the call's `content` mode (D-030), which the request frame declares:
+
+| mode | `MODEL_CHUNK` payload |
+|---|---|
+| `full` | the **raw response bytes and nothing else**, so a reader concatenates chunk frames to get the body back |
+| `hash` | `[bbx-hash sha256=<64 hex> bytes=<n>]` — a digest of the group's bytes and their count, CPU-readable ASCII |
+| `off` | `[bbx-off bytes=<n>]` — the count alone |
+
+The count is in the payload because a reader must be able to answer "how many bytes arrived before the process died"
+from the frames alone; `chunk_bytes()` is the one implementation of that rule and `rec.recovery` uses it. A header is
+bracketed and begins `[bbx-` so it cannot be mistaken for a body; a body that literally began with `[bbx-` and ended
+with `]` and contained ` bytes=<int>]` would be misread, which is the documented cost of the convention (bodies are
+SSE or JSON in practice). The summary keys a reader may rely on:
+
+| key | meaning |
+|---|---|
+| `chunks_events` | parsed stream events the seam counted (seam C counts events, not bytes — D-023) |
+| `chunks_raw` | **reads the application made** — counted before redaction, so it is a fact about the call |
+| `chunks_stored`, `bytes_stored` | frames and bytes the tape actually holds, after redaction and coalescing |
+| `bytes_received` | bytes the application received, unchanged by redaction or by the sink |
+| `partial` | the stream ended without reaching the end of the response (cancel, timeout, dropped socket) |
+| `redaction` | `{mode, counts: {kind: n}, bytes_in, bytes_out, window, failures}` — **counts, never content** |
+
+`chunks_raw` and `chunks_stored` are separate numbers because redaction merges and drops segments; a reader that has
+one must not infer the other (D-029). A `redaction.failures` above zero means the redactor raised and its input was
+replaced by `[REDACTION_FAILED]`: the call kept its place in the stream and its content is absent, which is what the
+architecture's C4 asks for.
+
 ### 4.1 `GAP` frames — a declared hole, not a missing frame
 
 `GAP` (kind 4) is the only frame that is allowed to *shorten* the readable tape. Payload (canonical CBOR):
@@ -217,9 +248,22 @@ Payloads above `blob_inline_max` (1024 B) leave the frame and become a file name
 
 `body_len = file_size − 56`, so there is no length field to disagree with the file.
 
-**Write path:** `hash → tmp (O_EXCL) → write → fdatasync → os.replace → fsync(dir)`. A visible blob is therefore a
-complete blob; a kill before the rename leaves only `*.tmp-*`, swept by `blobs.sweep_tmp`. Two crash stages exist
-for tests: `S9` (after the tmp body, before the rename) and `S9b` (after the rename, before the directory fsync).
+**Write path (D-019, C32):** `hash → tmp (O_EXCL) → write → os.replace`, and **the calling thread never syncs**.
+A visible blob is still a complete blob: `os.replace` of a fully written file is atomic with respect to *process*
+death without a sync, because the page cache outlives the process — the same promise the tape makes in `process`
+mode. Durability against a *machine* crash is owned by the durability mode, in this order:
+
+| mode | who syncs the blob | when, relative to the referencing frame |
+|---|---|---|
+| `process` | nobody | it goes as far as the tape goes: kill-safe, not power-cut-safe |
+| `kernel` | the keeper | `sync_pending()` in the tick, **before** the tape sync covering the frame (`Keeper.tick` → `sync_pending` → `publish_if_due`); `TapeWriter._maybe_sync` repeats the same order if a group commit publishes on the calling thread |
+| `paranoid` | the caller, as part of the put | the blob **and its directory** are durable before the frame is appended, so before it can be published |
+
+The invariant is *no durable frame references a non-durable blob*, and it is a test rather than a comment:
+`tests/test_blob_durability.py` records the sync calls in order through a platform shim and reads the published
+frames back to check every `has_blob` reference against what was synced. A kill before the rename leaves only
+`*.tmp-*`, swept by `blobs.sweep_tmp`. Two crash stages exist for tests: `S9` (after the tmp body, before the
+rename) and `S9b` (after the rename, before any directory sync).
 **Read path:** the CRC is checked before the body is trusted, the codec is dispatched, and the payload hash is
 recomputed on every read; a mismatch is `BBX-E162`, a short/garbled container `BBX-E161`, a missing file `BBX-E160`.
 The **name is part of the claim** — a file whose content hash differs from its own filename is refused, not

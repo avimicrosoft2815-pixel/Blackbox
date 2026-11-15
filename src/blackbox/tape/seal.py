@@ -9,11 +9,15 @@ from __future__ import annotations
 
 import os
 import struct
+from typing import Any
 
 from blackbox import constants as C
 from blackbox.codec.crc32 import crc32
 from blackbox.codec.ids import blake2b
 from blackbox.errors import bbx
+from blackbox.platform import current as _plat_current
+
+_plat = _plat_current()      # C32: every sync goes through the dispatch, never `os.fsync` at the call site
 
 
 def encode(*, segment_no: int, reason: int, start_seq: int, end_seq: int, frame_count: int,
@@ -36,7 +40,7 @@ def encode(*, segment_no: int, reason: int, start_seq: int, end_seq: int, frame_
     return bytes(buf)
 
 
-def decode(buf: bytes) -> dict:
+def decode(buf: bytes) -> dict[str, Any]:
     if len(buf) != C.SEAL_BYTES:
         raise bbx("BBX-E224", f"seal is {len(buf)} B, expected {C.SEAL_BYTES}")
     if buf[0:8] != C.MAGIC_SEAL:
@@ -57,7 +61,7 @@ def decode(buf: bytes) -> dict:
 
 
 def write(path: str, *, segment_no: int, reason: int, start_seq: int, end_seq: int, frame_count: int,
-          body: bytes, prev_chain: bytes, sealer: bytes, closed_wall_ns: int | None = None) -> dict:
+          body: bytes, prev_chain: bytes, sealer: bytes, closed_wall_ns: int | None = None) -> dict[str, Any]:
     """Write `<path>` (…/00000001.seal) atomically: tmp + fsync + replace."""
     import time
 
@@ -71,12 +75,12 @@ def write(path: str, *, segment_no: int, reason: int, start_seq: int, end_seq: i
     with open(tmp, "wb") as fh:
         fh.write(payload)
         fh.flush()
-        os.fsync(fh.fileno())
+        _plat.fdatasync(fh.fileno())
     os.replace(tmp, path)
     return decode(payload)
 
 
-def read(path: str) -> dict | None:
+def read(path: str) -> dict[str, Any] | None:
     try:
         with open(path, "rb") as fh:
             return decode(fh.read(C.SEAL_BYTES))
@@ -84,14 +88,14 @@ def read(path: str) -> dict | None:
         return None
 
 
-def verify(segment_path: str, seal_path: str) -> dict:
+def verify(segment_path: str, seal_path: str) -> dict[str, Any]:
     """Verify a sealed segment against its footer. Raises BBX-E224 on mismatch."""
     seal = read(seal_path)
     if seal is None:
         raise bbx("BBX-E224", f"no seal for {segment_path}")
-    with open(segment_path, "rb") as fh:
-        fh.seek(C.SEGMENT_HEADER_BYTES)
-        body = fh.read(seal["body_len"])
+    from blackbox.tape import segments  # local: segments imports this module's constants only
+
+    body = segments.logical_bytes(segment_path)[C.SEGMENT_HEADER_BYTES:C.SEGMENT_HEADER_BYTES + seal["body_len"]]
     if len(body) != seal["body_len"]:
         raise bbx("BBX-E224", "body shorter than the footer declares")
     if crc32(body) != seal["body_crc32"] or blake2b(body) != seal["body_hash"]:

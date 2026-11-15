@@ -9,6 +9,9 @@ attacker who can rewrite the whole directory and recompute the chain; the keyed 
 """
 from __future__ import annotations
 
+from collections.abc import Sequence
+from typing import Any
+
 from blackbox import constants as C
 from blackbox.codec import cbor
 from blackbox.codec.ids import blake2b
@@ -25,7 +28,7 @@ def batch_hash(frames: list[bytes]) -> bytes:
     return h
 
 
-def batch_hash_spans(mm, spans) -> bytes:
+def batch_hash_spans(mm: Any, spans: Sequence[tuple[int, int]]) -> bytes:
     """Batch hash straight off the mapped segment: no frame bytes are ever concatenated in memory."""
     import hashlib
 
@@ -44,7 +47,7 @@ def encode_payload(*, prev: bytes, batch: bytes, first_seq: int, last_seq: int) 
     return cbor.encode({"prev": prev, "batch": batch, "first": first_seq, "last": last_seq})
 
 
-def decode_payload(payload: bytes) -> dict:
+def decode_payload(payload: bytes) -> dict[str, Any]:
     d = cbor.decode_or_raise(payload)
     for key in ("prev", "batch"):
         if not isinstance(d.get(key), (bytes, type(None))) or len(d[key] or b"") != 32:

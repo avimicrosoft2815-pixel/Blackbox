@@ -5,6 +5,8 @@ import contextlib
 import os
 import struct
 import time
+import zlib
+from typing import Any
 
 from blackbox import constants as C
 from blackbox.errors import bbx
@@ -39,7 +41,7 @@ def encode_header(*, writer_uuid: bytes, segment_no: int, start_seq: int, segmen
     return bytes(buf)
 
 
-def read_header(tape_dir: str, n: int) -> dict:
+def read_header(tape_dir: str, n: int) -> dict[str, Any]:
     """Decode segment n's header from disk (raises OSError when the segment is gone or short)."""
     with open(seg_path(tape_dir, n), "rb") as fh:
         buf = fh.read(C.SEGMENT_HEADER_BYTES)
@@ -48,7 +50,7 @@ def read_header(tape_dir: str, n: int) -> dict:
     return decode_header(buf)
 
 
-def decode_header(buf: bytes) -> dict:
+def decode_header(buf: bytes) -> dict[str, Any]:
     from blackbox.codec.crc32 import crc32
     if len(buf) < C.SEGMENT_HEADER_BYTES or buf[0:8] != C.MAGIC_SEG:
         raise bbx("BBX-E224", "bad segment magic")
@@ -95,10 +97,7 @@ def finish(tape_dir: str, n: int, tmp: str, *, writer_uuid: bytes, segment_bytes
     fd = _plat.open_fd(tmp, os.O_RDWR)
     try:
         _plat.pwrite(fd, header, 0)
-        if hasattr(os, "fdatasync"):
-            os.fdatasync(fd)
-        else:                                # pragma: no cover - Windows
-            os.fsync(fd)
+        _plat.fdatasync(fd)                   # the dispatch handles the Windows fallback, not the caller
     finally:
         os.close(fd)
     os.replace(tmp, path)
@@ -122,15 +121,27 @@ def create(tape_dir: str, n: int, *, writer_uuid: bytes, segment_bytes: int, pre
                   prev_chain=prev_chain)
 
 
+def seg_path_any(tape_dir: str, n: int) -> str | None:
+    """The segment wherever it lives: the live `<n>.seg`, else its compacted copy under `arch/` (P1-13)."""
+    live = seg_path(tape_dir, n)
+    if os.path.exists(live):
+        return live
+    from blackbox.tape import arch  # local import: arch imports this module for `seg_path`
+    return arch.find(tape_dir, n)
+
+
 def list_segments(tape_dir: str) -> list[int]:
-    out: list[int] = []
+    """Every segment number a reader must account for, live **and** archived (P1-13 compaction)."""
+    out: set[int] = set()
     try:
         names = os.listdir(tape_dir)
     except FileNotFoundError:
-        return out
+        names = []
     for name in names:
         if name.endswith(".seg") and name[:-4].isdigit():
-            out.append(int(name[:-4]))
+            out.add(int(name[:-4]))
+    from blackbox.tape import arch
+    out.update(arch.archived_numbers(tape_dir))
     return sorted(out)
 
 
@@ -141,8 +152,39 @@ def body_of(path: str, *, end_offset: int | None = None) -> bytes:
 
 
 def seal_segment(tape_dir: str, n: int, *, reason: int, body: bytes, prev_chain: bytes,
-                 start_seq: int, end_seq: int, frame_count: int, sealer: bytes) -> dict:
+                 start_seq: int, end_seq: int, frame_count: int, sealer: bytes) -> dict[str, Any]:
     from blackbox.tape import seal as seal_mod
     return seal_mod.write(seal_path(tape_dir, n), segment_no=n, reason=reason, start_seq=start_seq,
                           end_seq=end_seq, frame_count=frame_count, body=body,
                           prev_chain=prev_chain, sealer=sealer)
+
+
+def codec_of(raw: bytes) -> int:
+    codec: int = struct.unpack_from("<I", raw, C.SEG_CODEC_OFF)[0]
+    return codec
+
+
+def logical_bytes(path: str, *, limit: int | None = None) -> bytes:
+    """The segment as a reader wants it: header, then the **uncompressed** frames region (P1-13).
+
+    A compacted segment stores its body with `codec = zlib` and says so in the header, so every reader goes through
+    here instead of `open().read()`; the limit applies to logical bytes, which keeps prefix reads identical on both
+    layouts.
+    """
+    with open(path, "rb") as fh:
+        raw = fh.read() if limit is None else fh.read(max(limit, C.SEGMENT_HEADER_BYTES))
+    if len(raw) < C.SEGMENT_HEADER_BYTES:
+        return raw
+    codec = codec_of(raw)
+    if codec == C.CODEC_RAW:
+        # The common case must not copy: a scan reads the whole segment, and a second copy of 16 MiB per segment
+        # showed up as a 2.5x recovery regression when this function was introduced (found by the C37 re-run).
+        return raw if limit is None else raw[:limit]
+    if codec != C.CODEC_ZLIB:
+        raise bbx("BBX-E221", f"{path}: segment codec {codec} is not readable by this reader")
+    try:
+        body = zlib.decompress(raw[C.SEGMENT_HEADER_BYTES:])
+    except zlib.error as exc:
+        raise bbx("BBX-E224", f"{path}: compacted body does not decompress: {exc}") from None
+    out = raw[:C.SEGMENT_HEADER_BYTES] + body          # one allocation: header + decompressed frames
+    return out if limit is None else out[:limit]

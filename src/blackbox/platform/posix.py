@@ -120,7 +120,7 @@ def open_fd(path: str, flags: int, mode: int = 0o600) -> int:
     return os.open(path, flags | O_BINARY, mode)
 
 
-def pwrite(fd: int, buf, off: int) -> None:
+def pwrite(fd: int, buf: bytes | memoryview, off: int) -> None:
     """Positional write. The only route to `os.pwrite` in this repository (C22)."""
     view = buf if isinstance(buf, (bytes, bytearray, memoryview)) else bytes(buf)
     os.pwrite(fd, view, off)

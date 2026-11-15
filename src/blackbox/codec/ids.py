@@ -8,6 +8,7 @@ from __future__ import annotations
 import hashlib
 import os
 import time
+from typing import Any
 
 from blackbox.codec import cbor
 
@@ -56,7 +57,7 @@ def blake2b(data: bytes) -> bytes:
     return hashlib.blake2b(data, digest_size=HASH_BYTES).digest()
 
 
-def fingerprint(obj) -> bytes:
+def fingerprint(obj: Any) -> bytes:
     """Stable 32-byte fingerprint of a CBOR-encodable object (key order normalised by the encoder)."""
     return blake2b(cbor.encode(obj))
 

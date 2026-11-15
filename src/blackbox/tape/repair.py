@@ -11,6 +11,7 @@ head already names `n+1`.
 from __future__ import annotations
 
 import os
+from typing import Any
 
 from blackbox import constants as C
 from blackbox.tape import frame as frame_mod
@@ -20,11 +21,11 @@ from blackbox.tape import seal as seal_mod
 from blackbox.tape import segments
 
 
-def segment_state(tape_dir: str, n: int, *, segment_bytes: int | None = None) -> dict:
+def segment_state(tape_dir: str, n: int, *, segment_bytes: int | None = None) -> dict[str, Any]:
     """Classify one segment file: missing, header-only (empty body), open, sealed, or damaged."""
     path = segments.seg_path(tape_dir, n)
     seal_path = segments.seal_path(tape_dir, n)
-    info: dict = {"segment": n, "path": path, "exists": os.path.exists(path),
+    info: dict[str, Any] = {"segment": n, "path": path, "exists": os.path.exists(path),
                   "sealed": os.path.exists(seal_path), "empty_body": False, "frames": 0,
                   "last_kind": None, "first_seq": None, "last_seq": None, "header": None, "damaged": False}
     if not info["exists"]:
@@ -58,12 +59,12 @@ def segment_state(tape_dir: str, n: int, *, segment_bytes: int | None = None) ->
     return info
 
 
-def completes_roll(state: dict) -> bool:
+def completes_roll(state: dict[str, Any]) -> bool:
     """True when this segment is the `n+1` of an interrupted roll: valid header, nothing written yet."""
     return bool(state["exists"] and not state["damaged"] and state["empty_body"] and not state["sealed"])
 
 
-def rebuild_head(tape_dir: str, *, sealer: bytes = b"") -> dict | None:
+def rebuild_head(tape_dir: str, *, sealer: bytes = b"") -> dict[str, Any] | None:
     """Reconstruct `head` from the segments when both slots are unreadable.
 
     The head is a *hint*: every frame carries its own `seq`, so the committed prefix is recoverable from the
@@ -99,7 +100,7 @@ def rebuild_head(tape_dir: str, *, sealer: bytes = b"") -> dict | None:
     return report
 
 
-def adopt_orphan(tape_dir: str, *, sealer: bytes = b"", closed_wall_ns: int | None = None) -> dict | None:
+def adopt_orphan(tape_dir: str, *, sealer: bytes = b"", closed_wall_ns: int | None = None) -> dict[str, Any] | None:
     """Complete an interrupted roll. Returns a report, or None when there is nothing to do.
 
     Steps (each skipped when already done): seal segment `n` if it is missing its `.seal`, then publish the

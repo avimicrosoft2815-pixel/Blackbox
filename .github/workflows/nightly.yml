@@ -7,13 +7,21 @@ jobs:
   kill-matrix:
     runs-on: ubuntu-latest
     steps:
+      # C35: full history. A depth-1 clone has one commit, so `git merge-base --is-ancestor` can only ever see
+      # HEAD, the forbidden-word scan over `git log` sees exactly one message, and the ancestry tests fail for
+      # every sha — which is what turned every run on this branch red while the same tests passed locally.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
       - run: python -m pip install -e ".[dev]"
+      # Defect 28: this step named `tests/kill/randomized_kills.py`, which does not exist, so the nightly's kill job
+      # exited 2 (usage error) on every run it ever had and the P2-09 clock never started. The driver that does exist
+      # is `tests/kill/kill_matrix.py`, and its output flag is `--json`.
       - name: 2000 randomized kill -9 trials (plan §24 G3)
-        run: python tests/kill/randomized_kills.py --trials 2000 --out bench/results/kill-nightly.json
+        run: python tests/kill/kill_matrix.py --trials 2000 --json bench/results/kill-nightly.json
       - uses: actions/upload-artifact@v4
         with:
           name: kill-nightly
@@ -21,9 +29,17 @@ jobs:
   cbor-fuzz:
     runs-on: ubuntu-latest
     steps:
+      # C35: full history. A depth-1 clone has one commit, so `git merge-base --is-ancestor` can only ever see
+      # HEAD, the forbidden-word scan over `git log` sees exactly one message, and the ancestry tests fail for
+      # every sha — which is what turned every run on this branch red while the same tests passed locally.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
       - run: python -m pip install -e ".[dev]"
-      - run: python -m pytest tests/test_cbor_fuzz.py -q
+      # Defect 28, the same mistake in the other job: there is no `tests/test_cbor_fuzz.py`, so pytest exited 4.
+      # The fuzzer is `bench/fuzz_cbor.py` and it is a script, not a test module.
+      - name: 100 000 CBOR buffers (P1-03)
+        run: python bench/fuzz_cbor.py --iterations 100000 --out bench/results/fuzz-cbor-nightly.json

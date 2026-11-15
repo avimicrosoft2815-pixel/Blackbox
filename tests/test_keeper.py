@@ -19,19 +19,43 @@ def _writer(tmp_path, **kw):
 
 def test_low_rate_event_is_published_within_the_window(tmp_path):
     w = _writer(tmp_path)
-    # 200 ms, not 5: under load, a 5 ms window can expire *between* flush() and emit(), in which case `emit`
-    # publishes inline and this test would be measuring the app thread instead of the keeper. The assertion
-    # below is about the keeper draining a window the app left open, so the window has to survive a stall.
+    # C40. The window is measured from the *last publish*, not from `flush()`: a flush with nothing pending and a
+    # head already published is a no-op, so the reference point was `open()`. On a cold Windows runner more than
+    # 200 ms can pass between `open()` and `emit()` (1 MiB preallocation, a scanning antivirus), the window is
+    # already expired, `emit` correctly publishes inline, the keeper publishes nothing, and this test failed with
+    # `0 >= 1` in the py3.13/windows cell of run 43678767989. A publish here sets the reference point to "now" on
+    # every OS, which is what the assertion is about: the keeper drains a window the app left open.
     w.batch_ms = 200.0
+    w.publish()                      # the window starts here, whatever the machine did before it
     k = Keeper(w).start()
     try:
-        w.flush()                    # start the window here, so `emit` cannot be "already due"
         w.emit(C.KIND_MARK, b"x" * 64)
         deadline = time.monotonic() + 2.0
         while w._pending and time.monotonic() < deadline:
             time.sleep(0.002)
         assert w._pending == 0, "keeper did not drain the window"
         assert k.publishes >= 1
+    finally:
+        k.stop()
+        w.close()
+
+
+def test_a_window_older_than_the_bound_publishes_inline(tmp_path):
+    """The other half of C40, stated instead of assumed: an *expired* window must not hold a frame.
+
+    If the last publish is older than `batch_ms`, `emit` publishes in the app thread and the keeper has nothing to
+    do. That is the behaviour the flaky Windows cell was actually seeing, and it is correct - a window that old is
+    exactly what the bound exists to prevent.
+    """
+    w = _writer(tmp_path)
+    w.batch_ms = 5.0
+    w.publish()
+    k = Keeper(w).start()
+    try:
+        time.sleep(0.02)             # 4x the window: the next event is already due
+        w.emit(C.KIND_MARK, b"x" * 64)
+        assert w._pending == 0, "an expired window must publish the frame inline"
+        assert k.publishes == 0, "the keeper was not needed and must not be credited"
     finally:
         k.stop()
         w.close()
