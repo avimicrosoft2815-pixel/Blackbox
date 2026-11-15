@@ -134,10 +134,7 @@ def publish(path: str | os.PathLike, slot: HeadSlot, *, mode: str = "process", f
         fh.write(bytes(buf[base + 32:base + C.HEAD_SLOT_BYTES]))
         fh.flush()
         if mode in ("kernel", "paranoid"):
-            if hasattr(os, "fdatasync"):
-                os.fdatasync(fh.fileno())
-            else:  # Windows
-                os.fsync(fh.fileno())
+            _current_platform().fdatasync(fh.fileno())
     return new_slot
 
 
@@ -169,18 +166,12 @@ class HeadFile:
             fd = _current_platform().open_fd(tmp, os.O_RDWR | os.O_CREAT | os.O_TRUNC, 0o600)
             try:
                 os.ftruncate(fd, C.HEAD_BYTES)
-                os.fsync(fd)
+                _current_platform().fdatasync(fd)
             finally:
                 os.close(fd)
             os.replace(tmp, path)
-            try:
-                dfd = os.open(os.path.dirname(path) or ".", os.O_RDONLY)
-                try:
-                    os.fsync(dfd)
-                finally:
-                    os.close(dfd)
-            except OSError:
-                pass
+            with contextlib.suppress(OSError):
+                _current_platform().fsync_dir(os.path.dirname(path) or ".")
             existed = True
         self._plat = _current_platform()
         self.fd = self._plat.open_fd(path, os.O_RDWR)
@@ -188,7 +179,7 @@ class HeadFile:
             if not existed or os.fstat(self.fd).st_size < C.HEAD_BYTES:
                 os.ftruncate(self.fd, C.HEAD_BYTES)
                 if create:
-                    os.fsync(self.fd)
+                    self._plat.fdatasync(self.fd)
         except Exception:
             os.close(self.fd)
             raise
@@ -252,10 +243,7 @@ class HeadFile:
     def sync(self) -> None:
         if not self._dirty:
             return
-        if hasattr(os, "fdatasync"):
-            os.fdatasync(self.fd)
-        else:                                   # pragma: no cover - Windows
-            os.fsync(self.fd)
+        self._plat.fdatasync(self.fd)
         self._dirty = False
 
     def close(self) -> None:

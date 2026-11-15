@@ -218,10 +218,7 @@ def write_capsule(dest: str, entries: dict[str, bytes], manifest: dict) -> dict:
         written = 0
         while written < len(blob):
             written += os.write(fd, view[written:])
-        if hasattr(os, "fdatasync"):
-            os.fdatasync(fd)
-        else:
-            os.fsync(fd)
+        _plat.fdatasync(fd)
     finally:
         os.close(fd)
     os.replace(tmp, dest)

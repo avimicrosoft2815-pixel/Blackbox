@@ -95,10 +95,7 @@ def finish(tape_dir: str, n: int, tmp: str, *, writer_uuid: bytes, segment_bytes
     fd = _plat.open_fd(tmp, os.O_RDWR)
     try:
         _plat.pwrite(fd, header, 0)
-        if hasattr(os, "fdatasync"):
-            os.fdatasync(fd)
-        else:                                # pragma: no cover - Windows
-            os.fsync(fd)
+        _plat.fdatasync(fd)                   # the dispatch handles the Windows fallback, not the caller
     finally:
         os.close(fd)
     os.replace(tmp, path)

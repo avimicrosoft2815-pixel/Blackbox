@@ -28,6 +28,7 @@ import zlib
 from dataclasses import dataclass, field
 
 from blackbox import constants as C
+from blackbox.codec import cbor
 from blackbox.codec.crc32 import crc32
 from blackbox.codec.ids import blake2b
 from blackbox.errors import BlackBoxError, bbx
@@ -128,8 +129,13 @@ def decode(raw: bytes, *, verify_hash: bool = True) -> dict:
 
 
 # ── write path (P1-14) ──────────────────────────────────────────────────────
-def _write_atomic(path: str, blob: bytes) -> str:
-    """tmp → fsync → replace → fsync(dir). A visible blob is therefore a complete blob."""
+def _write_atomic(path: str, blob: bytes, *, sync: bool) -> str:
+    """tmp → write → close → replace, and a sync **only when the caller is the keeper** (D-019).
+
+    `os.replace` of a fully written tmp file is atomic with respect to process death without any sync, because the
+    page cache outlives the process: a visible blob is a complete blob in every mode. Only a *machine* crash needs
+    the sync, and that sync is the keeper's job, never the app thread's (C32).
+    """
     directory = os.path.dirname(path)
     os.makedirs(directory, mode=0o700, exist_ok=True)
     tmp = f"{path}.tmp-{os.getpid()}-{time.monotonic_ns()}"
@@ -137,23 +143,24 @@ def _write_atomic(path: str, blob: bytes) -> str:
     try:
         _plat.pwrite(fd, memoryview(blob), 0)
         _die("S9")                      # tmp body is on disk, the name is not: a kill leaves nothing visible
-        if hasattr(os, "fdatasync"):
-            os.fdatasync(fd)
-        else:
-            os.fsync(fd)
+        if sync:
+            _plat.fdatasync(fd)
     finally:
         os.close(fd)
     os.replace(tmp, path)
     _die("S9b")                         # the blob is visible; only the directory entry is not yet durable
-    _plat.fsync_dir(directory)
+    if sync:
+        _plat.fsync_dir(directory)
     return path
 
 
-def put(data_dir: str, payload: bytes, *, compress: bool = False) -> dict:
+def put(data_dir: str, payload: bytes, *, compress: bool = False, sync: bool = False) -> dict:
     """Write one blob. Returns its ref record; identical payloads cost one file (`deduped`).
 
     `compress=True` compresses inline — used by tests and by callers that already know the payload is cold. The
     default is raw, because compression belongs on the keeper (P1-15), not on the writer thread.
+    `sync=False` is the calling-thread default: the page cache outlives the process, so durability against a
+    *machine* crash is the keeper's job (`BlobWriter`, D-019), not a cost paid per payload on the app thread.
     """
     digest = digest_of(payload)
     path = blob_path(data_dir, digest)
@@ -165,7 +172,7 @@ def put(data_dir: str, payload: bytes, *, compress: bool = False) -> dict:
         codec, body = CODEC_ZLIB, zlib.compress(payload, ZLIB_LEVEL)
         if len(body) >= len(payload):
             codec, body = CODEC_RAW, payload      # compression that grows the file is not compression
-    _write_atomic(path, encode(digest, body, codec=codec, orig_len=len(payload)))
+    _write_atomic(path, encode(digest, body, codec=codec, orig_len=len(payload)), sync=sync)
     return {"hash": digest, "path": path, "codec": codec, "codec_name": CODEC_NAMES[codec],
             "orig_len": len(payload), "stored_len": len(body), "deduped": False,
             "inline": should_inline(payload)}
@@ -332,10 +339,91 @@ class CompressionQueue:
         if len(body) >= len(payload):
             return {"action": "kept", "saved": 0, "reason": "compression does not shrink this payload"}
         path = blob_path(self.data_dir, record["hash"])
-        _write_atomic(path, encode(record["hash"], body, codec=CODEC_ZLIB, orig_len=record["orig_len"]))
+        # The compression queue runs on the keeper, so this rewrite may sync (D-019).
+        _write_atomic(path, encode(record["hash"], body, codec=CODEC_ZLIB, orig_len=record["orig_len"]), sync=True)
         return {"action": "compressed", "saved": len(payload) - len(body)}
 
     def stats(self) -> dict:
         return {"pending": len(self.pending), "compressed": self.done, "skipped": self.skipped,
                 "failed": self.failed, "bytes_saved": self.bytes_saved,
                 "errors": self.last_errors[-8:]}
+
+
+# ── durability ownership (D-019, C32) ───────────────────────────────────────
+MODES = ("process", "kernel", "paranoid")
+
+
+def sync_path(path: str) -> None:
+    """Make one already-written blob file and its directory entry durable. Keeper-side only."""
+    fd = _plat.open_fd(path, os.O_RDONLY)
+    try:
+        _plat.fdatasync(fd)
+    finally:
+        os.close(fd)
+    _plat.fsync_dir(os.path.dirname(path) or ".")
+
+
+class BlobWriter:
+    """Blob durability follows the tape's durability mode, and the calling thread never syncs (D-019).
+
+    `process`   — no sync at all. A visible blob is a complete blob against a *process* kill because the page
+                  cache outlives the process; the tape in this mode makes exactly the same promise, so a sync here
+                  would buy nothing the tape is not already buying (that is why the 64 KiB event cost a sync).
+    `kernel`    — the calling thread writes and `put` enqueues the path; the keeper calls `sync_pending()` in the
+                  same tick **before** `writer.publish_if_due()`, so the blob and its directory are durable before
+                  the tape sync that covers the frame referencing it. Invariant: no durable frame references a
+                  non-durable blob.
+    `paranoid`  — `put` syncs before it returns, i.e. before the referencing frame is even appended, so the blob is
+                  durable before the frame can be published.
+    """
+
+    __slots__ = ("_pending", "compress", "data_dir", "mode", "synced")
+
+    def __init__(self, data_dir: str, *, mode: str = "process", compress: bool = False) -> None:
+        if mode not in MODES:
+            raise ValueError(f"durability mode must be one of {MODES}, got {mode!r}")
+        self.data_dir = data_dir
+        self.mode = mode
+        # Compression stays on the keeper (P1-15); asking for it here would put zlib on the app thread.
+        self.compress = False if mode == "process" else compress
+        self._pending: list[str] = []
+        self.synced = 0
+
+    def put(self, payload: bytes) -> dict:
+        record = put(self.data_dir, payload, compress=self.compress, sync=self.mode == "paranoid")
+        if self.mode == "kernel" and not record["deduped"]:
+            self._pending.append(record["path"])
+        return record
+
+    def pending(self) -> int:
+        return len(self._pending)
+
+    def sync_pending(self, limit: int = 0) -> int:
+        """Sync queued blobs and their directories. Runs on the keeper, before the tape sync of the same tick."""
+        for path in list(self._pending if not limit else self._pending[:limit]):
+            try:
+                sync_path(path)
+                self.synced += 1
+            except OSError:
+                continue          # counted as unsynced: the next tick retries the same path
+            self._pending.remove(path)
+        return self.synced
+
+    def stats(self) -> dict:
+        return {"mode": self.mode, "pending_sync": len(self._pending), "synced": self.synced}
+
+
+def append_payload(writer, blobs: BlobWriter, kind: int, payload: bytes, *, flags: int = 0, **kw) -> int:
+    """Append one event whose payload is `payload`: inline, or a blob plus the frame's ref stub (§8.5).
+
+    This is the one place where "the calling thread never syncs a blob" is enforced structurally: the sync decision
+    lives in `BlobWriter.put`, and the frame is appended *after* it returns, so `paranoid` is durable before the
+    frame exists and `process`/`kernel` pay nothing on this thread.
+    """
+    if should_inline(payload):
+        seq: int = writer.append(kind, payload, flags=flags, **kw)
+        return seq
+    record = blobs.put(payload)
+    stub = cbor.encode(ref_stub(record))
+    seq = writer.append(kind, stub, flags=flags | C.FRAME_FLAG_HAS_BLOB, **kw)
+    return seq

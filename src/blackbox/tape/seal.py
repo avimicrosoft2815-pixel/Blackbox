@@ -14,6 +14,9 @@ from blackbox import constants as C
 from blackbox.codec.crc32 import crc32
 from blackbox.codec.ids import blake2b
 from blackbox.errors import bbx
+from blackbox.platform import current as _plat_current
+
+_plat = _plat_current()      # C32: every sync goes through the dispatch, never `os.fsync` at the call site
 
 
 def encode(*, segment_no: int, reason: int, start_seq: int, end_seq: int, frame_count: int,
@@ -71,7 +74,7 @@ def write(path: str, *, segment_no: int, reason: int, start_seq: int, end_seq: i
     with open(tmp, "wb") as fh:
         fh.write(payload)
         fh.flush()
-        os.fsync(fh.fileno())
+        _plat.fdatasync(fh.fileno())
     os.replace(tmp, path)
     return decode(payload)
 

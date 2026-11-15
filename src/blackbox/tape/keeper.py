@@ -17,9 +17,14 @@ TICK_S = 0.001          # 1 ms: finer than the 5 ms publish bound, cheap enough 
 
 
 class Keeper:
-    def __init__(self, writer, *, tick_s: float = TICK_S, blob_queue=None, blob_jobs_per_tick: int = 4) -> None:
+    def __init__(self, writer, *, tick_s: float = TICK_S, blob_queue=None, blob_jobs_per_tick: int = 4,
+                 blob_writer=None) -> None:
         self.writer = writer
         self.tick_s = tick_s
+        # C32/D-019: blob durability is the keeper's job in `kernel` mode, and the ordering is the invariant —
+        # `sync_pending()` below runs before `publish_if_due()`, so the blob is durable before the tape sync that
+        # covers the frame that references it.
+        self.blob_writer = blob_writer
         # P1-15: compression is off the writer thread by construction — the app never touches this queue, and a
         # failure inside it is counted by the queue (the raw blob stays readable) instead of disabling the keeper.
         self.blob_queue = blob_queue
@@ -46,6 +51,8 @@ class Keeper:
             self._thread.join(timeout)
             self._thread = None
         if not self.disabled:
+            if self.blob_writer is not None:      # blob before tape, on the way out too
+                self.blob_writer.sync_pending()
             self.writer.flush()
 
     def __enter__(self) -> Keeper:
@@ -69,6 +76,8 @@ class Keeper:
 
     def tick(self) -> None:
         self.ticks += 1
+        if self.blob_writer is not None:
+            self.blob_writer.sync_pending()
         if self.writer.publish_if_due():
             self.publishes += 1
         if self.blob_queue is not None and len(self.blob_queue):
@@ -79,4 +88,5 @@ class Keeper:
         return {"ticks": self.ticks, "publishes": self.publishes, "disabled": self.disabled,
                 "error": self.error, "tick_s": self.tick_s,
                 "blob_queue": self.blob_queue.stats() if self.blob_queue is not None else None,
+                "blob_writer": self.blob_writer.stats() if self.blob_writer is not None else None,
                 "window_max_ms": round(self.writer.window_max_ms, 3)}

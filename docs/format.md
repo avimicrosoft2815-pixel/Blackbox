@@ -217,9 +217,22 @@ Payloads above `blob_inline_max` (1024 B) leave the frame and become a file name
 
 `body_len = file_size − 56`, so there is no length field to disagree with the file.
 
-**Write path:** `hash → tmp (O_EXCL) → write → fdatasync → os.replace → fsync(dir)`. A visible blob is therefore a
-complete blob; a kill before the rename leaves only `*.tmp-*`, swept by `blobs.sweep_tmp`. Two crash stages exist
-for tests: `S9` (after the tmp body, before the rename) and `S9b` (after the rename, before the directory fsync).
+**Write path (D-019, C32):** `hash → tmp (O_EXCL) → write → os.replace`, and **the calling thread never syncs**.
+A visible blob is still a complete blob: `os.replace` of a fully written file is atomic with respect to *process*
+death without a sync, because the page cache outlives the process — the same promise the tape makes in `process`
+mode. Durability against a *machine* crash is owned by the durability mode, in this order:
+
+| mode | who syncs the blob | when, relative to the referencing frame |
+|---|---|---|
+| `process` | nobody | it goes as far as the tape goes: kill-safe, not power-cut-safe |
+| `kernel` | the keeper | `sync_pending()` in the tick, **before** the tape sync covering the frame (`Keeper.tick` → `sync_pending` → `publish_if_due`); `TapeWriter._maybe_sync` repeats the same order if a group commit publishes on the calling thread |
+| `paranoid` | the caller, as part of the put | the blob **and its directory** are durable before the frame is appended, so before it can be published |
+
+The invariant is *no durable frame references a non-durable blob*, and it is a test rather than a comment:
+`tests/test_blob_durability.py` records the sync calls in order through a platform shim and reads the published
+frames back to check every `has_blob` reference against what was synced. A kill before the rename leaves only
+`*.tmp-*`, swept by `blobs.sweep_tmp`. Two crash stages exist for tests: `S9` (after the tmp body, before the
+rename) and `S9b` (after the rename, before any directory sync).
 **Read path:** the CRC is checked before the body is trusted, the codec is dispatched, and the payload hash is
 recomputed on every read; a mismatch is `BBX-E162`, a short/garbled container `BBX-E161`, a missing file `BBX-E160`.
 The **name is part of the claim** — a file whose content hash differs from its own filename is refused, not

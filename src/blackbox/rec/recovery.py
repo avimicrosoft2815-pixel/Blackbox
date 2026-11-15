@@ -67,10 +67,7 @@ def _write_atomic(path: str, blob: bytes) -> None:
     fd = _plat.open_fd(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     try:
         _plat.pwrite(fd, memoryview(blob), 0)
-        if hasattr(os, "fdatasync"):
-            os.fdatasync(fd)
-        else:
-            os.fsync(fd)
+        _plat.fdatasync(fd)
     finally:
         os.close(fd)
     os.replace(tmp, path)
@@ -350,10 +347,7 @@ class Recovery:
                 return False                          # lost the race to another recoverer, which is fine
         try:
             _plat.pwrite(fd, memoryview(content), 0)
-            if hasattr(os, "fdatasync"):
-                os.fdatasync(fd)
-            else:
-                os.fsync(fd)
+            _plat.fdatasync(fd)
         finally:
             os.close(fd)
         return True

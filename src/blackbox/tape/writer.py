@@ -112,6 +112,7 @@ class TapeWriter:
         self._window_start_ns = 0
         self.publishes = 0
         self.syncs = 0
+        self.blob_writer = None      # set by `attach_blobs` when the recorder owns a blob store (C32)
         self.dropped_events = 0
         # The keeper thread publishes on a tick while the app thread appends. Roll mutates the mapping,
         # the head and the chain, so publish/flush/roll/close are serialised; append keeps its own short
@@ -135,7 +136,7 @@ class TapeWriter:
             with open(self.meta_path, "wb") as fh:
                 fh.write(blob)
                 fh.flush()
-                os.fsync(fh.fileno())
+                _plat.fdatasync(fh.fileno())
         meta = meta_mod.decode(self._read_meta())
         self.segment_bytes = meta["segment_bytes"]
 
@@ -331,7 +332,18 @@ class TapeWriter:
         _die("S5")
         return self._slot
 
+    def attach_blobs(self, blob_writer) -> None:
+        """C32/D-019: whoever syncs the tape syncs the blobs it references first, in that order.
+
+        The keeper's tick already calls `sync_pending()` before `publish_if_due()`; this hook covers the other path,
+        a group-commit publish that happens on the calling thread, where deferring the blob would leave a durable
+        frame pointing at a blob that is only in the page cache.
+        """
+        self.blob_writer = blob_writer
+
     def _maybe_sync(self, *, force: bool = False) -> None:
+        if self.blob_writer is not None:
+            self.blob_writer.sync_pending()      # blob before tape, always, and in that order
         if self._seg_fd is None:
             return
         now = time.perf_counter_ns()
@@ -339,10 +351,7 @@ class TapeWriter:
         if not (force or due):
             return
         self._flush_buf()
-        if hasattr(os, "fdatasync"):
-            os.fdatasync(self._seg_fd)
-        else:
-            os.fsync(self._seg_fd)
+        _plat.fdatasync(self._seg_fd)
         if self._head is not None:
             self._head.sync()
         self._last_sync_ns = now

@@ -89,3 +89,29 @@ def test_a_posix_liveness_probe_refuses_to_run_off_posix(monkeypatch):
     monkeypatch.setattr(os, "name", "nt")
     with pytest.raises(NotImplementedError):
         posix.pid_alive(os.getpid())
+
+
+def test_no_module_syncs_a_file_outside_the_platform_layer_or_the_keeper():
+    """C32: `os.fsync`/`os.fdatasync` at a call site is a promise the wrong thread will keep it.
+
+    The 64 KiB event used to fsync a blob on the app thread (`format.md` §7.1 before D-019). Every sync now goes
+    through `platform.*.fdatasync` / `fsync_dir`, which lets the durability mode decide who pays: nobody in
+    `process`, the keeper in `kernel`, the writer in `paranoid`. Two exemptions, both deliberate — the shims
+    themselves, and `tape/keeper.py`, whose whole job is time-based work (draining the commit window, sealing,
+    syncing blobs before the tape they are referenced by).
+    """
+    offenders: list[str] = []
+    for path in sorted(SRC.rglob("*.py")):
+        rel = path.relative_to(ROOT)
+        if path.parent.name == "platform" or rel.as_posix() == "src/blackbox/tape/keeper.py":
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            if (isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name)
+                    and func.value.id in ("os", "fcntl") and func.attr in ("fsync", "fdatasync")):
+                offenders.append(f"{rel}:{node.lineno}: {func.value.id}.{func.attr}()")
+    assert offenders == [], (
+        "these calls sync at the call site instead of through the dispatch: " + "; ".join(offenders))

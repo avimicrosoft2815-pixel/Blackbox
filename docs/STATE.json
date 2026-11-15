@@ -246,7 +246,9 @@
       "recovery_ms_per_10k_frames": 52.1,
       "rss_above_baseline_mib": 1.15,
       "amplification_16kib": 1.231,
-      "amplification_per_event": 1.843
+      "amplification_per_event": 1.843,
+      "payload_64kib_p50_us": 226.864,
+      "payload_64kib_p99_us": 461.281
     },
     "sources": {
       "full_event_p50_us": {
@@ -276,6 +278,14 @@
       "amplification_per_event": {
         "json": "bench/results/2026-11-14-recovery.json",
         "selector": "results.ext4.amplification.ratio"
+      },
+      "payload_64kib_p50_us": {
+        "json": "bench/results/2026-11-15-payload-blob.json",
+        "selector": "results.ext4.rows[gate=true].p50_us"
+      },
+      "payload_64kib_p99_us": {
+        "json": "bench/results/2026-11-15-payload-blob.json",
+        "selector": "results.ext4.rows[gate=true].p99_us"
       }
     },
     "regression_rule": "tools/bench_smoke.py fails the build when any key is missing or a fresh run is worse than the baseline by more than 10 % in the key's own direction"

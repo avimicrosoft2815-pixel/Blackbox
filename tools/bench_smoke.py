@@ -28,7 +28,8 @@ REGRESSION_LIMIT = 0.10          # Part B §6: a smoke run may not be 10 % worse
 
 # Which way is worse. A key that is not here is a build failure, not a silent skip: a new row needs a decision.
 WORSE_IF_HIGHER = {"full_event_p50_us", "full_event_p99_us", "recovery_ms_per_10k_frames",
-                   "rss_above_baseline_mib", "amplification_16kib", "amplification_per_event"}
+                   "rss_above_baseline_mib", "amplification_16kib", "amplification_per_event",
+                   "payload_64kib_p50_us", "payload_64kib_p99_us"}
 WORSE_IF_LOWER = {"events_per_s"}
 
 

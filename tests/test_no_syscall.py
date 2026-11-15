@@ -96,3 +96,57 @@ def test_kernel_mode_syncs_only_on_the_commit_boundary(tmp_path, monkeypatch):
     monkeypatch.setattr(os, "fdatasync", real, raising=False)
     assert 0 < synced["n"] < events // 10, f"{synced['n']} syncs for {events} events"
     w.close()
+
+
+def test_a_64kib_full_event_costs_a_bounded_named_set_of_calls(tmp_path, monkeypatch):
+    """C32/§15.1: one `content=full` 64 KiB event in `process` mode, counted call by call.
+
+    The row is a hard fail above 10 ms, so the point is what the *shape* of the cost is: four calls per new blob
+    (open, write, close, replace — all into the page cache), two `pwrite`s per publish for the tape, and
+    **no sync of any kind**. Before D-019 this cost two fsyncs of the calling thread per event.
+    """
+    from blackbox.store import blobs
+
+    w = TapeWriter(str(tmp_path), segment_bytes=C.DEFAULT_SEGMENT_BYTES, mode="process",
+                   chain_enabled=True).open()
+    bw = blobs.BlobWriter(str(tmp_path), mode="process")
+    payload = bytes(range(256)) * 256               # 64 KiB, incompressible-ish and not repeated
+    blobs.append_payload(w, bw, C.KIND_MODEL_RESPONSE, payload)   # warm up (meta/head, first blob)
+    w.flush()
+
+    watched = ("write", "pwrite", "writev", "pwritev", "fsync", "fdatasync", "open", "openat", "close",
+               "replace", "posix_fallocate", "ftruncate", "lseek")
+    counts = dict.fromkeys(watched, 0)
+
+    def counting(name, real):
+        def wrapper(*args, **kwargs):
+            counts[name] += 1
+            return real(*args, **kwargs)
+        return wrapper
+
+    patched = {}
+    for name in watched:
+        real = getattr(os, name, None)
+        if real is None:
+            continue
+        patched[name] = real
+        monkeypatch.setattr(os, name, counting(name, real), raising=False)
+    publishes_before = w.publishes
+    try:
+        for i in range(20):
+            blobs.append_payload(w, bw, C.KIND_MODEL_RESPONSE, payload + bytes([i]))
+        w.flush()
+    finally:
+        for name, real in patched.items():
+            monkeypatch.setattr(os, name, real, raising=False)
+
+    made = {name: n for name, n in counts.items() if n}
+    publishes = w.publishes - publishes_before
+    assert counts["fsync"] == 0 and counts["fdatasync"] == 0, f"the calling thread synced: {made}"
+    assert set(made) <= {"open", "pwrite", "close", "replace", "lseek", "ftruncate"}, (
+        f"unexpected syscalls on the 64 KiB path: {made}")
+    # 20 blobs, one file each: open + pwrite + close + replace. The tape adds 2 pwrites per publish.
+    assert made.get("open", 0) == 20, made
+    assert made.get("replace", 0) >= 20, made
+    assert made.get("pwrite", 0) == 20 + 2 * publishes, made
+    w.close()
