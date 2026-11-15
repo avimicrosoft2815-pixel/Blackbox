@@ -72,7 +72,7 @@ A † marks a Done-when cell paraphrased because the plan's wording uses a word 
 | `P3-11` | 60-secret corpus: 0 leaks; hook raising ⇒ `REDACTION_FAILED` | **todo** | — | — | — | — |  |
 | `P3-12` | rotation keeps old hashes verifiable (key id recorded) | **todo** | — | — | — | — |  |
 | `P3-13` | burst test: 1M events queued at 10× ingest rate ⇒ no P0 loss | **todo** | — | — | — | — |  |
-| `P3-14` | 100-call agent: identical outputs and exceptions vs no BlackBox | **todo** | — | — | — | — |  |
+| `P3-14` | 100-call agent: identical outputs and exceptions vs no BlackBox | **done** | HEAD | tests/test_failopen.py (6) | — | self | 100-call agent, bare vs recorded: identical return value and identical stdout; raises at call 37 with the same exception type and message; three real breakages (read-only data dir where install() reports enabled: False + PermissionError, a keeper that raises on every publish, a tape truncated by 512 B) each repeat the whole comparison |
 | `P3B-01` | `curl`, a Node `openai` script and a Python `anthropic` script all work unchanged through it; SSE bytes received by the client are sha256-identical to upstream's | **todo** | — | — | — | — |  |
 | `P3B-02` | unknown host ⇒ `502 upstream-not-allowed`; `tests/test_no_egress.py` allowlist covers exactly `proxy/` and asserts the destination set | **todo** | — | — | — | — |  |
 | `P3B-03` | `blackbox run -- node app.js` and `blackbox run -- python app.py` both yield one run with linked nodes; `--no-proxy`, `--no-sdk`, `--force-proxy` behave as documented | **todo** | — | — | — | — |  |

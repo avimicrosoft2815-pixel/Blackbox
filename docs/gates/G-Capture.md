@@ -13,7 +13,7 @@ builder has run every command below, from the pushed tree, and a second reader h
 |---|---|---|
 | unmodified `openai` and `anthropic` scripts recorded with **zero code changes** | `tests/_day14_child.py` is an `openai` script with a client, a `messages` list and `chat.completions.create(stream=True)` as documented; the recorder is installed around it, not woven into it. Captured by seam A through `httpx2`. The **anthropic** half is proven for seam C only (`tests/test_seam_sdk_methods.py`) and has no zero-change child yet | ✓ openai / **pending** anthropic |
 | MID_STREAM interruption with chunk and byte counts | `tests/test_day14_kill.py::test_an_unmodified_openai_stream_keeps_its_in_flight_call_across_sigkill`: real `SIGKILL` at 5 chunks of 40; recovery reports `INTERRUPTED_MID_STREAM` with `chunks ≥ 1`, `partial_stream_bytes > 0`, and **both no larger than the mock provider's own tally of what it pushed down the socket** | ✓ |
-| P3-14 identical app output and exceptions | **not written.** `tests/test_sink.py` proves fail-open for a hostile sink; nothing yet runs a 100-call agent with and without the recorder and compares stdout and exception identities | **pending** |
+| P3-14 identical app output and exceptions | `tests/test_failopen.py` (6): 100 calls bare vs recorded → identical return value and identical stdout; an agent that raises at call 37 → same exception type *and* message; then three real breakages (unwritable data dir, keeper raising on every publish, tape truncated by 512 bytes) each re-run the whole comparison. The read-only case asserts `enabled: False` with a `PermissionError` reason, so it cannot pass against a recorder that was never broken | ✓ |
 | 60-secret corpus absent from every sink that exists so far | **not written.** The redaction pipeline is P3-11 and does not exist; no secret has ever been written by this code because nothing writes request bodies verbatim — but "we believe so" is not a row | **pending** |
 | seams A→B→C each proven by a forced-failure test | `tests/test_preflight.py` (9): forcing A picks B and records why; forcing A and B picks C; forcing all three leaves the recorder installed-but-not-capturing with three reasons and no exception; an install that raises does not escape | ✓ |
 | day-14 rule (§4) | the row above; and the control `test_the_stream_that_is_not_killed_is_recorded_whole` records the whole stream, ending with a `MODEL_RESPONSE` whose byte count equals the sum of its `MODEL_CHUNK` payloads | ✓ for seam A + POSIX; **not testable here** for real providers (no keys) — the mock is the gate, as the plan allows |
@@ -28,7 +28,8 @@ builder has run every command below, from the pushed tree, and a second reader h
 | Provider-call latency Δ p95 on a 700 ms streamed call | **not measured** |
 | Startup `install()` | **not measured** |
 
-A gate with four of its five measurement rows unmeasured cannot pass, and it is not going to be signed to look close.
+Two of the evidence rows are now ✓ (day-14, P3-14) and four of the five measurement rows are unmeasured: it cannot
+pass, and it is not going to be signed to look close.
 The honest summary: **the mechanism the gate exists for works, and half the gate's evidence does not exist yet.**
 
 ## How a reviewer reproduces what is proven
@@ -47,11 +48,11 @@ Expected: 3 passed in `test_day14_kill.py` on a POSIX host (skipped on Windows �
 
 ## What would let this gate pass
 
-1. `tests/test_failopen.py` (P3-14): 100-call agent, recorder on and off, identical stdout and identical exception
-   types — then the row is ✓.
+1. ~~P3-14 fail-open suite~~ — done, `tests/test_failopen.py`.
 2. P3-11's redaction pipeline plus the 60-secret corpus, asserted absent from every sink that exists at that time.
-3. The four missing §15.1 rows, each with a committed JSON under `bench/results/`.
-4. A reviewer's signature below, from a different model family or a fresh context, with the commands they ran.
+3. The anthropic half of the zero-code-change row: an `anthropic` child, killed mid-stream like the openai one.
+4. The four missing §15.1 rows, each with a committed JSON under `bench/results/`.
+5. A reviewer's signature below, from a different model family or a fresh context, with the commands they ran.
 
 ## Signature
 

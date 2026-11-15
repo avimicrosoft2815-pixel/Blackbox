@@ -5,8 +5,8 @@
     "docs/STATUS.md",
     "bench/results/*.json"
   ],
-  "next_ticket": "P3-14",
-  "next_note": "The day-14 mechanism is green (unmodified openai script, SIGKILL mid-stream, recovery reports INTERRUPTED_MID_STREAM with chunks and bytes no larger than the provider's tally). G-Capture is NOT passed: it still needs P3-11 (redaction corpus), P3-14 (identical app output and exceptions), the §15.1 capture rows (Disabled / content=off / content=hash / provider latency delta p95 / startup install cost) and a reviewer-signed docs/gates/G-Capture.md.",
+  "next_ticket": "P3-11",
+  "next_note": "Day-14 rule green (kill mid-stream, recovery classifies INTERRUPTED_MID_STREAM) and P3-14 green (100-call agent identical bare vs recorded, plus three real breakages). G-Capture still needs: P3-11 redaction + 60-secret corpus absent from every sink; an anthropic zero-code-change child; the four §15.1 capture measurements; a reviewer's signature on docs/gates/G-Capture.md.",
   "last_green_commit": "e40fece",
   "last_green_commit_note": "run 43693723611, ten jobs ten success (280b7fe before it, 43693470163). The three red runs before that are one defect (21), fixed at 771f5ea; 99a5164 passed with the same test still in the tree",
   "gates": {
@@ -98,7 +98,8 @@
         "P3-05b",
         "P3-05d",
         "P3-05c",
-        "P3-06"
+        "P3-06",
+        "P3-14"
       ],
       "wip": [],
       "todo": [
@@ -108,8 +109,7 @@
         "P3-10",
         "P3-11",
         "P3-12",
-        "P3-13",
-        "P3-14"
+        "P3-13"
       ]
     },
     "L3": {
