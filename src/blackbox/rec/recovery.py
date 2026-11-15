@@ -32,8 +32,7 @@ from blackbox.cap_sdk.sink import chunk_bytes
 from blackbox.codec.ids import blake2b
 from blackbox.errors import bbx
 from blackbox.platform import current as _plat_current
-from blackbox.rec import correlate
-from blackbox.rec import discover
+from blackbox.rec import correlate, discover
 from blackbox.tape import chain as chain_mod
 from blackbox.tape import meta as meta_mod
 from blackbox.tape import scanner, segments
