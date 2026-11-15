@@ -235,3 +235,75 @@ def stall_status() -> dict[str, Any]:
 
 if __name__ == "__main__":                       # pragma: no cover - manual probe
     print(install(), file=sys.stderr)
+
+
+# ── P3-02: decorators ───────────────────────────────────────────────────────
+#
+# The disabled path is the contract: check `enabled()` and call straight through. No node is allocated, no frame is
+# encoded, no clock is read. `test_api_decorators.py` measures the overhead of a disabled decorated call against the
+# undecorated function and fails past 1 µs.
+
+
+def _wrap(kind: str, fn: Any, name: str | None) -> Any:
+    import functools
+    import inspect
+
+    from blackbox.rec import context as node_ctx
+
+    label = str(name or getattr(fn, "__qualname__", getattr(fn, "__name__", "call")))
+
+    if inspect.iscoroutinefunction(fn):
+        @functools.wraps(fn)
+        async def async_inner(*args: Any, **kwargs: Any) -> Any:
+            if not enabled():
+                return await fn(*args, **kwargs)
+            node = node_ctx.open_node(label, kind)
+            try:
+                result = await fn(*args, **kwargs)
+            except BaseException as exc:
+                node_ctx.close_node(node, "error", exc)
+                raise
+            node_ctx.close_node(node, "ok")
+            return result
+
+        return async_inner
+
+    @functools.wraps(fn)
+    def inner(*args: Any, **kwargs: Any) -> Any:
+        if not enabled():
+            return fn(*args, **kwargs)
+        node = node_ctx.open_node(label, kind)
+        try:
+            result = fn(*args, **kwargs)
+        except BaseException as exc:
+            node_ctx.close_node(node, "error", exc)
+            raise
+        node_ctx.close_node(node, "ok")
+        return result
+
+    return inner
+
+
+def _decorator(kind: str) -> Any:
+    def factory(fn: Any = None, *, name: str | None = None) -> Any:
+        if fn is None:
+            return lambda f: _wrap(kind, f, name)
+        return _wrap(kind, fn, name)
+
+    factory.__name__ = kind
+    factory.__doc__ = f"Record one `{kind}` node around the decorated callable (P3-02)."
+    return factory
+
+
+workflow = _decorator("workflow")
+agent = _decorator("agent")
+tool = _decorator("tool")
+retrieval = _decorator("retrieval")
+
+def step(fn: Any = None, *, name: str | None = None) -> Any:
+    """`@blackbox.step` or `@blackbox.step("parse")` — one step node per call (P3-02)."""
+    if isinstance(fn, str):                     # @step("parse")
+        return lambda f: _wrap("step", f, fn)
+    if fn is None:                              # @step(name="parse")
+        return lambda f: _wrap("step", f, name)
+    return _wrap("step", fn, name)              # @step
