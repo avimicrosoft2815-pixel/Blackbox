@@ -139,7 +139,7 @@ every object in the collector and turned `anthropic`'s `LazyProxy` into nine tea
 Windows `install()` accepted a data directory that is a file), and the two older capture-layer gaps (defect 20, the
 untested async path, still open; defect 21, a wall-clock assertion that reddened `43693106857` at `714554c`, fixed at
 `771f5ea`).
-Twelve deviations, all dated and argued in `docs/DEVIATIONS.md`: DV-005 (one checksum, CRC-32), DV-006/007 (S17
+Fourteen deviations, all dated and argued in `docs/DEVIATIONS.md`: DV-005 (one checksum, CRC-32), DV-006/007 (S17
 degrades instead of raising, including the first segment), DV-008 (P2-03/P2-04 written with an honest
 `capabilities()`), DV-009/010 (ADR-005 store change; the head is no longer mapped), DV-011 (every OS call through
 `platform.current()`), DV-012 (`O_BINARY` on every descriptor). Findings F1–F13 are decided, not pending: F4 became
@@ -148,11 +148,12 @@ recorded in `docs/errors.md` with the defect that motivated each. No finding is 
 
 ## Decisions taken with plan defaults (DECISIONS.md)
 
-Twenty-five decisions, D-001 … D-025. The ones taken since the last checkpoint, each with the plan default and the
-reason written beside it: **D-020…D-025** (the capture layer's network exception, the mock provider's
-numbering, the `partial` marker, and seam C's unit being an event rather than a byte), **D-016/D-017/D-018** (retention prunes whole sealed segments, a tombstone pins and merges
-`GAP`s, deletion is `GAP`-then-unlink), **D-019** (the calling thread never syncs a blob; the keeper syncs blob and
-directory before the tape sync that covers the frame — the invariant is a test). The two knobs of `P1-02b` were the
+Thirty-one decisions, D-001 … D-031. The ones taken since the last checkpoint, each with the plan default and the
+reason beside it: **D-026…D-028** (capture scope is an explicit host allowlist; fail-open is per callback; a stream
+closed early is `partial` and chunk counts are only compared with the reads the application made), **D-029** (redaction
+before persistence, on by default, holding only what is unfinished), **D-030** (the content mode is honoured and its
+default is Appendix A's `hash`), **D-031** (the pseudonym is an HMAC under a per-machine key, and a missing key is
+recorded as unkeyed). The two knobs of `P1-02b` were the
 last thing switched off in `mypy`; nothing is switched off now. Format-freeze decisions carry their `DEVIATIONS.md`
 row in the same commit.
 
@@ -173,15 +174,14 @@ row in the same commit.
    is `d43b208`; the red pair keep their numbers and their verdicts (C40).
 1. **G-Promise is signed** (`docs/gates/G-Promise.md`, verdict pass, self-signed — see §Labelled) and `STATE.json`
    carries `gates["G-Promise"] = "pass"`.
-2. **G-Capture is open, and its three mechanism rows are green**: the day-14 rule (an unmodified `openai` script
-   killed mid-stream, recovered with counts that never exceed what the provider pushed), P3-14 (a 100-call agent
-   identical with and without the recorder, under three real breakages) and P3-11's core (the 60-secret corpus, the
-   three modes, the default policy, fail-closed — `wip`, because the keyed hash, mask offsets and the pattern split
-   are not built). What remains, in order: an **`anthropic` child** for the zero-code-change row (**P3-11b**), the
-   four unmeasured §15.1 rows (Disabled, content=off, content=hash, provider-call latency Δ p95, startup install
-   cost — **measured**, see the five rows above), P3-11's remainder (keyed hash + mask offsets, **P3-11d**), then a
-   reviewer's signature on `docs/gates/G-Capture.md`. What is left of P3-11 is mask offsets (DV-014), which belong
-   with the viewer that would use them.**Next ticket: G-Capture's signature block (a reviewer's, not mine), then L3.**
+2. **G-Capture's mechanism rows are all green and the gate needs a signature that is not mine.** Green: the day-14
+   rule for **both** SDKs (unmodified `openai` 3.51.0 and `anthropic` 2.8.0 scripts killed mid-stream, recovered with
+   counts that never exceed the mock provider's own tally, taking the same seam); P3-14 (a 100-call agent identical
+   with and without the recorder, under three real breakages); P3-11's redaction (60-shape corpus at every split
+   offset, three modes, default policy, fail-closed, keyed pseudonyms); and the five §15.1 capture rows, measured.
+   What is left of P3-11 is **mask offsets** (DV-014), which belong with the viewer that would use them, and the gate
+   itself needs a reviewer's counter-signature on `docs/gates/G-Capture.md`. **Next ticket: L3 — P3B-01, the proxy
+   core** (`blackbox run -- <anything>` is the universality promise, and it has no commits yet).
 3. **Defect 26 is open and cannot be closed here**: on Windows, `install(data_dir=<a file>)` reported `enabled: True`
    and let 100 calls run against a tape directory that cannot exist. Three questions are written down in
    `docs/defects.md`; answering them needs a Windows host, which this sandbox does not have.
@@ -189,8 +189,10 @@ row in the same commit.
    `anthropic` packages are built on `httpx2`, which is why seam A reported `installed` and captured nothing until
    the day-14 test found it (defect 23, D-025). No seam, and no unit test of a seam, could have found it from the
    inside.
-5. **L3 is untouched**: the attach lane (proxy, launcher integration, hooks, demo) has no commits yet and starts from
-   the current trunk, not from an older SHA.
+5. **L3 starts from `d43b208`, not from an older SHA**: the attach lane (proxy core and routes, launcher integration,
+   header links, Claude Code / Codex hooks, inbox, proxy bench, `docs/attach.md`) has no commits yet; the error codes
+   it will use (`BBX-E140`–`E143`) are already in the registry and `tests/test_no_egress.py` already names `proxy/` as
+   the one place allowed to open a socket.
 6. The independent reviewer's loop is the gate loop: a counter-signature at every gate, with the reproduce block in
    `docs/gates/` and `docs/reviews.md` as the ledger. It found C40 on its first pass and defect 25 on this one, which
    is the argument for it.
