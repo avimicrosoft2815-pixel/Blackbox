@@ -140,7 +140,7 @@ def test_the_openai_sdk_streams_through_the_proxy_without_knowing_it_is_there():
         proxy = holder["proxy"]
         try:
             client = openai.OpenAI(api_key="test-key", base_url=f"http://127.0.0.1:{proxy.port}/v1",  # type: ignore[attr-defined]
-                                   max_retries=0)
+                                   max_retries=0, timeout=10.0)
             stream = client.chat.completions.create(model="m", messages=[{"role": "user", "content": "hi"}],
                                                     stream=True)
             pieces = [chunk.choices[0].delta.content or "" for chunk in stream]

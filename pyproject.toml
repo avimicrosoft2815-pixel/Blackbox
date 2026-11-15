@@ -24,7 +24,9 @@ classifiers = [
 dependencies = []
 
 [project.optional-dependencies]
-dev = ["pytest==8.3.4", "hypothesis==6.122.3"]
+# `pytest-timeout` is here for one reason: the 3.12 cells sat inside the unit step for fifteen minutes with a log that
+# named nothing, and a hang has to fail as loudly as an assertion does (it prints every thread's stack first).
+dev = ["pytest==8.3.4", "hypothesis==6.122.3", "pytest-timeout==2.3.1"]
 # The optional HTTP integration (D-020) gets its own extra, never `dev`: httpx is not a runtime dependency, the seams
 # import it inside functions, and the suite skips them when it is absent. The pin is the version range P3-05d's
 # SUPPORTED table is verified against.
@@ -50,6 +52,9 @@ where = ["src"]
 testpaths = ["tests"]
 addopts = "-q"
 filterwarnings = ["error::DeprecationWarning"]
+# A test that never returns is a red cell with a stack, not a job that sits until the runner gives up.
+timeout = 120
+timeout_method = "thread"
 
 [tool.ruff]
 line-length = 120
