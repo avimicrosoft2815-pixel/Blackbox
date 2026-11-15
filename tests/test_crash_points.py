@@ -31,8 +31,13 @@ def run_child(data_dir: Path, stage: str, events: int, die_on: int, mode: str = 
     env = dict(os.environ)
     env.pop("BLACKBOX_DIE_AT", None)
     env["PYTHONPATH"] = str(ROOT / "src")
-    return subprocess.run([sys.executable, str(CHILD), str(data_dir), stage, str(events), str(die_on), mode],
+    proc = subprocess.run([sys.executable, str(CHILD), str(data_dir), stage, str(events), str(die_on), mode],
                           capture_output=True, text=True, env=env, timeout=180)
+    # A child that dies of a *stage* exits 137 by design; anything else is a harness/product failure and its
+    # traceback is the only way to see why the tape came back empty (the Windows cells report `frames: 0`).
+    if proc.returncode not in (0, 137):
+        raise AssertionError(f"crash child exited {proc.returncode} for stage {stage}:\n{proc.stderr[-2000:]}")
+    return proc
 
 
 def scan_dir(data_dir: Path):
