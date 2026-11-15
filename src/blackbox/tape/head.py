@@ -166,7 +166,7 @@ class HeadFile:
             # `head` that no reader could parse while segments already existed (kill matrix seed 120, tmpfs).
             # tmp + ftruncate + fsync + replace + fsync(dir) means the name appears only when it is complete.
             tmp = path + ".tmp"
-            fd = os.open(tmp, os.O_RDWR | os.O_CREAT | os.O_TRUNC, 0o600)
+            fd = _current_platform().open_fd(tmp, os.O_RDWR | os.O_CREAT | os.O_TRUNC, 0o600)
             try:
                 os.ftruncate(fd, C.HEAD_BYTES)
                 os.fsync(fd)
@@ -182,7 +182,8 @@ class HeadFile:
             except OSError:
                 pass
             existed = True
-        self.fd = os.open(path, os.O_RDWR)
+        self._plat = _current_platform()
+        self.fd = self._plat.open_fd(path, os.O_RDWR)
         try:
             if not existed or os.fstat(self.fd).st_size < C.HEAD_BYTES:
                 os.ftruncate(self.fd, C.HEAD_BYTES)

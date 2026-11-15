@@ -13,6 +13,9 @@ import os
 import subprocess
 
 from blackbox.errors import bbx
+from blackbox.platform import current as _plat_current
+
+_plat = _plat_current()
 
 FAULT_ENV = "BLACKBOX_FAULT_PREALLOC"       # test hook: values "ENOSPC", "EACCES"
 
@@ -31,7 +34,12 @@ def _du_kib(path: str) -> int:
 
 
 def is_sparse(path: str, size: int) -> bool:
-    """True when the file is allocated lazily (fewer blocks than bytes). Best effort per platform."""
+    """True when the file is allocated lazily (fewer blocks than bytes). Best effort per platform.
+
+    `st_blocks` is POSIX-only, and on NTFS the question does not even have the same answer: `SetEndOfFile`
+    (what `os.ftruncate` becomes) allocates the clusters, and a file becomes sparse only after
+    `FSCTL_SET_SPARSE`. So Windows returns False — not because it cannot measure, but because a file created by
+    `open_fd` + `ftruncate` there really is dense, which is what S17 wants."""
     try:
         st = os.stat(path)
     except OSError:
@@ -52,7 +60,7 @@ def preallocate(path: str, size: int) -> str:
     if fault == "EACCES":
         raise PreallocError(13, "injected EACCES at preallocation")
 
-    fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_TRUNC, 0o600)
+    fd = _plat.open_fd(path, os.O_RDWR | os.O_CREAT | os.O_TRUNC, 0o600)
     try:
         if hasattr(os, "posix_fallocate"):
             try:

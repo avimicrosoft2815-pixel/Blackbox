@@ -42,6 +42,25 @@ def test_only_the_platform_package_imports_a_shim_by_name():
         "these modules bypass platform.current() and would misbehave on another OS: " + "; ".join(offenders))
 
 
+def test_nothing_outside_the_platform_layer_calls_os_open():
+    """C29: a bare `os.open` is a text-mode descriptor on Windows. One hazard, one guard."""
+    offenders: list[str] = []
+    for path in sorted(SRC.rglob("*.py")):
+        if path.parent.name == "platform":
+            continue
+        text = path.read_text(encoding="utf-8")
+        for lineno, line in enumerate(text.splitlines(), start=1):
+            stripped = line.strip()
+            if stripped.startswith("#"):
+                continue
+            if "os.open(" in stripped and "open_fd" not in stripped:
+                offenders.append(f"{path.relative_to(ROOT)}:{lineno}: {stripped[:80]}")
+    # directory handles for fsync are the one documented exception: they are never written through.
+    offenders = [o for o in offenders if "O_RDONLY" not in o]
+    assert offenders == [], (
+        "these descriptors would be text mode on Windows; use platform.open_fd: " + "; ".join(offenders))
+
+
 def test_the_dispatch_is_the_only_path_into_a_shim():
     init = (SRC / "platform" / "__init__.py").read_text(encoding="utf-8")
     assert "def current()" in init

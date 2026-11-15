@@ -214,7 +214,7 @@ class TapeWriter:
         if self._seg_fd is not None:
             os.close(self._seg_fd)
         self._seg_path = segments.seg_path(self.tape_dir, n)
-        self._seg_fd = os.open(self._seg_path, os.O_RDWR)
+        self._seg_fd = _plat.open_fd(self._seg_path, os.O_RDWR)
         # A reopened writer continues where the head says, not at the top of the segment.
         self._buf_base = (self._slot.head_off
                           if self._slot is not None and self._slot.active_segment == n

@@ -38,7 +38,7 @@ def main(argv: list[str]) -> int:
     # command becomes an ANNOTATION, which `gh run view` prints without any of that. One annotation per failed
     # test id, so a red cell names its tests from the CLI.
     for line in lines:
-        if line.startswith("FAILED ") or line.startswith("ERROR "):
+        if line.startswith(("FAILED ", "ERROR ")):
             print(f"::error title={title}::{line.strip()[:200]}", flush=True)
     status = "passed" if proc.returncode == 0 else f"**failed** (exit {proc.returncode})"
     block = (f"\n### `{title}` — {status}\n\n"

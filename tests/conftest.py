@@ -6,6 +6,7 @@ fixture below closes every `TapeWriter` and `HeadFile` a test leaves open, so a 
 """
 from __future__ import annotations
 
+import contextlib
 import gc
 import os
 
@@ -22,7 +23,5 @@ def close_leaked_handles():
         for attr in ("_head",):
             handle = getattr(obj, attr, None)
             if handle is not None and hasattr(handle, "close") and type(obj).__name__ == "TapeWriter":
-                try:
+                with contextlib.suppress(Exception):
                     obj.abort()
-                except Exception:
-                    pass

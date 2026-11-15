@@ -88,34 +88,22 @@ platform where the child cannot be relied on to reach the same instruction, and 
 import on Windows. This is the next ticket, with the named tests as its acceptance: the same eight ids green in
 an annotation-free run.
 
-### Windows, run `43656494686` — the traceback, now that the harness stops swallowing it
+### Windows: the cause, named (C29)
 
-```
-FAILED tests/test_adoption.py::test_writer_reopen_adopts_the_orphan
-       BlackBoxError: BBX-E224: sealed segment does not match its footer [body does not match the footer]
-FAILED tests/test_keeper.py::test_keeper_exception_is_fail_open
-       BlackBoxError: BBX-E224: sealed segment does not match its footer [segment header checksum mismatch]
-FAILED tests/test_head_creation.py::test_unreadable_head_is_rebuilt_from_the_segments   assert 0 == 22
-FAILED tests/test_adoption.py::test_discover_order_is_stable                            assert None == 2
-FAILED tests/test_adoption.py::test_append_after_adoption_keeps_seq_dense               IndexError
-FAILED tests/test_keeper.py::test_keeper_and_app_thread_never_roll_twice                AssertionError
-FAILED tests/test_prealloc.py::test_sparse_detection                                    assert False is True
-FAILED tests/test_crash_points.py::test_s5_after_head_publish_the_commit_survives       frames: 0
-FAILED tests/test_crash_points.py::test_torn_frame_is_never_committed[S1]               frames: 0
-```
+Every `os.open()` in `src/` produced a **text-mode CRT descriptor** on Windows, because `O_BINARY` was in the
+flags nowhere in the tree. `open()` and `tempfile` add the flag themselves; a raw `os.open()` does not. On the
+`lseek`+`read`/`write` path that meant every `0x0A` the writer emitted became `0x0D 0x0A`, every `0x0D 0x0A`
+read back collapsed to `0x0A`, and the first `0x1A` byte read was treated as end of file — which is exactly the
+run-`43656494686` failure set: `BBX-E224 segment header checksum mismatch`, `body does not match the footer`,
+`completeness: empty`, `assert 0 == 22`, adoption finding no header. Not flush ordering, not short reads (both
+earlier guesses were wrong).
 
-The smoking gun is the pair of `BBX-E224` failures: on Windows a segment's **header checksum does not match
-what was written**, and a seal's body does not match its footer. Both are read-back mismatches of bytes the
-writer itself wrote, and both appear only after the header/seal path went through
-`platform.windows.pwrite` (`lseek` + `os.write`). The two candidate causes, in order:
+Fixed in one commit: `platform.open_fd` ORs `O_BINARY` into every tape descriptor, the dispatch test forbids a
+bare `os.open` outside the platform layer, and `test_positional_io_is_byte_exact_for_all_256_values` writes all
+256 byte values through `pwrite`/`pread` and demands byte identity — it fails on any OS whose `open_fd` forgets
+the flag.
 
-1. `os.write` on an fd opened with `os.open(..., os.O_RDWR)` is binary, but the *seal* and *header* writers in
-   `segments.py`/`seal.py` may still be using buffered `open(..., "wb")` literals somewhere on that path, and a
-   flush ordering difference between POSIX and Windows would surface exactly this way;
-2. `os.read` short-reads on Windows are common (pipe/console, and a cached file can return less than asked), and
-   `platform.windows.pread` handles that — but any caller that still calls `os.read` once would see a truncated
-   header and a CRC mismatch.
-
-That is the next ticket, with these nine ids as its acceptance list. `test_sparse_detection` is a different
-thing entirely: `st_blocks` does not exist on Windows, so the assertion is POSIX-only and needs a skip, not a
-fix.
+`test_sparse_detection` is skipped on Windows for a different reason and it is not a measurement gap: on NTFS,
+`SetEndOfFile` (what `os.ftruncate` becomes) **allocates** the clusters, and a file is sparse only after
+`FSCTL_SET_SPARSE`. The test's premise is false there, so `prealloc.is_sparse` documents that Windows returns
+`False` because the file really is dense — which is what S17 wants.

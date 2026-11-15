@@ -24,6 +24,10 @@ def test_preallocate_then_not_sparse(tmp_path):
     prealloc.ensure_not_sparse(str(path), 4 << 20)
 
 
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="on NTFS, extending a file with SetEndOfFile (os.ftruncate) ALLOCATES the clusters; a file is "
+           "sparse only after FSCTL_SET_SPARSE, so 'truncate makes it sparse' is false there, not unmeasurable")
 def test_sparse_detection(tmp_path):
     path = tmp_path / "sparse.bin"
     with open(path, "wb") as fh:

@@ -9,6 +9,7 @@ import os
 import stat as stat_mod
 from pathlib import Path
 
+O_BINARY = getattr(os, "O_BINARY", 0)      # 0 on POSIX, real on Windows
 NAME = "posix"
 
 _NETWORK_FS = {"nfs", "nfs4", "cifs", "smb3", "smbfs", "9p", "fuse.sshfs", "fuse.rclone", "afs"}
@@ -105,6 +106,18 @@ def is_regular_file(path: str) -> bool:
         return stat_mod.S_ISREG(os.stat(path).st_mode)
     except OSError:
         return False
+
+
+def open_fd(path: str, flags: int, mode: int = 0o600) -> int:
+    """`os.open` with binary semantics guaranteed (C29).
+
+    On Windows the CRT opens a descriptor in **text mode** unless `O_BINARY` is in the flags: `0x0A` becomes
+    `0x0D 0x0A` on the way out, `0x0D 0x0A` collapses to `0x0A` on the way in, and the first `0x1A` byte read is
+    treated as end of file. Python's `open()` and `tempfile` add the flag themselves; a raw `os.open()` does
+    not, which is why every descriptor the tape opens goes through here. `O_BINARY` is 0 on POSIX, so this is
+    the same call everywhere.
+    """
+    return os.open(path, flags | O_BINARY, mode)
 
 
 def pwrite(fd: int, buf, off: int) -> None:

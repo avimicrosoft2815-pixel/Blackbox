@@ -58,7 +58,7 @@ def acquire(path: str, *, pid: int | None = None) -> Lease:
     if len(payload) > C.LEASE_MAX_BYTES:
         raise bbx("BBX-E210", "lease payload too large")
     try:
-        fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        fd = _plat.open_fd(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
     except FileExistsError:
         existing = read(path)
         if existing is not None:
@@ -66,7 +66,7 @@ def acquire(path: str, *, pid: int | None = None) -> Lease:
             if not stale:
                 raise bbx("BBX-E210", f"lease held by pid {existing.pid} ({why})") from None
             os.replace(path, path + ".stale")
-        fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        fd = _plat.open_fd(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
     with os.fdopen(fd, "wb") as fh:
         fh.write(payload)
         fh.flush()

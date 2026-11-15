@@ -185,3 +185,35 @@ def test_macos_uses_fullfsync_when_the_constant_exists(monkeypatch):
     monkeypatch.setattr(macos.fcntl, "F_FULLFSYNC", 51, raising=False)
     macos.fdatasync(7)
     assert issued == [(7, 51)], "kernel/paranoid must reach the device, not just the drive cache"
+
+
+# ── C29: the Windows text-mode hazard, caught on any OS ─────────────────────────────────────────────────
+def test_positional_io_is_byte_exact_for_all_256_values(tmp_path):
+    """Every byte value through `pwrite`/`pread`, byte-identical, with the right file size.
+
+    On Windows a descriptor opened without `O_BINARY` is a *text-mode* CRT descriptor: `0x0A` leaves as
+    `0x0D 0x0A`, `0x0D 0x0A` comes back as `0x0A`, and the first `0x1A` ends the read. A tape is a binary file,
+    so this test writes all 256 values in order — including the pair `0x0D 0x0A` and the byte `0x1A` — through
+    the platform layer, and requires the bytes and the length to survive unchanged. It fails on any OS whose
+    `open_fd` forgot `O_BINARY`, which is how this was found (Windows cell, run 43656494686).
+    """
+    mod = current()
+    payload = bytes(range(256)) * 16                  # 4 KiB, every value, 0x0D 0x0A at 13-14, 0x1A at 26
+    path = tmp_path / "byte-exact.bin"
+    fd = mod.open_fd(str(path), os.O_RDWR | os.O_CREAT | os.O_TRUNC)
+    try:
+        mod.pwrite(fd, payload, 0)
+        assert os.fstat(fd).st_size == len(payload), "text mode changes the length: 0x0A expands to 0x0D 0x0A"
+        assert mod.pread(fd, len(payload), 0) == payload, "text mode rewrites 0x0D 0x0A and stops at 0x1A"
+        # a second, offset write must not disturb the first
+        mod.pwrite(fd, b"\x1a\x0d\x0a", 4096)
+        assert mod.pread(fd, 3, 4096) == b"\x1a\x0d\x0a"
+    finally:
+        os.close(fd)
+    assert path.read_bytes() == payload + b"\x1a\x0d\x0a", "read via a file object too: both paths must agree"
+
+
+def test_open_fd_sets_o_binary_where_it_exists():
+    mod = current()
+    assert hasattr(mod, "open_fd")
+    assert getattr(os, "O_BINARY", 0) == mod.O_BINARY

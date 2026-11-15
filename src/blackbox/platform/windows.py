@@ -40,6 +40,7 @@ SUPPORTED = os.name == "nt"
 PREALLOC_METHOD = "zero-fill"          # never `truncate`: that would make the segment sparse
 DIRECTORY_FSYNC = False
 MAPPED_VIEW_FLUSH = "mmap.flush"       # FlushViewOfFile + FlushFileBuffers, via CPython
+O_BINARY = getattr(os, "O_BINARY", 0)  # 0 on POSIX, needed on Windows (C29)
 
 
 # ── the lease's start-time check (P2-03, C20) ────────────────────────────────────────────────────────────
@@ -157,6 +158,18 @@ def fsync_dir(path: str) -> None:
 def fdatasync(fd: int) -> None:
     """Windows has no `fdatasync`; `FlushFileBuffers` (what `os.fsync` calls) flushes the file's data."""
     os.fsync(fd)
+
+
+def open_fd(path: str, flags: int, mode: int = 0o600) -> int:
+    """`os.open` with binary semantics guaranteed (C29).
+
+    On Windows the CRT opens a descriptor in **text mode** unless `O_BINARY` is in the flags: `0x0A` becomes
+    `0x0D 0x0A` on the way out, `0x0D 0x0A` collapses to `0x0A` on the way in, and the first `0x1A` byte read is
+    treated as end of file. Python's `open()` and `tempfile` add the flag themselves; a raw `os.open()` does
+    not, which is why every descriptor the tape opens goes through here. `O_BINARY` is 0 on POSIX, so this is
+    the same call everywhere.
+    """
+    return os.open(path, flags | O_BINARY, mode)
 
 
 def pwrite(fd: int, buf, off: int) -> None:

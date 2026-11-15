@@ -31,6 +31,9 @@ SUPPORTED = os.uname().sysname == "Darwin" if hasattr(os, "uname") else False
 PREALLOC_METHOD = "zero-fill"          # F_PREALLOCATE is not reachable from stdlib
 DIRECTORY_FSYNC = False                # fsync(dir) raises EINVAL on APFS/HFS+
 MAPPED_VIEW_FLUSH = "mmap.flush"       # msync(MS_SYNC) via CPython
+O_BINARY = getattr(os, "O_BINARY", 0)  # 0 on POSIX, needed on Windows (C29)
+
+
 def f_fullfsync_supported() -> bool:
     """True when `fcntl.F_FULLFSYNC` can be issued from this interpreter (it usually cannot)."""
     return fcntl is not None and hasattr(fcntl, "F_FULLFSYNC")
@@ -179,6 +182,18 @@ def is_regular_file(path: str) -> bool:
         return stat_mod.S_ISREG(os.stat(path).st_mode)
     except OSError:
         return False
+
+
+def open_fd(path: str, flags: int, mode: int = 0o600) -> int:
+    """`os.open` with binary semantics guaranteed (C29).
+
+    On Windows the CRT opens a descriptor in **text mode** unless `O_BINARY` is in the flags: `0x0A` becomes
+    `0x0D 0x0A` on the way out, `0x0D 0x0A` collapses to `0x0A` on the way in, and the first `0x1A` byte read is
+    treated as end of file. Python's `open()` and `tempfile` add the flag themselves; a raw `os.open()` does
+    not, which is why every descriptor the tape opens goes through here. `O_BINARY` is 0 on POSIX, so this is
+    the same call everywhere.
+    """
+    return os.open(path, flags | O_BINARY, mode)
 
 
 def pwrite(fd: int, buf, off: int) -> None:

@@ -52,8 +52,17 @@ CONFIGS = [
 BATCHES = [0, 4096]
 
 
+def _free_bytes(path: Path) -> int | None:
+    try:
+        st = os.statvfs(str(path))
+    except (AttributeError, OSError):
+        return None
+    return st.f_bavail * st.f_frsize
+
+
 def one_trial(tmp: Path, cfg: dict, batch: int, delay_s: float, seed: int) -> dict:
     data_dir = tmp / f"t{seed}"
+    free_before = _free_bytes(tmp)
     env = dict(os.environ)
     env["PYTHONPATH"] = str(ROOT / "src")
     env.pop("BLACKBOX_DIE_AT", None)
@@ -69,9 +78,15 @@ def one_trial(tmp: Path, cfg: dict, batch: int, delay_s: float, seed: int) -> di
     if not ready:
         proc.kill()
         _, err = proc.communicate(timeout=60)
+        text = (err or b"").decode(errors="replace")
+        # C19/C29: a trial the *harness* could not start because the scratch filesystem was full is a
+        # `harness_abort`, counted and named, never a violation and never a quiet pass.
+        harness = "No space left on device" in text or "ENOSPC" in text
         return {"seed": seed, "delay_ms": round(delay_s * 1000, 1), "batch_bytes": batch, **cfg,
-                "violations": ["child never signalled READY: the trial did not start"],
-                "stderr": (err or b"").decode(errors="replace")[-600:], "not_started": True}
+                "violations": [] if harness else ["child never signalled READY: the trial did not start"],
+                "harness_abort": harness, "free_bytes_before": free_before,
+                "free_bytes_after": _free_bytes(tmp),
+                "stderr": text[-600:], "not_started": True}
     time.sleep(delay_s)
     os.kill(proc.pid, signal.SIGKILL)
     _, err = proc.communicate(timeout=60)
@@ -191,6 +206,10 @@ def main(argv=None) -> int:
         "violations": violations[:20],
         "violation_count": len(violations),
         "not_started": sum(1 for t in trials if t.get("not_started")),
+        "harness_aborts": sum(1 for t in trials if t.get("harness_abort")),
+        "free_bytes_first_trial": trials[0].get("free_bytes_before") if trials else None,
+        "free_bytes_min_seen": min((t["free_bytes_after"] for t in trials
+                                    if t.get("free_bytes_after") is not None), default=None),
         "trials_detail": trials,
     }
     path = args.json or str(ROOT / "bench" / "results" / f"{out['date']}-kill-random.json")

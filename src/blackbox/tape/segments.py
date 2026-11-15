@@ -83,7 +83,7 @@ def finish(tape_dir: str, n: int, tmp: str, *, writer_uuid: bytes, segment_bytes
     path = seg_path(tape_dir, n)
     header = encode_header(writer_uuid=writer_uuid, segment_no=n, start_seq=0,
                            segment_bytes=segment_bytes, prev_chain=prev_chain)
-    fd = os.open(tmp, os.O_RDWR)
+    fd = _plat.open_fd(tmp, os.O_RDWR)
     try:
         _plat.pwrite(fd, header, 0)
         if hasattr(os, "fdatasync"):
