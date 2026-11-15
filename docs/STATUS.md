@@ -144,7 +144,7 @@ to `P2-11`** (`blackbox run`), not P5 — corrected here and in `DECISIONS.md`.
 | docs + `bench/results/*.json` committed | yes |
 | no absolute sandbox paths | grep over `bench/results/` = 0 |
 | forbidden words, tree + commit messages | green |
-| **C7 CI** | **ran; partially green.** Runs `43645445224`/`43647132716`: **docs green**, **all three ubuntu cells green**. C23's table in `docs/compatibility.md` carries the per-cell verdict and the run URL. **macOS × 3 and Windows × 3 are still red** (exit 1), cause not yet identified — the job logs are outside this sandbox's egress (only `github.com`, `api.github.com`, `codeload`, npm and PyPI are reachable), so the Cells are reported as red/unknown, never as green. Fixed so far on the way: the docs job had no pytest; the kill step collected zero tests (exit 5); the Windows shim imported `fcntl` at module scope; two POSIX-only suites had no skip marker. The macOS/Windows failures need the Actions-tab log to name — that is the next CI ticket. |
+| **C7 CI** | **ran; eight of nine cells green.** Run `43656191825`: **docs, ubuntu × 3 and macOS × 3 green**; **Windows × 3 red**, and now *named* — C27's follow-up turns every failure into a `::error::` annotation, so `gh run view` lists the eight failing test ids without a log or a login. They are all in `tests/test_crash_points.py` and `tests/test_adoption.py`, all with `frames: 0` — the child's tape is empty on the parent's side. `docs/compatibility.md` carries the list and the two candidate causes; that is the next ticket. |
 
 ## 7. Not done — and why that is the honest state
 

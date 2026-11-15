@@ -45,14 +45,15 @@ Not yet applicable — no capture layer exists (phase P3). The declared matrix l
 Cell values are the **test** verdict only. No benchmark number in this repository comes from a CI runner: those
 rows stay `smoke only` on a runner and `not measured` for an OS that has not run the benchmark.
 
-Last update: run [`43647132716`](https://github.com/avimicrosoft2815-pixel/Blackbox/actions/runs/43647132716)
-(commit `cd85a7f`), read with `gh run view` because the job logs are outside this sandbox's egress.
+Last update: run [`43656191825`](https://github.com/avimicrosoft2815-pixel/Blackbox/actions/runs/43656191825)
+(commit `9960fc5`-era). Since C27's follow-up every failing test is emitted as a `::error::` annotation, so
+`gh run view <id>` prints **which tests failed** — no job log, no login, no guessing.
 
 | OS | 3.11 | 3.12 | 3.13 | Evidence |
 |---|---|---|---|---|
 | ubuntu-latest (Linux 6.x, x86-64) | **green** | **green** | **green** | `gh run view 43647132716` — three cells completed successfully |
-| macOS (arm64 runner) | **red** | **red** | **red** | same run; the job exits 1 in ~20 s, reason not readable from here. C22's known cause (`tested_here` hard-coded) is fixed; a second layer remains |
-| windows-latest | **red** | **red** | **red** | same run; exit 1 in ~33 s. `os.pwrite`/`os.pread` were absent and are now behind the platform layer; a second layer remains (`os.replace` over an open handle is the usual next one) |
+| macOS (arm64 runner) | **green** | **green** | **green** | `gh run view 43656191825` — all three cells completed successfully (C25/C26/C28 fixed this) |
+| windows-latest | **red** | **red** | **red** | exit 1 in ~30 s; **the failing tests are named by the annotations**, see below |
 | docs job | green | — | — | `ci.yml` docs job, `tests/test_docs_links.py` |
 
 Consequences for the gates, stated plainly:
@@ -63,3 +64,26 @@ Consequences for the gates, stated plainly:
 * Benchmark rows: the §15.1 numbers in `docs/STATUS.md` are from this machine only (`requires hardware`), never
   from a runner.
 
+
+### Windows: the failing tests, named (run `43656191825`)
+
+Eight of them, all in two files, and all with the same signature — the tape the child wrote is reported empty:
+
+```
+FAILED tests/test_crash_points.py::test_s5_after_head_publish_the_commit_survives        {'completeness': 'empty', 'frames': 0, ...}
+FAILED tests/test_crash_points.py::test_s4_torn_head_slot_falls_back_to_previous_commit   {'completeness': 'empty', 'frames': 0, ...}
+FAILED tests/test_crash_points.py::test_s14_after_seg_end_before_next_segment             {'completeness': 'empty', 'frames': 0, ...}
+FAILED tests/test_crash_points.py::test_s15_next_segment_durable_but_head_still_names_the_old_one
+FAILED tests/test_crash_points.py::test_torn_frame_is_never_committed[S1|S2|S3]
+FAILED tests/test_adoption.py::test_adoption_does_not_require_a_seg_end_frame             AttributeError: 'NoneType' has no attribute 'active_segment'
+FAILED tests/test_adoption.py::test_append_after_adoption_keeps_seq_dense                IndexError: list index out of range
+```
+
+`frames: 0` while the directory exists means the child's frames are not visible to the parent's scanner: the
+frame went into the writer's batch buffer and **the child died before the batch was written**, or the head is
+unreadable on the parent side. The stage child is spawned by `subprocess.run` with `BLACKBOX_DIE_AT`, so on
+Windows the two candidates are (a) the batch buffer not being flushed on the `os._exit` path — the `S1`/`S2`/`S3`
+stages die *inside* `emit` before `publish`, which is correct behaviour and must be asserted differently on a
+platform where the child cannot be relied on to reach the same instruction, and (b) `_child.py` dying during
+import on Windows. This is the next ticket, with the named tests as its acceptance: the same eight ids green in
+an annotation-free run.
