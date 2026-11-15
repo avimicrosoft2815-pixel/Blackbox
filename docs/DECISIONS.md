@@ -344,3 +344,51 @@ in one data directory resolve `exact` with the proxy on the left; a tape carryin
 says why; the capsule carries `links.json` while the tape's segment bytes are identical before and after recovery and
 hold no `LINK` frame; an empty answer is still a file, byte-identical across two runs; and the command is idempotent,
 records in both directories, and leaves nothing behind when it refuses.
+## D-039 — a hook blocks somebody's prompt, so the fast path writes one file and the mapping waits
+
+*Date: 2026-11-14. Plan refs: §11.9, P3B-05, P3B-07, C5. Cold-start budget: §15's ≤ 40 ms p95 row.*
+
+A Claude Code hook is a **synchronous checkpoint in a program we do not own**: the agent runs `blackbox ingest`, waits
+for it, and only then uses the tool the user asked for. That single fact decides the whole design of `hooks/`.
+
+**The split.** `blackbox ingest` reads stdin and writes exactly one atomic file —
+`inbox/<session>/<ts_ns>-<nonce>.json`, `tmp + fdatasync + os.replace` — then exits. The §11.9 **mapping** runs later, at
+fold time, in `hooks/events.py`. The plan's sentence says the ingest command maps the payload; this build does not, and
+the reason is measurable: the mapping needs the tape's vocabulary (`constants`, canonical CBOR, the fingerprint codec),
+and the cold-start row is paid by a human waiting inside their prompt. Keeping the raw body in the envelope also means a
+mapping corrected tomorrow applies to events written today — a property that has already earned itself once, since the
+`MARK{tool_event}` fallback was written after the first envelope format was already on disk in tests.
+
+**Where the milliseconds were.** The first working version measured **p50 46.2 ms / p95 47.7 ms** for the whole process
+on this sandbox (a bare `python -c pass` is 10.5 ms). The cost was not the work: `hooks/inbox.py` imported the platform
+dispatch, which pulled `pathlib` (~7 ms) for a `capabilities()` call the hook never makes, and used `dataclasses` for a
+four-field result (~10 ms). `pathlib` now imports inside `capabilities()` and `FoldResult` is a `__slots__` class, both
+for the same reason: **this module is on a 40 ms path**. Re-measured: **p50 32.0 ms, p95 40.2 ms**, of which 25.4 ms is
+the CLI floor (`blackbox --version`, i.e. interpreter + argparse + package) — so the inbox's own share is ~7 ms
+including the `fsync`. The dispatch itself was *not* bypassed to get there: an earlier draft used a bare `os.open`/
+`os.fsync` and `tests/test_platform_dispatch.py` refused it (C29 needs `O_BINARY`; C32 keeps `fsync` at the dispatch),
+which is the correct outcome — a budget that only holds by breaking a cross-platform rule is not a budget.
+
+**Folding is at-least-once, and says so.** A file's frames are appended **and published** before the file is unlinked, so
+a kill in between re-folds it rather than losing it. Duplicates are therefore possible in that window, which is why
+every payload carries `ingest_id` — the file's own name — so a reader can drop a repeat instead of counting it twice.
+The opposite order (unlink, then append) would silently *lose* an event, and losing one is the failure this project
+exists to prevent.
+
+**The slot survives the process.** `PreToolUse` and `PostToolUse` are two `ingest` invocations, minutes apart.
+Node slots are therefore kept in `inbox/<session>/state.json` next to the entries, written atomically after each fold:
+the pairing lives on disk, not in the folder's memory. When a close arrives with no matching open (a session that began
+before the adapter was installed, an entry that got quarantined), the folder writes
+`MARK{kind: "tool_event", why: "close without an open node"}` rather than a `NODE_CLOSE` for a node no reader ever saw
+open — a fabricated close is how a graph acquires a parent it never had.
+
+**A broken hook never fails the agent.** Not-JSON stdin, an unwritable inbox, a session that names nothing: each prints
+one line to stderr and exits **0**. A non-zero exit in the middle of somebody's prompt, because the *recorder* had a
+problem, is the trade this project refused everywhere else (C5 fail-open) and a hook is the worst possible place to make
+an exception. `test_a_broken_hook_body_never_fails_the_agent` asserts the exit code for three shapes of garbage.
+
+**And the settings file is somebody else's.** The Claude Code adapter touches only the entries it marked
+(`"_blackbox": true`), backs the file up once, and `remove` restores **byte-identically** when the file still holds
+exactly what `install` wrote — a proof (`_serialise(_with_ours(backup)) == bytes_on_disk`) rather than a hope. If the
+user edited their settings in between, their edit survives and only our block is stripped, and the result says which of
+the two happened. An unknown schema raises `BBX-E151` and writes nothing, before any backup is taken.
