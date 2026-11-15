@@ -180,4 +180,16 @@ routes = Routes([Route(name="openai", base="https://api.openai.com")], default="
   already set — in which case it is left exactly as it was and its destination becomes a route. `--no-proxy` turns the
   listener off, `--upstream NAME=URL[@/prefix]` adds or replaces a route, `--insecure-upstream NAME` skips verification
   for one, `--proxy-port` pins the port. The provider base URLs themselves live in `proxy/upstreams.json` (D-034).
-* **Not built yet**: the bench of §15.1's proxy rows (P3B-08) and the hook adapters plus the inbox (P3B-05/06).
+* **A coding agent's hooks are a first-class vantage point (P3B-05, P3B-07).** `blackbox hook install --claude-code
+  [--project|--user|--settings <path>]` adds a marked block to the `hooks` object of Claude Code's settings, and
+  `hook remove` gives the file back **byte-identically** when nothing else touched it — if you edited your settings while
+  it was installed, your edit wins and only our block is stripped. An unknown schema is refused (`BBX-E151`) before a
+  byte or a backup is written, and `hook status` never writes. Each hook runs `blackbox ingest --tool claude-code --event
+  <name>`, which reads the tool's JSON on stdin and writes **one atomic file** into the inbox: it exits 0 whatever
+  happens, because a hook that fails is a hook that breaks *your* prompt. The fold maps all ten of §11.9's Claude Code
+  events to frames — prompts and tool arguments leave hashes and fingerprints, never content — pairs
+  `PreToolUse`/`PostToolUse` on a node slot that survives the process, and writes an unmapped event as
+  `MARK{tool_event}` instead of dropping it (D-039). `blackbox ingest` cold start measures p50 32.0 ms / p95 40.2 ms end
+  to end in the development sandbox; the bench box's number is still owed.
+* **Not built yet**: the bench of §15.1's proxy rows (P3B-08), the Codex adapter (P3B-06), the launcher's 250 ms inbox
+  fold (the rest of P3B-07), and `docs/attach.md` (P3B-09).
