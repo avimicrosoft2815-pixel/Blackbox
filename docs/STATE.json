@@ -301,7 +301,7 @@
     },
     {
       "id": "P0-review-ee210ae",
-      "what": "the independent reviewer's three P0 findings at ee210ae: a receiver exception escaping through any callback (defect 27, cap_sdk/failopen.py, tests/test_capture_failopen.py 18), the blanket capture of unrelated HTTP traffic (D-026, cap_sdk/scope.py, tests/test_capture_scope.py 12), and defect 26 (data directory that is a file, now refused by name on every OS)",
+      "what": "the independent reviewer's three P0 findings at ee210ae: a receiver exception escaping through any callback (defect 27, cap_sdk/failopen.py, tests/test_capture_failopen.py 18), the blanket capture of unrelated HTTP traffic (D-026, cap_sdk/scope.py, tests/test_capture_scope.py 12), and defect 26 (data directory that is a file, now refused by name on every OS). Follow-up: both client modules verified directly (tests/test_capture_modules.py, 11), a stream closed early marked partial, and the mock provider's content-type fixed so call.stream means something (D-028)",
       "commit": "this turn",
       "tests": [
         "tests/test_capture_failopen.py",

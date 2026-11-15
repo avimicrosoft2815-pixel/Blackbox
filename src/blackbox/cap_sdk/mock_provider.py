@@ -98,8 +98,15 @@ class MockProvider:
         self.stop()
 
     # ── request handling ────────────────────────────────────────────────────
-    def handle(self, path: str, headers: dict[str, str], body: bytes) -> tuple[int, list[tuple[bytes, float]]]:
-        """Return (status, [(chunk_bytes, delay_before_send_s)]) for one request. Pure enough to unit-test."""
+    def handle(self, path: str, headers: dict[str, str],
+               body: bytes) -> tuple[int, list[tuple[bytes, float]], str]:
+        """Return (status, [(chunk_bytes, delay_before_send_s)], content_type) for one request.
+
+        The content type is the third element because it is *observable behaviour*: a real provider labels a
+        non-streaming completion `application/json` and a stream `text/event-stream`, and the seams decide
+        `call.stream` from that header. Sending `text/event-stream` for both made the flag impossible to test and
+        would have made a non-streaming call look streamed in every capsule this mock produced.
+        """
         self.scenario.requests += 1
         try:
             request = json.loads(body.decode("utf-8")) if body else {}
@@ -107,17 +114,17 @@ class MockProvider:
             request = {"_raw": body.decode("utf-8", "replace")}
         self.received.append({"path": path, "headers": dict(headers), "body": request})
         if self.scenario.status != 200:
-            return self.scenario.status, [(self._error_body(429), 0.0)]
+            return self.scenario.status, [(self._error_body(429), 0.0)], "application/json"
         anthropic = path.endswith("/messages")
         if path.endswith("/embeddings"):
-            return 200, [(self._embedding_body(), 0.0)]
+            return 200, [(self._embedding_body(), 0.0)], "application/json"
         streaming = bool(request.get("stream")) if isinstance(request, dict) else False
         if not streaming:
             # A real SDK asks for JSON when `stream` is absent, and parses it with its own model classes. Serving SSE
             # here would have made every non-streaming test fail inside the SDK, which is the one place a mock must
             # not put the interesting failure.
             body_json = self._message_body() if anthropic else self._completion_body()
-            return 200, [(body_json, 0.0)]
+            return 200, [(body_json, 0.0)], "application/json"
         chunks = [self._chunk(i, anthropic) for i in range(self.scenario.chunks)]
         timed: list[tuple[bytes, float]] = []
         for index, chunk in enumerate(chunks):
@@ -127,7 +134,7 @@ class MockProvider:
                 timed.append((self._error_event(anthropic), 0.0))
                 break
         timed.append((self._done(anthropic), 0.0))
-        return 200, timed
+        return 200, timed, "text/event-stream"
 
     # ── non-streaming bodies ────────────────────────────────────────────────
     def _text(self) -> str:
@@ -195,7 +202,7 @@ def _make_handler(provider: MockProvider) -> type[http.server.BaseHTTPRequestHan
         def do_POST(self) -> None:
             length = int(self.headers.get("content-length") or 0)
             body = self.rfile.read(length) if length else b""
-            status, chunks = provider.handle(self.path, dict(self.headers), body)
+            status, chunks, content_type = provider.handle(self.path, dict(self.headers), body)
             if status != 200:
                 payload = chunks[0][0]
                 self.send_response(status)
@@ -205,7 +212,7 @@ def _make_handler(provider: MockProvider) -> type[http.server.BaseHTTPRequestHan
                 self.wfile.write(payload)
                 return
             self.send_response(200)
-            self.send_header("content-type", "text/event-stream")
+            self.send_header("content-type", content_type)
             self.send_header("cache-control", "no-cache")
             self.send_header("connection", "close")
             self.end_headers()

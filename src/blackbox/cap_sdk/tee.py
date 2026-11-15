@@ -74,18 +74,23 @@ def tee_stream_class(module_name: str = "httpx") -> Any:
                 except Exception as exc:
                     # An error mid-stream is recorded *and* re-raised: hiding it would hand the application a silent
                     # short stream, and the tape would claim a call that completed.
-                    self._finish(error=f"{type(exc).__name__}: {exc}")
+                    self._finish(error=f"{type(exc).__name__}: {exc}", completed=False)
                     raise
                 if chunk:
                     first_ms = self._elapsed_ms() if self.call.first_byte_ms is None else None
                     self.recorder.receive(self.call, chunk, first_byte_ms=first_ms)
                 yield chunk
-            self._finish()
+            self._finish(completed=True)
 
-        def _finish(self, error: str | None = None) -> None:
+        def _finish(self, error: str | None = None, completed: bool = True) -> None:
             if self.done:
                 return
             self.done = True
+            if not completed and error is None:
+                # Closed early — a `break`, a timeout, a cancelled consumer. The bytes that arrived are real; the
+                # call did not finish, and a capsule must be able to tell those apart (D-023's `partial`, applied
+                # to a stream the seam watched end to end).
+                self.call.partial = True
             self.recorder.close_call(self.call, status=self.status, total_ms=self._elapsed_ms(), error=error)
 
         def close(self) -> None:
@@ -94,7 +99,7 @@ def tee_stream_class(module_name: str = "httpx") -> Any:
             close_inner = getattr(self.inner, "close", None)
             if close_inner is not None:
                 close_inner()
-            self._finish()
+            self._finish(completed=False)
 
     _TEE_STREAMS[module_name] = TeeStream
     return TeeStream
@@ -129,25 +134,30 @@ def async_tee_stream_class(module_name: str = "httpx") -> Any:
                 except StopAsyncIteration:
                     break
                 except Exception as exc:
-                    self._finish(error=f"{type(exc).__name__}: {exc}")
+                    self._finish(error=f"{type(exc).__name__}: {exc}", completed=False)
                     raise
                 if chunk:
                     first_ms = self._elapsed_ms() if self.call.first_byte_ms is None else None
                     self.recorder.receive(self.call, chunk, first_byte_ms=first_ms)
                 yield chunk
-            self._finish()
+            self._finish(completed=True)
 
-        def _finish(self, error: str | None = None) -> None:
+        def _finish(self, error: str | None = None, completed: bool = True) -> None:
             if self.done:
                 return
             self.done = True
+            if not completed and error is None:
+                # Closed early — a `break`, a timeout, a cancelled consumer. The bytes that arrived are real; the
+                # call did not finish, and a capsule must be able to tell those apart (D-023's `partial`, applied
+                # to a stream the seam watched end to end).
+                self.call.partial = True
             self.recorder.close_call(self.call, status=self.status, total_ms=self._elapsed_ms(), error=error)
 
         async def aclose(self) -> None:
             aclose_inner = getattr(self.inner, "aclose", None)
             if aclose_inner is not None:
                 await aclose_inner()
-            self._finish()
+            self._finish(completed=False)
 
     _ASYNC_TEE_STREAMS[module_name] = AsyncTeeStream
     return AsyncTeeStream
