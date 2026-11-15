@@ -258,3 +258,25 @@ plan's §10 shape, and it is append-only.
   (`coalesce_ms=60_000`) so the only trigger left is the one under test, and the docstring now says why the clock was
   removed instead of leaving the next reader to wonder. Re-run green at `6a8a742`+ (`43749402312`); the macOS cell is
   the evidence, since a fast local loop cannot reproduce a 100 ms gap.
+- **defect 39 — the exported OpenAI base URL lost the `/v1`, so a real client asked the provider for a path it does not
+  serve.** Found by P3B-09's matrix work: the row *"does this client honour the base URL `blackbox run` exports?"* was
+  the first question in this repository that had to be answered by **running the client**, and the first client run put
+  `POST /chat/completions` on the upstream instead of `/v1/chat/completions`.
+  *Invariant*: `exported path + the path the client appends == the path the provider documents`. It is a two-column
+  equality, and it was never written down.
+  *Cause*: `ExportPlan.with_url()` rendered one flat shape, `http://127.0.0.1:<port>/<name>`, for all four variables.
+  That is right for the Anthropic SDK, whose default base is `https://api.anthropic.com` and which appends
+  `/v1/messages`. It is wrong for the OpenAI SDK, whose default base is `https://api.openai.com/v1` and which appends
+  only `/chat/completions` — so the version segment has to be **in the value we hand it**. The plan had said so in
+  §13 (`OPENAI_BASE_URL=http://127.0.0.1:8787/openai/v1`); the implementation disagreed with the plan and nothing
+  compared them. Every proxy test that existed used a hand-written `/v1/chat/completions`, so the suite agreed with the
+  bug: the tests had modelled a client that appends the version, and no real client does.
+  *Fix*: `BASE_URL_SUFFIX` in `proxy/supervisor.py`, one entry today (`OPENAI_BASE_URL → /v1`), applied where the value
+  is rendered. Adopted values are untouched — a variable the user set is still never rewritten.
+  *Test*: `tests/test_attach_sdks.py::test_the_exported_base_plus_the_clients_own_path_is_the_documented_provider_path`
+  compares export + appended against the documented path for openai, anthropic and gemini, using the **default upstream
+  table** rather than a fixture; and the four client tests run the real SDKs, `curl` and `node` through the proxy so the
+  appended path is a client's decision and not the test's. Both fail on the old rendering (openai: `/chat/completions`
+  ≠ `/v1/chat/completions`). The `OLLAMA_HOST` and `GOOGLE_GEMINI_BASE_URL` rows are labelled **unverified** in
+  `docs/attach.md` instead of being quietly assumed right — `OLLAMA_HOST` is a `host:port` without a scheme in Ollama's
+  own documentation, which this build does not produce.

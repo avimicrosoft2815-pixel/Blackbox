@@ -41,7 +41,7 @@ def test_referenced_docs_exist():
         for rel in set(BACKTICK_DOC.findall(doc.read_text(encoding="utf-8"))):
             if not (ROOT / rel).exists():
                 missing.append(f"{doc.name} mentions {rel}")
-    # the v1.1 plan is allowed to name files that a later phase creates; report rather than fail hard
-    allowed_pending = {"docs/attach.md"}
+    # the v1.1 plan is allowed to name files that a later phase creates; nothing is pending as of P3B-09
+    allowed_pending: set[str] = set()
     missing = [m for m in missing if not any(a in m for a in allowed_pending)]
     assert not missing, "references to missing docs:\n" + "\n".join(missing)

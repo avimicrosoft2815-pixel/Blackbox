@@ -467,3 +467,31 @@ rot, and the guarantee is the one this project sells.
 The honest summary a user of this feature gets: *the Codex adapter maps the twelve events and will tell you to its face
 that it is guessing about the file it edits.* That is a smaller claim than a green checkmark, and it is one that can be
 defended when the guess turns out wrong.
+## D-042 — an exported base URL carries the version segment its client does not append
+
+*Date: 2026-11-14. Plan refs: §13, P3B-03, P3B-09. Follows D-033; forced by defect 39.*
+
+**The decision**: the value `blackbox run` exports is the value the client's own `base_url` would have been, not a
+host root with a route name on the end. Concretely `OPENAI_BASE_URL=http://127.0.0.1:<port>/openai/v1` and
+`ANTHROPIC_BASE_URL=http://127.0.0.1:<port>/anthropic`, because the OpenAI SDK's default base is
+`https://api.openai.com/v1` and it appends only `/chat/completions`, while the Anthropic SDK's default is
+`https://api.anthropic.com` and it appends `/v1/messages`. The asymmetry is the clients', not ours; encoding it in one
+table (`BASE_URL_SUFFIX`) is how we stop pretending it is uniform (defect 39).
+
+**Why it is not a detail**: with the flat rendering, a proxied OpenAI call reached `https://api.openai.com/chat/completions`
+— a 404 — and every test in the repository stayed green, because the tests wrote `"/v1/chat/completions"` by hand and so
+modelled a client nobody uses. The rule that follows is narrower than "test the proxy": **the client's path is a fact to
+be measured, not a string to be typed**. A row becomes "verified" in `docs/attach.md` only when a real client, at a named
+version, on a named date, produced the path the provider documents — and the four rows that have that today
+(`openai` 3.51.0, `anthropic` 2.8.0, `curl` 7.88.1, `node` v22.22.3) each point at the test that ran them.
+
+**What is deliberately still unverified**: `OLLAMA_HOST` (Ollama's own variable is `host:port`, without a scheme, which
+is not the shape we export) and `GOOGLE_GEMINI_BASE_URL` (the variable name is this repository's invention; the
+`google-genai` client reads its own spelling). Both rows say **unverified** and both say what is doubted, because a
+labelled row nobody can act on is the same as no label at all. Node, Go, Java, C#, Rust, Ruby, PHP, Aider, LangChain,
+LiteLLM and Cursor stay unverified for the same reason: nothing here has run them, and a version number copied from a
+README is not evidence.
+
+**One consequence for the suite**: `tests/test_attach_doc.py` fails if any verdict row stops carrying either a version
+and a date or the word **unverified**, and it is checked against a doctored document in the same session that wrote it
+— the check refuses a row with a `**verified**` verdict and no evidence, which is the failure mode that matters here.
