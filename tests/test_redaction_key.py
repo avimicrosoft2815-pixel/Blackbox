@@ -37,23 +37,36 @@ SECRET = b"sk-proj-ABCDEFGHIJKLMNOPQRSTUVWX000"
 
 
 def test_the_key_is_created_once_with_0600_and_reused(tmp_path, monkeypatch):
+    """On POSIX the promise is mode `0600` in a `0700` directory. On Windows there are no mode bits to promise —
+    `os.open`'s mode is ignored and `os.stat` reports the CRT default — so the file there is protected by the ACL of a
+    directory under the user profile, and this test says so rather than asserting a number Windows does not have.
+    """
     path = tmp_path / "keys" / "redaction.key"
     monkeypatch.setenv("BLACKBOX_KEY_PATH", str(path))
     first = load_or_create_key()
     assert len(first) == KEY_BYTES
-    mode = stat.S_IMODE(os.stat(path).st_mode)
-    assert mode == 0o600, f"the key file is mode {mode:o}"
-    assert stat.S_IMODE(os.stat(path.parent).st_mode) == 0o700
+    if os.name == "posix":
+        assert stat.S_IMODE(os.stat(path).st_mode) == 0o600
+        assert stat.S_IMODE(os.stat(path.parent).st_mode) == 0o700
+    else:
+        assert path.exists(), "the key must exist; its protection is the parent directory's ACL"
     assert load_or_create_key() == first, "a second call must read the key it made, not make another"
 
 
 def test_the_default_location_is_the_one_the_docs_name(tmp_path, monkeypatch):
+    """`expanduser` reads `HOME` on POSIX and `USERPROFILE` on Windows, so both are pointed at the same place and the
+    assertion is on the path the code actually resolves, not on a literal the test hopes it resolved."""
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.delenv("BLACKBOX_KEY_PATH", raising=False)
     monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    from blackbox.keys import default_key_path
+
+    resolved = Path(default_key_path())
+    assert resolved == home / ".blackbox" / "keys" / "redaction.key", resolved
     load_or_create_key()
-    assert (home / ".blackbox" / "keys" / "redaction.key").exists()
+    assert resolved.exists()
 
 
 def test_the_pseudonym_is_the_hmac_and_not_the_digest(tmp_path, monkeypatch):
@@ -137,9 +150,11 @@ def test_four_processes_starting_at_once_agree_on_one_key(tmp_path, monkeypatch)
         "from blackbox.keys import load_or_create_key\n"
         "print(load_or_create_key({!r}).hex())\n".format(str(ROOT / "src"), str(path))
     )
-    procs = [subprocess.Popen([sys.executable, "-c", program], stdout=subprocess.PIPE, text=True,
-                              env={**os.environ, "PYTHONPATH": str(ROOT / "src")}) for _ in range(4)]
-    outputs = {proc.communicate(timeout=60)[0].strip() for proc in procs}
+    procs = [subprocess.Popen([sys.executable, "-c", program], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                              text=True, env={**os.environ, "PYTHONPATH": str(ROOT / "src")}) for _ in range(4)]
+    results = [proc.communicate(timeout=60) for proc in procs]
+    outputs = {out.strip() for out, _err in results}
+    assert "" not in outputs, f"a process failed: {[err[-400:] for _out, err in results if err]}"
     assert len(outputs) == 1, f"the processes disagreed on the key: {outputs}"
     assert len(path.read_bytes()) == KEY_BYTES
 
@@ -155,3 +170,35 @@ def test_hash_mode_in_a_fresh_environment_creates_and_reports_its_key(tmp_path, 
     monkeypatch.setenv("BLACKBOX_KEY_PATH", str(tmp_path / "k"))
     state = Redactor("hash").as_dict()
     assert state["keyed"] is True and isinstance(state["key_id"], str) and len(state["key_id"]) == 8
+
+
+def test_a_file_that_is_not_a_key_is_reported_rather_than_used_or_overwritten(tmp_path):
+    """A short file is not a race after a moment: it is a broken key, and silently replacing it would rotate the key
+    out from under every capsule that names its id."""
+    from blackbox.keys import KeyUnavailable
+
+    path = tmp_path / "broken.key"
+    path.write_bytes(b"half a key")
+    with pytest.raises(KeyUnavailable, match="delete it to have a new one created"):
+        load_or_create_key(str(path), timeout_s=0.05)
+    assert path.read_bytes() == b"half a key", "a broken key must not be overwritten silently"
+
+
+def test_a_key_written_by_another_process_mid_read_is_waited_for(tmp_path):
+    """The CI failure this test exists for: the winner creates the file, the loser reads zero bytes, and the loser must
+    wait rather than call the key corrupt."""
+    path = tmp_path / "slow.key"
+    path.touch()                                         # exists, empty: exactly the window
+    import threading
+
+    def writer() -> None:
+        import time as _time
+
+        _time.sleep(0.05)
+        path.write_bytes(b"k" * KEY_BYTES)
+
+    thread = threading.Thread(target=writer)
+    thread.start()
+    key = load_or_create_key(str(path), timeout_s=5.0)
+    thread.join()
+    assert key == b"k" * KEY_BYTES

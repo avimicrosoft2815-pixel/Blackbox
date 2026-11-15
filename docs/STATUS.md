@@ -25,7 +25,7 @@ with the ordered preflight are real and tested, as is seam C (SDK method patches
 `anthropic` 2.8.0), the tape sink that turns seam events into `MODEL_CHUNK` frames, and the day-14 rule: an unmodified
 `openai` script killed with `SIGKILL` mid-stream is recovered with chunk and byte counts that never exceed what the
 provider pushed. The proxy, the launcher integration, the viewer and the diagnosis workflow are not built yet.**
-Suite: **Total: 647 tests** — 646 pass here and 1 is skipped on POSIX by name
+Suite: **Total: 649 tests** — 648 pass here and 1 is skipped on POSIX by name
 (`test_an_open_view_blocks_the_unlink_only_on_windows`: POSIX permits unlinking a file another fd still holds, so
 the open-view case exists only on Windows). ruff 0.17.5 and mypy 2.4.1 (`strict = true`, nothing disabled):
 0 findings.

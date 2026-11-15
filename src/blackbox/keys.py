@@ -24,6 +24,7 @@ from __future__ import annotations
 import hashlib
 import os
 import secrets
+import time
 
 from blackbox.platform import current as _plat_current
 
@@ -52,44 +53,56 @@ def key_id(key: bytes) -> str:
     return hashlib.sha256(key).hexdigest()[:8]
 
 
-def load_or_create_key(path: str | None = None) -> bytes:
+def load_or_create_key(path: str | None = None, *, timeout_s: float = 2.0) -> bytes:
     """Read the machine key, creating it on first use. Raises `KeyUnavailable` when it cannot be had.
 
-    `O_EXCL` is the whole concurrency story: if two processes start at the same instant, one creates the file and the
-    other's `open` fails with `EEXIST`, at which point it reads what the winner wrote. There is no window in which a
-    reader sees a half-written key, because the bytes are written before the descriptor is closed and the file is only
-    ever created once.
+    `O_EXCL` is the creation rule: if two processes start at the same instant, one creates the file and the other's
+    `open` fails with `EEXIST`, at which point it reads what the winner wrote. The subtlety that cost a CI run is that
+    "what the winner wrote" can briefly be *nothing* — the winner has created the file but not yet written the key —
+    so a short read is retried for a moment rather than reported as a corrupt key. A file that is still short after
+    `timeout_s` is reported as broken, with the size, because at that point it is not a race.
     """
     target = path or default_key_path()
-    for _attempt in range(2):
+    deadline = time.monotonic() + timeout_s
+    while True:
         try:
             with open(target, "rb") as handle:
                 key = handle.read()
-            if len(key) >= KEY_BYTES:
-                return key
-            raise KeyUnavailable(f"key file {target!r} is {len(key)} bytes; expected {KEY_BYTES}")
         except FileNotFoundError:
-            pass
+            key = b""
         except OSError as exc:                                  # a read-only home, a denied directory
             raise KeyUnavailable(f"cannot read key {target!r}: {exc}") from exc
+        if len(key) >= KEY_BYTES:
+            return key[:KEY_BYTES]
+
+        if key:
+            # The file exists but is not a key yet: another process is mid-write, or it is broken.
+            if time.monotonic() >= deadline:
+                raise KeyUnavailable(f"key file {target!r} holds {len(key)} bytes, not {KEY_BYTES}; "
+                                     "delete it to have a new one created")
+            time.sleep(0.01)
+            continue
 
         directory = os.path.dirname(target)
         try:
             if directory:
                 os.makedirs(directory, exist_ok=True)
-                os.chmod(directory, 0o700)
+                if os.name == "posix":
+                    os.chmod(directory, 0o700)
             descriptor = _plat.open_fd(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         except FileExistsError:
-            continue                                            # another process won the race; read its key
+            time.sleep(0.01)                                    # another process won; read its key next time round
+            if time.monotonic() >= deadline:
+                raise KeyUnavailable(f"key {target!r} exists but never became readable") from None
+            continue
         except OSError as exc:
             raise KeyUnavailable(f"cannot create key {target!r}: {exc}") from exc
-        key = secrets.token_bytes(KEY_BYTES)
+        fresh = secrets.token_bytes(KEY_BYTES)
         try:
             with os.fdopen(descriptor, "wb") as handle:
-                handle.write(key)
+                handle.write(fresh)
                 handle.flush()
                 _plat.fdatasync(handle.fileno())
         except OSError as exc:
             raise KeyUnavailable(f"cannot write key {target!r}: {exc}") from exc
-        return key
-    raise KeyUnavailable(f"key {target!r} appeared and vanished twice")
+        return fresh
