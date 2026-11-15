@@ -132,72 +132,105 @@ def test_the_seam_injects_only_when_the_launcher_says_a_proxy_is_in_front(monkey
 
 # ── through a real proxy: injected, read for the link, stripped before the upstream ─────────────────────────────────
 
-def test_the_proxy_reads_the_run_id_and_the_upstream_never_sees_it(tmp_path: Path):
-    """The whole mechanism in one test: SDK-side header in, link recorded, header out."""
-    import asyncio
+class _EchoOrigin:
+    """A threaded origin that records the headers it was sent. A thread, not the test's event loop."""
 
-    from blackbox.cap_sdk.sink import SinkRecorder, TapeSink
-    from blackbox.tape import writer as writer_module
+    def __init__(self) -> None:
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-    async def main() -> None:
         seen: list[dict[str, str]] = []
 
-        async def origin(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
-            while True:
-                try:
-                    line = (await reader.readuntil(b"\r\n")).rstrip(b"\r\n").decode()
-                except (asyncio.IncompleteReadError, ConnectionError):
-                    return
-                if not line:
-                    return
-                head: dict[str, str] = {}
-                while True:
-                    raw = await reader.readuntil(b"\r\n")
-                    if raw in (b"\r\n", b"\n"):
-                        break
-                    name, _, value = raw.rstrip(b"\r\n").decode().partition(":")
-                    head[name.strip().lower()] = value.strip()
-                length = int(head.get("content-length", "0"))
-                await reader.readexactly(length) if length else None
-                seen.append(head)
+        class Handler(BaseHTTPRequestHandler):
+            protocol_version = "HTTP/1.1"
+
+            def do_POST(self) -> None:                    # http.server's spelling
+                length = int(self.headers.get("content-length", "0"))
+                if length:
+                    self.rfile.read(length)
+                seen.append({name.lower(): value for name, value in self.headers.items()})
                 body = json.dumps({"id": "chatcmpl-h", "choices": [{"message": {"content": "ok"}}]}).encode()
-                head = (f"HTTP/1.1 200 OK\r\nContent-Length: {len(body)}\r\n"
-                        "Content-Type: application/json\r\n\r\n").encode()
-                writer.write(head + body)
-                await writer.drain()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
 
-        server = await asyncio.start_server(origin, "127.0.0.1", 0)
-        port = (server.sockets or ())[0].getsockname()[1]
+            def log_message(self, *args: object) -> None:
+                pass
 
-        tape = writer_module.TapeWriter(str(tmp_path / "t"), segment_bytes=256 * 1024).open()
-        recorder = SinkRecorder(TapeSink(tape.emit, content="full", coalesce_bytes=1))
-        routes = Routes([Route(name="openai", base=f"http://127.0.0.1:{port}", prefix="/v1")], default=None)
-        proxy = await ProxyServer(routes, receiver=recorder).start()
-        try:
-            import httpx
+        self.seen = seen
+        self._server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self._server.daemon_threads = True
+        self.url = f"http://127.0.0.1:{self._server.server_address[1]}"
+        import threading
 
-            request_headers: dict[str, str] = {}
-            env = {headers.ENV_PROXY: "1", headers.ENV_RUN: "run-9"}
-            assert headers.inject(request_headers, env, node=3) is True
-            async with httpx.AsyncClient() as client:
-                response = await client.post(f"http://127.0.0.1:{proxy.port}/v1/chat/completions",
-                                             json={"model": "m", "messages": []}, headers=request_headers)
-                assert response.status_code == 200
-            assert not any(name.startswith("x-blackbox-") for name in seen[-1]), \
-                "the proxy must strip every header of ours before the upstream"
-            assert proxy.stats.requests == 1
-        finally:
-            await proxy.close()
-            server.close()
-            await server.wait_closed()
-            tape.publish()
-            tape.close()
+        self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
+        self._thread.start()
 
-        from blackbox import constants as C
-        from blackbox.tape import scanner
+    def close(self) -> None:
+        self._server.shutdown()
+        self._server.server_close()
 
-        frames = scanner.scan(str(tmp_path / "t"), tape.writer_uuid.hex()).frames
-        summary = json.loads(next(f["payload"] for f in frames if f["kind"] == C.KIND_MODEL_REQUEST))
-        assert summary["linked_run"] == "run-9", "the tape carries the run the header named, which is what links it"
 
-    asyncio.run(main())
+def test_the_proxy_reads_the_run_id_and_the_upstream_never_sees_it(tmp_path: Path):
+    """The whole mechanism in one test: SDK-side header in, link recorded, header out.
+
+    The proxy runs on its own loop in its own thread and the client is synchronous, which is the shape the rest of the
+    proxy tests use — and now for a second reason. The first version of this test put the client, the proxy and the
+    origin on one `asyncio.run()` loop; on 3.12 it deadlocked (the loop parked in `select` with nothing runnable) and on
+    3.11 and 3.13 it passed, so the harness was measuring an asyncio difference rather than the header. A test that hangs
+    on one interpreter is not evidence about the thing it claims to test.
+    """
+    import asyncio
+    import threading
+
+    import httpx
+
+    from blackbox import constants as C
+    from blackbox.cap_sdk.sink import SinkRecorder, TapeSink
+    from blackbox.tape import scanner
+    from blackbox.tape import writer as writer_module
+
+    origin = _EchoOrigin()
+    tape = writer_module.TapeWriter(str(tmp_path / "t"), segment_bytes=256 * 1024).open()
+    recorder = SinkRecorder(TapeSink(tape.emit, content="full", coalesce_bytes=1))
+    loop = asyncio.new_event_loop()
+    ready = threading.Event()
+    state: dict[str, Any] = {}
+
+    def run() -> None:
+        asyncio.set_event_loop(loop)
+
+        async def start() -> None:
+            routes = Routes([Route(name="openai", base=origin.url, prefix="/v1")], default=None)
+            state["proxy"] = await ProxyServer(routes, receiver=recorder).start()
+            ready.set()
+
+        loop.run_until_complete(start())
+        loop.run_forever()
+
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+    try:
+        assert ready.wait(10), "the proxy did not start"
+        proxy = state["proxy"]
+        request_headers: dict[str, str] = {}
+        env = {headers.ENV_PROXY: "1", headers.ENV_RUN: "run-9"}
+        assert headers.inject(request_headers, env, node=3) is True
+        with httpx.Client(timeout=15.0) as client:
+            response = client.post(f"http://127.0.0.1:{proxy.port}/v1/chat/completions",
+                                   json={"model": "m", "messages": []}, headers=request_headers)
+            assert response.status_code == 200
+        assert not any(name.startswith("x-blackbox-") for name in origin.seen[-1]), \
+            "the proxy must strip every header of ours before the upstream"
+        assert proxy.stats.requests == 1
+    finally:
+        loop.call_soon_threadsafe(loop.stop)
+        thread.join(10)
+        origin.close()
+        tape.publish()
+        tape.close()
+
+    frames = scanner.scan(str(tmp_path / "t"), tape.writer_uuid.hex()).frames
+    summary = json.loads(next(f["payload"] for f in frames if f["kind"] == C.KIND_MODEL_REQUEST))
+    assert summary["linked_run"] == "run-9", "the tape carries the run the header named, which is what links it"
