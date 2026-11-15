@@ -27,13 +27,19 @@ def main(argv: list[str]) -> int:
     if "--title" in head:
         title = head[head.index("--title") + 1]
 
-    proc = subprocess.run(cmd, capture_output=True, text=True)          # noqa: S603 - the workflow calls it
+    proc = subprocess.run(cmd, capture_output=True, text=True)
     out = (proc.stdout or "") + (proc.stderr or "")
     sys.stdout.write(out)
     sys.stdout.flush()
 
     lines = out.splitlines()
     tail = "\n".join(lines[-TAIL:])
+    # C27 follow-up: the step summary is JS-rendered and the job log needs a login, but a `::error::` workflow
+    # command becomes an ANNOTATION, which `gh run view` prints without any of that. One annotation per failed
+    # test id, so a red cell names its tests from the CLI.
+    for line in lines:
+        if line.startswith("FAILED ") or line.startswith("ERROR "):
+            print(f"::error title={title}::{line.strip()[:200]}", flush=True)
     status = "passed" if proc.returncode == 0 else f"**failed** (exit {proc.returncode})"
     block = (f"\n### `{title}` — {status}\n\n"
              f"```\n{tail}\n```\n")
