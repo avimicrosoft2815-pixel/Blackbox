@@ -203,3 +203,40 @@ plan's §10 shape, and it is append-only.
   Tests: `tests/proxy/test_disconnect_classes.py` (real sockets both ways, real tape, class read back off it) and
   `tests/proxy/test_proxy_death.py` (S16: `SIGKILL` a real proxy mid-stream, recover, `INTERRUPTED_PROXY`).
 
+- **defect 35 — a test that hung on one interpreter, and a CI that could not say which one.** Not a product bug, and
+  found exactly the way a product bug is found: a claim was checked on one platform and asserted on three. P3B-04's
+  first half landed with `tests/test_headers.py`'s proxy test running the `httpx` client, the `ProxyServer` and the echo
+  origin on **one** `asyncio.run()` loop — accept, serve and read interleaved on a single scheduler, which is a shape
+  that *usually* works and is never guaranteed. On CPython 3.11 and 3.13 the cells were green; on 3.12 all three failed,
+  and the failure was not an assertion but **the absence of one**: the step hung until GitHub's `timeout-minutes`
+  expired, and the only annotation the run produced was `The action 'Unit + property tests' has timed out after 15
+  minutes` (`check-runs/132853301928`). Everything a reader needed — which test, which line, what it was waiting on —
+  was inside a process that had been killed by the orchestrator. Two defects, then: the loop, and the silence.
+  *The loop.* On 3.12 the loop parks in `select()` with nothing runnable: every coroutine is waiting on a server whose
+  accept callback can only run once the loop comes back, so it never does. The rewrite is the shape
+  `tests/proxy/` already used — the proxy on its own loop in a daemon thread, woken by a `threading.Event`; the origin a
+  `ThreadingHTTPServer`; the client synchronous `httpx.Client(timeout=15.0)`. Three threads, no shared scheduler to
+  starve, and the test states the trap in its own docstring so the next one is not written the same way.
+  *The silence.* Fixed in four parts, because each layer lost the information for its own reason (D-037): an autouse
+  `conftest` watchdog (`BLACKBOX_TEST_TIMEOUT`, default 120 s) that writes a `FAILED <nodeid> — ran longer than N s at
+  <file>:<line> in <function>` line and exits the process; a **file** in the tempdir as the durable channel, because
+  pytest's capture is an `fd`-level `dup2` and `os._exit` skips its flush, and because GitHub keeps only ~10 annotations
+  per step so a `faulthandler` dump of every thread filled them with `pluggy` frames; `tools/ci_summary.py` printing one
+  fixed-shape annotation (`exit N · out M lines · hung yes|no · <FAILED line> | …`) that is emitted even when the child
+  said nothing, since the first version printed nothing at all in that case; and `-s` on the pytest invocation, because
+  under capture the child's own output never reaches the log. The first run with all four in place named the test and
+  the frame (`selectors.py:468 in select`) from a run that previously said only that it had timed out.
+  `tests/test_headers.py` is still seven tests; the count did not change because nothing was deleted to make it pass.
+- **defect 36 — a test compared a read count to an event count, and one cell out of ten disagreed.** `d6ab810`'s run
+  (`43743518320`) was nine of ten: `py3.13 / ubuntu-latest` failed on
+  `tests/test_seam_transport.py::test_a_truncated_stream_is_recorded_short_rather_than_completed` with *"the recorder
+  invented or dropped a chunk — `2 == ModelCall(...).chunks`, `4 == len(...)`"*, and the ten cells before and after it
+  were green. Nothing was invented and nothing was dropped: `call.chunks` counts the **reads the application made**, and
+  on that machine two SSE events arrived in one read, so the body's four `data:` frames had been delivered in two
+  chunks. The assertion had compared a property of the transport to a property of the payload, and no amount of care in
+  the seam could make the two agree. It is the same shape as C40's window flake — an assertion that is true of the
+  common scheduling and false of the honest one — and it was found the way this file has been catching them: the
+  watchdog and the single annotation named the test and the two numbers in one line, from a run that would otherwise
+  have said "exit 1". Fix: "short" is now measured against an **oracle** (the same request through an unseamed client,
+  untruncated: the truncated body must be strictly smaller and must lack `[DONE]`), and the chunk count is compared to
+  the reads that run's application actually made, which is the only relation the seam guarantees.

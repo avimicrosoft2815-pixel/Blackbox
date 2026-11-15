@@ -32,7 +32,7 @@ from blackbox.cap_sdk.sink import chunk_bytes
 from blackbox.codec.ids import blake2b
 from blackbox.errors import bbx
 from blackbox.platform import current as _plat_current
-from blackbox.rec import discover
+from blackbox.rec import correlate, discover
 from blackbox.tape import chain as chain_mod
 from blackbox.tape import meta as meta_mod
 from blackbox.tape import scanner, segments
@@ -468,6 +468,10 @@ class Recovery:
                 assert isinstance(per_segment, dict)
                 per_segment[str(f.get("segment"))] = body["prev"].hex()
         entries[cap.CHAIN_NAME] = json.dumps(chain, sort_keys=True).encode() + b"\n"
+        # §11.10, the resolver at seal time: which other tapes of this data directory this run is linked to, and on what
+        # evidence. Written into the capsule, never into the tape — the tape's bytes are the evidence this entry's
+        # siblings hash, so a resolver that appended to it would be editing what it was describing (D-038).
+        entries[cap.LINKS_NAME] = correlate.for_capsule(self.data_dir, self.writer_uuid_hex)
         input_hash = _hash(*(f"{k}:{blake2b(v).hex()}" for k, v in sorted(entries.items())))
         if self._skip("SEALED", input_hash):
             existing = cap.read_capsule(self.capsule_path)

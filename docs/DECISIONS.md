@@ -225,3 +225,122 @@ proxy's own two counters — it is the difference between what the provider prod
 why the test asserts `origin.sent_stream_bytes > client_received_bytes` against an origin we own, and says in a comment why
 the two tape counts may coincide.
 
+## D-036 — `x-blackbox-run` travels only behind a proxy, and a link's class is the strength of the claim
+
+*Date: 2026-11-16. Plan refs: §11.10, CH-07, P3B-04. Risk R16 in §22.3 is about this header.*
+
+§11.10's `exact` link needs one fact to cross a process boundary: the proxy must know which run the socket belongs to.
+There is no way to do that without touching the request, so the header is the single place where this product modifies
+somebody else's bytes, and it is therefore governed by two rules that the code enforces rather than documents:
+
+* **Inject only when `BLACKBOX_PROXY=1`** — set by `blackbox run` and by nothing else. The alternative ("the header is
+  harmless") is what produces R16: an unproxied app with its own header on the wire to a real provider, for our benefit.
+  `headers.inject()` returns False and touches nothing unless the variable says exactly `1` *and* there is a run id; a
+  header with a run but no node still names its run, and a run with no run id is dropped rather than guessed at.
+* **Strip it before the upstream.** The proxy reads the value and removes every `x-blackbox-*` header in both directions,
+  so a user who exported the variable by hand leaks an internal name as far as the proxy and no further.
+
+The value is `<run_id>/<node>`; the node half is a hint. The proxy records the run id on the call it opens
+(`linked_run` on `MODEL_REQUEST`), which is the anchor the resolver matches on — so the link is established from the
+*tape*, not from a live in-memory pairing that a crash would lose.
+
+**Three classes, three strengths of claim.** `rec/links.py` resolves `exact` (same run id — by construction),
+`declared` (the user said so; recorded with `asserted_by: user` so it is never mistaken for a measurement) and `inferred`
+(a ±2 s window **and** a content-fingerprint match, with both numbers in the evidence and a confidence capped below 1.0).
+Authority is ordered — declared, then exact, then inferred — and a pair that got a stronger link never also gets a weaker
+one, because two edges for one relation is how a graph starts disagreeing with itself.
+
+**An inference never merges runs.** This is the invariant the plan puts in bold and the one a "helpful" refactor would
+break first, so `resolve()` returns links and nothing else, and `test_an_inference_never_merges_two_runs` asserts that both
+run identities come back unchanged and distinct. A recorder whose totals cannot be checked is not a record.
+
+**What is not here yet.** The resolver and the header path are real and tested; the emission of `LINK` frames at
+recovery/seal time and `blackbox link <a> <b>` are the remaining half of P3B-04 and are listed as such in `docs/STATUS.md`.
+The classes are named in one module now precisely so that half has a vocabulary to write against.
+
+## D-037 — a hung test must cost a failure that names itself, and the report travels in a file
+
+*Date: 2026-11-14. Plan refs: C7, C40, P0-14. Discovered through defect 35.*
+
+A suite that hangs costs more than a suite that fails. A failure arrives with a node id and a traceback; a hang arrives,
+in CI, as `The action 'Unit + property tests' has timed out after 15 minutes` — an artefact of the orchestrator, not of
+the code — and the process that knew where it was stopped is gone. Three 3.12 cells failed that way on a branch whose
+other seven cells were green, and the only way to learn which test it was, was to guess and re-run. So the rule is: **a
+test that overruns is a failure, and it names itself, in a channel that survives the process being killed.**
+
+Four consequences, each paid for by something that did not work:
+
+* **The watchdog is stdlib, in `conftest.py`, and autouse.** `pytest-timeout` was the obvious answer and is not
+  available: `[project.optional-dependencies].dev` is asserted to be exactly `{pytest, hypothesis}` by
+  `tests/test_packaging.py`, because the test toolchain is part of what a contributor installs and it should stay small
+  and boring. The watchdog is a thread that samples the current test node id and, past `BLACKBOX_TEST_TIMEOUT`
+  (default 120 s), writes the line, dumps tracebacks and `os._exit(1)`s. It cannot be npm-style "detected" per test;
+  it is one clock for the suite, and 120 s is chosen to be far longer than the slowest honest test.
+* **The channel is a file, not a descriptor.** pytest's capture is `fd`-level `dup2` from the start of the session, so
+  whatever `os.write(1, …)` does inside a test may go into a buffer nobody flushes, and `os._exit` skips `atexit`,
+  `finally` and the flush it would have needed. A `dup(1)` taken in `conftest` does not help either — it duplicates the
+  *capture* descriptor. A path in the tempdir, appended to by the watchdog and read-and-unlinked by the summary tool, is
+  the only channel that does not depend on the process surviving its own exit.
+* **One annotation, fixed shape, always printed.** GitHub accepts about ten annotations per step, and a
+  `faulthandler.dump_traceback(all_threads=True)` filled every one of them with `_pytest/runner.py` and `pluggy` frames
+  — ten true statements that together said nothing. `tools/ci_summary.py` now prints exactly one
+  `::error title=…::` whose text is `exit N · out M lines · hung yes|no · <FAILED/ERROR lines> | <last non-traceback
+  lines>`, capped at 600 characters. The shape is fixed and unconditional because the conditional version had a hole:
+  a child that produced no output produced no annotation at all, and the run looked like a run with nothing to say.
+* **`-s` stays on the pytest invocation.** It is a concession — capture is useful — but a test that is about to be
+  killed at a `select()` needs its output to have already left the process. With capture on, the log of a hung run ends
+  at the last test that finished.
+
+None of this makes a hang impossible. It makes a hang *cheap to read*: the run that previously said only that it had
+timed out now says `FAILED tests/test_headers.py::test_the_proxy_reads_the_run_id_and_the_upstream_never_sees_it — ran
+longer than 120 s at …/python3.12/selectors.py:468 in select`. That line is what turned defect 35 from a platform
+mystery into a shared-loop bug in one afternoon, and it is the reason the diagnostics were worth keeping after the test
+itself was fixed.
+## D-038 — a `LINK` is written beside the tape, and a link payload is read like the untrusted input it is
+
+*Date: 2026-11-14. Plan refs: §11.10, C14, C24, P3B-04 (second half).*
+
+§11.10 says the resolver runs **at recovery/seal time, not on the hot path**, and that a capsule lists links under
+`links[]`. This decision is about the two things that sentence leaves open: which artefacts get the record, and what a
+reader does with one it did not write.
+
+**Where it lands: beside the tape, never in it.** `recovery.py` opens with "nothing here mutates a tape", and that is
+not a stylistic preference — a segment's bytes are what a capsule's integrity root hashes, so a resolver that appended a
+`LINK` to the tape it was describing would be editing its own evidence, and the capsule would then attest to a tape that
+no longer exists. The records therefore go to the capsule as `links.json` (`rec/correlate.py: for_capsule`) and to
+stdout as the answer `blackbox link a b` prints. `links.frames_for()` exists anyway, because P3B-05's inbox and P4's
+viewer will own live tapes and may append a `LINK` to their own bytes — the difference is *whose* tape it is.
+
+**A capsule with no links carries an empty `links.json`.** "These tapes were looked at and nothing matched" and "this
+capsule never looked" are different facts, and a missing file states neither. The same rule as `summary` printing all
+three classes at zero.
+
+**Reading one back is a parse, not a `json.loads`.** A tape is input from whatever produced it. `links.parse` requires
+all seven fields, refuses an unknown class (the vocabulary is closed: three classes, and two spellings of one is how a
+vocabulary rots), refuses a self-link (a writer is not its own other vantage point), refuses confidence outside `[0, 1]`,
+and — the one that matters — refuses an **`inferred` link carrying confidence 1.0**, because the class exists precisely
+to say that nobody asserted the relation. It tolerates *extra* keys, since the format is append-only and a newer writer
+may add a field a reader has no business failing on. Everything it refuses raises `BBX-E155` ("invalid CBOR payload — a
+producer wrote a non-canonical or malformed payload"), which is the registry's existing code for exactly this: no new
+error code was invented, because the plan's appendix is closed and a code is never reused for a new meaning.
+
+**What a tape says about its own run.** The run id is `RUN_START`'s `run_id` when the tape has one, and failing that the
+single `linked_run` its `MODEL_REQUEST` frames carry — the proxy's case, which is told whose socket it is. Two *different*
+linked runs on one tape is not a run id: it is two runs' traffic through one proxy, so the view names neither, the exact
+class cannot apply, and the pair can only be linked by inference (with `why_not_exact` in the evidence) or declared.
+Guessing the most frequent one would have produced a confident link to the wrong run roughly half the time, which is the
+worst failure this module can have.
+
+**`blackbox link a b` records one assertion, in both directories.** The pair goes into `<data_dir>/links.declared.json`
+on *both* sides, because a declaration only one side remembers is one the other side's evidence contradicts. Recording
+is idempotent and order-free (`a,b` sorts), and the resolver de-duplicates pairs read from two directories — otherwise
+one human statement would render as two identical `declared` edges. The command refuses three cases rather than writing a
+link between unidentifiable things: a directory with no readable tape, a tape that names no run, and a directory naming
+more than one run.
+
+**Evidence.** `tests/test_link_records.py` (16): the kind is `19`, in the graph range, P2 and appended without moving a
+single published id; a payload round-trips and four kinds of damage are each refused by their own reason; two real tapes
+in one data directory resolve `exact` with the proxy on the left; a tape carrying two runs resolves only `inferred` and
+says why; the capsule carries `links.json` while the tape's segment bytes are identical before and after recovery and
+hold no `LINK` frame; an empty answer is still a file, byte-identical across two runs; and the command is idempotent,
+records in both directories, and leaves nothing behind when it refuses.

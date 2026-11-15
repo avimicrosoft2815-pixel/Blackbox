@@ -5,10 +5,10 @@
     "docs/STATUS.md",
     "bench/results/*.json"
   ],
-  "next_ticket": "P3-11",
-  "next_note": "L3: P3B-08's kill/disconnect half is done (D-035, defect 34) — §14.4a's three classes are decided by the side that closed first and written on the tape, INTERRUPTED_PROXY is derived from an open call plus a dead writer lease, and S16 kills a real proxy mid-stream to prove it; the client matrix (curl, Node 22, openai SDK) receives byte-identical streams through the same listener. Proxy rows: added latency p50 0.165/p99 0.471, first byte p50 0.184, 200 streams, RSS 0.0 MiB (D-032c). Suite 711. Next: P3B-04 header links, then P3B-05/06 hooks and inbox, P3B-09 docs/attach.md.",
-  "last_green_commit": "1c3db9d",
-  "last_green_commit_note": "run 43710478316, ten jobs ten success. 50d6b37 (43710184175), c869d9e (43707004115) and d43b208 (43706220024) before it, all ten of ten. PRs #2, #3 and #4 merged, so origin/main is past 31241d6 for the first time and the nightly clock has started (C40: every commit names its own run).",
+  "next_ticket": "P3B-05",
+  "next_note": "L3: P3B-04 is complete — header injection behind a proxy (D-036), the three link classes, and now the records themselves (D-038): LINK is kind 19, resolved at seal time into the capsule's links.json, never appended to the tape it describes, and `blackbox link <a> <b>` records a declared pair in both data directories. Suite 748. Next: P3B-05/06 — the Claude Code / Codex hook adapters and their inbox — then P3B-09 docs/attach.md.",
+  "last_green_commit": "ac25b4a",
+  "last_green_commit_note": "run 43744646557, ten jobs ten success (3 OS x 3 Python, py3.12 included); before it e18ce61 (43744575973) and 8a8b58b (43743421915) at ten of ten. d6ab810 (43743518320) was nine of ten on a single py3.13 cell — defect 36, a chunk count compared to an event count — and is fixed by ac25b4a. The four 3.12-red runs before 8a8b58b were defect 35, the shared-loop hang (D-037).",
   "gates": {
     "G-A": "pass",
     "G-Promise": "pass",
@@ -114,13 +114,14 @@
       ]
     },
     "L3": {
-      "done": [],
+      "done": [
+        "P3B-04"
+      ],
       "wip": [],
       "todo": [
         "P3B-01",
         "P3B-02",
         "P3B-03",
-        "P3B-04",
         "P3B-05",
         "P3B-06",
         "P3B-07",

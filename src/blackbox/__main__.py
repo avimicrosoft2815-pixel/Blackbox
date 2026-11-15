@@ -17,17 +17,21 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--version", action="version",
                     version=f"blackbox {__version__} (format v{C.FORMAT_VERSION})")
     ap.add_argument("command", nargs="?", default="status",
-                    help="`status` prints the build line; `run -- cmd` runs a command under the recorder")
+                    help="`status` prints the build line; `run -- cmd` runs a command under the recorder; "
+                         "`link <a> <b>` declares that two tapes describe one run")
     args, rest = ap.parse_known_args(argv)
     if args.command == "run":
         from blackbox.rec.launcher import main as run_main
         return run_main(rest)
+    if args.command == "link":
+        from blackbox.cli.link import main as link_main
+        return link_main(rest)
     if args.command == "status":
         print(f"blackbox {__version__}: pre-alpha, storage and recovery layer only; "
               f"no SDK, proxy or viewer yet.  Tape format v{C.FORMAT_VERSION}.")
         print("See docs/STATUS.md for what is green, what is pending and what is not testable here.")
         return 0
-    print(f"unknown command {args.command!r}; this build implements --version, status and run",
+    print(f"unknown command {args.command!r}; this build implements --version, status, run and link",
           file=sys.stderr)
     return 2
 

@@ -12,9 +12,11 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 TAIL = 150
+HUNG_FILE = os.path.join(tempfile.gettempdir(), "blackbox-hung.txt")
 
 
 def main(argv: list[str]) -> int:
@@ -39,9 +41,26 @@ def main(argv: list[str]) -> int:
     # test id, so a red cell names its tests from the CLI. 600 characters rather than 200: an assertion message is
     # usually a dict, and the field that explains the failure is rarely in the first 200 (defect 26 was found by
     # reading these annotations, and the truncated tail was the part that would have explained it).
-    for line in lines:
-        if line.startswith(("FAILED ", "ERROR ")):
-            print(f"::error title={title}::{line.strip()[:600]}", flush=True)
+    # ONE annotation, because GitHub keeps ten per step and a stack dump is sixty lines: the ten it kept were the
+    # bottom of a traceback, and the line naming the test — written before the dump — was the one dropped. The message
+    # carries the `FAILED`/`ERROR` lines (where they exist) *and* the last few non-traceback lines, inside 600 chars.
+    if proc.returncode != 0:
+        # The watchdog's account first: a hung test writes its own line to a file precisely because the capture layer
+        # and `os._exit` cannot be trusted to carry it.
+        hung: list[str] = []
+        try:
+            with open(HUNG_FILE, encoding="utf-8") as handle:
+                hung = [line.strip() for line in handle if line.strip()]
+            os.unlink(HUNG_FILE)
+        except OSError:
+            pass
+        failed = hung + [line.strip() for line in lines if line.startswith(("FAILED ", "ERROR "))][:3]
+        useful = [line.strip() for line in lines if line.strip() and not line.startswith(("  File ", "File "))]
+        # The shape is fixed and never empty: a failed step that annotates nothing tells the next reader that this
+        # tool did not run, when the truth is usually that the child died before it flushed anything.
+        facts = (f"exit {proc.returncode} · out {len(lines)} lines · "
+                 f"hung {'yes' if hung else 'no'} · {' | '.join([*failed, '…', *useful[-4:]]) or 'no output captured'}")
+        print(f"::error title={title}::{facts[:600]}", flush=True)
     status = "passed" if proc.returncode == 0 else f"**failed** (exit {proc.returncode})"
     block = (f"\n### `{title}` — {status}\n\n"
              f"```\n{tail}\n```\n")

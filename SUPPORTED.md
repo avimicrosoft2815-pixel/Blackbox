@@ -156,6 +156,13 @@ routes = Routes([Route(name="openai", base="https://api.openai.com")], default="
   for `GET`/`HEAD`/`OPTIONS`, and it is a statement the operator makes about their own upstreams — HTTP only *intends* those
   methods to be safe, and a `GET` that bills or warms a cache is a real thing. `POST`/`PUT`/`PATCH`/`DELETE` are never resent,
   flag or no flag, so a duplicated effect is never the recorder's surprise (D-032b, corrected by D-032c).
+* **The run id crosses the process boundary on one header, and only behind a proxy.** `x-blackbox-run: <run>/<node>` is
+  injected by the SDK **only** when `BLACKBOX_PROXY=1` (which only `blackbox run` sets), so an unproxied app's requests are
+  never modified; the proxy reads it, records the run on the call, and strips every `x-blackbox-*` header before the
+  upstream. Links are then `exact` (same run id), `declared` (you said so) or `inferred` (±2 s and a fingerprint, evidence
+  and a confidence below 1.0) — and an inference never merges runs (D-036). The resolver runs at seal time and puts the
+  records in the capsule as `links.json`, never into the tape it is describing (D-038); `blackbox link <a> <b>` records a
+  `declared` pair in both data directories, idempotently, and refuses to link two tapes that do not name their runs.
 * **A disconnect is classified, and the class is on the tape.** `INTERRUPTED_CLIENT` (the app died, the model kept
   talking), `INTERRUPTED_UPSTREAM` (the provider died, the app saw a truncated stream) and `INTERRUPTED_PROXY` (the recorder
   died — derived from an open call plus a dead writer lease, because no frame can say it). Each carries the bytes each side
@@ -173,5 +180,4 @@ routes = Routes([Route(name="openai", base="https://api.openai.com")], default="
   already set — in which case it is left exactly as it was and its destination becomes a route. `--no-proxy` turns the
   listener off, `--upstream NAME=URL[@/prefix]` adds or replaces a route, `--insecure-upstream NAME` skips verification
   for one, `--proxy-port` pins the port. The provider base URLs themselves live in `proxy/upstreams.json` (D-034).
-* **Not built yet**: the bench of §15.1's proxy rows and the kill/disconnect classes (P3B-08), the header links (P3B-04) and
-  the hook adapters (P3B-05/06).
+* **Not built yet**: the bench of §15.1's proxy rows (P3B-08) and the hook adapters plus the inbox (P3B-05/06).

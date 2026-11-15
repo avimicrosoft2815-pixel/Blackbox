@@ -31,7 +31,14 @@ jobs:
       - name: Guard rails (stdlib-only core, no egress)
         run: python tools/ci_summary.py --title "${{ matrix.python }} / ${{ matrix.os }} · guard rails" -- python -m pytest tests/test_stdlib_only.py tests/test_no_egress.py tests/test_platform_dispatch.py -q -rfE --tb=short
       - name: Unit + property tests
-        run: python tools/ci_summary.py --title "${{ matrix.python }} / ${{ matrix.os }} · unit + property" -- python -m pytest -q -rfE --tb=short
+        # A hung test used to be a six-hour wait with a log nobody could read: the 3.12 cells sat in this step while
+        # 3.11 and 3.13 finished in three minutes, and the only way to learn which test it was would have been to
+        # guess. `faulthandler_timeout` dumps every thread's stack once a test exceeds the bound, and
+        # `timeout-minutes` turns the hang into a red cell that names itself.
+        timeout-minutes: 15
+        # `-s`: the run's evidence has to survive the process, and a captured stdout is a buffer that `os._exit` never
+        # flushes (the watchdog exits that way by design). Fixture-level `capfd`/`capsys` tests do their own capture.
+        run: python tools/ci_summary.py --title "${{ matrix.python }} / ${{ matrix.os }} · unit + property" -- python -m pytest -q -rfE --tb=short -s
       - name: Crash stages S1-S5 + a 20-trial kill smoke run (POSIX only)
         if: runner.os != 'Windows'
         # `tests/kill/` holds drivers, not test modules, so `pytest tests/kill` collected nothing and exited 5.

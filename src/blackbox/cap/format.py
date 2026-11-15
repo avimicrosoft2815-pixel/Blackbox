@@ -46,6 +46,9 @@ MIN_READER = "0.1"
 MANIFEST_NAME = "manifest.json"
 INTEGRITY_NAME = "INTEGRITY.sha256"
 CHAIN_NAME = "chain.json"
+# §11.10: the cross-vantage links, with their class, evidence and confidence. Written at seal time by the resolver,
+# never appended to a tape (see rec/correlate.py).
+LINKS_NAME = "links.json"
 FIXED_DATE = (1980, 1, 1, 0, 0, 0)
 FIXED_MODE = 0o644 << 16
 MAX_ENTRIES = 5_000

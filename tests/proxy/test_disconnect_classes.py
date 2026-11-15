@@ -92,7 +92,11 @@ def test_a_client_that_hangs_up_mid_stream_is_classified_as_the_client_and_not_t
     # the *class* adds is which side went away; what the *cost* is appears against the provider — it kept producing
     # after nobody was listening, which is the number §14.4a exists to make visible.
     assert 0 < client_bytes <= proxy_bytes, (client_bytes, proxy_bytes)
-    assert box.origin.sent_stream_bytes > client_bytes, "the model kept talking after the client left: that is the cost"
+    # The cost is against the *provider*, which is the side that keeps billing: it had 512 chunks to send and was cut
+    # off part-way, so its own tally is at least what the client was credited with and its stream never finished.
+    assert not box.origin.stream_finished.is_set(), "the origin was cut off mid-stream: that is the cost of a dead client"
+    assert box.origin.sent_stream_bytes >= client_bytes, (box.origin.sent_stream_bytes, client_bytes)
+    assert box.origin.sent_stream_bytes < len(box.origin.stream_body), "the origin did not finish its stream"
     assert disconnects.parse(errors[0]) == disconnects.INTERRUPTED_CLIENT
     assert box.proxy is not None and box.proxy.stats.upstream_gone == 0
 

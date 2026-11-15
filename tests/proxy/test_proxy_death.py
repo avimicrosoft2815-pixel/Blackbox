@@ -45,14 +45,19 @@ class _SlowOrigin(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
     def do_GET(self) -> None:                    # http.server's spelling, not ours to rename
-        self.send_response(200)
-        self.send_header("Content-Type", "text/event-stream")
-        self.send_header("Transfer-Encoding", "chunked")
-        self.end_headers()
-        for _ in range(CHUNKS):
-            self.wfile.write(f"{len(PIECE):x}\r\n".encode() + PIECE + b"\r\n")
-            self.wfile.flush()
-            time.sleep(0.005)
+        try:
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Transfer-Encoding", "chunked")
+            self.end_headers()
+            for _ in range(CHUNKS):
+                self.wfile.write(f"{len(PIECE):x}\r\n".encode() + PIECE + b"\r\n")
+                self.wfile.flush()
+                time.sleep(0.005)
+        except (BrokenPipeError, ConnectionError):
+            # The proxy was killed, which is the whole test: an unhandled traceback here would be noise in the log that
+            # the run's one annotation is made of, and it once was exactly that.
+            pass
 
     def log_message(self, *args: object) -> None:
         pass
@@ -80,8 +85,15 @@ def test_a_killed_proxy_is_an_interrupted_proxy_and_the_tape_says_so(slow_origin
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=env)
     try:
         assert proc.stdout is not None
-        line = proc.stdout.readline()
-        assert line, "the child died before announcing its port"
+        # A child that never announces its port must fail this test, not hang the step: `readline` on a live pipe has no
+        # timeout of its own, and a `-q` run prints nothing while it waits (the 3.12 cells spent fifteen minutes in
+        # exactly this shape once, and the log named nothing).
+        announced: list[str] = []
+        reader = threading.Thread(target=lambda: announced.append(proc.stdout.readline()), daemon=True)
+        reader.start()
+        reader.join(60)
+        assert announced and announced[0], "the child never announced its port; it is probably wedged at startup"
+        line = announced[0]
         port = int(json.loads(line)["port"])
 
         sock = socket.create_connection(("127.0.0.1", port), timeout=10)

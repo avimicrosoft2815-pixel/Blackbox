@@ -26,6 +26,7 @@ import time
 from dataclasses import dataclass, field, replace
 from typing import Any
 
+from blackbox.cap_sdk import headers as cap_headers
 from blackbox.proxy.routes import Route, Routes
 from blackbox.proxy.server import ProxyServer
 
@@ -36,7 +37,9 @@ BASE_URL_VARS: tuple[tuple[str, str], ...] = (
     ("OLLAMA_HOST", "ollama"),
     ("GOOGLE_GEMINI_BASE_URL", "gemini"),
 )
-ENV_PROXY = "BLACKBOX_PROXY"
+# One spelling of the variable: the SDK's header module decides what counts as "a proxy is configured", and the launcher
+# must set exactly that variable to exactly that value or the `exact` link never happens (P3B-04).
+ENV_PROXY = cap_headers.ENV_PROXY
 REBIND_BUDGET_MS = 100.0
 START_TIMEOUT = 10.0
 

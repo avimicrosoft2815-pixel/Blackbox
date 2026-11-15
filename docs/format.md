@@ -119,8 +119,17 @@ header, and the backward scanner can never mistake a partial frame for committed
 **Trailer** makes the backward walk O(1): `prev_off = off - tail_len`.
 
 Kind registry (append-only): `1 SEG_END`, `2 CHAIN`, `3 INTERN`, `4 GAP`, `5 DEGRADED`, `6 HEARTBEAT`,
-`16 NODE_OPEN`, `17 NODE_CLOSE`, `18 EDGE`, `32 MODEL_REQUEST`, `33 MODEL_RESPONSE`, `34 MODEL_CHUNK`,
+`16 NODE_OPEN`, `17 NODE_CLOSE`, `18 EDGE`, `19 LINK`, `32 MODEL_REQUEST`, `33 MODEL_RESPONSE`, `34 MODEL_CHUNK`,
 `35 MODEL_ERROR`, `48 TOOL_REQUEST`, `49 TOOL_RESULT`, `80 RUN_START`, `81 RUN_END`, `96 EXCEPTION`, `112 MARK`.
+
+`19 LINK` is the graph range's lowest free id at the time it was first written (§8.4 of the plan names the range and
+the kinds in it, not their numbers, and `MARK` keeps the `112` it has always had here — a kind is never renumbered to
+tidy a table). Its payload is the record `rec/links.py` resolves (§11.10): `{"class","left_writer","right_writer",
+"left_run","right_run","confidence","evidence"}`, CBOR, with a reader that refuses an `inferred` link claiming
+confidence 1.0. It is a **P2** kind and is deliberately absent from `PRIORITY_KINDS`: the resolver writes links at
+recovery/seal time, never on the hot path. Nothing in this build appends a `LINK` to a live tape — a capsule carries
+the resolved records as `links.json` (see `rec/correlate.py`), because appending to a tape to describe it would edit the
+evidence the capsule hashes.
 
 ### 4.0 Model-frame payloads (JSON, not CBOR)
 

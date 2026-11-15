@@ -149,6 +149,10 @@ KIND_HEARTBEAT = 6
 KIND_NODE_OPEN = 16
 KIND_NODE_CLOSE = 17
 KIND_EDGE = 18
+# 0x13 — the graph range's lowest free id at the time LINK was first written (append-only: MARK keeps the 0x70 it has
+# always had here, and a kind is never renumbered to tidy a table). P2 priority by design — §11.10 says the resolver
+# writes links at recovery/seal time, not on the hot path — so it is deliberately absent from PRIORITY_KINDS below.
+KIND_LINK = 19
 KIND_MODEL_REQUEST = 32
 KIND_MODEL_RESPONSE = 33
 KIND_MODEL_CHUNK = 34
@@ -163,7 +167,8 @@ KIND_MARK = 112
 KIND_NAMES = {
     KIND_SEG_END: "SEG_END", KIND_CHAIN: "CHAIN", KIND_INTERN: "INTERN", KIND_GAP: "GAP",
     KIND_DEGRADED: "DEGRADED", KIND_HEARTBEAT: "HEARTBEAT", KIND_NODE_OPEN: "NODE_OPEN",
-    KIND_NODE_CLOSE: "NODE_CLOSE", KIND_EDGE: "EDGE", KIND_MODEL_REQUEST: "MODEL_REQUEST",
+    KIND_NODE_CLOSE: "NODE_CLOSE", KIND_EDGE: "EDGE", KIND_LINK: "LINK",
+    KIND_MODEL_REQUEST: "MODEL_REQUEST",
     KIND_MODEL_RESPONSE: "MODEL_RESPONSE", KIND_MODEL_CHUNK: "MODEL_CHUNK",
     KIND_MODEL_ERROR: "MODEL_ERROR", KIND_TOOL_REQUEST: "TOOL_REQUEST",
     KIND_TOOL_RESULT: "TOOL_RESULT", KIND_RUN_START: "RUN_START", KIND_RUN_END: "RUN_END",
