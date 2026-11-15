@@ -36,7 +36,13 @@ CLAUDE_CODE = "claude-code"
 CLAUDE_EVENTS = ("SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "PostToolUseFailure",
                  "Notification", "PreCompact", "Stop", "SubagentStop", "SessionEnd")
 EVENTS = CLAUDE_EVENTS
+
+# Codex's twelve names. These are the **adapter's contract with the folder**, not a claim about the tool: Codex's own
+# vocabulary could not be verified from this build's sandbox (P3B-06 is labelled as such), and the design survives being
+# wrong — a name we do not know becomes `MARK{tool_event, raw_name}`, so a wrong guess is visible rather than silent.
 CODEX = "codex"
+CODEX_EVENTS = ("session.start", "session.end", "turn.start", "turn.end", "user.prompt", "tool.call",
+                "tool.result", "tool.error", "agent.message", "context.compact", "notify", "error")
 TOOLS = (CLAUDE_CODE, CODEX)
 
 # The node a record opens or closes is named here; the *slot* is the folder's business, because only the tape knows
@@ -125,9 +131,41 @@ def _claude_code(event: str, body: Mapping[str, Any]) -> list[Record] | None:
     return None
 
 
+def _codex(event: str, body: Mapping[str, Any]) -> list[Record] | None:
+    """The Codex table. Tool names come from the body, as Claude Code's do; every close names the same node as its open."""
+    if event == "session.start":
+        return [Record(C.KIND_RUN_START, {"source": _text(body, "source") or "startup"})]
+    if event == "session.end":
+        return [Record(C.KIND_RUN_END, {"reason": _text(body, "reason") or "session_end"})]
+    if event == "turn.start":
+        return [Record(C.KIND_NODE_OPEN, {"name": TURN, "kind": "turn", "turn": body.get("turn") or 0}, opens=TURN)]
+    if event == "turn.end":
+        return [Record(C.KIND_NODE_CLOSE, {"name": TURN, "kind": "turn", "outcome": "ok"}, closes=TURN)]
+    if event == "user.prompt":
+        return [Record(C.KIND_MARK, {"name": "prompt", "kind": "prompt", **_prompt_hash(body)})]
+    if event == "tool.call":
+        return [Record(C.KIND_NODE_OPEN, _tool_call(body), opens=_text(body, "tool_name", "tool") or "tool")]
+    if event in ("tool.result", "tool.error"):
+        outcome = "ok" if event == "tool.result" else "error"
+        return [Record(C.KIND_NODE_CLOSE, _tool_result(body, outcome),
+                       closes=_text(body, "tool_name", "tool") or "tool")]
+    if event == "agent.message":
+        return [Record(C.KIND_MARK, {"name": "assistant", "kind": "assistant", **_prompt_hash(body)})]
+    if event == "context.compact":
+        return [Record(C.KIND_MARK, {"name": "precompact", "kind": "compact",
+                                     "trigger": _text(body, "trigger") or "auto"})]
+    if event == "notify":
+        return [Record(C.KIND_MARK, {"name": "notify", "kind": "notice",
+                                     "message": _digest(body.get("message", body))[:16]})]
+    if event == "error":
+        return [Record(C.KIND_MARK, {"name": "error", "kind": "error",
+                                     "error_type": _digest(body.get("error", body))[:16]})]
+    return None
+
+
 def map_event(tool: str, event: str, body: Mapping[str, Any]) -> list[Record]:
     """Every frame this event implies. An unknown tool or event is one honest `MARK{tool_event}`."""
-    table = {CLAUDE_CODE: _claude_code}.get(tool)
+    table = {CLAUDE_CODE: _claude_code, CODEX: _codex}.get(tool)
     records = table(event, body) if table is not None else None
     if records is None:
         return [Record(C.KIND_MARK, {"name": event or "unknown", "kind": "tool_event",

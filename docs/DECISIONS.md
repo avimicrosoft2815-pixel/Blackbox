@@ -427,3 +427,43 @@ quarantined without changing the child's exit code; the fold thread is finished 
 run is a leak that shows up in week two); and **S18** — a real `kill -9` between the `tmp` write and the rename
 (`BLACKBOX_DIE_AT=INGEST.after_tmp`) leaves nothing a reader can mistake for an event, and the next hook in the same
 session folds normally.
+## D-041 — an unverified schema is labelled on the product surface, and its blast radius is bounded
+
+*Date: 2026-11-14. Plan refs: §11.9, P3B-06, C40. Follows D-040.*
+
+P3B-06 asks for the Codex adapter and, precisely, for *"fixture payloads for the 12 events mapped; unknown event ⇒
+`MARK{tool_event}`"* — a statement about the mapping, not about Codex's files. Those two things have different
+epistemic status here, and the ticket is only honest if the build says which is which. The mapping is verified by
+driving it: twelve names, each to the frame the plan names, an unknown name to a `MARK` that carries it, and a recorded
+session through the real folder producing `RUN_START` … paired slots … `RUN_END` (`tests/test_hook_codex.py`). Codex's
+own settings path (`.codex/settings.json`) and the shape of its hook block are **not** verified: no documentation for
+them could be read from this sandbox, and there is no Codex install to compare against. So they are an assumption.
+
+The temptation is to write that assumption in a paragraph and ship code that behaves as if it were a fact — the exact
+failure that put *"eight of nine cells green"* in a status document for a week while the cause was already known. Three
+rules follow from refusing it:
+
+**The label travels with the artefact, not with the prose.** `codex.SPEC.verified` is `False`, and that value reaches an
+operator three ways: `blackbox hook install --codex` prints the assumption to stderr *at the moment of the write*,
+`hook status --codex` prints `NOT verified`, and `--json` emits `"schema_verified": false` so a script cannot consume the
+status without seeing it. The `P3B-06` row in `docs/STATUS.md` repeats it, and the row sits in the **Labelled** section
+as `not testable here` rather than in Fulfilled — a reader who skims tables, not paragraphs, still learns it. There is a
+test whose job is to fail if someone quietly flips `verified` to `True`: the label is a claim that has to be *earned* by
+a real comparison, and the suite says so out loud.
+
+**The blast radius of a wrong guess is made small, then listed.** If `.codex/settings.json` is the wrong file, nothing
+breaks: `--settings <path>` points the adapter at the real one, and `install` refuses a shape it does not understand
+(`BBX-E151`) before it writes a byte or takes a backup — so the worst case is a refusal an operator can act on, not a
+half-edited config file in somebody's tool directory. If a hook-block shape differs, the same refusal applies. What is
+*not* affected by the guess at all is the event mapping: the twelve names and their frames are the ticket's content, and
+they hold wherever the settings file turns out to live.
+
+**One implementation, two tools.** The installer used by both adapters was lifted out of the Claude Code module into
+`hooks/settings.py` and parameterised by a `Spec` (path, event table, `verified`, note). The two adapters cannot drift:
+the byte-identical round-trip, the idempotent second install, the surviving user edit, and the `BBX-E151`-before-write
+refusal are one code path, tested twice. A duplicate installer would have been a second place for the same guarantee to
+rot, and the guarantee is the one this project sells.
+
+The honest summary a user of this feature gets: *the Codex adapter maps the twelve events and will tell you to its face
+that it is guessing about the file it edits.* That is a smaller claim than a green checkmark, and it is one that can be
+defended when the guess turns out wrong.

@@ -194,5 +194,17 @@ routes = Routes([Route(name="openai", base="https://api.openai.com")], default="
   link** between that tape and the launcher's — two processes, one timeline, with the class of the claim written down
   (D-040). `blackbox ingest` cold start measures p50 32.0 ms / p95 40.2 ms end
   to end in the development sandbox; the bench box's number is still owed.
-* **Not built yet**: the bench of §15.1's proxy rows (P3B-08), the Codex adapter (P3B-06), the bench-box cold-start row
-  for `blackbox ingest`, and `docs/attach.md` (P3B-09).
+* **The same adapter exists for Codex, and it tells you it is guessing (P3B-06, D-041).** `blackbox hook install
+  --codex [--project|--user|--settings <path>]` installs the same marked block into `.codex/settings.json`; the twelve
+  Codex events (`session.start`, `turn.start`, `tool.call`, `notify`, …) map to the same frames — an unknown event name
+  is `MARK{tool_event, raw_name}`, and a recorded session folds into paired node slots closing innermost-first. What is
+  **not** verified is Codex's own settings location and the shape of its hook block: no documentation for it could be
+  read from this sandbox. So the belief is printed rather than filed away — `hook status --codex` says
+  `NOT verified` and emits `"schema_verified": false`, `install --codex` writes the assumption to stderr, and the
+  `P3B-06` row in `docs/STATUS.md` carries the same label. The cost of a wrong guess is bounded: an unknown shape is
+  refused with `BBX-E151` before a byte or a backup is written, `--settings <path>` points the adapter at the real file,
+  and the event mapping is independent of where the file lives. Install/remove round-trips byte-identically, and your
+  own hooks sitting beside ours survive both directions.
+* **Not built yet**: the bench of §15.1's proxy rows (P3B-08), confirmation of Codex's real hook schema (it has no
+  Codex install to compare against here), the bench-box cold-start row for `blackbox ingest`, and `docs/attach.md`
+  (P3B-09).

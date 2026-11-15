@@ -143,9 +143,9 @@ def test_the_hook_command_refuses_a_schema_it_does_not_know(tmp_path: Path, caps
     assert "BBX-E151" in capsys.readouterr().err
 
 
-def test_the_hook_command_says_codex_is_not_built_yet(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    assert hook_cli.main(["install", "--codex", "--settings", str(tmp_path / "x.json")]) == 2
-    assert "P3B-06" in capsys.readouterr().err
+def test_the_hook_command_needs_an_adapter(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    assert hook_cli.main(["install", "--settings", str(tmp_path / "x.json")]) == 2
+    assert "choose an adapter" in capsys.readouterr().err
 
 
 def test_the_user_and_project_scopes_resolve_to_the_documented_paths(tmp_path: Path) -> None:
