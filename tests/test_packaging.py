@@ -29,10 +29,7 @@ def test_dev_extra_is_pinned_and_minimal():
     extras = _pyproject()["project"]["optional-dependencies"]
     dev = extras["dev"]
     names = {re.split(r"[=<>!]=?", d)[0].strip(): d for d in dev}
-    # Three, since 2026-11-16: `pytest-timeout` is what turns a hung test into a named failure, and the 3.12 cells
-    # spent fifteen minutes in the unit step with a log that named nothing. It is a test tool, which is what this
-    # extra is for — the reason `dev` exists separately still holds (no HTTP integration, no runtime dependency).
-    assert set(names) == {"pytest", "hypothesis", "pytest-timeout"}, names
+    assert set(names) == {"pytest", "hypothesis"}, names
     for spec in dev:
         assert "==" in spec, f"dev dependency must be pinned exactly: {spec}"
     # D-020: the optional HTTP integration lives in its own extra so `dev` stays the two test tools. Nothing here is
