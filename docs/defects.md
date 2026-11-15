@@ -49,9 +49,13 @@ plan's §10 shape, and it is append-only.
     not the division. `tests/test_bench_results.py` keeps every percentile inside its own sample; the row sits at
     88 % of its 120 ms budget, so any change to `scanner.py` or `discover.py` re-measures it.
 
-19. **C40 follow-up — three Windows cells failed on a POSIX-only test** → run `43689004423` at `15cb55c`:
+19. **C40 follow-up — three Windows cells failed on a POSIX-only test, in two consecutive runs** → runs
+    `43689004423` at `15cb55c` and `43689012017` at `6d52088` (the docs-only commit carried the same broken test),
+    both 7/10:
     `ValueError: cannot find context for 'fork'` in `test_a_forked_process_records_into_its_own_tape` → the test
     hard-coded a start method that does not exist on Windows, and its child body was a closure, which `spawn`
     cannot pickle → the test takes `fork` where it exists and `spawn` where it does not, and the child body is a
     module-level function. The recorder was never wrong. A POSIX-only assumption in a test is invisible on the
-    builder's machine and blocks the gate exactly on the cells that matter.
+    builder's machine and blocks the gate exactly on the cells that matter — and `6d52088` shows why a docs-only
+    commit still has to be read for its CI verdict: it inherited the failure and would have been recorded as green
+    by anyone who trusted "it only touched markdown".

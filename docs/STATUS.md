@@ -1,10 +1,10 @@
 # BlackBox build status — 2026-11-14 — trunk `37d56df` — gates: **G-Promise pass** (built and self-reviewed at `af908bc`, independently counter-signed at `fdb3875`; see `docs/gates/G-Promise.md`), G-Capture, G-Attach, G-Capsule, G-Sec, G-Release not yet opened
 
-**Branch** `arena/a781c68f-blackbox` · **base** `31241d6` · CI for `37d56df`: run `43689197151`, ten jobs, ten
-`success`. Two red runs are named rather than buried: `af908bc` (`43678767989`, 9/10) is C40 — the gate was re-signed
-at `fdb3875` — and `15cb55c` (`43689004423`, 7/10) was three Windows cells failing on a POSIX-only test of mine, now
-defect 19 in `docs/defects.md`. The commit this text lands in is documentation; its run is the next one.
-**product: pre-alpha — storage, recovery, launcher and capsule layer only; no SDK, proxy or viewer yet.**
+**Branch** `arena/a781c68f-blackbox` · **base** `31241d6` · CI for `59aef18`: run `43689351726`, ten jobs, ten
+`success`. Every red run is named rather than buried: `af908bc` (`43678767989`, 9/10) is C40 — the gate was
+re-signed at `fdb3875`; `15cb55c` (`43689004423`, 7/10) **and** `6d52088` (`43689012017`, 7/10) are the same defect —
+a fork-only multiprocessing test of mine failing on the three Windows cells, fixed at `d5e1bb6` (defect 19).
+**product: pre-alpha — the recorder, the tape, recovery, the launcher and the SDK lifecycle/decorator/node layer are real and tested; the capture seams (P3-05), the mock provider, the proxy, the viewer and the diagnosis workflow are not built yet.**
 Suite: **Total: 353 tests** — 352 pass here and 1 is skipped on POSIX by name
 (`test_an_open_view_blocks_the_unlink_only_on_windows`: POSIX permits unlinking a file another fd still holds, so
 the open-view case exists only on Windows). ruff 0.17.5 and mypy 2.4.1 (`strict = true`, nothing disabled):
@@ -41,7 +41,7 @@ the open-view case exists only on Windows). ruff 0.17.5 and mypy 2.4.1 (`strict 
 | **P3-02/P3-03/P3-04** decorators, node stack, context managers | §10.2, P3-02–04 | `src/blackbox/api.py`, `src/blackbox/rec/context.py`, `tests/test_api_decorators.py` (6), `tests/test_context_nodes.py` (7): one `NODE_OPEN`/`NODE_CLOSE` pair per call for all five decorator kinds; signature, `__name__` and `__doc__` survive; an exception closes the node with its type and is re-raised; a **disabled** decorated call costs under 1 µs of median overhead; async keeps its node across awaits; 50 nested steps stay balanced with each level's parent the level above; `mark` lands in the node it was called inside; `handled_error` records a handled exception where it was handled; a plain thread gets a `detached:` root (marked `detached: True`) instead of an orphan; a forked child writes to its own tape |
 | **P3-01** SDK lifecycle: `install`/`uninstall`/`shutdown` | §10.2, P3-01 | `src/blackbox/api.py`, `tests/test_api_lifecycle.py` (6): double install ⇒ one writer UUID and one `RUN_START`; 16 threads install at once ⇒ one writer and `refs` 16; `uninstall()` during an in-flight append leaves the tape open and the frame lands; `BLACKBOX_DISABLED=1` creates no tape and `emit()` returns 0; an unwritable data dir leaves the app running with the reason recorded; `shutdown()` is idempotent and install works after it |
 | Lint, types, forbidden words, egress, stdlib-only | C6, C12, P0-14 | `make fmt` 0 findings, `mypy` strict 0 findings, `tests/test_forbidden_words.py`, `tests/test_no_egress.py`, `tests/test_stdlib_only.py` |
-| CI on three OSes × three Pythons + docs | C7 | run `43678447134` at `4619b90` — ten jobs, ten `success`; `docs/compatibility.md` holds the per-cell verdicts |
+| CI on three OSes × three Pythons + docs | C7 | run `43689351726` at `59aef18` — ten jobs, ten `success`; `docs/compatibility.md` holds the per-cell verdicts and every historical red run |
 
 ## Labelled
 
@@ -106,9 +106,9 @@ row in the same commit.
 
 1. **G-Promise is signed** (`docs/gates/G-Promise.md`, verdict pass, self-signed — see §Labelled) and `STATE.json`
    carries `gates["G-Promise"] = "pass"`.
-2. **L2 ‖ L3 fan out now**, as the plan orders: L2 = P3-01 → P3-14 (SDK install/uninstall, decorators, context
-   vars, seams A/B/C, preflight, streaming tee, `ModelCall`, redaction, buffer, fail-open, mock provider); L3 =
-   P5 attach lane (proxy, launcher integration, links, hooks, demo). Both start from `af908bc`.
+2. **L2 ‖ L3 are running, not queued**: L2 has P3-01/P3-02/P3-03/P3-04 committed at `37d56df`; the next L2 tickets
+   are the seams (P3-05a→05d) against a mock provider (P3-13). L3 (the attach lane: proxy, launcher integration,
+   hooks, demo) starts from the current trunk, not from an older SHA.
 3. **G-Capture** with the day-14 rule: an unmodified `openai`/`anthropic` script through seams A→B→C against the
    mock provider must keep its in-flight call across `kill -9` with correct `chunks_received`/`bytes_received`.
    Real-provider runs are `not testable here` (no keys) and the mock result is the gate, as the plan allows.
