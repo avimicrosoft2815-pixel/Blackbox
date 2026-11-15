@@ -37,6 +37,11 @@ BASE_URL_VARS: tuple[tuple[str, str], ...] = (
     ("OLLAMA_HOST", "ollama"),
     ("GOOGLE_GEMINI_BASE_URL", "gemini"),
 )
+# The version segment each client expects *inside* the value it is given, because the client appends only the rest of
+# its own path after it. The OpenAI SDK's own default is `https://api.openai.com/v1` and it appends `/chat/completions`;
+# the Anthropic SDK's default is `https://api.anthropic.com` and it appends `/v1/messages`. Exporting one shape for both
+# sent the OpenAI SDK to `/chat/completions` on the upstream, a path the provider does not serve (defect 39, P3B-09).
+BASE_URL_SUFFIX: dict[str, str] = {"OPENAI_BASE_URL": "/v1"}
 # One spelling of the variable: the SDK's header module decides what counts as "a proxy is configured", and the launcher
 # must set exactly that variable to exactly that value or the `exact` link never happens (P3B-04).
 ENV_PROXY = cap_headers.ENV_PROXY
@@ -56,7 +61,8 @@ class ExportPlan:
 
     def with_url(self, proxy_url: str) -> ExportPlan:
         """Render the exports now that the listener has a port — the second half of a plan made before it did."""
-        rendered = {var: f"{proxy_url.rstrip('/')}/{name}" for var, name in self.point.items()}
+        root = proxy_url.rstrip("/")
+        rendered = {var: f"{root}/{name}{BASE_URL_SUFFIX.get(var, '')}" for var, name in self.point.items()}
         rendered[ENV_PROXY] = "1"
         return replace(self, exports=rendered)
 
@@ -229,4 +235,4 @@ class ProxyThread:
         self.stop()
 
 
-__all__ = ["BASE_URL_VARS", "ENV_PROXY", "REBIND_BUDGET_MS", "ExportPlan", "ProxyThread", "plan_exports"]
+__all__ = ["BASE_URL_SUFFIX", "BASE_URL_VARS", "ENV_PROXY", "REBIND_BUDGET_MS", "ExportPlan", "ProxyThread", "plan_exports"]

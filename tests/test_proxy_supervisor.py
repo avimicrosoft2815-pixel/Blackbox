@@ -23,7 +23,8 @@ def _table() -> Routes:
 
 def test_an_unset_variable_is_exported_and_names_the_proxy():
     plan = plan_exports({}, "http://127.0.0.1:1234")
-    assert plan.exports["OPENAI_BASE_URL"] == "http://127.0.0.1:1234/openai"
+    assert plan.exports["OPENAI_BASE_URL"] == "http://127.0.0.1:1234/openai/v1", \
+        "the OpenAI SDK appends only /chat/completions, so its base_url must carry /v1 (defect 39)"
     assert plan.exports["ANTHROPIC_BASE_URL"] == "http://127.0.0.1:1234/anthropic"
     assert plan.exports[ENV_PROXY] == "1"
     assert plan.adopted == {}

@@ -74,7 +74,7 @@ names = ["OPENAI_BASE_URL", "ANTHROPIC_BASE_URL", "OLLAMA_HOST", "GOOGLE_GEMINI_
          "BLACKBOX_PROXY", "BLACKBOX_PROXY_URL", "BLACKBOX_RUN_ID"]
 out = {name: os.environ.get(name) for name in names}
 try:
-    request = urllib.request.Request(out["OPENAI_BASE_URL"] + "/v1/chat/completions", data=b"{}", method="POST")
+    request = urllib.request.Request(out["OPENAI_BASE_URL"] + "/chat/completions", data=b"{}", method="POST")
     with urllib.request.urlopen(request, timeout=10) as response:
         out["status"] = response.status
         out["body"] = response.read().decode()
@@ -110,7 +110,7 @@ def test_the_child_is_pointed_at_the_proxy_and_its_request_arrives_at_the_upstre
         result = launcher.launch(argv, data_dir=str(tmp_path / "data"), out=handle, proxy=True,
                                  proxy_routes=_routes(origin), env=env)
     printed = _printed(capfd)
-    assert printed["OPENAI_BASE_URL"] == f"{result.proxy['url']}/openai"
+    assert printed["OPENAI_BASE_URL"] == f"{result.proxy['url']}/openai/v1"
     assert printed["ANTHROPIC_BASE_URL"] == f"{result.proxy['url']}/anthropic"
     assert printed["BLACKBOX_PROXY"] == "1"
     assert printed["BLACKBOX_PROXY_URL"] == result.proxy["url"]

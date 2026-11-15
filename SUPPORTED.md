@@ -205,6 +205,14 @@ routes = Routes([Route(name="openai", base="https://api.openai.com")], default="
   refused with `BBX-E151` before a byte or a backup is written, `--settings <path>` points the adapter at the real file,
   and the event mapping is independent of where the file lives. Install/remove round-trips byte-identically, and your
   own hooks sitting beside ours survive both directions.
+* **The attach matrix, with the version on every row (P3B-09).** `docs/attach.md` answers "can I attach this to what
+  I already use" one row per surface: the base-URL variables `blackbox run` exports, sixteen clients, and the two
+  coding-agent hook adapters. Every verdict is a version **and a date** or the word **unverified**, and
+  `tests/test_attach_doc.py` fails the suite if a row loses either. Four rows were *run* here — `openai` 3.51.0,
+  `anthropic` 2.8.0, `curl` 7.88.1 and `node` v22.22.3, each reaching the documented path on a provider-shaped origin
+  through the exported value — and running them found defect 39: the flat export dropped the `/v1` the OpenAI SDK does
+  not append, so a proxied call would have asked the provider for a path it does not serve (D-042). `OLLAMA_HOST` and
+  `GOOGLE_GEMINI_BASE_URL` are labelled unverified with the doubt written down.
 * **Not built yet**: the bench of §15.1's proxy rows (P3B-08), confirmation of Codex's real hook schema (it has no
-  Codex install to compare against here), the bench-box cold-start row for `blackbox ingest`, and `docs/attach.md`
-  (P3B-09).
+  Codex install to compare against here), the bench-box cold-start row for `blackbox ingest`, and the rows of
+  `docs/attach.md` that need a client this sandbox does not have.
