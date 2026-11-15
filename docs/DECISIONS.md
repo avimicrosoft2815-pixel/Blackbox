@@ -62,3 +62,24 @@ launcher-spawned SDK.
 
 **Consequences.** `blackbox run -- node app.js` can point a base URL at this listener and the traffic cannot leave for
 anywhere else; `P3B-03` (launcher integration) can therefore export base URLs without inventing a second allowlist.
+
+## D-033 — the proxy thread is supervised on the port the child was told, and an environment variable is adopted, not overwritten
+
+*Date: 2026-11-16. Plan refs: §13, P3B-03.*
+
+**The plan default**: `blackbox run` starts the proxy thread, exports base-URL variables only when unset (existing
+values become upstreams), and supervises the thread with a rebind ≤ 100 ms.
+
+**Two decisions inside that sentence.** First, **"only when unset" is not politeness.** `OPENAI_BASE_URL` may already
+name a router, a gateway or a local model; a recorder that overwrites it changes where the application's traffic goes,
+which is the one thing a recorder may never do. So a set variable is *adopted*: its destination becomes a route (P3B-02
+would otherwise refuse to reach it), and the child's value stands. A value that is not a URL (`OLLAMA_HOST=host:port`)
+is adopted as a claim about the user's intent but is **not** turned into a route by guessing a scheme.
+
+**Second, a rebind must keep the port.** The child was handed a base URL once, at spawn; a supervisor that rebinds on a
+new port has fixed the listener and broken the child. So `ProxyThread.rebind()` tries the old port first and records
+`port_changed` only when the port genuinely went to somebody else — and the test closes the listener behind the
+watchdog's back and asserts service returns **on the same port** inside the 100 ms budget.
+
+**Consequences.** Supervision is a number (`rebinds`, in milliseconds) rather than a claim; the launcher's second half
+(P3B-03) only has to call `start()` before `Popen` and `stop()` after `wait()`.

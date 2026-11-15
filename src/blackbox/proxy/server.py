@@ -141,6 +141,11 @@ class ProxyServer:
         return self._port
 
     @property
+    def is_serving(self) -> bool:
+        """True while the listener accepts connections — what the supervisor's watchdog watches."""
+        return self._server is not None and self._server.is_serving()
+
+    @property
     def url(self) -> str:
         host = "127.0.0.1" if self._host in (WILDCARD_V4, "::") else self._host
         return f"{SCHEME}://{host}:{self._port}"

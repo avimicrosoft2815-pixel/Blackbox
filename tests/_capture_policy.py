@@ -36,7 +36,7 @@ LOOPBACK = ("cap_sdk/mock_provider.py",)
 # The proxy (P3B-01/02) is a server *and* a client by design: it listens on loopback and connects to a configured
 # upstream. It is exempt for `asyncio` and `ssl` — and for nothing else — because its reachable destinations are
 # asserted to be exactly `Routes.destinations()`, in `tests/test_proxy_server.py` and `tests/test_no_egress.py`.
-PROXY = ("server.py", "routes.py", "__init__.py")
+PROXY = ("server.py", "routes.py", "supervisor.py", "__init__.py")
 PROXY_MODULES = frozenset({"asyncio", "ssl", "socket"})
 # `urllib.parse` splits a base URL; `urllib.request` would fetch one, and stays banned by `test_no_egress.py`.
 PROXY_DOTTED = frozenset({"urllib.parse"})
