@@ -1,8 +1,8 @@
 # BlackBox build status — 2026-11-14 — trunk `af908bc` — gates: **G-Promise pass** (self-signed; see §Labelled), G-Capture, G-Attach, G-Capsule, G-Sec, G-Release not yet opened
 
-**Branch** `arena/a781c68f-blackbox` · **base** `31241d6` · CI for `a6f4faa`: run `43679417991`,
-ten jobs, ten `success`. (The previous green run, `43678447134` at `4619b90`, belongs to an earlier commit and is
-not evidence for this one.)
+**Branch** `arena/a781c68f-blackbox` · **base** `31241d6` · CI for `372006f`: run `43679755477`,
+ten jobs, ten `success` (P3-01). Earlier green runs (`43679417991` at `a6f4faa`, `43678447134` at `4619b90`)
+belong to earlier commits and are not evidence for this one.
 **product: pre-alpha — storage, recovery, launcher and capsule layer only; no SDK, proxy or viewer yet.**
 Suite: **Total: 338 tests** — 337 pass here and 1 is skipped on POSIX by name
 (`test_an_open_view_blocks_the_unlink_only_on_windows`: POSIX permits unlinking a file another fd still holds, so
