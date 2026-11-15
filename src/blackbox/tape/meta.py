@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import struct
 import time
+from typing import Any
 
 from blackbox import constants as C
 from blackbox.codec.crc32 import crc32
@@ -38,7 +39,7 @@ def encode(*, writer_uuid: bytes, segment_bytes: int, vantage: int,
     return bytes(buf)
 
 
-def decode(buf: bytes) -> dict:
+def decode(buf: bytes) -> dict[str, Any]:
     if len(buf) != C.META_BYTES:
         raise bbx("BBX-E222", f"meta is {len(buf)} B, expected {C.META_BYTES}")
     if buf[0:8] != C.MAGIC_META:

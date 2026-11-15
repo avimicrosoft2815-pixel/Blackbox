@@ -6,6 +6,7 @@ import os
 import struct
 import time
 import zlib
+from typing import Any
 
 from blackbox import constants as C
 from blackbox.errors import bbx
@@ -40,7 +41,7 @@ def encode_header(*, writer_uuid: bytes, segment_no: int, start_seq: int, segmen
     return bytes(buf)
 
 
-def read_header(tape_dir: str, n: int) -> dict:
+def read_header(tape_dir: str, n: int) -> dict[str, Any]:
     """Decode segment n's header from disk (raises OSError when the segment is gone or short)."""
     with open(seg_path(tape_dir, n), "rb") as fh:
         buf = fh.read(C.SEGMENT_HEADER_BYTES)
@@ -49,7 +50,7 @@ def read_header(tape_dir: str, n: int) -> dict:
     return decode_header(buf)
 
 
-def decode_header(buf: bytes) -> dict:
+def decode_header(buf: bytes) -> dict[str, Any]:
     from blackbox.codec.crc32 import crc32
     if len(buf) < C.SEGMENT_HEADER_BYTES or buf[0:8] != C.MAGIC_SEG:
         raise bbx("BBX-E224", "bad segment magic")
@@ -151,7 +152,7 @@ def body_of(path: str, *, end_offset: int | None = None) -> bytes:
 
 
 def seal_segment(tape_dir: str, n: int, *, reason: int, body: bytes, prev_chain: bytes,
-                 start_seq: int, end_seq: int, frame_count: int, sealer: bytes) -> dict:
+                 start_seq: int, end_seq: int, frame_count: int, sealer: bytes) -> dict[str, Any]:
     from blackbox.tape import seal as seal_mod
     return seal_mod.write(seal_path(tape_dir, n), segment_no=n, reason=reason, start_seq=start_seq,
                           end_seq=end_seq, frame_count=frame_count, body=body,

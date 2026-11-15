@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import struct
 import time
+from typing import Any
 
 from blackbox import constants as C
 from blackbox.codec.crc32 import checksum_parts, crc32
@@ -30,9 +31,9 @@ def frame_size(payload_len: int) -> int:
     return C.FRAME_OVERHEAD_BYTES + padded_len(payload_len)
 
 
-def encode_into(buf, off: int, seq: int, kind: int, payload: bytes | memoryview = b"", *, flags: int = 0,
+def encode_into(buf: bytearray | memoryview, off: int, seq: int, kind: int, payload: bytes | memoryview = b"", *, flags: int = 0,
                 priority: int = 1, run_slot: int = 0, node_slot: int = 0, wall_ns: int | None = None,
-                mono_ns: int | None = None, body_first: bool = True, hook=None) -> int:
+                mono_ns: int | None = None, body_first: bool = True, hook: Any = None) -> int:
     """Write one frame at `off` inside `buf` (a bytearray or an mmap) and return its total length.
 
     Zero intermediate buffers: the header is packed straight into `buf`, the payload is a slice copy, and the
@@ -93,7 +94,7 @@ def encode(seq: int, kind: int, payload: bytes = b"", *, flags: int = 0, priorit
     return bytes(out)
 
 
-def decode(buf: bytes, off: int = 0) -> tuple[dict, int]:
+def decode(buf: bytes, off: int = 0) -> tuple[dict[str, Any], int]:
     """Decode one frame at `off`; returns (fields, next_offset). Raises FrameError."""
     end = len(buf)
     if off + C.FRAME_HEADER_BYTES + C.FRAME_TRAILER_BYTES > end:
@@ -120,9 +121,9 @@ def decode(buf: bytes, off: int = 0) -> tuple[dict, int]:
     }, off + total
 
 
-def scan_backwards(buf: bytes, cursor: int, *, min_offset: int = C.SEGMENT_HEADER_BYTES) -> list[dict]:
+def scan_backwards(buf: bytes, cursor: int, *, min_offset: int = C.SEGMENT_HEADER_BYTES) -> list[dict[str, Any]]:
     """Walk frames backwards from `cursor` (exclusive end). Stops at the first invalid frame."""
-    frames: list[dict] = []
+    frames: list[dict[str, Any]] = []
     off = cursor
     while off - C.FRAME_TRAILER_BYTES >= min_offset:
         tmagic, tlen = _TRAILER.unpack_from(buf, off - C.FRAME_TRAILER_BYTES)

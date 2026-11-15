@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from typing import Any
 
 from blackbox import constants as C
 from blackbox.tape import frame as frame_mod
@@ -9,7 +10,7 @@ from blackbox.tape import seal as seal_mod
 from blackbox.tape import segments
 
 
-def iter_frames(tape_dir: str, segment_no: int, *, end_offset: int | None = None) -> Iterator[dict]:
+def iter_frames(tape_dir: str, segment_no: int, *, end_offset: int | None = None) -> Iterator[dict[str, Any]]:
     path = segments.seg_path_any(tape_dir, segment_no)
     if path is None:
         return
@@ -31,6 +32,6 @@ def iter_frames(tape_dir: str, segment_no: int, *, end_offset: int | None = None
         off = nxt
 
 
-def iter_tape(tape_dir: str) -> Iterator[dict]:
+def iter_tape(tape_dir: str) -> Iterator[dict[str, Any]]:
     for n in segments.list_segments(tape_dir):
         yield from iter_frames(tape_dir, n)

@@ -7,6 +7,7 @@ their encoded bytes, no tags, no indefinite items. Decoder rejects everything ou
 from __future__ import annotations
 
 import struct
+from typing import Any
 
 from blackbox.errors import bbx
 
@@ -41,7 +42,7 @@ def _int(n: int) -> bytes:
     return _head(0, n)
 
 
-def encode(obj, _depth: int = 0) -> bytes:
+def encode(obj: Any, _depth: int = 0) -> bytes:
     """Canonical encode. Type dispatch on `type(obj)` with a small-int fast path: the hot path avoids an
     isinstance chain and a function call per integer.
 
@@ -79,11 +80,11 @@ def encode(obj, _depth: int = 0) -> bytes:
     raise CBORError(f"cannot encode {type(obj).__name__}")
 
 
-def _first(pair):
+def _first(pair: tuple[Any, Any]) -> Any:
     return pair[0]
 
 
-def _enc_key(key, depth: int) -> bytes:
+def _enc_key(key: Any, depth: int) -> bytes:
     # map keys are almost always short text: keep them out of the general encoder's dispatch cost
     if type(key) is str and key.isascii() and len(key) < 24:
         b = key.encode("ascii")
@@ -174,7 +175,7 @@ def _read_len(buf: bytes, pos: int, info: int) -> tuple[int, int]:
     raise CBORError("reserved additional-information value")
 
 
-def decode(buf: bytes, pos: int = 0, allow_trailing: bool = False, _depth: int = 0):
+def decode(buf: bytes, pos: int = 0, allow_trailing: bool = False, _depth: int = 0) -> Any:
     """Decode one item at `pos`; returns (value, next_pos)."""
     if _depth > MAX_DEPTH:
         raise CBORError("nesting too deep")
@@ -245,7 +246,7 @@ def decode(buf: bytes, pos: int = 0, allow_trailing: bool = False, _depth: int =
     raise CBORError("unreachable")
 
 
-def decode_exact(buf: bytes):
+def decode_exact(buf: bytes) -> Any:
     """Decode one item and reject trailing bytes (used for frame payloads)."""
     value, pos = decode(buf, 0)
     if pos != len(buf):
@@ -253,7 +254,7 @@ def decode_exact(buf: bytes):
     return value
 
 
-def decode_or_raise(buf: bytes):
+def decode_or_raise(buf: bytes) -> Any:
     """decode_exact with the registry code attached (BBX-E151)."""
     try:
         return decode_exact(buf)

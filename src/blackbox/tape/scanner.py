@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
+from typing import Any
 
 from blackbox import constants as C
 from blackbox.codec import cbor
@@ -23,14 +24,14 @@ from blackbox.tape import segments
 @dataclass
 class ScanResult:
     writer_uuid: str
-    meta: dict
+    meta: dict[str, Any]
     head: head_mod.HeadSlot | None
-    frames: list[dict] = field(default_factory=list)
-    gaps: list[dict] = field(default_factory=list)
+    frames: list[dict[str, Any]] = field(default_factory=list)
+    gaps: list[dict[str, Any]] = field(default_factory=list)
     truncated_tail: bool = False
     lost_from_seq: int | None = None
-    gaps_declared: list[dict] = field(default_factory=list)   # committed `GAP` frames (declared holes)
-    gaps_unreadable: list[dict] = field(default_factory=list)  # GAP frames we cannot decode: NOT declared
+    gaps_declared: list[dict[str, Any]] = field(default_factory=list)   # committed `GAP` frames (declared holes)
+    gaps_unreadable: list[dict[str, Any]] = field(default_factory=list)  # GAP frames we cannot decode: NOT declared
     segments_seen: list[int] = field(default_factory=list)
     sealed_segments: list[int] = field(default_factory=list)
     bad_segments: list[int] = field(default_factory=list)
@@ -56,7 +57,7 @@ class ScanResult:
             return "partial"
         return "full"
 
-    def summary(self) -> dict:
+    def summary(self) -> dict[str, Any]:
         return {
             "writer_uuid": self.writer_uuid, "frames": self.frame_count,
             "first_seq": self.first_seq, "last_seq": self.last_seq,
@@ -115,7 +116,7 @@ def scan(data_dir: str, writer_uuid_hex: str, *, max_frames: int = 2_000_000) ->
         return result
 
     n_active = head.active_segment
-    collected: dict[int, dict] = {}
+    collected: dict[int, dict[str, Any]] = {}
 
     # 1. the active segment: walk backwards from the committed cursor
     active_path = segments.seg_path(tape_dir, n_active)
@@ -221,7 +222,7 @@ def scan(data_dir: str, writer_uuid_hex: str, *, max_frames: int = 2_000_000) ->
     return result
 
 
-def verify_chain(result: ScanResult, tape_dir: str) -> dict:
+def verify_chain(result: ScanResult, tape_dir: str) -> dict[str, Any]:
     """I9 over a scan result: walk the two-level chain and check that every declared hole is linked into it.
 
     Level 1 links the `CHAIN` frames inside a segment; level 2 links the segments through the next segment's
@@ -232,7 +233,7 @@ def verify_chain(result: ScanResult, tape_dir: str) -> dict:
     """
     problems: list[str] = []
     values: set[bytes] = set()
-    per_segment: dict[int, list[dict]] = {}
+    per_segment: dict[int, list[dict[str, Any]]] = {}
     for f in result.frames:
         if f["kind"] == C.KIND_CHAIN:
             per_segment.setdefault(int(f.get("segment", 0)), []).append(f)

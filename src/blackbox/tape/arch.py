@@ -21,6 +21,7 @@ from __future__ import annotations
 import os
 import struct
 import zlib
+from typing import Any
 
 from blackbox import constants as C
 from blackbox.codec.crc32 import crc32
@@ -83,7 +84,7 @@ codec_of = segments.codec_of
 logical_bytes = segments.logical_bytes
 
 
-def compact(tape_dir: str, n: int, *, writer_uuid_hex: str | None = None, level: int = LEVEL) -> dict:
+def compact(tape_dir: str, n: int, *, writer_uuid_hex: str | None = None, level: int = LEVEL) -> dict[str, Any]:
     """Compact sealed segment `n` into `arch/`. Idempotent; refuses an unsealed or already-archived segment."""
     live = segments.seg_path(tape_dir, n)
     if not os.path.exists(live):

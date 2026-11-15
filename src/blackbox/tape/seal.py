@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import struct
+from typing import Any
 
 from blackbox import constants as C
 from blackbox.codec.crc32 import crc32
@@ -39,7 +40,7 @@ def encode(*, segment_no: int, reason: int, start_seq: int, end_seq: int, frame_
     return bytes(buf)
 
 
-def decode(buf: bytes) -> dict:
+def decode(buf: bytes) -> dict[str, Any]:
     if len(buf) != C.SEAL_BYTES:
         raise bbx("BBX-E224", f"seal is {len(buf)} B, expected {C.SEAL_BYTES}")
     if buf[0:8] != C.MAGIC_SEAL:
@@ -60,7 +61,7 @@ def decode(buf: bytes) -> dict:
 
 
 def write(path: str, *, segment_no: int, reason: int, start_seq: int, end_seq: int, frame_count: int,
-          body: bytes, prev_chain: bytes, sealer: bytes, closed_wall_ns: int | None = None) -> dict:
+          body: bytes, prev_chain: bytes, sealer: bytes, closed_wall_ns: int | None = None) -> dict[str, Any]:
     """Write `<path>` (…/00000001.seal) atomically: tmp + fsync + replace."""
     import time
 
@@ -79,7 +80,7 @@ def write(path: str, *, segment_no: int, reason: int, start_seq: int, end_seq: i
     return decode(payload)
 
 
-def read(path: str) -> dict | None:
+def read(path: str) -> dict[str, Any] | None:
     try:
         with open(path, "rb") as fh:
             return decode(fh.read(C.SEAL_BYTES))
@@ -87,7 +88,7 @@ def read(path: str) -> dict | None:
         return None
 
 
-def verify(segment_path: str, seal_path: str) -> dict:
+def verify(segment_path: str, seal_path: str) -> dict[str, Any]:
     """Verify a sealed segment against its footer. Raises BBX-E224 on mismatch."""
     seal = read(seal_path)
     if seal is None:

@@ -24,6 +24,7 @@ import json
 import os
 import time
 from dataclasses import dataclass, field
+from typing import Any
 
 from blackbox import constants as C
 from blackbox.cap import format as cap
@@ -75,7 +76,7 @@ def _write_atomic(path: str, blob: bytes) -> None:
         _plat.fsync_dir(directory)
 
 
-def _read_json(path: str) -> dict | None:
+def _read_json(path: str) -> dict[str, Any] | None:
     try:
         with open(path, "rb") as fh:
             loaded = json.loads(fh.read().decode("utf-8"))
@@ -97,7 +98,7 @@ class NodeRecord:
     tool_requests: int = 0
     tool_results: int = 0
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         out = {"node_slot": self.node_slot, "status": self.status, "detail": self.detail,
                "model_requests": self.model_requests, "tool_requests": self.tool_requests,
                "tool_results": self.tool_results}
@@ -107,7 +108,7 @@ class NodeRecord:
         return out
 
 
-def classify_nodes(frames: list[dict], *, now_wall_ns: int | None = None) -> list[NodeRecord]:
+def classify_nodes(frames: list[dict[str, Any]], *, now_wall_ns: int | None = None) -> list[NodeRecord]:
     """Apply the §14.4 table to the frames of one run.
 
     A node is open when it has no `NODE_CLOSE`; the classification then asks what the last thing we saw was. The
@@ -190,7 +191,7 @@ def classify_nodes(frames: list[dict], *, now_wall_ns: int | None = None) -> lis
     return out
 
 
-def run_status(frames: list[dict], *, sealed: bool) -> tuple[str, str | None]:
+def run_status(frames: list[dict[str, Any]], *, sealed: bool) -> tuple[str, str | None]:
     """`(status, status_cause)` for the run itself: `SEAL_INTERRUPTED` when the run ended but was never sealed."""
     has_end = any(f["kind"] == C.KIND_RUN_END for f in frames)
     if has_end and not sealed:
@@ -208,11 +209,11 @@ class RecoveryResult:
     capsule_path: str | None = None
     capsule_root: str | None = None
     state: str = "DISCOVERED"
-    node_statuses: list[dict] = field(default_factory=list)
+    node_statuses: list[dict[str, Any]] = field(default_factory=list)
     run_status: str = "recovered"
     status_cause: str | None = None
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         return {"run_id": self.run_id, "run_dir": self.run_dir, "steps_run": self.steps_run,
                 "steps_skipped": self.steps_skipped, "capsule_path": self.capsule_path,
                 "capsule_root": self.capsule_root, "state": self.state,
@@ -238,7 +239,7 @@ class Recovery:
         self._scan: scanner.ScanResult | None = None
 
     # ── infrastructure ──────────────────────────────────────────────────────
-    def _read_meta(self) -> dict:
+    def _read_meta(self) -> dict[str, Any]:
         try:
             with open(os.path.join(self.tape_dir, "meta"), "rb") as fh:
                 return meta_mod.decode(fh.read(C.META_BYTES))
@@ -248,7 +249,7 @@ class Recovery:
     def _marker_path(self, step: str) -> str:
         return os.path.join(self.run_dir, f"recovery.done.{step}")
 
-    def _marker(self, step: str) -> dict | None:
+    def _marker(self, step: str) -> dict[str, Any] | None:
         return _read_json(self._marker_path(step))
 
     def _save_marker(self, step: str, *, input_hash: str, output_hash: str, artifact: str | None) -> None:
@@ -352,7 +353,7 @@ class Recovery:
             os.close(fd)
         return True
 
-    def _lock_is_live(self, held: dict) -> bool:
+    def _lock_is_live(self, held: dict[str, Any]) -> bool:
         try:
             pid = int(held["pid"])
         except (KeyError, TypeError, ValueError):

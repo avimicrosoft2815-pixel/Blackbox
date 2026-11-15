@@ -19,6 +19,7 @@ from __future__ import annotations
 import os
 import threading
 import time
+from typing import Any
 
 from blackbox import constants as C
 from blackbox.codec import cbor
@@ -246,7 +247,8 @@ class TapeWriter:
             return self._append_locked(kind, payload, priority=priority, flags=flags, run_slot=run_slot,
                                        node_slot=node_slot, wall_ns=wall_ns, mono_ns=mono_ns)
 
-    def _append_locked(self, kind, payload, *, priority, flags, run_slot, node_slot, wall_ns, mono_ns) -> int:
+    def _append_locked(self, kind: int, payload: bytes, *, priority: int, flags: int, run_slot: int,
+                       node_slot: int, wall_ns: int | None, mono_ns: int | None) -> int:
         if not self.recording:
             self.dropped_events += 1        # sink: counted, never raised (S17)
             return 0
@@ -332,7 +334,7 @@ class TapeWriter:
         _die("S5")
         return self._slot
 
-    def attach_blobs(self, blob_writer) -> None:
+    def attach_blobs(self, blob_writer: Any) -> None:
         """C32/D-019: whoever syncs the tape syncs the blobs it references first, in that order.
 
         The keeper's tick already calls `sync_pending()` before `publish_if_due()`; this hook covers the other path,
@@ -358,12 +360,12 @@ class TapeWriter:
         self._unpublished_bytes = 0
         self.syncs += 1
 
-    def append_and_publish(self, kind: int, payload: bytes = b"", **kw) -> int:
+    def append_and_publish(self, kind: int, payload: bytes = b"", **kw: Any) -> int:
         seq = self.append(kind, payload, **kw)
         self.publish()
         return seq
 
-    def emit(self, kind: int, payload: bytes = b"", **kw) -> int:
+    def emit(self, kind: int, payload: bytes = b"", **kw: Any) -> int:
         """Group commit: append now, publish when `batch_bytes` / `batch_ms` says so (or on `flush`).
 
         Under light load the window is one event; under load the batch grows by itself, which is why the
@@ -526,7 +528,7 @@ class TapeWriter:
         return body
 
     def _write_seal(self, n: int, *, body: bytes, start_seq: int, end_seq: int, frame_count: int,
-                    reason: int) -> dict | None:
+                    reason: int) -> dict[str, Any] | None:
         from blackbox.tape import seal as seal_mod
         prev = self._segment_prev_chain(n)
         return seal_mod.write(segments.seal_path(self.tape_dir, n), segment_no=n, reason=reason,
@@ -607,7 +609,7 @@ class TapeWriter:
                             "(see .degraded_reason)")
         return self._slot
 
-    def stats(self) -> dict:
+    def stats(self) -> dict[str, Any]:
         return {
             "writer_uuid": self.writer_uuid.hex(), "tape_dir": self.tape_dir,
             "head_seq": self._slot.head_seq if self._slot else 0,
@@ -621,5 +623,5 @@ class TapeWriter:
     def __enter__(self) -> TapeWriter:
         return self.open() if self._slot is None else self
 
-    def __exit__(self, exc_type, exc, tb) -> None:
+    def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
         self.close(reason=C.SEAL_REASON_SHUTDOWN if exc_type is None else C.SEAL_REASON_RUN_END)

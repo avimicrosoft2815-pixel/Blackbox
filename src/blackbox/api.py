@@ -19,9 +19,10 @@ import faulthandler
 import os
 import signal
 import sys
+from typing import Any
 
 STALL_TXT = "stall_tb.txt"
-_registered: dict = {"installed": False, "signal": None, "path": None, "stacks": False, "reason": None}
+_registered: dict[str, Any] = {"installed": False, "signal": None, "path": None, "stacks": False, "reason": None}
 
 
 def stall_dump_path(data_dir: str | None = None) -> str:
@@ -29,7 +30,7 @@ def stall_dump_path(data_dir: str | None = None) -> str:
     return os.path.join(root, STALL_TXT)
 
 
-def install(*, data_dir: str | None = None, signal_number: int | None = None) -> dict:
+def install(*, data_dir: str | None = None, signal_number: int | None = None) -> dict[str, Any]:
     """Register the stall stack dump. Idempotent; never raises."""
     if _registered["installed"]:
         return dict(_registered)
@@ -58,7 +59,7 @@ def uninstall() -> None:
     _registered.update({"installed": False, "stacks": False})
 
 
-def stall_status() -> dict:
+def stall_status() -> dict[str, Any]:
     return dict(_registered)
 
 

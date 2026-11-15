@@ -26,7 +26,7 @@ import sys
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import IO
+from typing import IO, Any
 
 from blackbox import constants as C
 from blackbox.codec import cbor
@@ -55,10 +55,10 @@ class RunResult:
     stall_path: str | None = None
     dump_path: str | None = None
     writer_uuid: str = ""
-    recovered: dict = field(default_factory=dict)
+    recovered: dict[str, Any] = field(default_factory=dict)
     recovery_error: str | None = None
 
-    def as_dict(self) -> dict:
+    def as_dict(self) -> dict[str, Any]:
         return {
             "run_id": self.run_id, "argv": self.argv, "pid": self.pid, "exit_code": self.exit_code,
             "signaled": self.signaled, "duration_s": round(self.duration_s, 3),
@@ -82,7 +82,7 @@ def _newest_tape_head(data_dir: str) -> tuple[str | None, int | None]:
     return writer, (head.head_seq if head is not None else None)
 
 
-def _write_json(path: str, payload: dict) -> None:
+def _write_json(path: str, payload: dict[str, Any]) -> None:
     tmp = f"{path}.tmp"
     with open(tmp, "w", encoding="utf-8") as fh:
         json.dump(payload, fh, indent=2, sort_keys=True)

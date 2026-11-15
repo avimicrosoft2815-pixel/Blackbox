@@ -12,13 +12,14 @@ from __future__ import annotations
 
 import contextlib
 import threading
+from typing import Any
 
 TICK_S = 0.001          # 1 ms: finer than the 5 ms publish bound, cheap enough to ignore
 
 
 class Keeper:
-    def __init__(self, writer, *, tick_s: float = TICK_S, blob_queue=None, blob_jobs_per_tick: int = 4,
-                 blob_writer=None) -> None:
+    def __init__(self, writer: Any, *, tick_s: float = TICK_S, blob_queue: Any = None,
+                 blob_jobs_per_tick: int = 4, blob_writer: Any = None) -> None:
         self.writer = writer
         self.tick_s = tick_s
         # C32/D-019: blob durability is the keeper's job in `kernel` mode, and the ordering is the invariant —
@@ -58,7 +59,7 @@ class Keeper:
     def __enter__(self) -> Keeper:
         return self.start()
 
-    def __exit__(self, *exc) -> None:
+    def __exit__(self, *exc: Any) -> None:
         self.stop()
 
     # ── work ────────────────────────────────────────────────────────────────
@@ -84,7 +85,7 @@ class Keeper:
             self.blob_queue.drain(limit=self.blob_jobs_per_tick)
 
     # ── introspection ───────────────────────────────────────────────────────
-    def stats(self) -> dict:
+    def stats(self) -> dict[str, Any]:
         return {"ticks": self.ticks, "publishes": self.publishes, "disabled": self.disabled,
                 "error": self.error, "tick_s": self.tick_s,
                 "blob_queue": self.blob_queue.stats() if self.blob_queue is not None else None,
