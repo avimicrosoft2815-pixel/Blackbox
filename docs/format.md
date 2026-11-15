@@ -125,8 +125,19 @@ Kind registry (append-only): `1 SEG_END`, `2 CHAIN`, `3 INTERN`, `4 GAP`, `5 DEG
 ### 4.0 Model-frame payloads (JSON, not CBOR)
 
 `MODEL_REQUEST` (32), `MODEL_CHUNK` (34), `MODEL_RESPONSE` (33) and `MODEL_ERROR` (35) carry canonical JSON in their
-payload; the chunk payload is the **raw response bytes and nothing else**, so a reader concatenates chunk frames to get
-the body back. The summary keys a reader may rely on:
+payload; the chunk payload depends on the call's `content` mode (D-030), which the request frame declares:
+
+| mode | `MODEL_CHUNK` payload |
+|---|---|
+| `full` | the **raw response bytes and nothing else**, so a reader concatenates chunk frames to get the body back |
+| `hash` | `[bbx-hash sha256=<64 hex> bytes=<n>]` — a digest of the group's bytes and their count, CPU-readable ASCII |
+| `off` | `[bbx-off bytes=<n>]` — the count alone |
+
+The count is in the payload because a reader must be able to answer "how many bytes arrived before the process died"
+from the frames alone; `chunk_bytes()` is the one implementation of that rule and `rec.recovery` uses it. A header is
+bracketed and begins `[bbx-` so it cannot be mistaken for a body; a body that literally began with `[bbx-` and ended
+with `]` and contained ` bytes=<int>]` would be misread, which is the documented cost of the convention (bodies are
+SSE or JSON in practice). The summary keys a reader may rely on:
 
 | key | meaning |
 |---|---|

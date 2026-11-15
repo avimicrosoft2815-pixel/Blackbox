@@ -6,7 +6,7 @@
     "bench/results/*.json"
   ],
   "next_ticket": "P3-11",
-  "next_note": "P3-11 redaction is built and green (139 tests); the zero-code-change row now covers both SDKs (openai 3.51.0 and anthropic 2.8.0, unmodified scripts killed mid-stream, same seam, counts never above the mock provider's own tally). Next: the four unmeasured §15.1 capture rows, then P3-11's remainder (keyed hash, mask offsets — DV-013), then a reviewer signature on G-Capture. Named as not built: keyed HMAC, mask offsets, the patterns split; P3-11 stays wip. Nightly still has zero successful runs and cannot start until merge; origin/main is at 31241d6.",
+  "next_note": "Content modes are real now (defect 30 fixed) and the five §15.1 capture rows are measured on ext4: disabled 0.12 µs/call, content=off 1.4 µs/read, content=hash 11 µs/read (worst case 139 µs), provider Δ p95 −1.0 % (noise on n=20), install p50 2.9 ms — bench/results/2026-11-15-capture-overhead.json. Next: P3-11d (keyed hash, mask offsets, patterns split), then a reviewer signature on G-Capture. Named as not built: keyed HMAC, mask offsets; P3-11 stays wip. Nightly still has zero successful runs and cannot start until merge; origin/main is at 31241d6.",
   "last_green_commit": "ce1439b",
   "last_green_commit_note": "run 43701652852, ten jobs ten success (47ec45a 43701107412 before it, da6ef3e 43694261034, d901811 43698231222). The tree at this commit is the one the redaction work was built on; the commit that carries the redaction itself is verified by its own run, not by this one",
   "gates": {
@@ -312,7 +312,7 @@
       "label": "self"
     },
     {
-      "id": "P3-11c",
+      "id": "P3-11d",
       "name": "redaction remainder: keyed HMAC in ~/.blackbox/keys/ (0600), mask offsets, patterns split out",
       "status": "todo",
       "commit": "—",
@@ -327,6 +327,16 @@
       "commit": "HEAD",
       "tests": "tests/test_day14_kill.py (6), tests/_day14_child_anthropic.py",
       "note": "unmodified anthropic 2.8.0 script killed mid-stream: recovered as INTERRUPTED_MID_STREAM with counts never above the mock provider's own tally; the control records path /v1/messages and bytes equal to the concatenated chunk payloads; both SDKs take the same seam in the same run",
+      "label": "self"
+    },
+    {
+      "id": "P3-11c",
+      "name": "the §15.1 capture rows (Disabled, content=off, content=hash, provider Δ p95, install) and the content modes they needed",
+      "status": "done",
+      "commit": "HEAD",
+      "tests": "tests/test_content_modes.py (9), bench/bench_capture.py",
+      "measurement": "bench/results/2026-11-15-capture-overhead.json",
+      "note": "the sink ignored the configured content mode (defect 30): default `hash` in Appendix A, body written anyway. Now full/hash/off with the byte count in a payload header so recovery still answers \"how much arrived\"; redaction skipped in off mode. All five §15.1 rows measured on ext4 with tmpfs as a labelled second column; the content=hash worst case (a body containing `token`) is published beside the row rather than behind it",
       "label": "self"
     }
   ]

@@ -31,6 +31,24 @@ The async path is **tested**: `tests/test_seam_async.py` runs both seams against
 four tests found two faults that the code review had missed — `AsyncClient` *awaits* its hooks, and it builds an
 `AsyncHTTPTransport` — so the async row is now a claim with a test behind it rather than a caveat (defect 20).
 
+## Content modes (§15.1, D-030)
+
+What the tape is allowed to keep of the model's own text. Chosen by `BLACKBOX_CONTENT` (or the `content=` argument),
+default **`hash`** — Appendix A's default, and the one the code actually uses since defect 30 was found.
+
+| mode | chunk payload | the body is | verified |
+|---|---|---|---|
+| `full` | the raw bytes | on the tape, byte for byte | `tests/test_content_modes.py`, `tests/test_sink.py`, the day-14 controls |
+| `hash` | `[bbx-hash sha256=… bytes=N]` | not on the tape; each group's digest recomputes from the body | `tests/test_content_modes.py` |
+| `off` | `[bbx-off bytes=N]` | not on the tape, and redaction is skipped because nothing is kept | `tests/test_content_modes.py` |
+
+The byte count travels in the payload, so `recovery` can still answer "how much arrived before the process died" in
+every mode — the interrupted-call classification and its `partial_stream_bytes` do not depend on the body being kept.
+
+**Cost per 1 KiB read, measured on ext4** (`bench/results/2026-11-15-capture-overhead.json`): `off` **1.4 µs**, `hash`
+on ordinary SSE **11 µs**, `hash` on a body containing `token` **139 µs** (the worst case, because that literal starts
+the `assignment` pattern; still under §15.1's 1 ms hard fail). A misspelt mode raises instead of guessing.
+
 ## Redaction (P3-11)
 
 Redaction runs **before** anything is written: between the seam and the sink, not on the way out of the capsule. What

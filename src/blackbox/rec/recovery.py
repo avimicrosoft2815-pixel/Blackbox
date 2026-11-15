@@ -28,6 +28,7 @@ from typing import Any
 
 from blackbox import constants as C
 from blackbox.cap import format as cap
+from blackbox.cap_sdk.sink import chunk_bytes
 from blackbox.codec.ids import blake2b
 from blackbox.errors import bbx
 from blackbox.platform import current as _plat_current
@@ -143,7 +144,7 @@ def classify_nodes(frames: list[dict[str, Any]], *, now_wall_ns: int | None = No
             r = rec(slot)
             r.chunks += 1
             payload = f.get("payload") or b""
-            r.partial_stream_bytes += len(payload)
+            r.partial_stream_bytes += chunk_bytes(payload)
             r.last_chunk_wall_ns = int(f.get("wall_ns") or 0)
             last_kind[slot] = kind
         elif kind in (C.KIND_MODEL_RESPONSE, C.KIND_MODEL_ERROR):

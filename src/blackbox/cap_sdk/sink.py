@@ -31,7 +31,9 @@ Two invariants this file must not break:
 """
 from __future__ import annotations
 
+import hashlib
 import json
+import os
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -43,6 +45,33 @@ from blackbox.redact import FAILED, Redactor
 
 DEFAULT_COALESCE_BYTES = 8 * 1024
 DEFAULT_COALESCE_MS = 100.0
+CONTENT_MODES = ("full", "hash", "off")
+ENV_CONTENT = "BLACKBOX_CONTENT"
+
+
+def _content_of(payload: bytes) -> int | None:
+    """The byte count a non-`full` chunk payload declares, or `None` when the payload *is* the content."""
+    if not payload.startswith(b"[bbx-") or not payload.endswith(b"]"):
+        return None
+    marker = b" bytes="
+    index = payload.rfind(marker)
+    if index < 0:
+        return None
+    try:
+        return int(payload[index + len(marker):-1])
+    except ValueError:
+        return None
+
+
+def chunk_bytes(payload: bytes) -> int:
+    """How many response bytes a `MODEL_CHUNK` payload stands for, whatever the content mode was.
+
+    In `full` mode the payload is the body, so the answer is its length. In `hash` and `off` mode the payload is a
+    header that *declares* the count (`[bbx-hash sha256=… bytes=N]`, `[bbx-off bytes=N]`), because a tape that
+    cannot say how many bytes arrived is a tape that cannot answer "was the call cut short?".
+    """
+    declared = _content_of(payload)
+    return len(payload) if declared is None else declared
 
 
 class _DefaultPolicy:
@@ -74,11 +103,19 @@ class TapeSink:
 
     def __init__(self, emit: Callable[..., int], *, node_slot: int = 0,
                  coalesce_bytes: int = DEFAULT_COALESCE_BYTES, coalesce_ms: float = DEFAULT_COALESCE_MS,
-                 clock: Callable[[], int] = time.monotonic_ns, redactor: Any = None) -> None:
+                 clock: Callable[[], int] = time.monotonic_ns, redactor: Any = None,
+                 content: str | None = None) -> None:
         self._emit = emit
         # `None` means "no redaction, and the caller said so" — it is not the default. The default is the
         # documented policy, `Redactor.from_config()`: full redaction unless `BLACKBOX_REDACTION` chooses otherwise.
         self.redactor = Redactor.from_config() if redactor is None else redactor
+        # Content mode (Appendix A, §15.1): what the tape is allowed to keep of the model's own text. `None` means
+        # "use the documented default", which is `BLACKBOX_CONTENT` or, unset, the plan's `hash`: a recorder whose
+        # default keeps every token of every prompt is a recorder that quietly copies the customer's data.
+        chosen = (content or os.environ.get(ENV_CONTENT) or "hash").strip().lower()
+        if chosen not in CONTENT_MODES:
+            raise ValueError(f"unknown content mode {chosen!r}; expected one of {CONTENT_MODES}")
+        self.content = chosen
         self.node_slot = node_slot
         self.coalesce_bytes = coalesce_bytes
         self.coalesce_ms = coalesce_ms
@@ -96,7 +133,7 @@ class TapeSink:
         self._safe(C.KIND_MODEL_REQUEST, {
             "provider": call.provider, "path": call.path, "model": call.model,
             "request_fp": call.request_fp, "stream": call.stream, "partial": call.partial,
-            "capture_seam": seam,
+            "capture_seam": seam, "content": self.content,
             "coalesce_bytes": self.coalesce_bytes, "coalesce_ms": self.coalesce_ms,
         })
         self.groups[id(call)] = _Group(first_ns=self._clock())
@@ -112,9 +149,10 @@ class TapeSink:
         # the tape stores is a different number — redaction merges and drops segments — and the two are reported
         # separately so neither can be read as a fingerprint of the other.
         self.raw_chunks[id(call)] = self.raw_chunks.get(id(call), 0) + 1
-        if self.redactor is not None:
+        if self.redactor is not None and self.content != "off":
             # `feed` returns only what it can prove is not the beginning of a secret, so the buffer it holds is
-            # bounded by its window and the tape never sees a half-key.
+            # bounded by its window and the tape never sees a half-key. In `off` mode there is nothing to redact:
+            # the tape keeps a byte count, so a redaction pass would be work whose result is discarded.
             try:
                 chunk = self.redactor.feed(chunk)
             except Exception:
@@ -144,7 +182,7 @@ class TapeSink:
         group = self.groups.pop(id(call), None)
         if group is None:
             return
-        if self.redactor is not None:
+        if self.redactor is not None and self.content != "off":
             try:
                 tail = self.redactor.flush()
             except Exception:
@@ -162,6 +200,7 @@ class TapeSink:
             "chunks_stored": self.stored.get(id(call), (0, 0))[0],
             "bytes_stored": self.stored.get(id(call), (0, 0))[1],
             "bytes_received": call.bytes_received, "first_byte_ms": call.first_byte_ms, "total_ms": call.total_ms,
+            "content": self.content,
             "response_fp": call.response_fp, "partial": call.partial, "error": call.error,
             "redaction": ({**self.redactor.as_dict(), "failures": self.redaction_failures}
                           if self.redactor is not None else
@@ -174,9 +213,17 @@ class TapeSink:
     def _flush(self, call: ModelCall, group: _Group, now: int) -> None:
         if not group.chunks:
             return
-        payload = b"".join(group.chunks)
-        # The payload is the raw bytes and nothing else: a reader concatenates the frames to get the body back, and
-        # `recovery` counts `len(payload)` as bytes received. Per-frame metadata goes in the frame's own fields.
+        raw = b"".join(group.chunks)
+        # In `full` mode the payload is the raw bytes and nothing else, so a reader concatenates the frames to get the
+        # body back. In `hash` and `off` mode it is a bracketed header that declares the byte count and, for `hash`,
+        # the digest: the tape still answers "how much arrived", and the model's text is not on it at all.
+        if self.content == "full":
+            payload = raw
+        elif self.content == "hash":
+            digest = hashlib.sha256(raw).hexdigest().encode()
+            payload = b"[bbx-hash sha256=" + digest + b" bytes=" + str(len(raw)).encode() + b"]"
+        else:
+            payload = b"[bbx-off bytes=" + str(len(raw)).encode() + b"]"
         self._safe(C.KIND_MODEL_CHUNK, payload, mono_ns=group.last_ns or now)
         self.bytes_written += len(payload)
         group.chunks.clear()

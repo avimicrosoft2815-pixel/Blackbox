@@ -165,7 +165,7 @@ def test_no_secret_from_the_corpus_reaches_a_real_tape(tmp_path):
     """The unit tests can all pass while the sink writes something else. This one greps the tape."""
     api.install(data_dir=str(tmp_path), publish_ms=0.0)
     redactor = Redactor("full")
-    sink = TapeSink(api.emit, coalesce_bytes=256, redactor=redactor)
+    sink = TapeSink(api.emit, coalesce_bytes=256, redactor=redactor, content="full")
     recorder = SinkRecorder(sink)
     try:
         call = recorder.open_call("mock", "/v1/chat/completions", b"{}", model="mock-1", stream=True)
@@ -196,7 +196,7 @@ def test_no_secret_from_the_corpus_reaches_a_real_tape(tmp_path):
 def test_the_response_frame_says_what_was_removed_not_what_it_was(tmp_path):
     api.install(data_dir=str(tmp_path), publish_ms=0.0)
     redactor = Redactor("hash")
-    sink = TapeSink(api.emit, redactor=redactor)
+    sink = TapeSink(api.emit, redactor=redactor, content="full")
     recorder = SinkRecorder(sink)
     try:
         call = recorder.open_call("mock", "/v1/chat/completions", b"{}", model="mock-1", stream=True)
@@ -222,7 +222,7 @@ def test_redaction_happens_after_the_application_has_its_bytes():
     httpx = pytest.importorskip("httpx")
     api.install(data_dir="/tmp/blackbox-redaction-unused", publish_ms=0.0)
     redactor = Redactor("full")
-    sink = TapeSink(api.emit, redactor=redactor)
+    sink = TapeSink(api.emit, redactor=redactor, content="full")
     recorder = SinkRecorder(sink)
     handle = install(recorder)
     try:
@@ -275,9 +275,9 @@ def test_the_default_policy_comes_from_configuration_and_a_typo_is_not_a_decisio
 
 
 def test_a_sink_that_was_never_told_to_redact_redacts_anyway():
-    """The default is the policy, not the absence of one: `TapeSink(emit)` with no argument still redacts."""
+    """The default is the policy, not the absence of one: `TapeSink(emit, content="full")` with no argument still redacts."""
     frames: list[tuple[int, bytes, dict]] = []
-    sink = TapeSink(lambda kind, payload, **fields: frames.append((kind, payload, fields)))
+    sink = TapeSink(lambda kind, payload, **fields: frames.append((kind, payload, fields)), content="full")
     recorder = SinkRecorder(sink)
     call = recorder.open_call("mock", "/v1/chat/completions", b"{}", model="mock-1", stream=True)
     recorder.receive(call, b"the key is " + SECRETS_BYTES[1] + b" and that is all\n")
@@ -350,7 +350,8 @@ def test_a_redactor_that_breaks_fails_closed_and_says_so():
             return {"mode": "full", "counts": {}, "bytes_in": 0, "bytes_out": 0, "window": WINDOW}
 
     frames: list[tuple[int, bytes, dict]] = []
-    sink = TapeSink(lambda kind, payload, **fields: frames.append((kind, payload, fields)), redactor=Broken())
+    sink = TapeSink(lambda kind, payload, **fields: frames.append((kind, payload, fields)), redactor=Broken(),
+                    content="full")
     recorder = SinkRecorder(sink)
     call = recorder.open_call("mock", "/v1/chat/completions", b"{}", model="mock-1", stream=True)
     secret = SECRETS_BYTES[0]

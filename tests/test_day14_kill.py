@@ -43,9 +43,15 @@ pytestmark = pytest.mark.skipif(not hasattr(signal, "SIGKILL"),
 
 
 def _run_child(data_dir: Path, base_url: str, die_after: int, provider: MockProvider,
-               child: Path = CHILD) -> tuple[int, str]:
+               child: Path = CHILD, content: str | None = "full") -> tuple[int, str]:
     env = {**os.environ, "PYTHONPATH": str(ROOT / "src"), "BLACKBOX_HOME": str(data_dir)}
     env.pop("BLACKBOX_DISABLED", None)
+    # The child passes no content mode, so the process policy decides: `full` for the byte-for-byte controls, and
+    # unset for the test that runs the same kill under the documented default.
+    if content is None:
+        env.pop("BLACKBOX_CONTENT", None)
+    else:
+        env["BLACKBOX_CONTENT"] = content
     proc = subprocess.Popen([sys.executable, str(child), str(data_dir), base_url, str(die_after)],
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=env)
     # Wait until the server has actually pushed enough chunks that a kill lands mid-stream, then kill.

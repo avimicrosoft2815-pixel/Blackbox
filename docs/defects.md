@@ -157,3 +157,11 @@ plan's §10 shape, and it is append-only.
   this pass: three of the 60 corpus fixtures were malformed (`eyJ…` third segment of seven characters), so the jwt
   pattern correctly refused them and the failure looked like a redactor miss — the fixture was the bug, and the corpus
   now has a test that every entry is matched by its own kind.
+- **defect 30 — the configured content mode was ignored: the default said `hash` and the tape got the body.** Found
+  while preparing the §15.1 rows for `content=off` and `content=hash`: `constants.DEFAULT_CONTENT` is `hash` and
+  `config` validates the value, but `TapeSink` had no `content` parameter at all, so every capture wrote the model's
+  text whatever the configuration said. A user reading `content=hash` would have believed the prompt was not on the
+  disk. Fixed in the same commit as the measurements it blocked (D-030): the sink honours `full` / `hash` / `off`, the
+  request and summary frames declare the mode, and `recovery` reads the byte count from a payload header so an
+  interrupted call still reports how much arrived. Three suites depend on the body being on the tape and now ask for
+  `content="full"` explicitly rather than relying on a default that was not what it said.

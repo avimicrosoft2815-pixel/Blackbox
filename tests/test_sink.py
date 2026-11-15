@@ -54,7 +54,7 @@ def sink_recorder(sink: TapeSink) -> SinkRecorder:
 
 def test_two_thousand_chunks_become_few_frames_and_exact_bytes():
     emit = Recorder0()
-    sink = TapeSink(emit)
+    sink = TapeSink(emit, content="full")
     recorder = SinkRecorder(sink)
     call = recorder.open_call("127.0.0.1", "/v1/chat/completions", b"{}")
     piece = b"data: {\"token\": \"x\"}\n\n"
@@ -75,7 +75,7 @@ def test_two_thousand_chunks_become_few_frames_and_exact_bytes():
 
 def test_the_frame_order_is_request_chunks_response():
     emit = Recorder0()
-    recorder = SinkRecorder(TapeSink(emit))
+    recorder = SinkRecorder(TapeSink(emit, content="full"))
     call = recorder.open_call("127.0.0.1", "/v1/messages", b"{}")
     recorder.receive(call, b"one")
     recorder.receive(call, b"two")
@@ -87,7 +87,7 @@ def test_the_frame_order_is_request_chunks_response():
 
 def test_a_call_that_errors_ends_with_model_error_not_a_response():
     emit = Recorder0()
-    recorder = SinkRecorder(TapeSink(emit))
+    recorder = SinkRecorder(TapeSink(emit, content="full"))
     call = recorder.open_call("127.0.0.1", "/v1/chat/completions", b"{}")
     recorder.receive(call, b"partial")
     recorder.close_call(call, status=200, error="ReadError: socket died")
@@ -104,7 +104,7 @@ def test_the_time_bound_flushes_even_when_the_byte_bound_does_not():
     """
     now = [0]
     emit = Recorder0()
-    sink = TapeSink(emit, coalesce_ms=100.0, clock=lambda: now[0], redactor=Redactor("off"))
+    sink = TapeSink(emit, coalesce_ms=100.0, clock=lambda: now[0], redactor=Redactor("off"), content="full")
     recorder = SinkRecorder(sink)
     call = recorder.open_call("127.0.0.1", "/x", b"{}")
     recorder.receive(call, b"a")
@@ -134,7 +134,7 @@ def test_a_sink_that_raises_never_reaches_the_application_or_stops_the_bytes():
 def test_frames_land_on_a_real_tape_and_a_scanner_finds_them(tmp_path):
     writer = TapeWriter(str(tmp_path), segment_bytes=256 * 1024).open()
     uuid = writer.writer_uuid.hex()
-    sink = TapeSink(writer.emit)
+    sink = TapeSink(writer.emit, content="full")
     recorder = SinkRecorder(sink)
     try:
         with MockProvider(Scenario(chunks=6, delay_ms=2)) as provider:
@@ -170,7 +170,7 @@ def test_an_unfinished_call_is_left_as_chunks_with_no_response(tmp_path):
     """
     writer = TapeWriter(str(tmp_path), segment_bytes=256 * 1024).open()
     uuid = writer.writer_uuid.hex()
-    sink = TapeSink(writer.emit)
+    sink = TapeSink(writer.emit, content="full")
     recorder = SinkRecorder(sink)
     try:
         call = recorder.open_call("127.0.0.1", "/v1/chat/completions", b"{}")
@@ -198,7 +198,7 @@ def test_the_byte_bound_is_respected():
     """16 KiB of chunks against a 8 KiB bound is two frames; against a 64 KiB bound it is one — flushed by close,
     not by the byte bound. Both end with the same bytes, which is the invariant that matters."""
     emit = Recorder0()
-    recorder = SinkRecorder(TapeSink(emit, coalesce_bytes=8 * 1024))
+    recorder = SinkRecorder(TapeSink(emit, coalesce_bytes=8 * 1024, content="full"))
     call = recorder.open_call("127.0.0.1", "/x", b"{}")
     for _ in range(4):
         recorder.receive(call, b"y" * 4096)
@@ -207,7 +207,7 @@ def test_the_byte_bound_is_respected():
     recorder.close_call(call, status=200)
 
     emit2 = Recorder0()
-    recorder2 = SinkRecorder(TapeSink(emit2, coalesce_bytes=64 * 1024))
+    recorder2 = SinkRecorder(TapeSink(emit2, coalesce_bytes=64 * 1024, content="full"))
     call2 = recorder2.open_call("127.0.0.1", "/x", b"{}")
     for _ in range(4):
         recorder2.receive(call2, b"y" * 4096)

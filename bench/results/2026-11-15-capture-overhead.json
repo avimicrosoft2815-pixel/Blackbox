@@ -1,0 +1,335 @@
+{
+  "date": "2026-11-15",
+  "probe": "\u00a715.1 capture rows: Disabled, content=off, content=hash 1 KiB, provider \u0394 p95, install()",
+  "protocol": "single process, perf_counter_ns per operation; enqueue rows use an in-memory emitter so the number is the recorder's own work (durability is the 64 KiB content=full row in bench_payload.py); the latency row is end-to-end over loopback against the mock provider, alternating bare and recorded calls of ~700 ms with a real tape in the recorded case; install() from nothing including RUN_START and the keeper; percentiles by nearest rank from one sorted array (P1-17), n printed beside every percentile",
+  "gate_column": "ext4",
+  "budget_source": "docs/BLACKBOX_FINAL_ARCHITECTURE_v1.1.md \u00a715.1",
+  "hardware": {
+    "cpu": "Intel(R) Xeon(R) Processor @ 2.60GHz",
+    "cpu_count": 2,
+    "python": "3.11.2",
+    "implementation": "CPython",
+    "os": "Linux-6.1.158+-x86_64-with-glibc2.36",
+    "machine": "x86_64",
+    "mem_total_kib": 4034452
+  },
+  "host": {
+    "python": "3.11.2",
+    "implementation": "CPython",
+    "os": "Linux-6.1.158+"
+  },
+  "results": {
+    "ext4": {
+      "column": "ext4",
+      "gate": true,
+      "disabled": {
+        "n": 5000,
+        "warmup": 500,
+        "bare": {
+          "n": 5000,
+          "min": 0.08,
+          "p50": 0.092,
+          "p95": 0.096,
+          "p99": 0.127,
+          "max": 24.949,
+          "mean": 0.099
+        },
+        "decorated": {
+          "n": 5000,
+          "min": 0.198,
+          "p50": 0.213,
+          "p95": 0.238,
+          "p99": 0.254,
+          "max": 26.295,
+          "mean": 0.228
+        },
+        "overhead_us": {
+          "n": 5000,
+          "min": 0.0,
+          "p50": 0.12,
+          "p95": 0.151,
+          "p99": 0.162,
+          "max": 26.206,
+          "mean": 0.135
+        },
+        "disabled": true,
+        "budget": {
+          "p50_us_max": 1.0,
+          "p99_us_max": 3.0,
+          "hard_fail_us": 5.0
+        },
+        "unit": "us"
+      },
+      "enqueue_off": {
+        "n": 5000,
+        "warmup": 500,
+        "read_bytes": 1024,
+        "content": "off",
+        "body_class": "ordinary-sse",
+        "us": {
+          "n": 5000,
+          "min": 1.335,
+          "p50": 1.424,
+          "p95": 1.594,
+          "p99": 2.09,
+          "max": 41.318,
+          "mean": 1.497
+        },
+        "budget": {
+          "p50_us_max": 8.0,
+          "p99_us_max": 40.0,
+          "hard_fail_us": 100.0
+        },
+        "frames_written": 3,
+        "unit": "us"
+      },
+      "enqueue_hash": {
+        "n": 5000,
+        "warmup": 500,
+        "read_bytes": 1024,
+        "content": "hash",
+        "body_class": "ordinary-sse",
+        "us": {
+          "n": 5000,
+          "min": 10.591,
+          "p50": 10.953,
+          "p95": 14.298,
+          "p99": 31.79,
+          "max": 62.793,
+          "mean": 11.541
+        },
+        "budget": {
+          "p50_us_max": 25.0,
+          "p99_us_max": 250.0,
+          "hard_fail_us": 1000.0
+        },
+        "frames_written": 3,
+        "unit": "us"
+      },
+      "enqueue_hash_keyword": {
+        "n": 5000,
+        "warmup": 500,
+        "read_bytes": 1024,
+        "content": "hash",
+        "body_class": "sse-with-keywords",
+        "us": {
+          "n": 5000,
+          "min": 132.474,
+          "p50": 138.712,
+          "p95": 174.735,
+          "p99": 242.294,
+          "max": 1092.395,
+          "mean": 146.814
+        },
+        "budget": {
+          "p50_us_max": null,
+          "p99_us_max": null,
+          "hard_fail_us": 1000.0
+        },
+        "frames_written": 11,
+        "unit": "us"
+      },
+      "provider_latency": {
+        "calls": 40,
+        "bare_ms": {
+          "n": 20,
+          "min": 677.87,
+          "p50": 679.76,
+          "p95": 698.87,
+          "p99": 702.32,
+          "max": 702.32,
+          "mean": 683.67
+        },
+        "recorded_ms": {
+          "n": 20,
+          "min": 678.11,
+          "p50": 679.41,
+          "p95": 691.77,
+          "p99": 693.53,
+          "max": 693.53,
+          "mean": 681.33
+        },
+        "delta_p95_pct": -1.02,
+        "budget": {
+          "p95_delta_pct_max": 3.0,
+          "hard_fail_pct": 10.0
+        },
+        "unit": "ms"
+      },
+      "startup": {
+        "n": 20,
+        "ms": {
+          "n": 20,
+          "min": 2.597,
+          "p50": 2.9,
+          "p95": 3.477,
+          "p99": 3.89,
+          "max": 3.89,
+          "mean": 2.944
+        },
+        "budget": {
+          "p50_ms_max": 25.0,
+          "p99_ms_max": 25.0,
+          "hard_fail_ms": 150.0
+        },
+        "unit": "ms"
+      }
+    },
+    "tmpfs": {
+      "column": "tmpfs",
+      "gate": false,
+      "disabled": {
+        "n": 5000,
+        "warmup": 500,
+        "bare": {
+          "n": 5000,
+          "min": 0.08,
+          "p50": 0.093,
+          "p95": 0.116,
+          "p99": 0.184,
+          "max": 16.796,
+          "mean": 0.103
+        },
+        "decorated": {
+          "n": 5000,
+          "min": 0.203,
+          "p50": 0.218,
+          "p95": 0.25,
+          "p99": 0.27,
+          "max": 25.174,
+          "mean": 0.233
+        },
+        "overhead_us": {
+          "n": 5000,
+          "min": 0.0,
+          "p50": 0.125,
+          "p95": 0.159,
+          "p99": 0.173,
+          "max": 25.08,
+          "mean": 0.136
+        },
+        "disabled": true,
+        "budget": {
+          "p50_us_max": 1.0,
+          "p99_us_max": 3.0,
+          "hard_fail_us": 5.0
+        },
+        "unit": "us"
+      },
+      "enqueue_off": {
+        "n": 5000,
+        "warmup": 500,
+        "read_bytes": 1024,
+        "content": "off",
+        "body_class": "ordinary-sse",
+        "us": {
+          "n": 5000,
+          "min": 1.341,
+          "p50": 1.421,
+          "p95": 1.7,
+          "p99": 13.166,
+          "max": 47.684,
+          "mean": 1.659
+        },
+        "budget": {
+          "p50_us_max": 8.0,
+          "p99_us_max": 40.0,
+          "hard_fail_us": 100.0
+        },
+        "frames_written": 3,
+        "unit": "us"
+      },
+      "enqueue_hash": {
+        "n": 5000,
+        "warmup": 500,
+        "read_bytes": 1024,
+        "content": "hash",
+        "body_class": "ordinary-sse",
+        "us": {
+          "n": 5000,
+          "min": 10.623,
+          "p50": 11.017,
+          "p95": 20.598,
+          "p99": 39.2,
+          "max": 311.407,
+          "mean": 13.312
+        },
+        "budget": {
+          "p50_us_max": 25.0,
+          "p99_us_max": 250.0,
+          "hard_fail_us": 1000.0
+        },
+        "frames_written": 3,
+        "unit": "us"
+      },
+      "enqueue_hash_keyword": {
+        "n": 5000,
+        "warmup": 500,
+        "read_bytes": 1024,
+        "content": "hash",
+        "body_class": "sse-with-keywords",
+        "us": {
+          "n": 5000,
+          "min": 131.915,
+          "p50": 142.753,
+          "p95": 207.367,
+          "p99": 304.319,
+          "max": 1330.795,
+          "mean": 155.707
+        },
+        "budget": {
+          "p50_us_max": null,
+          "p99_us_max": null,
+          "hard_fail_us": 1000.0
+        },
+        "frames_written": 11,
+        "unit": "us"
+      },
+      "provider_latency": {
+        "calls": 40,
+        "bare_ms": {
+          "n": 20,
+          "min": 677.85,
+          "p50": 678.79,
+          "p95": 682.34,
+          "p99": 682.98,
+          "max": 682.98,
+          "mean": 679.57
+        },
+        "recorded_ms": {
+          "n": 20,
+          "min": 678.25,
+          "p50": 680.42,
+          "p95": 689.2,
+          "p99": 699.92,
+          "max": 699.92,
+          "mean": 682.58
+        },
+        "delta_p95_pct": 1.01,
+        "budget": {
+          "p95_delta_pct_max": 3.0,
+          "hard_fail_pct": 10.0
+        },
+        "unit": "ms"
+      },
+      "startup": {
+        "n": 20,
+        "ms": {
+          "n": 20,
+          "min": 2.139,
+          "p50": 2.224,
+          "p95": 2.805,
+          "p99": 2.855,
+          "max": 2.855,
+          "mean": 2.295
+        },
+        "budget": {
+          "p50_ms_max": 25.0,
+          "p99_ms_max": 25.0,
+          "hard_fail_ms": 150.0
+        },
+        "unit": "ms"
+      }
+    }
+  }
+}

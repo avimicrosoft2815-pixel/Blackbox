@@ -24,7 +24,7 @@ with the ordered preflight are real and tested, as is seam C (SDK method patches
 `anthropic` 2.8.0), the tape sink that turns seam events into `MODEL_CHUNK` frames, and the day-14 rule: an unmodified
 `openai` script killed with `SIGKILL` mid-stream is recovered with chunk and byte counts that never exceed what the
 provider pushed. The proxy, the launcher integration, the viewer and the diagnosis workflow are not built yet.**
-Suite: **Total: 625 tests** — 624 pass here and 1 is skipped on POSIX by name
+Suite: **Total: 634 tests** — 633 pass here and 1 is skipped on POSIX by name
 (`test_an_open_view_blocks_the_unlink_only_on_windows`: POSIX permits unlinking a file another fd still holds, so
 the open-view case exists only on Windows). ruff 0.17.5 and mypy 2.4.1 (`strict = true`, nothing disabled):
 0 findings.
@@ -54,6 +54,12 @@ the open-view case exists only on Windows). ruff 0.17.5 and mypy 2.4.1 (`strict 
 | Budget: 1 KiB `content=hash` p50/p99, throughput | §15.1 | p50 11.057 · p99 51.662 µs · 73 338 ev/s — `bench/results/2026-11-14-writer-throughput.json` |
 | Budget: recovery ≤ 120 ms / 10 k frames | §15.1 | 106.1 ms/10 k, n 30 — `bench/results/2026-11-15-recovery.json` |
 | Budget: disk amplification ≤ 1.25× (2× hard fail) | §15.1 | 16 KiB group commit 1.231× (3 150 352 / 2 560 000) — `bench/results/2026-11-15-recovery.json` |
+| Budget: Disabled overhead per decorated call | §15.1 | **p50 0.12 µs · p99 0.16 µs** against a ≤ 1 / ≤ 3 µs target, hard fail 5 µs — `bench/results/2026-11-15-capture-overhead.json` `results.ext4.disabled.overhead_us` (n=5 000, measured against the same function undecorated in the same process) |
+| Budget: `content=off` event enqueue | §15.1 | **p50 1.42 µs · p99 2.09 µs** against ≤ 8 / ≤ 40 µs, hard fail 100 µs — `bench/results/2026-11-15-capture-overhead.json` `results.ext4.enqueue_off.us` (n=5 000, 1 KiB reads, in-memory emitter so the number is the recorder's own work) |
+| Budget: `content=hash`, 1 KiB payload (redact + digest + frame) | §15.1 | **p50 10.95 µs · p99 31.79 µs** against ≤ 25 / ≤ 250 µs, hard fail 1 ms — `bench/results/2026-11-15-capture-overhead.json` `results.ext4.enqueue_hash.us`. The **worst case is published too**: a 1 KiB body containing the word `token` costs p50 138.7 µs (p99 242.3, max 1 092) because that is the literal the `assignment` pattern hunts, and it is still under the hard fail. `enqueue_hash_keyword` |
+| Budget: provider call latency Δ p95 (700 ms streamed call) | §15.1 | **−1.02 %** on 20 recorded against 20 bare calls of a 14 × 50 ms stream (p95 691.8 ms recorded vs 698.9 ms bare) against a ≤ 3 % target and 10 % hard fail — `bench/results/2026-11-15-capture-overhead.json` `results.ext4.provider_latency`. A negative delta is noise, not a speed-up: n=20 per side and the p95 of a 700 ms call is dominated by the mock provider's 14 sleeps |
+| Budget: startup `install()` | §15.1 | **p50 2.90 ms · p99 3.89 ms** against ≤ 25 ms, hard fail 150 ms — `bench/results/2026-11-15-capture-overhead.json` `results.ext4.startup.ms` (n=20, from nothing: open the tape, write `RUN_START`, start the keeper) |
+| **The content mode is honoured, and it is what the configuration says** | D-030, Appendix A, defect 30, §15.1 | `src/blackbox/cap_sdk/sink.py`, `tests/test_content_modes.py` (9): the default is the plan's `hash` and not whatever was convenient; `full` keeps the body byte-for-byte, `hash` keeps `[bbx-hash sha256=… bytes=N]` and the digest of each group recomputes from the body, `off` keeps the count alone and no byte of the text; the request and summary frames declare the mode; a secret in the body does not reach a `hash` tape; and `recovery` reports the same partial byte total from the frames in all three modes, which is what lets a `kill -9` still answer "how much arrived" |
 | Budget: RSS ≤ 24 MiB above baseline | §15.1 | 1.56 MiB at 28.13 % of a segment — `bench/results/2026-11-15-recovery.json` |
 | Budget: 64 KiB `content=full` incl. blob write (C32) | §15.1 | p50 226.864 · p99 461.281 µs · 4 356.4 ev/s — `bench/results/2026-11-15-payload-blob.json` |
 | Group-commit window, per OS (C40) | §8.6, C3 | `tests/test_keeper.py::test_low_rate_event_is_published_within_the_window` starts its own window and `test_a_window_older_than_the_bound_publishes_inline` states the expired-window rule; the ≤ 5 ms row is measured on ext4/Linux only and the Windows bound (one 15.6 ms timer tick for a keeper-only drain, inline publish for arriving events) is stated in `docs/compatibility.md` and marked `not measured` |
@@ -167,8 +173,9 @@ row in the same commit.
    three modes, the default policy, fail-closed — `wip`, because the keyed hash, mask offsets and the pattern split
    are not built). What remains, in order: an **`anthropic` child** for the zero-code-change row (**P3-11b**), the
    four unmeasured §15.1 rows (Disabled, content=off, content=hash, provider-call latency Δ p95, startup install
-   cost), P3-11's remainder (keyed hash + mask offsets, **P3-11c**), then a reviewer's signature on
-   `docs/gates/G-Capture.md`. **Next ticket: P3-11** (its remainder), starting with the `anthropic` child.
+   cost — **measured**, see the five rows above), P3-11's remainder (keyed hash + mask offsets, **P3-11d**), then a
+   reviewer's signature on `docs/gates/G-Capture.md`. **Next ticket: P3-11d** (the redaction remainder), then the
+   signature.
 3. **Defect 26 is open and cannot be closed here**: on Windows, `install(data_dir=<a file>)` reported `enabled: True`
    and let 100 calls run against a tape directory that cannot exist. Three questions are written down in
    `docs/defects.md`; answering them needs a Windows host, which this sandbox does not have.

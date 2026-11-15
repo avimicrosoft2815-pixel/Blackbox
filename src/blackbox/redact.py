@@ -76,8 +76,8 @@ PENDING: tuple[tuple[str, bytes], ...] = (
     ("github", rb"gh[pousr]_[A-Za-z0-9]*\Z"),
     ("slack", rb"xox[baprs]-[A-Za-z0-9\-]*\Z"),
     ("jwt", rb"eyJ[A-Za-z0-9_\-]*(?:\.[A-Za-z0-9_\-]*){0,2}\Z"),
-    ("bearer", rb"(?i)bearer\s*[A-Za-z0-9._\-]*\Z"),
-    ("assignment", rb"(?i)(?:api[_-]?key|secret|token|password|passwd|access[_-]?key)\"?\s*"
+    ("bearer", rb"bearer\s*[A-Za-z0-9._\-]*\Z"),
+    ("assignment", rb"(?:api[_-]?key|secret|token|password|passwd|access[_-]?key)\"?\s*"
                    rb"(?:[:=]\s*\"?[A-Za-z0-9._\-+/=]*)?\Z"),
     ("email", rb"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]*\Z"),
 )
@@ -92,8 +92,8 @@ PATTERNS: tuple[tuple[str, bytes], ...] = (
     ("github", rb"gh[pousr]_[A-Za-z0-9]{16,}"),
     ("slack", rb"xox[baprs]-[A-Za-z0-9\-]{10,}"),
     ("jwt", rb"eyJ[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}"),
-    ("bearer", rb"(?i)bearer\s+[A-Za-z0-9._\-]{16,}"),
-    ("assignment", rb"(?i)(?:api[_-]?key|secret|token|password|passwd|access[_-]?key)\"?\s*[:=]\s*\"?"
+    ("bearer", rb"bearer\s+[A-Za-z0-9._\-]{16,}"),
+    ("assignment", rb"(?:api[_-]?key|secret|token|password|passwd|access[_-]?key)\"?\s*[:=]\s*\"?"
                    rb"[A-Za-z0-9._\-+/=]{12,}"),
     ("email", rb"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}"),
 )
@@ -101,10 +101,11 @@ PATTERNS: tuple[tuple[str, bytes], ...] = (
 _COMPILED = tuple((kind, re.compile(pattern)) for kind, pattern in PATTERNS)
 _PENDING = tuple((kind, re.compile(pattern)) for kind, pattern in PENDING)
 
-# A literal every match of a kind must contain, lowercased. Checked before the regex runs: an unanchored
-# `[A-Za-z0-9._%+-]+@` re-scans the whole buffer from every position when there is no `@` in it at all, which turns a
-# 4 KiB read into 16 million character steps and a redactor that costs more than the model call it is recording.
-_NEEDLES: dict[str, tuple[bytes, ...]] = {
+# One or two cheap literals per kind, checked with `in`: a pattern whose literal is absent cannot match, and running
+# it anyway costs a scan of the whole buffer from every position. The needles are per kind rather than one big
+# alternation because a twenty-branch regex is slower than twenty `in` tests on a short buffer (measured: 16 µs
+# against 3 µs on 1 KiB) — regex alternation backtracks, `bytes.__contains__` does not.
+_PREFILTER: dict[str, tuple[bytes, ...]] = {
     "private_key": (b"-----begin",),
     "anthropic": (b"sk-ant-",),
     "openai": (b"sk-",),
@@ -113,16 +114,15 @@ _NEEDLES: dict[str, tuple[bytes, ...]] = {
     "slack": (b"xox",),
     "jwt": (b"eyj",),
     "bearer": (b"bearer",),
-    "assignment": (b"token", b"secret", b"password", b"passwd", b"api_key", b"api-key", b"apikey",
-                   b"access_key", b"access-key"),
+    "assignment": (b"key", b"secret", b"token", b"pass"),
     "email": (b"@",),
 }
-
-
-def _possible(kind: str, lower: bytes) -> bool:
-    """Whether this buffer could contain a match of `kind` at all — a substring test, not a regex."""
-    needles = _NEEDLES.get(kind)
-    return needles is None or any(needle in lower for needle in needles)
+# Matched against the lowercased buffer, at identical offsets (ASCII case folding is one byte for one byte), so the
+# engine does not carry an `IGNORECASE` flag through every position of every pattern.
+_CASE_INSENSITIVE = frozenset({"bearer", "assignment"})
+_ALL_KINDS = frozenset(kind for kind, _pattern in PATTERNS)
+_BIT: dict[str, int] = {kind: 1 << index for index, (kind, _pattern) in enumerate(PATTERNS)}
+_ALL_BITS = (1 << len(PATTERNS)) - 1
 
 
 def _gaps(length: int, claimed: list[tuple[int, int]]) -> list[tuple[int, int]]:
@@ -136,6 +136,36 @@ def _gaps(length: int, claimed: list[tuple[int, int]]) -> list[tuple[int, int]]:
     if cursor < length:
         gaps.append((cursor, length))
     return gaps
+
+
+def _possible(lower: bytes) -> int:
+    """A bitmask of the kinds whose literal appears in this buffer.
+
+    Straight-line `in` tests rather than a loop over a table with a generator per kind: the generator version cost
+    10 µs per call, more than all ten regexes together (defect 29's second half, found by the same cost test).
+    """
+    mask = 0
+    if b"-----begin" in lower:
+        mask |= _BIT["private_key"]
+    if b"sk-ant-" in lower:
+        mask |= _BIT["anthropic"]
+    if b"sk-" in lower:
+        mask |= _BIT["openai"]
+    if b"akia" in lower or b"asia" in lower:
+        mask |= _BIT["aws"]
+    if b"ghp_" in lower or b"gho_" in lower or b"ghu_" in lower or b"ghs_" in lower or b"ghr_" in lower:
+        mask |= _BIT["github"]
+    if b"xox" in lower:
+        mask |= _BIT["slack"]
+    if b"eyj" in lower:
+        mask |= _BIT["jwt"]
+    if b"bearer" in lower:
+        mask |= _BIT["bearer"]
+    if b"key" in lower or b"secret" in lower or b"token" in lower or b"pass" in lower:
+        mask |= _BIT["assignment"]
+    if b"@" in lower:
+        mask |= _BIT["email"]
+    return mask
 
 
 class Redactor:
@@ -178,22 +208,23 @@ class Redactor:
             self.bytes_out += len(chunk)
             return chunk
         self._buf += chunk
-        matches = self._matches(self._buf)
-        release = self._cut(self._buf, matches)
+        lower = self._buf.lower()                       # one lowercased copy per feed, shared by both passes
+        mask = _possible(lower)
+        matches = self._matches(self._buf, lower, mask)
+        release = self._cut(self._buf, matches, lower, mask)
         out = self._replace(self._buf[:release], [m for m in matches if m.end() <= release])
         self._buf = self._buf[release:]
         self.bytes_out += len(out)
         return out
 
-    def _cut(self, buf: bytes, matches: list[re.Match[bytes]]) -> int:
+    def _cut(self, buf: bytes, matches: list[re.Match[bytes]], lower: bytes, mask: int) -> int:
         """How much of `buf` can be written now. Everything, unless something in it is unfinished."""
         end = len(buf)
         cut = end
-        lower = buf.lower()
         for kind, pattern in _PENDING:
-            if kind not in self.kinds or not _possible(kind, lower):
+            if kind not in self.kinds or not mask & _BIT[kind]:
                 continue
-            found = pattern.search(buf)
+            found = pattern.search(lower if kind in _CASE_INSENSITIVE else buf)
             if found is not None:
                 cut = min(cut, found.start())           # an identifier whose body is still arriving
         for match in matches:
@@ -213,12 +244,13 @@ class Redactor:
             return b""
         buf = self._buf + b""
         self._buf = b""
-        out = self._replace(buf, self._matches(buf))
+        lower = buf.lower()
+        out = self._replace(buf, self._matches(buf, lower, _possible(lower)))
         self.bytes_out += len(out)
         return out
 
     # ── internals ───────────────────────────────────────────────────────────
-    def _matches(self, buf: bytes) -> list[re.Match[bytes]]:
+    def _matches(self, buf: bytes, lower: bytes, mask: int) -> list[re.Match[bytes]]:
         """Every distinct secret in `buf`, longest-first by pattern priority, none overlapping another.
 
         Each pattern searches only the gaps the earlier patterns left. That matters more than it looks: the private
@@ -228,12 +260,12 @@ class Redactor:
         """
         found: list[re.Match[bytes]] = []
         claimed: list[tuple[int, int]] = []
-        lower = buf.lower()
         for kind, pattern in _COMPILED:
-            if kind not in self.kinds or not _possible(kind, lower):
+            if kind not in self.kinds or not mask & _BIT[kind]:
                 continue
+            haystack = lower if kind in _CASE_INSENSITIVE else buf
             for low, high in _gaps(len(buf), claimed):
-                for match in pattern.finditer(buf, low, high):
+                for match in pattern.finditer(haystack, low, high):
                     found.append(match)
                     claimed.append((match.start(), match.end()))
             claimed.sort()
