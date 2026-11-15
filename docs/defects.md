@@ -90,3 +90,18 @@ plan's §10 shape, and it is append-only.
     this session had the same shape and was only green because the suite happened to pass → the count is now 399,
     `tests/test_status_doc.py` is the test that caught it, and the rule is `set -o pipefail` before any command whose
     exit code is used to decide a commit — or, better, no pipe at all.
+
+23. **found by the day-14 child, in `d075a32`'s seams** → a seam that installs must also *capture*, and the
+    preflight must not be able to report success without a capture → the published `openai` 3.51.0 and `anthropic`
+    2.8.0 build on **`httpx2`**, not `httpx`. Seams A and B patched `httpx.Client`/`HTTPTransport`, so for both real
+    SDKs they installed, reported `installed` in `capture_seam`, and recorded **nothing** — a capsule that looks
+    recorded and is empty. Every unit test was green because every unit test used `httpx`. → seams patch every
+    importable client module (`http_clients.available()`), the handle lists the modules it covered,
+    `tee.wrap_stream` takes its base class from the stream's own module, and the day-14 test is the guard:
+    `tests/test_day14_kill.py`. This is the argument for the plan's insistence on a real SDK against a real socket —
+    the seam suite could not have caught it.
+24. **found while writing the day-14 test** → a sink writes the request frame the moment a call opens, so a seam that
+    filled `call.model` *after* `open_call` left durable frames saying `model: null` for calls that named their model
+    → `Receiver.open_call` now takes `model`/`stream`/`partial` as hints, seams pass them at open time, and the
+    ordering is asserted by `tests/test_day14_kill.py::test_the_capsule_says_which_seam_captured_it` reading
+    `model` back off the tape.

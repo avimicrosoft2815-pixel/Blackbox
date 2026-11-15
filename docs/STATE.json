@@ -6,7 +6,7 @@
     "bench/results/*.json"
   ],
   "next_ticket": "P3-14",
-  "next_note": "P3-06 (the sink) is green at HEAD: seamed chunks reach MODEL_CHUNK frames on a real tape with exact payload bytes. Next is the day-14 kill test (P3-14 territory): an unmodified openai/anthropic script through the seams against the mock provider, killed with SIGKILL mid-stream, then recovered with chunk and byte counts checked against the provider's own tally.",
+  "next_note": "The day-14 mechanism is green (unmodified openai script, SIGKILL mid-stream, recovery reports INTERRUPTED_MID_STREAM with chunks and bytes no larger than the provider's tally). G-Capture is NOT passed: it still needs P3-11 (redaction corpus), P3-14 (identical app output and exceptions), the §15.1 capture rows (Disabled / content=off / content=hash / provider latency delta p95 / startup install cost) and a reviewer-signed docs/gates/G-Capture.md.",
   "last_green_commit": "e40fece",
   "last_green_commit_note": "run 43693723611, ten jobs ten success (280b7fe before it, 43693470163). The three red runs before that are one defect (21), fixed at 771f5ea; 99a5164 passed with the same test still in the tree",
   "gates": {

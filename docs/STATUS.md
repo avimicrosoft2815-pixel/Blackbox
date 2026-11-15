@@ -16,7 +16,7 @@ loopback mock provider and capture seams A (httpx response hooks) and B (transpo
 preflight are real and tested, as is seam C (SDK method patches, against the real `openai` 3.51.0 and `anthropic`
 2.8.0) and the tape sink that turns seam events into `MODEL_CHUNK` frames; the proxy, the launcher integration, the
 viewer and the diagnosis workflow are not built yet.**
-Suite: **Total: 424 tests** — 423 pass here and 1 is skipped on POSIX by name
+Suite: **Total: 428 tests** — 427 pass here and 1 is skipped on POSIX by name
 (`test_an_open_view_blocks_the_unlink_only_on_windows`: POSIX permits unlinking a file another fd still holds, so
 the open-view case exists only on Windows). ruff 0.17.5 and mypy 2.4.1 (`strict = true`, nothing disabled):
 0 findings.
@@ -58,6 +58,7 @@ the open-view case exists only on Windows). ruff 0.17.5 and mypy 2.4.1 (`strict 
 | **P3-05d** ordered preflight A→B, `capture_seam` | §18.5 | `src/blackbox/cap_sdk/preflight.py`, `tests/test_preflight.py` (8), `SUPPORTED.md`: forcing A picks B and records why, forcing both leaves the recorder installed-but-not-capturing with two reasons and no exception, an absent library is `unavailable` rather than `forced-failed`, an `install` that raises does not escape, a client handed to the preflight is wrapped rather than having its class patched. `capture_seam` is written into the decision (`as_dict()`) and tested; writing it into a `run.json` waits for the sink (P3-06) and is labelled pending in `SUPPORTED.md` |
 | **P3-05c** seam C, SDK method patches | §18.5, D-023 | `src/blackbox/cap_sdk/seam_sdk_methods.py`, `tests/test_seam_sdk_methods.py` (10) against **real** `openai` 3.51.0 and `anthropic` 2.8.0 pointed at the mock provider: `chat.completions.create` (streaming and not), `embeddings.create`, `messages.create`, sync and async; the SDK signature survives the patch (`inspect.signature` compared); an unrecognised SDK shape is skipped and listed, never guessed; a 429 is recorded as an error and re-raised. Every record is `partial=True` with `bytes_received = 0` because a parsed event is not a wire byte (D-023) |
 | **P3-06** the sink: seam events become frames | §18.5, D-024 | `src/blackbox/cap_sdk/sink.py`, `tests/test_sink.py` (8): 2 000 chunks become **8 chunk frames** (bound 40) with the payloads concatenating back to the identical body; the time bound flushes at 100 ms without waiting for 8 KiB; `MODEL_REQUEST` before every chunk and `MODEL_RESPONSE`/`MODEL_ERROR` after the last; frames land on a real tape and the same `scanner` a recovery uses reads them back with a sha256 match against the body; an unfinished call is left as chunks with no response, which is the shape `recovery` classifies as `INTERRUPTED_MID_STREAM`; a sink that raises is counted and never reaches the application |
+| **Day-14 rule** (the gate's core mechanism; **G-Capture itself is still open**) | §4, G-Capture, D-025 | `tests/_day14_child.py` + `tests/test_day14_kill.py` (3): an **unmodified** `openai` script (client built after install, `chat.completions.create(stream=True)` as documented) is killed with `SIGKILL` mid-stream; `recovery.recover()` then reports the node as `INTERRUPTED_MID_STREAM` with `chunks ≥ 1`, `partial_stream_bytes > 0`, and **both no larger than the mock provider's own tally of what it pushed down the socket**; the control run (no kill) records the whole stream and ends with `MODEL_RESPONSE` whose byte count equals the sum of its `MODEL_CHUNK` payloads; `capture_seam` and the coalescing parameters are readable in the request frame |
 | Capture layer's network exception | P0-08, P0-13, D-020 | `tests/_capture_policy.py` + `tests/test_stdlib_only.py`, `tests/test_no_egress.py`, `tests/test_codec.py`: four named files are exempt and nothing outside `cap_sdk/` can be; `httpx` is allowed only **inside a function body**, so `import blackbox` works with httpx absent; the mock provider may bind loopback only and the wildcard-bind source check runs; `httpx==0.28.1` lives in its own `capture` extra, `[project].dependencies` is still empty |
 | Lint, types, forbidden words, egress, stdlib-only | C6, C12, P0-14 | `make fmt` 0 findings, `mypy` strict 0 findings, `tests/test_forbidden_words.py`, `tests/test_no_egress.py`, `tests/test_stdlib_only.py` |
 | CI on three OSes × three Pythons + docs | C7 | run `43689351726` at `59aef18` — ten jobs, ten `success`; `docs/compatibility.md` holds the per-cell verdicts and every historical red run |
@@ -115,8 +116,8 @@ recorded in `docs/errors.md` with the defect that motivated each. No finding is 
 
 ## Decisions taken with plan defaults (DECISIONS.md)
 
-Twenty-four decisions, D-001 … D-024. The ones taken since the last checkpoint, each with the plan default and the
-reason written beside it: **D-020…D-024** (the capture layer's network exception, the mock provider's
+Twenty-five decisions, D-001 … D-025. The ones taken since the last checkpoint, each with the plan default and the
+reason written beside it: **D-020…D-025** (the capture layer's network exception, the mock provider's
 numbering, the `partial` marker, and seam C's unit being an event rather than a byte), **D-016/D-017/D-018** (retention prunes whole sealed segments, a tombstone pins and merges
 `GAP`s, deletion is `GAP`-then-unlink), **D-019** (the calling thread never syncs a blob; the keeper syncs blob and
 directory before the tape sync that covers the frame — the invariant is a test). The two knobs of `P1-02b` were the
@@ -133,9 +134,10 @@ row in the same commit.
    carries `gates["G-Promise"] = "pass"`.
 2. **L2 ‖ L3 are running, not queued**: L2 has P3-01…P3-04 committed at `37d56df`, the mock provider at `714554c`
    (P3-13MP) and seams A, B and the preflight at `1112881`/`0f81445`/`99a5164` (P3-05a/b/d). The next L2 ticket is
-   **P3-14** (the fail-open suite) and the day-14 kill test: seam C and the sink are committed, so an in-flight call
-   now reaches a tape — what is still missing is the test that kills a real process mid-stream and reads the chunk
-   and byte counts back out of the recovered tape, plus `capture_seam` in a `run.json` (needs P4-16's manifest). L3 (the attach
+   **G-Capture's remaining rows**, in this order: P3-11 (the redaction pipeline and the 60-secret corpus), P3-14
+   (identical application output and exceptions through the fail-open suite), the §15.1 capture measurements
+   (Disabled, content=off, content=hash, provider-call latency Δ p95 of a 700 ms streamed call, startup install cost)
+   and then a reviewer-signed `docs/gates/G-Capture.md`. The day-14 mechanism itself is green. L3 (the attach
    lane: proxy, launcher integration, hooks, demo) starts from the current trunk, not from an older SHA.
 3. **G-Capture** with the day-14 rule: an unmodified `openai`/`anthropic` script through seams A→B→C against the
    mock provider must keep its in-flight call across `kill -9` with correct `chunks_received`/`bytes_received`.

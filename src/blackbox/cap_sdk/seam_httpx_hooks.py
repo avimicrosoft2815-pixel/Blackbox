@@ -17,8 +17,11 @@ e.g. a hook added after the body was read, or a response replayed from another s
 the body it can see and marks it `partial` — "this call happened, and this seam did not see all of it". A reader of
 the tape must never have to guess whether a zero means *nothing arrived* or *nothing was visible*.
 
-`install(recorder, hook_name="response")` patches `httpx.Client.__init__`/`AsyncClient.__init__`, so clients created
-*after* install are captured; a client created before it is not, which the preflight reports instead of pretending.
+`install(recorder, hook_name="response")` patches `Client.__init__`/`AsyncClient.__init__` in **every** known client
+module (`httpx`, and `httpx2` when present — the published openai/anthropic packages use the latter, D-025), so
+clients created *after* install are captured; a client created before it is not, which the preflight reports instead
+of pretending. A client library this code does not know about is not captured by this seam, and seam C exists for
+exactly that case.
 
 Everything is inside a `try/except`: a capture seam that raises into the application has failed at its one job.
 """
@@ -27,6 +30,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
+from blackbox.cap_sdk import http_clients
 from blackbox.cap_sdk.base import ModelCall, Receiver, SeamHandle, SeamUnavailable
 from blackbox.cap_sdk.tee import wrap_stream
 
@@ -34,13 +38,12 @@ NAME = "httpx-hooks"
 
 
 def probe() -> tuple[bool, str]:
-    try:
-        import httpx
-    except Exception as exc:                     # pragma: no cover - the module is absent in a stdlib-only env
-        return False, f"httpx is not importable: {type(exc).__name__}"
-    if not hasattr(httpx.Client, "__init__"):    # pragma: no cover - belt and braces
-        return False, "httpx.Client has no __init__ to wrap"
-    return True, "httpx is importable; the response hook can wrap the unread stream"
+    """Available client modules, by name. `httpx2` counts: the published openai and anthropic packages use it, so a
+    seam that only knew about `httpx` would install, report `installed`, and capture nothing for both SDKs."""
+    found = http_clients.available()
+    if not found:
+        return False, "no known HTTP client module is importable (httpx, httpx2)"
+    return True, "response hooks can wrap the unread stream for: " + ", ".join(name for name, _ in found)
 
 
 def _model_of(body: bytes) -> str | None:
@@ -92,8 +95,6 @@ def install(recorder: Receiver, *, hook_name: str = "response") -> SeamHandle:
     if not ok:
         raise SeamUnavailable(reason)
 
-    import httpx
-
     starts: dict[int, int] = {}
 
     def on_request(request: Any) -> None:
@@ -110,16 +111,16 @@ def install(recorder: Receiver, *, hook_name: str = "response") -> SeamHandle:
             request = response.request
             started = starts.pop(id(request), time.perf_counter_ns())
             body = request.content or b""
-            call: ModelCall = recorder.open_call(request.url.host or "unknown", request.url.path or "/", body)
-            call.model = _model_of(body)
             status = int(response.status_code)
+            is_stream = "text/event-stream" in response.headers.get("content-type", "")
+            call: ModelCall = recorder.open_call(request.url.host or "unknown", request.url.path or "/", body,
+                                                 model=_model_of(body), stream=is_stream)
             if response.is_closed:
                 # The body is already gone (replayed, or a hook added late). Record the sighting and say so — a zero
                 # here must never be mistaken for "the model returned nothing".
                 call.partial = True
                 recorder.close_call(call, status=status, total_ms=_elapsed_ms(response))
                 return
-            call.stream = "text/event-stream" in response.headers.get("content-type", "")
             response.stream = wrap_stream(response.stream, recorder, call, status, started)
         except Exception:
             return                                # fail-open: the application never sees a recorder error
@@ -133,16 +134,21 @@ def install(recorder: Receiver, *, hook_name: str = "response") -> SeamHandle:
     async def on_response_async(response: Any) -> None:
         on_response(response)
 
-    original_sync = _patch_init(httpx.Client, on_request, on_response, hook_name)
-    original_async = _patch_init(httpx.AsyncClient, on_request_async, on_response_async, hook_name)
+    patched: list[tuple[Any, Any]] = []
+    for module_name, module in http_clients.available():
+        patched.append((module.Client, _patch_init(module.Client, on_request, on_response, hook_name)))
+        patched.append((module.AsyncClient,
+                        _patch_init(module.AsyncClient, on_request_async, on_response_async, hook_name)))
 
     def undo() -> None:
         starts.clear()
-        _restore_init(httpx.Client, original_sync)
-        _restore_init(httpx.AsyncClient, original_async)
+        for cls, original in patched:
+            _restore_init(cls, original)
 
     return SeamHandle(name=NAME, undo=undo,
-                      detail={"patched": ["httpx.Client.__init__", "httpx.AsyncClient.__init__"], "form": "init"})
+                      detail={"patched": [f"{cls.__module__}.{cls.__name__}.__init__" for cls, _ in patched],
+                              "modules": [cls.__module__.split(".")[0] for cls, _ in patched],
+                              "form": "init"})
 
 
 def _elapsed_ms(response: Any) -> float | None:

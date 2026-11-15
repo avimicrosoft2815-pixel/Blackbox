@@ -151,8 +151,9 @@ class SinkRecorder(Receiver):
     def calls(self) -> list[ModelCall]:
         return self._recorder.calls
 
-    def open_call(self, provider: str, path: str, request: Any) -> ModelCall:
-        call = self._recorder.open_call(provider, path, request)
+    def open_call(self, provider: str, path: str, request: Any, *, model: str | None = None,
+                  stream: bool = False, partial: bool = False) -> ModelCall:
+        call = self._recorder.open_call(provider, path, request, model=model, stream=stream, partial=partial)
         self._forward("on_open", call, self.installed_seam)
         return call
 

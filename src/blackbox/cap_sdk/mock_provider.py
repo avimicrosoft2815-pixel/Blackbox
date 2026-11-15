@@ -49,6 +49,10 @@ class MockProvider:
     def __init__(self, scenario: Scenario | None = None) -> None:
         self.scenario = scenario or Scenario()
         self.received: list[dict[str, Any]] = []
+        # What the server has actually pushed down the socket. The parent uses this as the oracle for a kill test:
+        # the tape may hold less than this and must never hold more.
+        self.sent_chunks = 0
+        self.sent_bytes = 0
         self._server: http.server.ThreadingHTTPServer | None = None
         self._thread: threading.Thread | None = None
 
@@ -217,6 +221,8 @@ def _make_handler(provider: MockProvider) -> type[http.server.BaseHTTPRequestHan
                     self.wfile.flush()
                 except (BrokenPipeError, ConnectionResetError):
                     return
+                provider.sent_chunks += 1
+                provider.sent_bytes += len(chunk)
 
         def do_GET(self) -> None:
             payload = json.dumps({"ok": True, "requests": provider.scenario.requests}).encode()

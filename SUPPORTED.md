@@ -12,15 +12,19 @@ currently ends at B and a two-seam failure means *not capturing*, recorded rathe
 
 | seam | module | what it patches | needs | verified | notes |
 |---|---|---|---|---|---|
-| A — client hooks | `cap_sdk/seam_httpx_hooks.py` | `httpx.Client.__init__`, `httpx.AsyncClient.__init__` (adds a request hook and a response hook) | httpx | **httpx 0.28.1, Linux, 2026-11-15** | the response hook wraps the still-unread stream with the shared tee, so A sees every chunk. Clients built *before* install are not captured — the preflight records that instead of pretending |
-| B — transport tee | `cap_sdk/seam_httpx_transport.py` | a client's `_transport`, or `httpx.HTTPTransport.handle_request` | httpx | **httpx 0.28.1, Linux, 2026-11-15** | works when the SDK owns the client. Bytes forwarded unchanged: sha256-compared against an unmodified client in `tests/test_seam_transport.py` |
+| A — client hooks | `cap_sdk/seam_httpx_hooks.py` | `Client.__init__` / `AsyncClient.__init__` in **every** importable client module: `httpx` **and `httpx2`** (adds a request hook and a response hook) | a client library | **httpx 0.28.1 and httpx2 2.16.0, Linux, 2026-11-16** | the response hook wraps the still-unread stream with the shared tee, so A sees every chunk. Clients built *before* install are not captured — the preflight records that instead of pretending |
+| B — transport tee | `cap_sdk/seam_httpx_transport.py` | a client's `_transport`, or `HTTPTransport` / `AsyncHTTPTransport` in every importable client module | a client library | **httpx 0.28.1 and httpx2 2.16.0, Linux, 2026-11-16** | works when the SDK owns the client. Bytes forwarded unchanged: sha256-compared against an unmodified client in `tests/test_seam_transport.py` |
 | C — SDK methods | `cap_sdk/seam_sdk_methods.py` | `openai` `chat.completions.create`, `embeddings.create`, `responses.create` and `anthropic` `messages.create` (sync and async classes) | the SDKs | **openai 3.51.0 + anthropic 2.8.0, Linux, 2026-11-15** | the fallback for an SDK that hides its client. **Counts parsed stream events, not wire bytes**: every call it records is `partial=True` with `bytes_received = 0`, and no claim about bytes may be made from it (D-023) |
 
 | seam | verified on | unverified |
 |---|---|---|
 | C | openai 3.51.0, anthropic 2.8.0 | any other version or any SDK this table does not name. Every target is looked up by module, class and attribute: what is missing is skipped and listed in the handle's `detail["skipped"]`, never guessed. An SDK version whose shape differs will therefore *not* install, which the preflight records |
-| A | httpx 0.28.1 (sync and async) | httpx 0.27.x, 0.26.x, and every future version: the seam's capability depends on httpx firing response hooks before the body is read, which is a timing fact, not an API contract. `tests/test_seam_hooks.py` fails loudly if a version moves it, rather than writing zero-byte calls |
+| A | httpx 0.28.1 + httpx2 2.16.0 (sync and async) | httpx 0.27.x, 0.26.x, and every future version: the seam's capability depends on httpx firing response hooks before the body is read, which is a timing fact, not an API contract. `tests/test_seam_hooks.py` fails loudly if a version moves it, rather than writing zero-byte calls |
 | B | httpx 0.28.1 | anything that stops exposing `HTTPTransport.handle_request`, or a client whose transport is not reachable as `_transport`. `client=` install is the supported path; the class patch is the fallback |
+
+**Which library the SDKs actually use, checked rather than assumed:** `openai` 3.51.0 and `anthropic` 2.8.0 build on
+`httpx2` 2.16.0. That is why both seams install over every importable client module and why the `detail["modules"]`
+field exists — a seam that covers `httpx` only reports `installed` and captures nothing for either SDK (defect 23).
 
 The async path is **tested**: `tests/test_seam_async.py` runs both seams against `httpx.AsyncClient` under
 `asyncio.run` (stdlib), asserting chunk count, byte total and sha256 equality with an unseamed client. Writing those

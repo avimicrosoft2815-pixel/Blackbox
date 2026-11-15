@@ -18,28 +18,34 @@ around one is not merely untested — it fails the moment anything iterates it. 
 kind it is (`__aiter__` or not) and returns the matching tee. An earlier version had only the sync one and a seam that
 would have broken every async client it was installed on; the async test is why it is not still there (defect 20).
 
-`httpx.SyncByteStream`/`AsyncByteStream` are the base classes because `httpx.Client` asserts on them, but the imports
-happen inside the factories — httpx is an optional integration and importing this module must not require it.
+`SyncByteStream`/`AsyncByteStream` are the base classes because the client asserts on them with `isinstance`, and the
+base must come from **the same module as the stream**: `httpx2.Client` checks its own class, so a tee subclassing
+httpx's would be rejected by an httpx2 client (D-025). The factories are cached per module and the import happens
+inside them — a client library is an optional integration and importing this module must not require one.
 """
 from __future__ import annotations
 
 import time
 from typing import Any
 
+from blackbox.cap_sdk import http_clients
 from blackbox.cap_sdk.base import ModelCall, Receiver
 
-_TEE_STREAM: Any = None       # built on first use, because httpx may not be installed
+_TEE_STREAMS: dict[str, Any] = {}       # built on first use, per client module
+_ASYNC_TEE_STREAMS: dict[str, Any] = {}
 
 
-def tee_stream_class() -> Any:
-    """`httpx.SyncByteStream` subclass, built lazily. Returned, not exported, so the import stays optional."""
-    global _TEE_STREAM
-    if _TEE_STREAM is not None:
-        return _TEE_STREAM
+def tee_stream_class(module_name: str = "httpx") -> Any:
+    """`SyncByteStream` subclass for that client module, built lazily so the import stays optional."""
+    if module_name in _TEE_STREAMS:
+        return _TEE_STREAMS[module_name]
 
-    import httpx
+    import importlib
 
-    class TeeStream(httpx.SyncByteStream):
+    base_module = importlib.import_module(module_name)
+
+    # The base class is chosen at runtime (httpx or httpx2), which is the whole point: mypy cannot name it.
+    class TeeStream(base_module.SyncByteStream):  # type: ignore[name-defined,misc]
         """Yields exactly the inner stream's chunks, recording each one as it passes through."""
 
         def __init__(self, inner: Any, recorder: Receiver, call: ModelCall, status: int, started: int) -> None:
@@ -85,22 +91,20 @@ def tee_stream_class() -> Any:
                 close_inner()
             self._finish()
 
-    _TEE_STREAM = TeeStream
+    _TEE_STREAMS[module_name] = TeeStream
     return TeeStream
 
 
-_ASYNC_TEE_STREAM: Any = None
+def async_tee_stream_class(module_name: str = "httpx") -> Any:
+    """`AsyncByteStream` subclass for that client module, built lazily for the same reason as the sync one."""
+    if module_name in _ASYNC_TEE_STREAMS:
+        return _ASYNC_TEE_STREAMS[module_name]
 
+    import importlib
 
-def async_tee_stream_class() -> Any:
-    """`httpx.AsyncByteStream` subclass, built lazily for the same reason as the sync one."""
-    global _ASYNC_TEE_STREAM
-    if _ASYNC_TEE_STREAM is not None:
-        return _ASYNC_TEE_STREAM
+    base_module = importlib.import_module(module_name)
 
-    import httpx
-
-    class AsyncTeeStream(httpx.AsyncByteStream):
+    class AsyncTeeStream(base_module.AsyncByteStream):  # type: ignore[name-defined,misc]
         def __init__(self, inner: Any, recorder: Receiver, call: ModelCall, status: int, started: int) -> None:
             self.inner = inner
             self.recorder = recorder
@@ -140,16 +144,21 @@ def async_tee_stream_class() -> Any:
                 await aclose_inner()
             self._finish()
 
-    _ASYNC_TEE_STREAM = AsyncTeeStream
+    _ASYNC_TEE_STREAMS[module_name] = AsyncTeeStream
     return AsyncTeeStream
 
 
 def wrap_stream(stream: Any, recorder: Receiver, call: ModelCall, status: int, started: int) -> Any:
     """Wrap `stream` so every chunk is recorded as it is yielded to the application.
 
-    The stream decides which tee: an async client's stream has `__aiter__`, and wrapping it in the sync tee would
-    break it rather than record it.
+    Two choices, both from the stream rather than from a guess: an async stream (`__aiter__`) needs the async tee, and
+    either kind needs the tee whose base class matches the module that produced it, or the client's own
+    `isinstance` assertion rejects the wrapper.
     """
+    module_name = type(stream).__module__.split(".")[0]
+    if module_name not in ("httpx", "httpx2"):         # a test double or an unknown client: any valid base will do
+        available = http_clients.available()
+        module_name = available[0][0] if available else "httpx"
     if hasattr(stream, "__aiter__"):
-        return async_tee_stream_class()(stream, recorder, call, status, started)
-    return tee_stream_class()(stream, recorder, call, status, started)
+        return async_tee_stream_class(module_name)(stream, recorder, call, status, started)
+    return tee_stream_class(module_name)(stream, recorder, call, status, started)

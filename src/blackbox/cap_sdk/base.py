@@ -61,7 +61,10 @@ class Receiver:
 
     installed_seam: str | None = None
 
-    def open_call(self, provider: str, path: str, request: Any) -> ModelCall:
+    def open_call(self, provider: str, path: str, request: Any, *, model: str | None = None,
+                  stream: bool = False, partial: bool = False) -> ModelCall:
+        """Open a call. The hints are not decoration: a sink writes the request frame *here*, so a seam that set
+        `call.model` afterwards would leave a durable frame saying `model: null` for a call that named its model."""
         raise NotImplementedError
 
     def receive(self, call: ModelCall, chunk: bytes, *, first_byte_ms: float | None = None) -> None:
@@ -80,8 +83,10 @@ class Recorder(Receiver):
         self.calls: list[ModelCall] = []
         self.installed_seam: str | None = None
 
-    def open_call(self, provider: str, path: str, request: Any) -> ModelCall:
-        call = ModelCall(provider=provider, path=path, request_fp=fingerprint(request))
+    def open_call(self, provider: str, path: str, request: Any, *, model: str | None = None,
+                  stream: bool = False, partial: bool = False) -> ModelCall:
+        call = ModelCall(provider=provider, path=path, request_fp=fingerprint(request),
+                         model=model, stream=stream, partial=partial)
         self.calls.append(call)
         return call
 

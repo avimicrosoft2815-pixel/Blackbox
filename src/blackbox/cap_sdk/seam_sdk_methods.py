@@ -180,11 +180,11 @@ def _wrap(original: Any, recorder: Receiver, provider: str, path: str) -> Any:
 
 
 def _open(recorder: Receiver, provider: str, path: str, kwargs: dict[str, Any]) -> tuple[Any, bool]:
-    call = recorder.open_call(provider, path, _request_payload(kwargs))
-    call.partial = True                      # events, not bytes: see the module docstring
     model = kwargs.get("model")
-    call.model = model if isinstance(model, str) else (str(model) if model is not None else None)
-    call.stream = bool(kwargs.get("stream"))
+    call = recorder.open_call(provider, path, _request_payload(kwargs),
+                              model=model if isinstance(model, str) else (str(model) if model is not None else None),
+                              stream=bool(kwargs.get("stream")),
+                              partial=True)         # events, not bytes: see the module docstring
     return call, call.stream
 
 

@@ -31,6 +31,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
+from blackbox.cap_sdk import http_clients
 from blackbox.cap_sdk.base import Receiver, SeamHandle, SeamUnavailable
 from blackbox.cap_sdk.tee import wrap_stream
 
@@ -38,11 +39,10 @@ NAME = "httpx-transport"
 
 
 def probe() -> tuple[bool, str]:
-    try:
-        import httpx  # noqa: F401
-    except Exception as exc:                     # pragma: no cover
-        return False, f"httpx is not importable: {type(exc).__name__}"
-    return True, "httpx is importable; the transport wrapper can tee the stream byte for byte"
+    found = http_clients.available()
+    if not found:
+        return False, "no known HTTP client module is importable (httpx, httpx2)"
+    return True, "transport wrapper can tee the stream byte for byte for: " + ", ".join(n for n, _ in found)
 
 
 class RecordingTransport:
@@ -133,8 +133,6 @@ def install(recorder: Receiver, *, client: Any = None) -> SeamHandle:
     if not ok:
         raise SeamUnavailable(reason)
 
-    import httpx
-
     if client is not None:
         original = client._transport
         client._transport = RecordingTransport(original, recorder)
@@ -148,8 +146,11 @@ def install(recorder: Receiver, *, client: Any = None) -> SeamHandle:
     # Two classes, not one: an async client builds an `AsyncHTTPTransport`, so patching only `HTTPTransport` records
     # sync clients and silently misses every async one.
     patched: list[tuple[Any, dict[str, Any]]] = []
-    for transport_class in (httpx.HTTPTransport, httpx.AsyncHTTPTransport):
-        patched.append((transport_class, _patch_transport_class(transport_class, recorder)))
+    for _module_name, module in http_clients.available():
+        for attribute in ("HTTPTransport", "AsyncHTTPTransport"):
+            transport_class = getattr(module, attribute, None)
+            if transport_class is not None:
+                patched.append((transport_class, _patch_transport_class(transport_class, recorder)))
 
     def undo_class() -> None:
         for transport_class, originals in patched:
@@ -157,7 +158,9 @@ def install(recorder: Receiver, *, client: Any = None) -> SeamHandle:
                 _restore(transport_class, attribute, original)
 
     return SeamHandle(name=NAME, undo=undo_class,
-                      detail={"patched": ["httpx.HTTPTransport", "httpx.AsyncHTTPTransport"], "form": "class"})
+                      detail={"patched": [f"{cls.__module__}.{cls.__name__}" for cls, _ in patched],
+                              "modules": [cls.__module__.split(".")[0] for cls, _ in patched],
+                              "form": "class"})
 
 
 def _restore(cls: Any, attribute: str, value: Any) -> None:
