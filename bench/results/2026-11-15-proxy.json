@@ -1,73 +1,73 @@
 {
   "added_latency_ms": {
     "added": {
-      "max": 0.859,
-      "mean": 0.246,
-      "min": -1.363,
+      "max": 0.894,
+      "mean": 0.161,
+      "min": -2.133,
       "n": 500,
-      "p50": 0.254,
-      "p95": 0.529,
-      "p99": 0.637
+      "p50": 0.165,
+      "p95": 0.319,
+      "p99": 0.471
     },
     "direct": {
-      "max": 1.982,
-      "mean": 0.619,
-      "min": 0.345,
+      "max": 2.822,
+      "mean": 0.409,
+      "min": 0.324,
       "n": 500,
-      "p50": 0.588,
-      "p95": 0.837,
-      "p99": 1.155
+      "p50": 0.373,
+      "p95": 0.539,
+      "p99": 0.914
     },
     "proxied": {
-      "max": 1.901,
-      "mean": 0.865,
-      "min": 0.511,
+      "max": 1.308,
+      "mean": 0.571,
+      "min": 0.476,
       "n": 500,
-      "p50": 0.837,
-      "p95": 1.158,
-      "p99": 1.364
+      "p50": 0.537,
+      "p95": 0.748,
+      "p99": 0.916
     }
   },
   "concurrent_streams": {
     "bodies_identical": true,
     "count": 200,
     "errors": 0,
-    "wall_ms": 413.548
+    "wall_ms": 157.687
   },
   "first_byte_ms": {
     "added": {
-      "max": 1.035,
-      "mean": 0.443,
-      "min": -0.097,
+      "max": 0.625,
+      "mean": 0.209,
+      "min": 0.079,
       "n": 100,
-      "p50": 0.441,
-      "p95": 0.689,
-      "p99": 0.885
+      "p50": 0.184,
+      "p95": 0.353,
+      "p99": 0.62
     },
     "block_p50": [
-      0.372,
-      0.403,
-      0.42,
-      0.517,
-      0.446
+      0.207,
+      0.146,
+      0.187,
+      0.162,
+      0.189
     ],
     "direct": {
-      "max": 1.338,
-      "mean": 0.851,
-      "min": 0.551,
+      "max": 0.661,
+      "mean": 0.425,
+      "min": 0.354,
       "n": 100,
-      "p50": 0.827,
-      "p95": 1.206,
-      "p99": 1.22
+      "p50": 0.415,
+      "p95": 0.527,
+      "p99": 0.571
     },
     "proxied": {
-      "max": 1.918,
-      "mean": 1.294,
-      "min": 0.745,
+      "max": 1.139,
+      "mean": 0.634,
+      "min": 0.508,
       "n": 100,
-      "p50": 1.239,
-      "p95": 1.732,
-      "p99": 1.815
+      "p50": 0.607,
+      "p95": 0.821,
+      "p99": 0.996
     }
   },
   "gate": {
@@ -75,8 +75,8 @@
       "budget_p50": 1.0,
       "budget_p99": 5.0,
       "n": 500,
-      "p50": 0.254,
-      "p99": 0.637,
+      "p50": 0.165,
+      "p99": 0.471,
       "pass": true
     },
     "concurrent_streams": {
@@ -88,13 +88,13 @@
     "first_byte_ms": {
       "budget": 0.5,
       "n": 100,
-      "p50": 0.441,
+      "p50": 0.184,
       "pass": true
     },
     "rss": {
       "budget_mib": 60.0,
-      "growth_mib": 0.258,
-      "n": 396,
+      "growth_mib": 0.0,
+      "n": 394,
       "pass": true
     }
   },
@@ -104,16 +104,19 @@
     "machine": "x86_64",
     "n": 500,
     "os": "Linux-6.1.158+-x86_64-with-glibc2.36",
-    "pid": 4910,
-    "python": "3.11.2"
+    "pid": 13083,
+    "python": "3.11.2",
+    "topology": "three processes: origin, proxy and the measuring client each in their own interpreter, because a shared one makes every row here a measurement of the GIL hand-off rather than of the proxy"
   },
-  "measured_at": "2026-11-15T12:34:21Z",
+  "measured_at": "2026-11-15T14:05:53Z",
+  "origin_pid": 13084,
+  "proxy_pid": 13085,
   "rss": {
-    "baseline_kib": 29968,
-    "growth_mib": 0.258,
-    "peak_kib": 30232,
+    "baseline_kib": 23952,
+    "growth_mib": 0.0,
+    "peak_kib": 23952,
     "rate_hz": 50.0,
-    "requests": 396,
+    "requests": 394,
     "seconds": 10.0
   },
   "stats": {

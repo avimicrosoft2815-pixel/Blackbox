@@ -20,8 +20,10 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import hashlib
 import json
+import multiprocessing
 import os
 import platform
 import sys
@@ -29,15 +31,13 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "bench"))
 
 from _stats import summary
-
-from blackbox.proxy.routes import Route, Routes
-from blackbox.proxy.supervisor import ProxyThread
 
 JSON_BODY = b'{"choices":[{"message":{"content":"ok"}}],"id":"chatcmpl-bench"}'
 SSE_CHUNKS = [b'data: {"choices":[{"delta":{"content":"tok%d"}}]}\n\n' % index for index in range(14)]
@@ -81,16 +81,80 @@ class _Server(ThreadingHTTPServer):
     daemon_threads = True
 
 
-def _origin_port() -> int:
+def _origin_process(ready: Any) -> None:
+    """The origin, in its own process, because the GIL is part of what a proxy costs.
+
+    The first version of this bench kept the origin, the proxy and the measuring client inside one interpreter. Every
+    hop then paid a GIL hand-off, and the delta it reported was a property of CPython's threading rather than of the
+    proxy: the first-byte row landed at 0.44–0.52 ms against a 0.5 ms budget, run to run. A proxy talks to a provider in
+    another process; the harness now does too, and the proxy thread is the only other thread in this one.
+    """
     server = _Server(("127.0.0.1", 0), _Origin)
-    server.daemon_threads = True
-    threading.Thread(target=server.serve_forever, daemon=True).start()
-    return server.server_address[1]
+    ready.send(server.server_address[1])
+    server.serve_forever()
 
 
-def _rss_kib() -> int:
+def _origin_port() -> tuple[int, Any]:
+    """`(port, process)` — the caller terminates the process. `fork` where it exists, `spawn` where it does not."""
+    context = multiprocessing.get_context("fork" if hasattr(os, "fork") else "spawn")
+    parent, child = context.Pipe()
+    process = context.Process(target=_origin_process, args=(child,), daemon=True)
+    process.start()
+    port = parent.recv()
+    return port, process
+
+
+def _proxy_process(conn: Any, route_bases: dict[str, str]) -> None:
+    """The proxy in its own process — which is where it runs in production, and what makes these rows mean anything.
+
+    A proxy that shares an interpreter with the client it serves pays a GIL hand-off on every hop, and this bench spent
+    two revisions measuring that instead of the proxy (first byte 0.44–0.52 ms, run to run, against a 0.5 ms budget).
+    The hop from a client process to a proxy process is a socket; here it is one too.
+    """
+    from blackbox.proxy.routes import Route, Routes
+    from blackbox.proxy.server import ProxyServer
+
+    async def serve() -> None:
+        routes = Routes([Route(name=name, base=base, prefix=f"/{name}")
+                         for name, base in route_bases.items()], default="origin")
+        server = await ProxyServer(routes).start()
+        stop = asyncio.Event()
+        loop = asyncio.get_running_loop()
+        conn.send({"port": server.port, "pid": os.getpid()})
+
+        def reader() -> None:
+            while True:
+                try:
+                    message = conn.recv()
+                except (EOFError, OSError):
+                    return
+                if message == "stats":
+                    conn.send({"stats": server.stats.as_dict()})
+                elif message == "stop":
+                    loop.call_soon_threadsafe(stop.set)
+                    return
+
+        threading.Thread(target=reader, daemon=True).start()
+        await stop.wait()
+        await server.close()
+
+    asyncio.run(serve())
+
+
+def _start_proxy_process(route_bases: dict[str, str]) -> tuple[int, int, Any, Any]:
+    """`(port, pid, connection, process)`."""
+    context = multiprocessing.get_context("fork" if hasattr(os, "fork") else "spawn")
+    parent, child = context.Pipe()
+    process = context.Process(target=_proxy_process, args=(child, route_bases), daemon=True)
+    process.start()
+    hello = parent.recv()
+    return hello["port"], hello["pid"], parent, process
+
+
+def _rss_kib(pid: int | None = None) -> int:
+    path = f"/proc/{pid}/status" if pid else "/proc/self/status"
     try:
-        with open("/proc/self/status", encoding="utf-8") as handle:
+        with open(path, encoding="utf-8") as handle:
             for line in handle:
                 if line.startswith("VmRSS:"):
                     return int(line.split()[1])
@@ -124,7 +188,7 @@ def _request(port: int, path: str, *, stream: bool = False) -> tuple[float, floa
         connection.close()
 
 
-async def _streams_rss(proxy_port: int, origin_port: int) -> dict:
+async def _streams_rss(proxy_port: int, origin_port: int, proxy_pid: int) -> dict:
     """200 concurrent streams, then 50 req/s for 10 s, with RSS sampled from this process."""
     async def one(index: int) -> bytes:
         reader, writer = await asyncio.open_connection("127.0.0.1", proxy_port)
@@ -143,7 +207,7 @@ async def _streams_rss(proxy_port: int, origin_port: int) -> dict:
     digests = {hashlib.sha256(body).hexdigest() for body in bodies}
     ok = digests == {hashlib.sha256(SSE_BODY).hexdigest()}
 
-    baseline = _rss_kib()
+    baseline = _rss_kib(proxy_pid)
     peak = baseline
     deadline = time.monotonic() + RATE_SECONDS
     sent = 0
@@ -151,7 +215,7 @@ async def _streams_rss(proxy_port: int, origin_port: int) -> dict:
         batch_started = time.monotonic()
         await asyncio.gather(*[one(sent + offset) for offset in range(int(RATE_HZ / 20))])
         sent += int(RATE_HZ / 20)
-        peak = max(peak, _rss_kib())
+        peak = max(peak, _rss_kib(proxy_pid))
         sleep = 0.05 - (time.monotonic() - batch_started)
         if sleep > 0:
             await asyncio.sleep(sleep)
@@ -161,6 +225,16 @@ async def _streams_rss(proxy_port: int, origin_port: int) -> dict:
         "rss": {"requests": sent, "rate_hz": RATE_HZ, "seconds": RATE_SECONDS,
                 "baseline_kib": baseline, "peak_kib": peak, "growth_mib": round((peak - baseline) / 1024.0, 3)},
     }
+
+
+def _proxy_stats(conn: Any) -> dict:
+    """Ask the proxy process for its counters. The pipe is duplex; the child answers one message at a time."""
+    try:
+        conn.send("stats")
+        reply = conn.recv()
+        return dict(reply.get("stats") or {})
+    except (EOFError, OSError):
+        return {}
 
 
 def _dechunk(payload: bytes) -> bytes:
@@ -180,24 +254,26 @@ def _dechunk(payload: bytes) -> bytes:
 
 
 def run(n: int, streams: bool) -> dict:
-    """The proxy runs in its own thread (the `ProxyThread` the launcher uses), so the measuring client is synchronis.
+    """Origin and proxy each in their own process; the measuring client is this one, and it is synchronous.
 
-    That is not a convenience: a client that blocks the same event loop the proxy needs cannot measure the proxy, it
-    measures a deadlock. This bug cost an hour of the first version of this bench.
+    Both halves of that are load-bearing. A client that blocks the same event loop the proxy needs cannot measure the
+    proxy, it measures a deadlock; a proxy that *shares an interpreter* with the client pays a GIL hand-off on every hop,
+    and the first two revisions of this bench measured exactly that (first byte 0.44–0.52 ms, PASS/FAIL alternating,
+    against a 0.5 ms budget) rather than the proxy. The hop from the client process to the proxy process is a socket;
+    here, now, it is one too.
     """
-    origin_port = _origin_port()
-    table = Routes([Route(name="origin", base=f"http://127.0.0.1:{origin_port}", prefix="/p")], default="origin")
-    server = ProxyThread(table).start()
+    origin_port, origin_process = _origin_port()
+    proxy_port, proxy_pid, conn, proxy_process = _start_proxy_process({"origin": f"http://127.0.0.1:{origin_port}"})
     try:
         for _ in range(20):                                      # warm-up, discarded
             _request(origin_port, "/plain")
-            _request(server.port, "/p/plain")
+            _request(proxy_port, "/origin/plain")
         direct_latency: list[float] = []
         proxied_latency: list[float] = []
         added: list[float] = []
         for _ in range(n):
             d_first, d_total, _body = _request(origin_port, "/plain")
-            p_first, p_total, _body2 = _request(server.port, "/p/plain")
+            p_first, p_total, _body2 = _request(proxy_port, "/origin/plain")
             direct_latency.append(d_total)
             proxied_latency.append(p_total)
             added.append(p_total - d_total)
@@ -207,7 +283,7 @@ def run(n: int, streams: bool) -> dict:
         first_added: list[float] = []
         for _ in range(max(20, n // 5)):
             d_first, _d_total, _ = _request(origin_port, "/sse", stream=True)
-            p_first, _p_total, _ = _request(server.port, "/p/sse", stream=True)
+            p_first, _p_total, _ = _request(proxy_port, "/origin/sse", stream=True)
             first_direct.append(d_first)
             first_proxied.append(p_first)
             first_added.append(p_first - d_first)
@@ -228,10 +304,10 @@ def run(n: int, streams: bool) -> dict:
                 "first_byte_ms": {"n": summary(first_added)["n"], "p50": summary(first_added)["p50"],
                                   "budget": 0.5, "pass": summary(first_added)["p50"] <= 0.5},
             },
-            "stats": server.stats.as_dict() if server.stats is not None else {},
+            "stats": _proxy_stats(conn),
         }
         if streams:
-            report.update(asyncio.run(_streams_rss(server.port, origin_port)))
+            report.update(asyncio.run(_streams_rss(proxy_port, origin_port, proxy_pid)))
             report["gate"]["concurrent_streams"] = {
                 "n": report["concurrent_streams"]["count"], "count": report["concurrent_streams"]["count"],
                 "pass": report["concurrent_streams"]["bodies_identical"],
@@ -240,9 +316,16 @@ def run(n: int, streams: bool) -> dict:
             report["gate"]["rss"] = {"n": report["rss"]["requests"], "growth_mib": report["rss"]["growth_mib"],
                                      "budget_mib": 60.0,
                                      "pass": report["rss"]["growth_mib"] <= 60.0}
+        report["proxy_pid"] = proxy_pid
+        report["origin_pid"] = origin_process.pid
         return report
     finally:
-        server.stop()
+        with contextlib.suppress(Exception):
+            conn.send("stop")
+        proxy_process.terminate()
+        proxy_process.join(10)
+        origin_process.terminate()
+        origin_process.join(10)
 
 
 def main(argv: list[str]) -> int:
@@ -254,7 +337,10 @@ def main(argv: list[str]) -> int:
     report = run(args.n, not args.no_streams)
     report["hardware"] = {"cpu_count": os.cpu_count(), "python": platform.python_version(),
                           "implementation": platform.python_implementation(), "os": platform.platform(),
-                          "machine": platform.machine(), "n": args.n, "pid": os.getpid()}
+                          "machine": platform.machine(), "n": args.n, "pid": os.getpid(),
+                          "topology": "three processes: origin, proxy and the measuring client each in their own "
+                                       "interpreter, because a shared one makes every row here a measurement of the "
+                                       "GIL hand-off rather than of the proxy"}
     report["measured_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     Path(args.out).parent.mkdir(parents=True, exist_ok=True)
     Path(args.out).write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")

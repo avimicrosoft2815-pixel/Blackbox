@@ -124,7 +124,8 @@ class Origin:
 class Box:
     """One event loop in one thread, hosting an origin and a proxy; the test body talks to it synchronously."""
 
-    def __init__(self, routes_from: Any = None) -> None:
+    def __init__(self, routes_from: Any = None, *, retry_transmitted: bool = False) -> None:
+        self.retry_transmitted = retry_transmitted
         self.origin = Origin()
         self.proxy: ProxyServer | None = None
         self.loop: asyncio.AbstractEventLoop | None = None
@@ -164,12 +165,21 @@ class Box:
             [Route(name="origin", base=f"{base}/base", prefix="/p"), Route(name="dead", base="http://127.0.0.1:9")],
             default=None)
         receiver = getattr(self, "receiver", None)
-        self.proxy = await ProxyServer(table, receiver=receiver).start()
+        self.proxy = await ProxyServer(table, receiver=receiver,
+                                       retry_transmitted=self.retry_transmitted).start()
 
     async def _stop(self) -> None:
         assert self.proxy is not None
         await self.proxy.close()
         await self.origin.close()
+        # Handlers still parked in a read are cancelled here rather than left to a closed loop: an unraisable
+        # "Event loop is closed" warning in a passing test is a smell, and it hides the next real one.
+        current = asyncio.current_task()
+        pending = [task for task in asyncio.all_tasks() if task is not current]
+        for task in pending:
+            task.cancel()
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
 
 
 def _get(port: int, path: str, headers: dict[str, str] | None = None) -> tuple[int, dict[str, str], bytes]:
@@ -380,11 +390,10 @@ def test_a_second_request_reuses_the_upstream_connection():
 
 
 def test_a_pooled_connection_that_died_while_idle_costs_the_client_nothing():
-    """The origin advertised keep-alive and then closed. The client must still get its 200, and the pool must say how.
+    """The origin advertised keep-alive and then closed while the connection sat idle.
 
-    Two outcomes are acceptable and one is not: the connection is discarded **before** the request is written (free),
-    or it is discovered dead afterwards and the GET is retried (safe, because a GET repeats without a side effect).
-    What must never happen is a second request the upstream actually received — `origin.requests` is asserted exactly.
+    That case is free: the connection is discarded **before** the request is written, so nothing was transmitted and
+    nothing can be duplicated. A GET is not even needed here — the pre-write probe does not care what the method is.
     """
     box = Box()
     with box:
@@ -398,7 +407,8 @@ def test_a_pooled_connection_that_died_while_idle_costs_the_client_nothing():
         status, _headers, body = _get(box.proxy.port, "/p/json")
         assert status == 200 and body == JSON_BODY, "a stale pooled connection must never reach the client"
         assert box.proxy.pool.discarded + box.proxy.pool.retries >= 1, "the recovery is counted, not silent"
-        assert len(box.origin.requests) - before in (1, 2), "at most one retry, and only a GET may be retried"
+        assert box.proxy.pool.retries == 0 or box.proxy.retry_transmitted, "a retry only happens if it was asked for"
+        assert len(box.origin.requests) - before in (1, 2), "at most one retry, and only when opted in"
 
 
 def test_a_post_that_may_have_been_transmitted_is_never_sent_twice():
@@ -423,14 +433,53 @@ def test_a_post_that_may_have_been_transmitted_is_never_sent_twice():
         assert box.proxy.pool.retries == 0, "a POST is never retried, whatever the pool thinks"
 
 
-def test_a_get_is_retried_once_when_its_response_never_arrives():
-    """The safe half of the same rule: repeating a GET cannot duplicate an effect, so the client keeps its 200."""
+def test_a_get_whose_response_never_arrives_is_reported_by_default_not_retried():
+    """HTTP *intends* GET to be safe; the upstream is what decides, and the proxy is not told.
+
+    So the default refuses to resend anything after it may have been transmitted — a GET included — and says so.
+    """
     box = Box()
     with box:
         assert box.proxy is not None
         _get(box.proxy.port, "/p/json")
+        before = len(box.origin.requests)
+        box.origin.drop_responses = 1
+        status, headers, body = _get(box.proxy.port, "/p/json")
+        assert status == 502 and headers[ERROR_HEADER] == "upstream-closed-uncertain"
+        assert b"off by default" in body and b"may have been applied" in body, body
+        assert len(box.origin.requests) - before == 1, "the default never sends a request twice"
+        assert box.proxy.pool.retries == 0 and box.proxy.stats.uncertain == 1
+
+
+def test_a_get_is_retried_only_when_the_caller_opts_in_and_says_why():
+    """The documented risk, exercised: with `retry_transmitted=True` a GET is resent once and the upstream sees two.
+
+    The second request is the point of the test, not an accident of it: it is what the flag buys and what its help
+    text warns about, so it is asserted rather than hidden behind an outcome assertion.
+    """
+    box = Box(retry_transmitted=True)
+    with box:
+        assert box.proxy is not None
+        _get(box.proxy.port, "/p/json")
+        before = len(box.origin.requests)
         box.origin.drop_responses = 1
         status, _headers, body = _get(box.proxy.port, "/p/json")
         assert status == 200 and body == JSON_BODY
         assert box.proxy.pool.retries >= 1
         assert box.proxy.stats.uncertain == 0
+        assert len(box.origin.requests) - before == 2, "the opt-in is what a second request costs, stated plainly"
+
+
+def test_even_with_the_opt_in_a_post_is_never_resent():
+    box = Box(retry_transmitted=True)
+    with box:
+        assert box.proxy is not None
+        _get(box.proxy.port, "/p/json")
+        before = len(box.origin.requests)
+        box.origin.drop_responses = 1
+        status, headers, body = _post(box.proxy.port, "/p/json", b'{"side":"effect"}')
+        assert status == 502 and headers[ERROR_HEADER] == "upstream-closed-uncertain"
+        assert b"never resent" in body, body
+        posts = [r for r in box.origin.requests[before:] if r["method"] == "POST"]
+        assert len(posts) == 1
+        assert box.proxy.pool.retries == 0

@@ -104,9 +104,10 @@ class ProxyThread:
     """A `ProxyServer` on its own loop in its own thread, with a watchdog that rebinds a dead listener."""
 
     def __init__(self, routes: Routes, *, receiver: Any = None, port: int = 0,
-                 supervise_ms: float = 50.0) -> None:
+                 supervise_ms: float = 50.0, retry_transmitted: bool = False) -> None:
         self.routes = routes
         self.receiver = receiver
+        self.retry_transmitted = retry_transmitted
         self._wanted_port = port
         self._supervise_ms = supervise_ms
         self._loop: asyncio.AbstractEventLoop | None = None
@@ -138,7 +139,8 @@ class ProxyThread:
             self._loop = asyncio.new_event_loop()
             asyncio.set_event_loop(self._loop)
             self._server = self._loop.run_until_complete(
-                ProxyServer(self.routes, receiver=self.receiver, port=self._wanted_port).start())
+                ProxyServer(self.routes, receiver=self.receiver, port=self._wanted_port,
+                            retry_transmitted=self.retry_transmitted).start())
         except BaseException as exc:                        # reported through `start()`, not swallowed
             self._start_error = exc
             self._ready.set()
@@ -208,7 +210,8 @@ class ProxyThread:
         for candidate in (in_use, 0):
             try:
                 future = asyncio.run_coroutine_threadsafe(
-                    ProxyServer(self.routes, receiver=self.receiver, port=candidate).start(), loop)
+                    ProxyServer(self.routes, receiver=self.receiver, port=candidate,
+                                retry_transmitted=self.retry_transmitted).start(), loop)
                 return future.result(timeout)
             except Exception as exc:                        # the old port went to somebody else: take a new one
                 if candidate == 0:

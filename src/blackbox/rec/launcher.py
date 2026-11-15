@@ -161,7 +161,8 @@ class _Watch:
 def launch(argv: list[str], *, data_dir: str | None = None, stall_ms: int = 5_000,
            env: dict[str, str] | None = None, out: IO[str] | None = None, recover: bool = True,
            run_id: str | None = None, proxy: bool = False, proxy_routes: Any = None,
-           proxy_port: int = 0, proxy_receiver: Any = None) -> RunResult:
+           proxy_port: int = 0, proxy_receiver: Any = None,
+           proxy_retry_transmitted: bool = False) -> RunResult:
     """Run `argv` under the recorder, watch for a stall, then recover the tape that the child left behind."""
     if not argv:
         raise ValueError("launch() needs a command")
@@ -181,7 +182,8 @@ def launch(argv: list[str], *, data_dir: str | None = None, stall_ms: int = 5_00
     # ---- the proxy (P3B-03): started before the child, because the child's environment names its port ----------
     proxy_thread, proxy_plan = (None, None)
     if proxy:
-        proxy_thread, proxy_plan = _start_proxy(child_env, proxy_routes, proxy_port, proxy_receiver)
+        proxy_thread, proxy_plan = _start_proxy(child_env, proxy_routes, proxy_port, proxy_receiver,
+                                                retry_transmitted=proxy_retry_transmitted)
         child_env.update(proxy_plan.exports)
         child_env["BLACKBOX_PROXY_URL"] = proxy_thread.url
 
@@ -219,6 +221,7 @@ def launch(argv: list[str], *, data_dir: str | None = None, stall_ms: int = 5_00
                 "exports": dict(sorted(proxy_plan.exports.items())),
                 "adopted": dict(sorted(proxy_plan.adopted.items())),
                 "rebinds": list(proxy_thread.rebinds),
+                "retry_transmitted": proxy_thread.retry_transmitted,
                 "port_changed": proxy_thread.port_changed,
                 "stats": server.stats.as_dict() if server is not None else {},
             }
@@ -250,8 +253,8 @@ def launch(argv: list[str], *, data_dir: str | None = None, stall_ms: int = 5_00
     return result
 
 
-def _start_proxy(env: dict[str, str], routes: Any = None, port: int = 0,
-                 receiver: Any = None) -> tuple[Any, Any]:
+def _start_proxy(env: dict[str, str], routes: Any = None, port: int = 0, receiver: Any = None,
+                 *, retry_transmitted: bool = False) -> tuple[Any, Any]:
     """Build the table from the plan, start the listener, and return it with the plan that names its port (P3B-03).
 
     The plan is made **before** the listener exists because the table depends on it (a base URL the user already set
@@ -265,7 +268,7 @@ def _start_proxy(env: dict[str, str], routes: Any = None, port: int = 0,
     table = routes or Routes.provider_defaults(names=wanted, default=plan.default_route or "openai")
     if plan.routes:
         table = table.extended(plan.routes, default=table.default or plan.default_route)
-    thread = ProxyThread(table, receiver=receiver, port=port).start()
+    thread = ProxyThread(table, receiver=receiver, port=port, retry_transmitted=retry_transmitted).start()
     return thread, plan_exports(env, thread.url)
 
 
@@ -305,6 +308,9 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--no-recover", action="store_true")
     ap.add_argument("--no-proxy", action="store_true", help="do not start the loopback proxy (P3B-03)")
     ap.add_argument("--proxy-port", type=int, default=0)
+    ap.add_argument("--proxy-retry-transmitted", action="store_true",
+                    help="retry GET/HEAD/OPTIONS once when the upstream dies after the request was sent; some "
+                         "upstreams give a GET side effects, so this is off by default")
     ap.add_argument("--upstream", action="append", default=[], metavar="NAME=URL[@/prefix]",
                     help="add or replace an upstream route; the table is the proxy's egress allowlist")
     ap.add_argument("--insecure-upstream", action="append", default=[], metavar="NAME",
@@ -322,7 +328,7 @@ def main(argv: list[str]) -> int:
         routes = Routes.from_specs(args.upstream, unverified=tuple(args.insecure_upstream), default=None)
     result = launch(cmd, data_dir=args.data_dir, stall_ms=args.stall_ms, out=sys.stderr,
                     recover=not args.no_recover, proxy=not args.no_proxy, proxy_routes=routes,
-                    proxy_port=args.proxy_port)
+                    proxy_port=args.proxy_port, proxy_retry_transmitted=args.proxy_retry_transmitted)
     return result.exit_code
 
 
