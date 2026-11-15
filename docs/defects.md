@@ -65,3 +65,12 @@ plan's §10 shape, and it is append-only.
     evidence → recorded in `SUPPORTED.md` as a gap in that word rather than left to read as verified → the fix is a
     test, so this entry stays open until `tests/test_seam_async.py` exists and runs (P3-14 / the `anyio` decision,
     whichever lands first). Until then `SUPPORTED.md`'s async row says so, and no gate may cite the async path.
+
+21. **CI run `43693106857` at `714554c`** → a test must fail for a reason that is wrong, not because a machine was
+    busy → `test_inter_chunk_delay_is_real_time` asserted that two 40 ms gaps take **>= 80 ms**; the `py3.11 /
+    windows-latest` cell measured **79 ms** and the suite went red. The fixture was right: the delay was real. The
+    assertion encoded "wall clock never rounds down", which no scheduler promises → the test now measures the same
+    request with and without the knob and asks for **60 % of the nominal gap**, which still proves the knob works and
+    survives a millisecond of jitter → `tests/test_mock_provider.py::test_inter_chunk_delay_is_real_time`. This is
+    the third timing test of mine to be wrong in the same direction (C40 was the second); the rule that comes out of
+    it is in the test's own docstring: assert an effect, not a schedule.

@@ -83,13 +83,26 @@ def test_an_error_event_mid_stream_is_followed_by_the_done_marker():
 
 
 def test_inter_chunk_delay_is_real_time():
+    """The knob has to produce a real gap, or a kill test would have no window to land in.
+
+    The assertion is deliberately *not* "elapsed >= nominal": the first version of this test asserted 2 gaps of
+    40 ms took >= 80 ms and failed on a Windows cell at 79 ms — a scheduler shaved a millisecond and the test
+    called that a bug in the fixture. What matters is that the delay dominates the call, so this measures the same
+    request with and without it and asks for most of the nominal gap, not all of it.
+    """
     import time
 
-    with MockProvider(Scenario(chunks=3, delay_ms=40)) as provider:
-        started = time.monotonic()
-        _post(provider, "/v1/chat/completions", {"model": "mock-1"})
-        elapsed_ms = (time.monotonic() - started) * 1000
-    assert elapsed_ms >= 80, f"two 40 ms gaps took {elapsed_ms:.0f} ms in total"
+    def elapsed_ms(delay_ms: float) -> float:
+        with MockProvider(Scenario(chunks=4, delay_ms=delay_ms)) as provider:
+            started = time.monotonic()
+            _post(provider, "/v1/chat/completions", {"model": "mock-1"})
+            return (time.monotonic() - started) * 1000
+
+    quick = elapsed_ms(0.0)
+    slow = elapsed_ms(50.0)
+    nominal = 3 * 50.0                                   # three gaps between four chunks
+    assert slow - quick >= nominal * 0.6, f"3 x 50 ms of delay only added {slow - quick:.0f} ms"
+    assert slow >= nominal * 0.6
 
 
 @pytest.mark.parametrize("path,marker", [("/v1/chat/completions", b"data: "), ("/v1/messages", b"event: ")])
