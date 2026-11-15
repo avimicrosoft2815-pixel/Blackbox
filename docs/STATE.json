@@ -7,7 +7,7 @@
   ],
   "next_ticket": "P3-11",
   "next_note": "Day-14 rule green (kill mid-stream, recovery classifies INTERRUPTED_MID_STREAM) and P3-14 green (100-call agent identical bare vs recorded, plus three real breakages). G-Capture still needs: P3-11 redaction + 60-secret corpus absent from every sink; an anthropic zero-code-change child; the four §15.1 capture measurements; a reviewer's signature on docs/gates/G-Capture.md.",
-  "last_green_commit": "23cdb7b",
+  "last_green_commit": "d901811",
   "last_green_commit_note": "run 43693723611, ten jobs ten success (280b7fe before it, 43693470163). The three red runs before that are one defect (21), fixed at 771f5ea; 99a5164 passed with the same test still in the tree",
   "gates": {
     "G-A": "pass",
