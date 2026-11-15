@@ -1,0 +1,99 @@
+"""P3-13 — the mock provider itself. Nothing below it can be trusted unless this is real HTTP.
+
+Every capture test downstream depends on one property of this fixture: the bytes arrive over a socket, in chunks,
+over time, in the shape an SDK expects. A test double that returns a list would prove nothing about a seam that
+claims to tee a stream. So these tests use `http.client` (stdlib) rather than httpx, which also proves the mock is
+not accidentally coupled to the library under test.
+
+The scenario knobs are the interesting part: they are the failure shapes a recorder has to survive — a truncated
+stream, an error event mid-stream, a 429, a slow first byte.
+"""
+from __future__ import annotations
+
+import http.client
+import json
+
+import pytest
+
+from blackbox.cap_sdk.mock_provider import MockProvider, Scenario
+
+
+def _post(provider: MockProvider, path: str, payload: dict) -> tuple[int, bytes, list[bytes]]:
+    conn = http.client.HTTPConnection("127.0.0.1", provider.port, timeout=10)
+    body = json.dumps(payload).encode()
+    conn.request("POST", path, body=body, headers={"content-type": "application/json"})
+    response = conn.getresponse()
+    chunks = []
+    while True:
+        piece = response.read(64)
+        if not piece:
+            break
+        chunks.append(piece)
+    status = response.status
+    conn.close()
+    return status, b"".join(chunks), chunks
+
+
+def test_openai_style_stream_arrives_in_several_chunks():
+    with MockProvider(Scenario(chunks=4)) as provider:
+        status, body, chunks = _post(provider, "/v1/chat/completions", {"model": "mock-1", "messages": []})
+    assert status == 200
+    assert len(chunks) >= 2, "the body arrived in one piece; the chunk boundary is the thing under test"
+    assert body.count(b"data: ") == 5, "four content chunks plus [DONE]"
+    assert body.rstrip().endswith(b"data: [DONE]")
+
+
+def test_anthropic_style_stream_uses_event_lines():
+    with MockProvider(Scenario(chunks=3)) as provider:
+        status, body, _ = _post(provider, "/v1/messages", {"model": "mock-1", "stream": True})
+    assert status == 200
+    assert b"event: content_block_delta" in body
+    assert b"event: message_stop" in body
+
+
+def test_the_request_reaches_the_server_and_is_recorded():
+    with MockProvider() as provider:
+        _post(provider, "/v1/chat/completions", {"model": "mock-1", "messages": [{"role": "user", "content": "hi"}]})
+    assert provider.scenario.requests == 1
+    assert provider.received[0]["body"]["messages"][0]["content"] == "hi"
+
+
+def test_a_non_200_status_is_returned_with_a_json_error():
+    with MockProvider(Scenario(status=429)) as provider:
+        status, body, _ = _post(provider, "/v1/chat/completions", {"model": "mock-1"})
+    assert status == 429
+    assert json.loads(body)["error"]["type"] == "rate_limit_error"
+
+
+def test_truncation_closes_the_stream_early_without_the_done_marker():
+    """The client must see a *short* stream, not an error: that is what a killed connection looks like."""
+    with MockProvider(Scenario(chunks=10, truncate_after=3)) as provider:
+        status, body, _ = _post(provider, "/v1/chat/completions", {"model": "mock-1"})
+    assert status == 200
+    assert b"[DONE]" not in body
+    assert body.count(b"data: ") == 3
+
+
+def test_an_error_event_mid_stream_is_followed_by_the_done_marker():
+    with MockProvider(Scenario(chunks=6, error_after=2)) as provider:
+        status, body, _ = _post(provider, "/v1/chat/completions", {"model": "mock-1"})
+    assert status == 200
+    assert b"mock overloaded" in body
+    assert body.rstrip().endswith(b"data: [DONE]")
+
+
+def test_inter_chunk_delay_is_real_time():
+    import time
+
+    with MockProvider(Scenario(chunks=3, delay_ms=40)) as provider:
+        started = time.monotonic()
+        _post(provider, "/v1/chat/completions", {"model": "mock-1"})
+        elapsed_ms = (time.monotonic() - started) * 1000
+    assert elapsed_ms >= 80, f"two 40 ms gaps took {elapsed_ms:.0f} ms in total"
+
+
+@pytest.mark.parametrize("path,marker", [("/v1/chat/completions", b"data: "), ("/v1/messages", b"event: ")])
+def test_both_dialects_mark_up_their_streams_differently(path, marker):
+    with MockProvider(Scenario(chunks=2)) as provider:
+        _, body, _ = _post(provider, path, {"model": "mock-1"})
+    assert marker in body

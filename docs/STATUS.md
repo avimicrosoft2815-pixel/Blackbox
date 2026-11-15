@@ -5,7 +5,7 @@
 re-signed at `fdb3875`; `15cb55c` (`43689004423`, 7/10) **and** `6d52088` (`43689012017`, 7/10) are the same defect —
 a fork-only multiprocessing test of mine failing on the three Windows cells, fixed at `d5e1bb6` (defect 19).
 **product: pre-alpha — the recorder, the tape, recovery, the launcher and the SDK lifecycle/decorator/node layer are real and tested; the capture seams (P3-05), the mock provider, the proxy, the viewer and the diagnosis workflow are not built yet.**
-Suite: **Total: 353 tests** — 352 pass here and 1 is skipped on POSIX by name
+Suite: **Total: 369 tests** — 368 pass here and 1 is skipped on POSIX by name
 (`test_an_open_view_blocks_the_unlink_only_on_windows`: POSIX permits unlinking a file another fd still holds, so
 the open-view case exists only on Windows). ruff 0.17.5 and mypy 2.4.1 (`strict = true`, nothing disabled):
 0 findings.
@@ -95,7 +95,7 @@ recorded in `docs/errors.md` with the defect that motivated each. No finding is 
 
 ## Decisions taken with plan defaults (DECISIONS.md)
 
-Nineteen decisions, D-001 … D-019. The ones taken since the last checkpoint, each with the plan default and the
+Twenty-two decisions, D-001 … D-022. The ones taken since the last checkpoint, each with the plan default and the
 reason written beside it: **D-016/D-017/D-018** (retention prunes whole sealed segments, a tombstone pins and merges
 `GAP`s, deletion is `GAP`-then-unlink), **D-019** (the calling thread never syncs a blob; the keeper syncs blob and
 directory before the tape sync that covers the frame — the invariant is a test). The two knobs of `P1-02b` were the

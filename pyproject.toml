@@ -25,6 +25,10 @@ dependencies = []
 
 [project.optional-dependencies]
 dev = ["pytest==8.3.4", "hypothesis==6.122.3"]
+# The optional HTTP integration (D-020) gets its own extra, never `dev`: httpx is not a runtime dependency, the seams
+# import it inside functions, and the suite skips them when it is absent. The pin is the version range P3-05d's
+# SUPPORTED table is verified against.
+capture = ["httpx==0.28.1"]
 
 [project.urls]
 Documentation = "https://github.com/avimicrosoft2815-pixel/Blackbox"
