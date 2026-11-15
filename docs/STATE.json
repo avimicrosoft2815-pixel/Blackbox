@@ -7,8 +7,8 @@
   ],
   "next_ticket": "P3-11",
   "next_note": "L3: the proxy core, routes and supervised thread are built (P3B-01/02, P3B-03 first half). Next: P3B-03 second half — `launch()` starts the ProxyThread, applies plan_exports() to the child env, and stops it after the wait; then P3B-08. origin/main is dd92c7b (PR #3 merged).",
-  "last_green_commit": "d43b208",
-  "last_green_commit_note": "run 43706220024, ten jobs ten success — the fix for defect 31 verified on Windows, macOS and Linux. 705fc59 (43705488648) and 9fe6d72 (43705818997) are red and stay red: seven cells failed on the key-file race and two POSIX-only assertions. Before the red pair, 4f42397 (43705007628), 4ce0f7c (43704041733), 07e5c29 (43703761892) and ce1439b (43701652852) were ten of ten (C40: no commit borrows another run's verdict)",
+  "last_green_commit": "1c3db9d",
+  "last_green_commit_note": "run 43710478316, ten jobs ten success. 50d6b37 (43710184175), c869d9e (43707004115) and d43b208 (43706220024) before it, all ten of ten. PRs #2, #3 and #4 merged, so origin/main is past 31241d6 for the first time and the nightly clock has started (C40: every commit names its own run).",
   "gates": {
     "G-A": "pass",
     "G-Promise": "pass",

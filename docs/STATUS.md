@@ -1,26 +1,25 @@
-# BlackBox build status — 2026-11-16 — trunk `d43b208` — gates: **G-Promise pass** (built and self-reviewed at `af908bc`, independently counter-signed at `fdb3875`; see `docs/gates/G-Promise.md`), G-Capture, G-Attach, G-Capsule, G-Sec, G-Release not yet opened
+# BlackBox build status — 2026-11-16 — trunk `1c3db9d` — gates: **G-Promise pass** (built and self-reviewed at `af908bc`, independently counter-signed at `fdb3875`; see `docs/gates/G-Promise.md`), G-Capture, G-Attach, G-Capsule, G-Sec, G-Release not yet opened
 
-**Branch** `arena/a781c68f-blackbox` · **base** `31241d6` · CI at `d43b208`: run `43706220024`, ten jobs, ten
-`success`; `705fc59` (`43705488648`) and `9fe6d72` (`43705818997`) are **red and stay red** (defect 31: seven cells
-failed on the new key code — the creator of the key file creates it before writing it, so a reader could see zero
-bytes; and two tests asserted POSIX-only facts), and `d43b208` is the fix verified on Windows, macOS and Linux.
-Before that `4f42397` (`43705007628`), `4ce0f7c` (`43704041733`), `07e5c29` (`43703761892`) and `ce1439b`
-(`43701652852`) were ten of ten, and the five before those — `47ec45a` (`43701107412`), `da6ef3e` (`43694261034`), `d901811` (`43698231222`),
-`43697929744` at `54c3aba` — ended four commits of Windows red on defect 25, with `846e01a` (`43697198262`) the
-**first all-OS green since `c7919f9`**.
+**Branch** `arena/a781c68f-blackbox` · **base** `31241d6` · CI at `1c3db9d`: run `43710478316`, ten jobs, ten
+`success`; before it `50d6b37` (`43710184175`), `c869d9e` (`43707004115`) and `d43b208` (`43706220024`) were ten of
+ten — the first two of those are the proxy, on every OS.
+**`main` has moved and the nightly clock has started**: PRs #2, #3 and #4 are merged (`e8c3f6f`, `dd92c7b`, and this
+one), so `origin/main` is no longer `31241d6` and item 0b below is done. `705fc59` (`43705488648`) and `9fe6d72`
+(`43705818997`) are **red and stay red** (defect 31: seven cells failed on the new key code — the creator of the key
+file creates it before writing it, so a reader could see zero bytes; and two tests asserted POSIX-only facts), and
+`d43b208` is the fix verified on Windows, macOS and Linux. Before that `4f42397` (`43705007628`), `4ce0f7c`
+(`43704041733`), `07e5c29` (`43703761892`) and `ce1439b` (`43701652852`) were ten of ten, and the five before those —
+`47ec45a` (`43701107412`), `da6ef3e` (`43694261034`), `d901811` (`43698231222`), `43697929744` at `54c3aba` — ended
+four commits of Windows red on defect 25, with `846e01a` (`43697198262`) the **first all-OS green since `c7919f9`**.
 This note's own commit is docs-only and its run is pending when it is written, which is what the `STOPPED` line
-reports. The three Windows cells had been red for four commits and the
-cause was mine: the Windows teardown fixture in `tests/conftest.py` called `getattr(obj, "_head", None)` on every
-object in `gc.get_objects()`, `anthropic` keeps its optional dependencies behind a `LazyProxy` that raises
-`MissingDependencyError` when the extra is absent, and the teardown error landed on nine innocent property tests once
-`capture-sdks` put the SDK in the environment (defect 25). Found through the check-run **annotations**, not the job
-log: GitHub redirects logs to a host this sandbox cannot reach, so `tools/ci_summary.py`'s `::error::` lines are the
-only readable failure trail — they now carry 600 characters instead of 200. Before that, `d075a32` (`43695573285`)
-and `4bb722d` (`43696068136`) were 7/10 on that same Windows defect and `67b5ae5` (`43696841639`) was 7/10 on a
-fail-open test of mine whose breakage did not break on Windows (defect 26, still open). The run before this gate work
-is `43695177370` at `27b82a3`, ten of ten. Older red runs keep their numbers and their verdicts — `af908bc`
-(`43678767989`, 9/10, C40), `15cb55c` and `6d52088` (7/10, a fork-only multiprocessing test) — because a later green
-tree is not a green commit.
+reports. The three Windows cells had been red for four commits and the cause was mine: the Windows teardown fixture in
+`tests/conftest.py` called `getattr(obj, "_head", None)` on every object in `gc.get_objects()`, `anthropic` keeps its
+optional dependencies behind a `LazyProxy` that raises `MissingDependencyError` when the extra is absent, and the
+teardown error landed on nine innocent property tests once `capture-sdks` put the SDK in the environment (defect 25).
+Found through the check-run **annotations**, not the job log: GitHub redirects logs to a host this sandbox cannot reach,
+so `tools/ci_summary.py`'s `::error::` lines are the only readable failure trail — they now carry 600 characters
+instead of 200. Older red runs keep their numbers and their verdicts — `af908bc` (`43678767989`, 9/10, C40), `15cb55c`
+and `6d52088` (7/10, a fork-only multiprocessing test) — because a later green tree is not a green commit.
 
 **product: pre-alpha — the recorder, the tape, recovery, the launcher, the SDK lifecycle/decorator/node layer, the
 loopback mock provider and capture seams A (client hooks over `httpx` **and** `httpx2`) and B (transport byte tee)
@@ -170,9 +169,10 @@ row in the same commit.
    allowlist with skips counted (D-026), and a data directory that is a file is refused by name on every OS
    (defect 26). `47ec45a` then verified both client modules directly for streaming, truncation, async and
    cancellation, and found two things that were only true by assumption (D-028).
-0b. **The nightly has never succeeded and `main` has not moved**: `origin/main` is at `31241d6`, this branch's base,
-   so the scheduled workflow's clock has not started; its one historical run failed because it named files that do not
-   exist (defect 28, fixed here). Merge is the owner's.
+0b. **`main` has moved, so the nightly clock has started**: PRs #2, #3 and #4 are merged (`e8c3f6f`, `dd92c7b`, and
+   the proxy-thread one) — the owner asked for the merges directly, which is what this item was waiting for. The
+   scheduled workflow's one historical run failed because it named files that do not exist (defect 28, fixed here);
+   the next scheduled run is the first that can succeed, and `docs/defects.md` says how to read it if it does not.
 0c. **`d43b208` is green on all ten cells** (`43706220024`) — the fix for defect 31, which reddened seven of ten
    cells at `705fc59` and kept `9fe6d72` red with it. Before that `4f42397` (`43705007628`), `4ce0f7c`
    (`43704041733`), `07e5c29` (`43703761892`) and `ce1439b` (`43701652852`) were ten of ten. `STATE.last_green_commit`
