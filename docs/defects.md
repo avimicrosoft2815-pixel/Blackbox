@@ -146,3 +146,14 @@ plan's §10 shape, and it is append-only.
     `--iterations 100000 --out`), verified locally with a 3-trial and a 500-buffer smoke run. **The P2-09 clock still
     has not started**: the schedule only runs on the default branch, `main` has not moved past the branch base
     `31241d6`, and the fix therefore takes effect only when the owner merges.
+- **defect 29 — the redactor held a fixed tail, and its email pattern was quadratic.** Two faults in one new module, both
+  found by running the tests that claim the property rather than by reading it. (1) The first release rule held a fixed
+  4 KiB tail; on a five-chunk stream that is the whole stream, so `tests/test_day14_kill.py` — a `SIGKILL` of an
+  unmodified `openai` script — recovered `MODEL_REQUEST` and no chunks, i.e. the day-14 rule broken by a privacy
+  feature. Fixed by holding only what is *unfinished* (D-029), and the test that caught it is the one that was already
+  there. (2) The email pattern `[A-Za-z0-9._%+-]+@…` is unanchored, so on a 4 KiB buffer with no `@` at all it re-scans
+  the buffer from every position: **41 ms per read**, more than the model call it was recording. Found by the
+  megabyte-cost test, fixed with a literal-needle pre-check per pattern (0.33 ms per read, 1.1 ms per 58 KiB). Also in
+  this pass: three of the 60 corpus fixtures were malformed (`eyJ…` third segment of seven characters), so the jwt
+  pattern correctly refused them and the failure looked like a redactor miss — the fixture was the bug, and the corpus
+  now has a test that every entry is matched by its own kind.

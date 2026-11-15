@@ -100,6 +100,11 @@ S: dict[str, tuple[str, str, str, str, str, str]] = {
                "real openai 3.51.0 and anthropic 2.8.0 against the mock provider: chat/embeddings/messages, sync and "
                "async streams counted, SDK signature preserved, unknown SDK shape skipped not guessed; counts events, "
                "not bytes (D-023)"),
+    "P3-11": ("wip", "HEAD", "tests/test_redaction.py (139), tests/_secrets.py", "—", "self",
+              "60 synthetic secrets of 10 kinds, every split offset of every one, 20 random chunkings, byte-at-a-time, "
+              "binary payloads; ordinary SSE byte-identical; off proved off; hash a stable pseudonym; bounded buffer; "
+              "a real tape grepped and 0 leaks; default policy redacts without being asked (D-029). NOT built: keyed "
+              "HMAC (DV-013), mask offsets, pure/patterns.py split"),
     "P3-06": ("done", "HEAD", "tests/test_sink.py (8)", "—", "self",
               "2 000 chunks => 8 chunk frames, payloads concatenate to the identical body; 8 KiB / 100 ms bounds; "
               "request/chunks/response ordering; unfinished call left as chunks for INTERRUPTED_MID_STREAM; "

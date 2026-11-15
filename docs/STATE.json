@@ -6,9 +6,9 @@
     "bench/results/*.json"
   ],
   "next_ticket": "P3-11",
-  "next_note": "The reviewer's three P0s are closed on the branch: fail-open is per callback (defect 27), capture is an explicit host allowlist (D-026), defect 26 is refused by name on every OS. Both client modules are verified directly for streaming, non-streaming, truncation, async and cancellation (tests/test_capture_modules.py). Next: P3-11 redaction + the 60-secret corpus, then the anthropic zero-code-change child, the four §15.1 capture measurements, and a reviewer signature on docs/gates/G-Capture.md. Nightly still has zero successful runs and cannot start until merge; origin/main is at 31241d6.",
-  "last_green_commit": "d901811",
-  "last_green_commit_note": "run 43693723611, ten jobs ten success (280b7fe before it, 43693470163). The three red runs before that are one defect (21), fixed at 771f5ea; 99a5164 passed with the same test still in the tree",
+  "next_note": "P3-11 redaction is built and green on the branch: 60 synthetic secrets of 10 kinds, every split offset of every one, 20 random chunkings, a byte-at-a-time stream, and a real tape grepped afterwards (139 tests); the default policy redacts without being asked, holds only unfinished credentials so a SIGKILL costs the last unfinished token rather than the last 4 KiB, and fails closed with [REDACTION_FAILED]. Named as not built: the keyed HMAC (DV-013), mask offsets, the patterns split — P3-11 stays wip. Next ticket is P3-11's remainder: the anthropic zero-code-change child first (it is the gate row), then the four unmeasured §15.1 capture rows, then the keyed hash and mask offsets (P3-11c), then a reviewer signature on G-Capture. Nightly still has zero successful runs and cannot start until merge; origin/main is at 31241d6.",
+  "last_green_commit": "ce1439b",
+  "last_green_commit_note": "run 43701652852, ten jobs ten success (47ec45a 43701107412 before it, da6ef3e 43694261034, d901811 43698231222). The tree at this commit is the one the redaction work was built on; the commit that carries the redaction itself is verified by its own run, not by this one",
   "gates": {
     "G-A": "pass",
     "G-Promise": "pass",
@@ -101,13 +101,14 @@
         "P3-06",
         "P3-14"
       ],
-      "wip": [],
+      "wip": [
+        "P3-11"
+      ],
       "todo": [
         "P3-07",
         "P3-08",
         "P3-09",
         "P3-10",
-        "P3-11",
         "P3-12",
         "P3-13"
       ]
@@ -308,6 +309,15 @@
         "tests/test_capture_scope.py",
         "tests/test_failopen.py"
       ],
+      "label": "self"
+    },
+    {
+      "id": "P3-11c",
+      "name": "redaction remainder: keyed HMAC in ~/.blackbox/keys/ (0600), mask offsets, patterns split out",
+      "status": "todo",
+      "commit": "—",
+      "tests": "—",
+      "note": "DV-013 records that the built `hash` mode is an unkeyed sha256[:8] prefix and that mask offsets are absent; neither is claimed by the P3-11 row, which stays wip until they exist",
       "label": "self"
     }
   ]

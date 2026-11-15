@@ -122,6 +122,26 @@ Kind registry (append-only): `1 SEG_END`, `2 CHAIN`, `3 INTERN`, `4 GAP`, `5 DEG
 `16 NODE_OPEN`, `17 NODE_CLOSE`, `18 EDGE`, `32 MODEL_REQUEST`, `33 MODEL_RESPONSE`, `34 MODEL_CHUNK`,
 `35 MODEL_ERROR`, `48 TOOL_REQUEST`, `49 TOOL_RESULT`, `80 RUN_START`, `81 RUN_END`, `96 EXCEPTION`, `112 MARK`.
 
+### 4.0 Model-frame payloads (JSON, not CBOR)
+
+`MODEL_REQUEST` (32), `MODEL_CHUNK` (34), `MODEL_RESPONSE` (33) and `MODEL_ERROR` (35) carry canonical JSON in their
+payload; the chunk payload is the **raw response bytes and nothing else**, so a reader concatenates chunk frames to get
+the body back. The summary keys a reader may rely on:
+
+| key | meaning |
+|---|---|
+| `chunks_events` | parsed stream events the seam counted (seam C counts events, not bytes — D-023) |
+| `chunks_raw` | **reads the application made** — counted before redaction, so it is a fact about the call |
+| `chunks_stored`, `bytes_stored` | frames and bytes the tape actually holds, after redaction and coalescing |
+| `bytes_received` | bytes the application received, unchanged by redaction or by the sink |
+| `partial` | the stream ended without reaching the end of the response (cancel, timeout, dropped socket) |
+| `redaction` | `{mode, counts: {kind: n}, bytes_in, bytes_out, window, failures}` — **counts, never content** |
+
+`chunks_raw` and `chunks_stored` are separate numbers because redaction merges and drops segments; a reader that has
+one must not infer the other (D-029). A `redaction.failures` above zero means the redactor raised and its input was
+replaced by `[REDACTION_FAILED]`: the call kept its place in the stream and its content is absent, which is what the
+architecture's C4 asks for.
+
 ### 4.1 `GAP` frames — a declared hole, not a missing frame
 
 `GAP` (kind 4) is the only frame that is allowed to *shorten* the readable tape. Payload (canonical CBOR):

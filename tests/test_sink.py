@@ -20,6 +20,7 @@ from blackbox.cap_sdk.base import Recorder
 from blackbox.cap_sdk.mock_provider import MockProvider, Scenario
 from blackbox.cap_sdk.seam_httpx_transport import install as install_transport
 from blackbox.cap_sdk.sink import SinkRecorder, TapeSink
+from blackbox.redact import Redactor
 from blackbox.tape import scanner, segments
 from blackbox.tape.writer import TapeWriter
 
@@ -95,10 +96,15 @@ def test_a_call_that_errors_ends_with_model_error_not_a_response():
 
 
 def test_the_time_bound_flushes_even_when_the_byte_bound_does_not():
-    """100 ms is the other half of the coalescing rule: a slow stream must not sit in a buffer waiting for 8 KiB."""
+    """100 ms is the other half of the coalescing rule: a slow stream must not sit in a buffer waiting for 8 KiB.
+
+    Redaction is off *here on purpose*: this test is about the timer, and three bytes of `abc` are, to the default
+    policy, one unfinished token that is deliberately held (see `test_redaction.py`, which tests that separately).
+    Making the policy part of this test would test neither rule.
+    """
     now = [0]
     emit = Recorder0()
-    sink = TapeSink(emit, coalesce_ms=100.0, clock=lambda: now[0])
+    sink = TapeSink(emit, coalesce_ms=100.0, clock=lambda: now[0], redactor=Redactor("off"))
     recorder = SinkRecorder(sink)
     call = recorder.open_call("127.0.0.1", "/x", b"{}")
     recorder.receive(call, b"a")
