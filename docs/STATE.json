@@ -7,11 +7,11 @@
   ],
   "next_ticket": "P3-01",
   "next_note": "in flight: P1-02b (mypy type-arg + no-untyped-def, the residual knobs of P1-02) then G-Promise on ext4 with a reviewer-signed gate file under docs/gates/; after the gate, L2 capture (P3-01) and L3 attach (P3B-01) fan out in parallel",
-  "last_green_commit": "adb25b4e4b81bc4fb4b8e223beba1349110b7450",
+  "last_green_commit": "af908bc",
   "last_green_commit_note": "all four corrections plus P2-11/P2-13 are green here; CI is the arbiter for the ten cells",
   "gates": {
     "G-A": "pass",
-    "G-Promise": "pending",
+    "G-Promise": "pass",
     "G-Capture": "pending",
     "G-Attach": "pending",
     "G-Capsule": "pending",
