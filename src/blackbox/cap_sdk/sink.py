@@ -133,7 +133,7 @@ class TapeSink:
         self._safe(C.KIND_MODEL_REQUEST, {
             "provider": call.provider, "path": call.path, "model": call.model,
             "request_fp": call.request_fp, "stream": call.stream, "partial": call.partial,
-            "capture_seam": seam, "content": self.content,
+            "capture_seam": seam, "content": self.content, "linked_run": call.linked_run,
             "coalesce_bytes": self.coalesce_bytes, "coalesce_ms": self.coalesce_ms,
         })
         self.groups[id(call)] = _Group(first_ns=self._clock())
@@ -255,8 +255,9 @@ class SinkRecorder(Receiver):
         return self._recorder.calls
 
     def open_call(self, provider: str, path: str, request: Any, *, model: str | None = None,
-                  stream: bool = False, partial: bool = False) -> ModelCall:
-        call = self._recorder.open_call(provider, path, request, model=model, stream=stream, partial=partial)
+                  stream: bool = False, partial: bool = False, linked_run: str | None = None) -> ModelCall:
+        call = self._recorder.open_call(provider, path, request, model=model, stream=stream, partial=partial,
+                                        linked_run=linked_run)
         self._forward("on_open", call, self.installed_seam)
         return call
 

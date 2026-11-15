@@ -52,10 +52,11 @@ class Hostile(Receiver):
         self.installed_seam: str | None = None
 
     def open_call(self, provider: str, path: str, request: Any, *, model: str | None = None,
-                  stream: bool = False, partial: bool = False) -> ModelCall:
+                  stream: bool = False, partial: bool = False, linked_run: str | None = None) -> ModelCall:
         if self.where == "open_call":
             raise RuntimeError("recorder blew up while opening the call")
-        call = ModelCall(provider=provider, path=path, model=model, stream=stream, partial=partial)
+        call = ModelCall(provider=provider, path=path, model=model, stream=stream, partial=partial,
+                         linked_run=linked_run)
         self.calls.append(call)
         return call
 
