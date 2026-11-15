@@ -5,10 +5,10 @@
     "docs/STATUS.md",
     "bench/results/*.json"
   ],
-  "next_ticket": "P3B-08",
-  "next_note": "L3: attach is a one-command story with the receipts — `blackbox run` exports the base URLs, two coding-agent adapters install byte-identically, and `docs/attach.md` labels every surface with a version+date or the word unverified (four rows were run with real clients: openai 3.51.0, anthropic 2.8.0, curl 7.88.1, node v22.22.3). Running them found defect 39 — the OpenAI export lost the `/v1` — fixed in `BASE_URL_SUFFIX` (D-042). Still owed: P3B-07's bench-box cold-start row, P3B-08's proxy bench (next), and confirmation of Codex's real hook schema. Suite 841.",
-  "last_green_commit": "53b8aeb",
-  "last_green_commit_note": "run 43766701588 on 53b8aeb, ten jobs ten success (py3.11/3.12/3.13 × ubuntu/macos/windows + docs) — the attach matrix, the four client rows run through the exported base URL, and defect 39's fix. 1a162fd is the merge of PR #13 on main (P3B-06, run 43765485763 ten of ten on 2d9501e); 2946000 was ten of ten as 43765148998.",
+  "next_ticket": "P3B-03",
+  "next_note": "L3: attach is one command with the receipts — the proxy's four §15.1 rows measured (P3B-08), the Claude Code and Codex hook adapters install byte-identically, the launcher folds the inbox into its own vantage, and `docs/attach.md` labels every surface with a version+date or the word unverified (openai 3.51.0, anthropic 2.8.0, curl 7.88.1, node v22.22.3 were run; defect 39 found and fixed). Next: P3B-03's remaining half — the Python auto-import .pth and the `--no-sdk` / `--force-proxy` / `--no-hooks` flags its done-when names — then P3B-07's bench-box cold-start row and the viewer. Suite 841.",
+  "last_green_commit": "ff85b59",
+  "last_green_commit_note": "run 43768293790 on ff85b59, ten jobs ten success — P3B-08 ticked on its own evidence and the rebind budget taken as a median of five (defect 40), after run 43767898299 read 107.9 ms against 100 on py3.11/macos-latest. 3f29d63 is the merge of PR #14 on main (P3B-09, run 43767064900 ten of ten on 35c0cdf).",
   "gates": {
     "G-A": "pass",
     "G-Promise": "pass",
@@ -118,7 +118,8 @@
         "P3B-04",
         "P3B-05",
         "P3B-06",
-        "P3B-09"
+        "P3B-09",
+        "P3B-08"
       ],
       "wip": [
         "P3B-07"
@@ -126,8 +127,7 @@
       "todo": [
         "P3B-01",
         "P3B-02",
-        "P3B-03",
-        "P3B-08"
+        "P3B-03"
       ]
     },
     "L4": {
