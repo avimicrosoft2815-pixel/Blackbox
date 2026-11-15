@@ -215,9 +215,9 @@ row in the same commit.
    with and without the recorder, under three real breakages); P3-11's redaction (60-shape corpus at every split
    offset, three modes, default policy, fail-closed, keyed pseudonyms); and the five §15.1 capture rows, measured.
    What is left of P3-11 is **mask offsets** (DV-014), which belong with the viewer that would use them, and the gate
-   itself needs a reviewer's counter-signature on `docs/gates/G-Capture.md`. **Next ticket: P3B-05/06** (the hook adapters and the inbox) — the proxy's
-   §15.1 rows (latency, first-byte, 200 concurrent streams, RSS at 50 req/s — measured, above), the kill/disconnect classes (measured: `tests/proxy/`) and the client matrix (curl, Node, SDK), then
-   the hook adapters and their inbox (P3B-04's links are done: D-036 and D-038).
+   itself needs a reviewer's counter-signature on `docs/gates/G-Capture.md`.
+
+   The L3 attach work is now done on both halves: the proxy's §15.1 rows are measured (P3B-08: added latency p50 0.165 / p99 0.471 ms, first-byte 0.184 ms, 200 concurrent streams, RSS 0.0 MiB growth), the kill and disconnect classes and the curl/Node/SDK client matrix are tests, both hook adapters install byte-identically (P3B-05, P3B-06/D-041), the inbox reaches a tape of its own vantage (P3B-07/D-040), and `docs/attach.md` labels every surface with a version and a date or the word **unverified** (P3B-09/D-042). **Next ticket: P3B-03's remaining half** — the Python auto-import `.pth` and the `--no-sdk` / `--force-proxy` / `--no-hooks` flags its done-when names — then P3B-07's bench-box cold-start row, then the viewer and the diagnosis workflow a user would actually judge this by.
 3. **Defect 26 is open and cannot be closed here**: on Windows, `install(data_dir=<a file>)` reported `enabled: True`
    and let 100 calls run against a tape directory that cannot exist. Three questions are written down in
    `docs/defects.md`; answering them needs a Windows host, which this sandbox does not have.
