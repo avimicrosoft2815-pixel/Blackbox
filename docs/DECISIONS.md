@@ -344,3 +344,86 @@ in one data directory resolve `exact` with the proxy on the left; a tape carryin
 says why; the capsule carries `links.json` while the tape's segment bytes are identical before and after recovery and
 hold no `LINK` frame; an empty answer is still a file, byte-identical across two runs; and the command is idempotent,
 records in both directories, and leaves nothing behind when it refuses.
+## D-039 — a hook blocks somebody's prompt, so the fast path writes one file and the mapping waits
+
+*Date: 2026-11-14. Plan refs: §11.9, P3B-05, P3B-07, C5. Cold-start budget: §15's ≤ 40 ms p95 row.*
+
+A Claude Code hook is a **synchronous checkpoint in a program we do not own**: the agent runs `blackbox ingest`, waits
+for it, and only then uses the tool the user asked for. That single fact decides the whole design of `hooks/`.
+
+**The split.** `blackbox ingest` reads stdin and writes exactly one atomic file —
+`inbox/<session>/<ts_ns>-<nonce>.json`, `tmp + fdatasync + os.replace` — then exits. The §11.9 **mapping** runs later, at
+fold time, in `hooks/events.py`. The plan's sentence says the ingest command maps the payload; this build does not, and
+the reason is measurable: the mapping needs the tape's vocabulary (`constants`, canonical CBOR, the fingerprint codec),
+and the cold-start row is paid by a human waiting inside their prompt. Keeping the raw body in the envelope also means a
+mapping corrected tomorrow applies to events written today — a property that has already earned itself once, since the
+`MARK{tool_event}` fallback was written after the first envelope format was already on disk in tests.
+
+**Where the milliseconds were.** The first working version measured **p50 46.2 ms / p95 47.7 ms** for the whole process
+on this sandbox (a bare `python -c pass` is 10.5 ms). The cost was not the work: `hooks/inbox.py` imported the platform
+dispatch, which pulled `pathlib` (~7 ms) for a `capabilities()` call the hook never makes, and used `dataclasses` for a
+four-field result (~10 ms). `pathlib` now imports inside `capabilities()` and `FoldResult` is a `__slots__` class, both
+for the same reason: **this module is on a 40 ms path**. Re-measured: **p50 32.0 ms, p95 40.2 ms**, of which 25.4 ms is
+the CLI floor (`blackbox --version`, i.e. interpreter + argparse + package) — so the inbox's own share is ~7 ms
+including the `fsync`. The dispatch itself was *not* bypassed to get there: an earlier draft used a bare `os.open`/
+`os.fsync` and `tests/test_platform_dispatch.py` refused it (C29 needs `O_BINARY`; C32 keeps `fsync` at the dispatch),
+which is the correct outcome — a budget that only holds by breaking a cross-platform rule is not a budget.
+
+**Folding is at-least-once, and says so.** A file's frames are appended **and published** before the file is unlinked, so
+a kill in between re-folds it rather than losing it. Duplicates are therefore possible in that window, which is why
+every payload carries `ingest_id` — the file's own name — so a reader can drop a repeat instead of counting it twice.
+The opposite order (unlink, then append) would silently *lose* an event, and losing one is the failure this project
+exists to prevent.
+
+**The slot survives the process.** `PreToolUse` and `PostToolUse` are two `ingest` invocations, minutes apart.
+Node slots are therefore kept in `inbox/<session>/state.json` next to the entries, written atomically after each fold:
+the pairing lives on disk, not in the folder's memory. When a close arrives with no matching open (a session that began
+before the adapter was installed, an entry that got quarantined), the folder writes
+`MARK{kind: "tool_event", why: "close without an open node"}` rather than a `NODE_CLOSE` for a node no reader ever saw
+open — a fabricated close is how a graph acquires a parent it never had.
+
+**A broken hook never fails the agent.** Not-JSON stdin, an unwritable inbox, a session that names nothing: each prints
+one line to stderr and exits **0**. A non-zero exit in the middle of somebody's prompt, because the *recorder* had a
+problem, is the trade this project refused everywhere else (C5 fail-open) and a hook is the worst possible place to make
+an exception. `test_a_broken_hook_body_never_fails_the_agent` asserts the exit code for three shapes of garbage.
+
+**And the settings file is somebody else's.** The Claude Code adapter touches only the entries it marked
+(`"_blackbox": true`), backs the file up once, and `remove` restores **byte-identically** when the file still holds
+exactly what `install` wrote — a proof (`_serialise(_with_ours(backup)) == bytes_on_disk`) rather than a hope. If the
+user edited their settings in between, their edit survives and only our block is stripped, and the result says which of
+the two happened. An unknown schema raises `BBX-E151` and writes nothing, before any backup is taken.
+## D-040 — the hook inbox gets its own tape, opened lazily, and folded one last time at exit
+
+*Date: 2026-11-14. Plan refs: §11.9 step 6, §11.10, P3B-07, C23. Follows D-039.*
+
+§11.9's step 6 says "immediate recovery of every tape of this run (**SDK, proxy, hook inbox**)", and §11.10 correlates
+them. The launcher therefore does not fold hook events into its own tape, even though that would have been three lines
+shorter:
+
+* **Its own tape, with `vantage = 3`.** The hook adapter is a vantage point, and the distinction is not decoration: a
+  capsule that cannot tell a `PreToolUse` written by *the tool* from a frame written by *the recorder* has lost exactly
+  the thing it was built to preserve. `meta.vantage` records it, `docs/format.md` names the four values, and the hook
+  tape's `RUN_START` carries the **same `run_id`** as the launcher's — which is what makes `exact` possible, because
+  `exact` means "the same run id on both sides".
+* **Lazily opened.** A run that fires no hooks leaves **no** hook tape. An empty tape is an artefact that looks like a
+  measurement ("the hook vantage was active and saw nothing"); the absence of frames says the same thing without
+  pretending. `test_a_child_that_fires_no_hooks_leaves_no_hook_tape` asserts both halves — no tape, and no frames.
+* **Every 250 ms, and once more at exit, in that order.** The interval is the plan's. The final fold is what puts a
+  session's last events (`SessionEnd`, the `PostToolUse` of the tool that was running when the user quit) into the tape
+  even when the child exits the instant after writing them: `folder.close()` folds, then writes the hook tape's
+  `RUN_END`, then the launcher writes its own. A kill still loses whatever arrived after the last fold — that window is
+  one interval wide, it is stated here, and it is why folding is at-least-once rather than a promise of no loss.
+
+**What this buys, and it is the claim the plan actually makes.** `tests/test_hook_launcher.py` runs a child that fires
+five real hooks through `blackbox ingest`, and then asserts the whole chain end to end: the hook tape exists with
+`vantage 3`; the five events became `RUN_START`, a `MARK` for the prompt (hash and byte count, never the text), a
+`NODE_OPEN`/`NODE_CLOSE` pair sharing a slot, and `RUN_END`; `correlate.resolve_one` returns **`exact`** with
+`carried_by: x-blackbox-run`; and the launcher's own capsule carries that link in its `links.json`. Two processes, one
+timeline, and the class of the claim written on the tape — which is the difference between "we have links" and "we have
+a recording that explains itself".
+
+**The boring failure modes are tests too**, because a recorder's reputation is made of them: a corrupt entry is
+quarantined without changing the child's exit code; the fold thread is finished when `launch()` returns (a thread per
+run is a leak that shows up in week two); and **S18** — a real `kill -9` between the `tmp` write and the rename
+(`BLACKBOX_DIE_AT=INGEST.after_tmp`) leaves nothing a reader can mistake for an event, and the next hook in the same
+session folds normally.

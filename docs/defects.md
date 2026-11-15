@@ -240,3 +240,21 @@ plan's §10 shape, and it is append-only.
   have said "exit 1". Fix: "short" is now measured against an **oracle** (the same request through an unseamed client,
   untruncated: the truncated body must be strictly smaller and must lack `[DONE]`), and the chunk count is compared to
   the reads that run's application actually made, which is the only relation the seam guarantees.
+- **defect 37 — my own new test hard-coded a POSIX path join, and the Windows cells said so within the hour.** The
+  inbox-defaults test asserted `inbox.default_dir(None) == "/tmp/bbx-data/inbox"` on every platform; `os.path.join`
+  produces `…\inbox` on Windows, so all three Windows cells of run `43749014701` failed while the six POSIX cells were
+  green — the mirror image of defect 35, and the same lesson from the other direction: *the platform is a variable, and
+  a test that spells a separator has decided the answer in advance.* Found by the annotation, which had the two strings
+  side by side (`'/tmp/bbx-data\\inbox' == '/tmp/bbx-data/inbox'`) and named the test, in a run whose log this sandbox
+  cannot read. Fixed by comparing against `os.path.join("/tmp/bbx-data", "inbox")`; `6a8a742` is ten of ten (`43749402312`).
+
+- **defect 38 — a byte-bound test that a clock could answer.** `c411a53`'s run (`43750531880`, a docs-only commit) came
+  back nine of ten: `py3.12 / macos-latest` failed `tests/test_sink.py::test_the_byte_bound_is_respected` with *"16 KiB
+  is under a 64 KiB bound"* — the assertion that nothing had been flushed before `close_call`. The sink coalesces on
+  **two** triggers (§7.2): the byte bound *and* a 100 ms window. On that runner more than 100 ms passed between
+  `open_call` and the fourth `receive`, so the window fired first, which is exactly what the sink is supposed to do —
+  the test had asked a question about bytes and accepted an answer from a clock. The same family as defects 35 and 36,
+  and the third flake the new annotation has caught in two days: the fix is to make the window unreachable
+  (`coalesce_ms=60_000`) so the only trigger left is the one under test, and the docstring now says why the clock was
+  removed instead of leaving the next reader to wonder. Re-run green at `6a8a742`+ (`43749402312`); the macOS cell is
+  the evidence, since a fast local loop cannot reproduce a 100 ms gap.

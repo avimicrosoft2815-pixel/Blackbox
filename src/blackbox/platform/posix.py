@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import os
 import stat as stat_mod
-from pathlib import Path
 
 O_BINARY = getattr(os, "O_BINARY", 0)      # 0 on POSIX, real on Windows
 NAME = "posix"
@@ -139,7 +138,14 @@ def is_current() -> bool:
 
 
 def capabilities() -> dict[str, object]:
-    """What this shim promises, in the same shape as `windows.capabilities()` / `macos.capabilities()`."""
+    """What this shim promises, in the same shape as `windows.capabilities()` / `macos.capabilities()`.
+
+    `pathlib` is imported here rather than at module scope: this shim is on the import path of `blackbox ingest`, whose
+    whole budget is a fraction of a hook's latency, and `pathlib` costs about as much as everything else in this module
+    put together. One lazy import, one call, no rule bent (the dispatch itself is untouched).
+    """
+    from pathlib import Path
+
     return {"platform": NAME, "supported": True, "prealloc": "posix_fallocate",
             "directory_fsync": True, "mapped_view_flush": "mmap.flush",
             "process_start_token": Path("/proc/self/stat").exists(), "boot_id": True,

@@ -5,10 +5,10 @@
     "docs/STATUS.md",
     "bench/results/*.json"
   ],
-  "next_ticket": "P3B-05",
-  "next_note": "L3: P3B-04 is complete — header injection behind a proxy (D-036), the three link classes, and now the records themselves (D-038): LINK is kind 19, resolved at seal time into the capsule's links.json, never appended to the tape it describes, and `blackbox link <a> <b>` records a declared pair in both data directories. Suite 748. Next: P3B-05/06 — the Claude Code / Codex hook adapters and their inbox — then P3B-09 docs/attach.md.",
-  "last_green_commit": "ac25b4a",
-  "last_green_commit_note": "run 43744646557, ten jobs ten success (3 OS x 3 Python, py3.12 included); before it e18ce61 (43744575973) and 8a8b58b (43743421915) at ten of ten. d6ab810 (43743518320) was nine of ten on a single py3.13 cell — defect 36, a chunk count compared to an event count — and is fixed by ac25b4a. The four 3.12-red runs before 8a8b58b were defect 35, the shared-loop hang (D-037).",
+  "next_ticket": "P3B-06",
+  "next_note": "L3: the hook path is real — `blackbox ingest` writes one atomic inbox file, the fold maps §11.9's ten Claude Code events into frames (allocation of node slots survives the process), and the Claude Code adapter installs/removes byte-identically (P3B-05 done, D-039). Cold start measured here at p50 32.0 ms / p95 40.2 ms end to end. Left in P3B-07: the launcher's keeper folding the inbox every 250 ms. Suite 792. Next: P3B-06 (the Codex adapter), then P3B-09 docs/attach.md.",
+  "last_green_commit": "9a29ad1",
+  "last_green_commit_note": "run 43762164945 (and 43761993947), ten jobs ten success — this branch's own run, which is the first commit here to carry the hook path *and* the launcher's fold. 9145a22 (43761530464) was ten of ten before it. The six commits above that point (44eb786…18d6008) are PR #11's, cherry-picked from main 1390c9b; they ran green on their own branch too (897803f / 43751123140, 4b49f9c / 43751657114).",
   "gates": {
     "G-A": "pass",
     "G-Promise": "pass",
@@ -115,16 +115,17 @@
     },
     "L3": {
       "done": [
-        "P3B-04"
+        "P3B-04",
+        "P3B-05"
       ],
-      "wip": [],
+      "wip": [
+        "P3B-07"
+      ],
       "todo": [
         "P3B-01",
         "P3B-02",
         "P3B-03",
-        "P3B-05",
         "P3B-06",
-        "P3B-07",
         "P3B-08",
         "P3B-09"
       ]

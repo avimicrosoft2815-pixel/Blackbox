@@ -196,9 +196,15 @@ def test_an_unfinished_call_is_left_as_chunks_with_no_response(tmp_path):
 
 def test_the_byte_bound_is_respected():
     """16 KiB of chunks against a 8 KiB bound is two frames; against a 64 KiB bound it is one — flushed by close,
-    not by the byte bound. Both end with the same bytes, which is the invariant that matters."""
+    not by the byte bound. Both end with the same bytes, which is the invariant that matters.
+
+    `coalesce_ms` is pushed far out of reach on purpose. The sink has *two* triggers — the byte bound and a 100 ms
+    window — and this test is about the first one; leaving the clock in meant that a loaded macOS runner could take
+    more than 100 ms between `open_call` and the fourth `receive`, legitimately flush early, and fail the assertion
+    about the byte bound (defect 38). A test of a byte bound must not be able to be answered by a clock.
+    """
     emit = Recorder0()
-    recorder = SinkRecorder(TapeSink(emit, coalesce_bytes=8 * 1024, content="full"))
+    recorder = SinkRecorder(TapeSink(emit, coalesce_bytes=8 * 1024, coalesce_ms=60_000.0, content="full"))
     call = recorder.open_call("127.0.0.1", "/x", b"{}")
     for _ in range(4):
         recorder.receive(call, b"y" * 4096)
@@ -207,7 +213,7 @@ def test_the_byte_bound_is_respected():
     recorder.close_call(call, status=200)
 
     emit2 = Recorder0()
-    recorder2 = SinkRecorder(TapeSink(emit2, coalesce_bytes=64 * 1024, content="full"))
+    recorder2 = SinkRecorder(TapeSink(emit2, coalesce_bytes=64 * 1024, coalesce_ms=60_000.0, content="full"))
     call2 = recorder2.open_call("127.0.0.1", "/x", b"{}")
     for _ in range(4):
         recorder2.receive(call2, b"y" * 4096)
