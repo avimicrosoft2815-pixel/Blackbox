@@ -1,6 +1,6 @@
 # STATUS — BlackBox v1.0 build
 
-**Branch** `arena/a781c68f-blackbox` · **base** `31241d6` · **HEAD** `8aeff7f`+ (pushed after every ticket)
+**Branch** `arena/a781c68f-blackbox` · **base** `31241d6` · **HEAD** `adb25b4`+ (pushed after every ticket)
 **trunk: mergeable** — every C12 check passes from a clean clone and the README says what exists.
 **product: pre-alpha — storage and recovery layer only; no SDK, proxy or viewer yet.**
 
