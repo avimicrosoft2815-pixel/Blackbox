@@ -6,7 +6,7 @@
     "bench/results/*.json"
   ],
   "next_ticket": "P3-11",
-  "next_note": "L3: proxy P0 fixed (defect 33 / D-032b — only idempotent methods retried, uncertain POSTs answered 502 upstream-closed-uncertain and counted). The four §15.1 proxy rows re-measured after the fix, budgets untouched: added latency p50 0.254/p99 0.637, first byte p50 0.441 (marginal: one 20-sample block at 0.517), 200 streams, RSS 0.26 MiB. Next: P3B-08 remainder (kill/disconnect classes, client matrix) then P3B-04 links.",
+  "next_note": "L3: the retry contract is corrected (D-032c) — after transmission the proxy retries nothing by default for any method and answers 502 upstream-closed-uncertain; --proxy-retry-transmitted opts into one retry for GET/HEAD/OPTIONS only, because HTTP only intends those to be safe. The four §15.1 proxy rows re-measured with origin, proxy and client each in their own process (the old 0.44–0.52 ms first-byte row was a GIL hand-off, not the proxy), budgets untouched: added latency p50 0.165/p99 0.471, first byte p50 0.184 (all five blocks under 0.5), 200 streams, RSS growth 0.0 MiB. Next: P3B-08 remainder (kill/disconnect classes, client matrix) then P3B-04 links.",
   "last_green_commit": "1c3db9d",
   "last_green_commit_note": "run 43710478316, ten jobs ten success. 50d6b37 (43710184175), c869d9e (43707004115) and d43b208 (43706220024) before it, all ten of ten. PRs #2, #3 and #4 merged, so origin/main is past 31241d6 for the first time and the nightly clock has started (C40: every commit names its own run).",
   "gates": {

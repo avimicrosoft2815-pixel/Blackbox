@@ -51,6 +51,7 @@ CONNECT_TIMEOUT = 15.0
 IDLE_TIMEOUT = 75.0
 READ_CHUNK = 64 * 1024
 BACKLOG = 256                          # §15.1 asks for 200 concurrent streams; a backlog of 100 is a refusal
+WRITE_HIGH_WATER = 64 * 1024           # stop reading upstream while the client is this far behind, so RSS stays flat
 WILDCARD_V4 = ".".join(["0"] * 4)      # written this way so the wildcard bind is not a literal in the source
 SCHEME = "http"                        # the listener is plain loopback; TLS is upstream's business
 
@@ -71,9 +72,12 @@ STATUS_TEXT = {
 }
 
 
-# A method whose repetition cannot cause a second side effect. Only these are ever retried after a request may have
-# been transmitted; everything else is reported as an uncertain failure instead (P3B-08, the P0 that named this).
-RETRYABLE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+# HTTP calls these methods *safe*: the specification says their repetition is not supposed to change the upstream's
+# state. That is an intention about well-behaved servers, not a property of the traffic — an analytics endpoint that
+# counts a GET, a "mark as read" link, a payment provider's confirmation URL all have effects, and none of them are
+# obliged to tell a proxy. So post-transmission retries are **off by default** and this set only ever applies when a
+# caller has said, in so many words, that their upstreams are the well-behaved kind (D-032c).
+SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 
 
 class _StaleConnection(Exception):
@@ -81,8 +85,9 @@ class _StaleConnection(Exception):
 
     **This is an uncertain outcome, not a retryable one.** The request may have reached the upstream and may have been
     acted on; only its response never arrived. A proxy that quietly sends it again can double a charge, a write or a
-    deployment, so the decision is made by the caller: an idempotent method (see `RETRYABLE_METHODS`) is retried once,
-    anything else is answered `502 upstream-closed-uncertain` with a body that says the request may have taken effect.
+    deployment — and "but it was a GET" is not a defence, because safety is a promise the *upstream* makes, not one the
+    method implies. So the default is to answer `502 upstream-closed-uncertain` and say so; a retry happens only when
+    the caller turned it on (`retry_transmitted=True`), and then only for `SAFE_METHODS`.
     """
 
 
@@ -191,9 +196,11 @@ class ProxyServer:
     """One loopback listener. `start()` is async; `serve_forever()` is for the launcher's thread (P3B-03)."""
 
     def __init__(self, routes: Routes, *, receiver: Any = None, port: int = 0, host: str | None = None,
-                 clock: Any = time.monotonic) -> None:
+                 retry_transmitted: bool = False, clock: Any = time.monotonic) -> None:
         self.routes = routes
         self.receiver = receiver                      # anything with open_call/receive/close_call (a SinkRecorder)
+        # Off by default: see `SAFE_METHODS`. A caller who turns this on is asserting something about their upstreams.
+        self.retry_transmitted = retry_transmitted
         self._port = port
         self._host = host or routes.bind
         self._clock = clock
@@ -355,15 +362,19 @@ class ProxyServer:
         except _StaleConnection:
             # The request went out and no response head came back. It may have been acted on, so a retry is only
             # defensible for a method whose repetition cannot have a second side effect.
-            if request.method.upper() not in RETRYABLE_METHODS:
+            if not (self.retry_transmitted and request.method.upper() in SAFE_METHODS):
                 self.stats.upstream_errors += 1
                 self.stats.uncertain += 1
                 self._close_call(call, status=502, error="upstream-closed-uncertain")
                 with contextlib.suppress(Exception):
                     upstream_writer.close()
+                why = ("post-transmission retries are off by default because a repeated request can have a second "
+                       "effect; --proxy-retry-transmitted opts in for GET/HEAD/OPTIONS")
+                if self.retry_transmitted:
+                    why = f"{request.method} is not one of GET/HEAD/OPTIONS, so it is never resent"
                 await self._fail(writer, 502, "upstream-closed-uncertain", request.keep_alive,
                                  note=f"{request.method} was sent once and may have been applied; "
-                                      "blackbox does not resend it")
+                                      f"blackbox did not resend it — {why}")
                 return request.keep_alive
             self.pool.retries += 1
             with contextlib.suppress(Exception):
@@ -596,6 +607,7 @@ class ProxyServer:
             return streamed, True
         if chunked:
             first = True
+            unwritten = 0                  # bytes handed to the transport since the last drain
             while True:
                 size_line = await upstream_reader.readuntil(CRLF)
                 size = int(size_line.split(b";")[0].strip() or b"0", 16)
@@ -615,7 +627,12 @@ class ProxyServer:
                 head, first = b"", False
                 self.stats.bytes_to_client += len(data)
                 self._receive(call, data)
-                await writer.drain()
+                # Drain under backpressure, not after every chunk: `drain()` yields to every other task, and a stream
+                # of 60-byte chunks would pay that once per chunk on a loopback path that never fills the buffer.
+                unwritten += len(data)
+                if unwritten >= WRITE_HIGH_WATER or writer.transport.get_write_buffer_size() > WRITE_HIGH_WATER:
+                    await writer.drain()
+                    unwritten = 0
         if status in (204, 304):
             writer.write(head)
             await writer.drain()

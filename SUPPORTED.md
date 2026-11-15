@@ -144,15 +144,18 @@ routes = Routes([Route(name="openai", base="https://api.openai.com")], default="
 * **Passthrough is byte-exact**: what a client receives from a streamed response is sha256-identical to what the
   upstream sent, and is relayed still chunked. `Expect: 100-continue`, keep-alive, hop-by-hop headers and
   `x-blackbox-*` stripping are handled; upstream failures are `502`/`504` with `x-blackbox-error`.
-* **Measured** (§15.1, `bench/results/2026-11-15-proxy.json`): added latency p50 0.27 ms / p99 0.65 ms (n 500, paired
-  against the same request without the proxy); first-byte passthrough 0.42 ms (n 100, budget 0.5 ms); 200 concurrent
-  streams, no errors, every body identical; 0.3 MiB RSS growth at 50 req/s for 10 s. Upstream connections are pooled
-  per route and a pooled connection that turns out to be dead is retried once, invisibly (D-032a).
-* **An uncertain upstream outcome is reported, never retried.** Idle upstream connections are pooled, and one found
-  dead *before* the request is written is replaced for free. If a connection dies *after* the request went out, only
-  `GET`/`HEAD`/`OPTIONS` are retried (once) — anything else is answered `502` with
-  `x-blackbox-error: upstream-closed-uncertain` and a body saying the request may have been applied, so a duplicated
-  effect is the caller's decision and never the recorder's surprise (D-032b).
+* **Measured** (§15.1, `bench/results/2026-11-15-proxy.json`): added latency p50 0.165 ms / p99 0.471 ms (n 500, paired
+  against the same request without the proxy); first-byte passthrough 0.184 ms (n 100, budget 0.5 ms, every 20-sample block
+  under it); 200 concurrent streams, no errors, every body identical; 0.0 MiB RSS growth at 50 req/s for 10 s. Origin, proxy
+  and measuring client each run in their own process, because sharing an interpreter makes these rows measure the GIL
+  instead of the proxy (D-032c). Upstream connections are pooled per route (D-032a) and a pooled connection found dead
+  *before* a request is written is replaced for free.
+* **An uncertain upstream outcome is reported, never retried — by default for every method.** If a connection dies *after*
+  the request went out, the client is answered `502` with `x-blackbox-error: upstream-closed-uncertain` and a body saying the
+  request may have been applied; `stats.uncertain` counts it. `--proxy-retry-transmitted` opts into exactly one retry, only
+  for `GET`/`HEAD`/`OPTIONS`, and it is a statement the operator makes about their own upstreams — HTTP only *intends* those
+  methods to be safe, and a `GET` that bills or warms a cache is a real thing. `POST`/`PUT`/`PATCH`/`DELETE` are never resent,
+  flag or no flag, so a duplicated effect is never the recorder's surprise (D-032b, corrected by D-032c).
 * **Recording is a tap, and the tap can fail**: a sink that raises costs frames, never a request
   (`stats.record_errors` counts them).
 * **TLS**: `ssl.create_default_context()` upstream; a route built with `verify_tls=False` (the plan's

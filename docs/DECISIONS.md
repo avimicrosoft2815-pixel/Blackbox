@@ -122,6 +122,8 @@ read" is what makes the retry invisible; it was already true, and it is now load
 
 ## D-032b — an uncertain outcome is reported, not retried: idempotent methods only
 
+*Amended by D-032c, which removes the default most of this entry relies on: "idempotent methods only" became "none by default, one retry as an opt-in".*
+
 *Date: 2026-11-16. Supersedes the retry half of D-032a, which a reviewer flagged as a P0. Plan refs: §13, P3B-08.*
 
 D-032a said a dead pooled connection is "retried once on a fresh connection before anything is written to the client",
@@ -141,3 +143,44 @@ is idempotent *in intent*, but the proxy cannot know whether the far end agrees.
 budget), and pooling is now safe by construction rather than by hope. **Why not buffer the request and replay from a
 reconstruction?** Because a replay is still a second request; the honest answer to "did this take effect" is to tell the
 caller, not to guess twice.
+
+## D-032c — retries after transmission are off by default; `SAFE_METHODS` is an intention, not a guarantee
+
+*Date: 2026-11-16. Amends D-032b, which a reviewer corrected: "GET/HEAD/OPTIONS are safe" is a claim about HTTP's intent, not
+about every upstream. Plan refs: §13, P3B-08.*
+
+D-032b retried `GET`, `HEAD` and `OPTIONS` after a transmission it could not account for, on the grounds that "repeating them
+cannot duplicate an effect". That sentence is wrong as a universal, and the proxy has no way to know when it is wrong. HTTP
+*says* those methods are safe; the specification's guarantee is about the **semantics a server claims**, not about the code
+that actually runs. Real upstreams and real middleboxes break it all the time: a `GET /v1/models/...` that lazy-loads and
+bills on first touch, a `HEAD` on an object store that counts a request or refreshes a lease, an `OPTIONS` that travels
+through a gateway which logs a write per preflight, a cache-warming `GET /v1/files/{id}/content` that materialises a
+download, or an old load balancer that turns an idempotent method into a retried charge. A proxy that resends is making an
+assumption about somebody else's server, from the client's side of the wire, silently.
+
+**The rule now.** After a request has been transmitted, an uncertain outcome is **reported and not retried, for every method,
+by default**. The client gets `502`, `x-blackbox-error: upstream-closed-uncertain`, and a body that says the request may have
+been applied; `stats.uncertain` counts it and `pool.retries` does not move. The only way to get the second attempt is to ask
+for it: `--proxy-retry-transmitted` on `blackbox run`, or `retry_transmitted=True` if you drive the proxy yourself. And even
+then the retry is limited to `SAFE_METHODS` (`GET`, `HEAD`, `OPTIONS`) — the flag says *"I have checked my upstreams and they
+are safe for these"*, which is a statement only the caller can make. `POST`/`PUT`/`PATCH`/`DELETE` are never resent, flag or
+no flag; for `POST /v1/chat/completions` that is a second charge.
+
+**Why a flag at all, rather than deleting the capability?** Because the failure it repairs is real: a provider that closes an
+idle keep-alive connection on its own schedule makes a pooled connection look dead to us and to the client as a spurious
+502, and a caller talking to a well-behaved upstream should be able to buy that repair knowingly. Defaults are for the
+caller who has not thought about it; the flag is for the one who has. **Why keep the name `SAFE_METHODS` if it is not a
+guarantee?** Because it is the name the specification uses and the set the flag is scoped to; the docstring and the flag's
+help text both say what it actually is — HTTP's assertion, which the operator is being asked to confirm.
+
+**Tested, not just documented.** `test_a_transmitted_get_is_not_retried_by_default` (flag off: one GET reaches the upstream,
+the client sees `502 upstream-closed-uncertain`); `test_retry_transmitted_retries_a_get_on_a_fresh_connection` (flag on: the
+upstream sees the GET **twice**, the client sees the response); `test_retry_transmitted_still_never_resends_a_post` (flag on:
+a POST is still sent **once** and still answered `502`); and the pre-write case is its own test, because a connection found
+dead before the write needs no flag at all.
+
+**Cost of the correction, measured.** None on the four §15.1 rows, and the same commit that fixed this fixed the bench. The
+first-byte row had been reading 0.44–0.52 ms with PASS/FAIL alternating and was described as "marginal"; the cause was that
+origin, proxy and client shared one interpreter, so the row measured a GIL hand-off. With each in its own process — the
+topology the budget is about — the same code reads p50 **0.184 ms**, every 20-sample block under the 0.5 ms budget, first
+byte p50 0.184 ms, RSS growth **0.0 MiB**. Budgets were not touched.

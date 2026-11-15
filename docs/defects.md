@@ -183,3 +183,10 @@ plan's §10 shape, and it is append-only.
   Test: the upstream records a POST and closes without responding —
   `test_a_post_that_may_have_been_transmitted_is_never_sent_twice` asserts one POST arrived and a 502 came back; a
   mutation check (POST made retryable again) shows the upstream receiving two, which is the bug reproduced.
+  **Follow-up, same reviewer:** the fix still called `GET`/`HEAD`/`OPTIONS` safe and retried them by itself, which replaced one
+  unstated assumption with another — HTTP only *intends* those methods to be safe, and an upstream that bills, warms or logs on
+  a `GET` is common enough to matter. Retries after transmission are now **off by default for every method** and reachable only
+  with `--proxy-retry-transmitted`, which the caller uses after checking their own upstreams; even then `POST`/`PUT`/`PATCH`/
+  `DELETE` are never resent. The bench that made this class hard to see had its own version of the same bug: it measured the
+  proxy from inside the proxy's interpreter, so its first-byte row (0.44–0.52 ms, PASS/FAIL alternating) was a GIL hand-off
+  rather than the proxy. Origin, proxy and client now each run in their own process, and the row reads 0.184 ms. D-032c.
