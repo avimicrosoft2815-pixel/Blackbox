@@ -100,6 +100,10 @@ S: dict[str, tuple[str, str, str, str, str, str]] = {
                "real openai 3.51.0 and anthropic 2.8.0 against the mock provider: chat/embeddings/messages, sync and "
                "async streams counted, SDK signature preserved, unknown SDK shape skipped not guessed; counts events, "
                "not bytes (D-023)"),
+    "P3-06": ("done", "HEAD", "tests/test_sink.py (8)", "—", "self",
+              "2 000 chunks => 8 chunk frames, payloads concatenate to the identical body; 8 KiB / 100 ms bounds; "
+              "request/chunks/response ordering; unfinished call left as chunks for INTERRUPTED_MID_STREAM; "
+              "fail-open counted, never raised"),
     "P3-05d": ("done", "99a5164", "tests/test_preflight.py (8), SUPPORTED.md", "—", "self",
                "forced failure of A chooses B and records why; all-fail is a printable state, not an exception; "
                "capture_seam in the decision — into a run.json only once P3-06 lands the sink"),

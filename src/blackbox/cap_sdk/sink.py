@@ -1,0 +1,174 @@
+"""P3-06: the sink — where a chunk stops being an in-memory observation and becomes a frame on a tape.
+
+The seams record; this writes. The gap between those two verbs is the whole product claim: an in-memory `ModelCall`
+has the chunk counts right up until the process dies, at which point it is gone. So every chunk that arrives is
+written to the tape *as it arrives*, through the writer's group commit, and a `kill -9` costs whatever was never
+published rather than everything.
+
+Coalescing, and why it is not cheating:
+
+* A 2 000-token stream is 2 000 socket reads. One frame per read would be a tape twice the size of the payload and a
+  recovery scan that spends its time on 60-byte frames. So chunks are grouped until 8 KiB or 100 ms, whichever comes
+  first, and each group is one `MODEL_CHUNK` frame whose **payload is the raw bytes, unchanged**.
+* The byte count therefore stays exact — the payloads concatenate back to the body, which is the test — and the unit
+  of `chunks_received` is a chunk *frame*, not a socket read. The capsule says so: the sink's parameters and the two
+  counts (`chunks_events`, `chunks_raw`) are in the response summary, and `capture_seam` and the coalescing
+  parameters travel with the run.
+* Nothing is buffered beyond one group: a sink that held the whole body would be the memory leak the seams avoid.
+
+Two invariants this file must not break:
+
+1. **Fail-open.** A sink that raises must not reach the application and must not stop the bytes. Every hook is
+   wrapped, and a failed write is counted (`write_errors`) rather than raised.
+2. **The tape owns the ordering.** `MODEL_REQUEST` before any chunk, `MODEL_RESPONSE` (or `MODEL_ERROR`) after the
+   last one. Recovery reads the *last* kind per node to classify an interrupted call (`INTERRUPTED_MID_STREAM`), so
+   the intermediate state has to look like exactly that: chunks and no response.
+"""
+from __future__ import annotations
+
+import json
+import time
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from typing import Any
+
+from blackbox import constants as C
+from blackbox.cap_sdk.base import ModelCall, Receiver
+
+DEFAULT_COALESCE_BYTES = 8 * 1024
+DEFAULT_COALESCE_MS = 100.0
+
+
+@dataclass
+class _Group:
+    """The bytes waiting to become one frame, and the timing facts worth keeping about them."""
+
+    chunks: list[bytes] = field(default_factory=list)
+    bytes: int = 0
+    raw_chunks: int = 0
+    first_ns: int = 0
+    last_ns: int = 0
+
+
+class TapeSink:
+    """Turns seam events into `MODEL_REQUEST` / `MODEL_CHUNK` / `MODEL_RESPONSE` frames.
+
+    `emit` is the writer's own `emit(kind, payload, **fields)`; passing the callable rather than the writer keeps this
+    testable without a filesystem and keeps the sink from reaching into the writer's state.
+    """
+
+    def __init__(self, emit: Callable[..., int], *, node_slot: int = 0,
+                 coalesce_bytes: int = DEFAULT_COALESCE_BYTES, coalesce_ms: float = DEFAULT_COALESCE_MS,
+                 clock: Callable[[], int] = time.monotonic_ns) -> None:
+        self._emit = emit
+        self.node_slot = node_slot
+        self.coalesce_bytes = coalesce_bytes
+        self.coalesce_ms = coalesce_ms
+        self._clock = clock
+        self.groups: dict[int, _Group] = {}
+        self.raw_chunks: dict[int, int] = {}
+        self.events_written = 0
+        self.write_errors = 0
+        self.bytes_written = 0
+
+    # ── hooks the Recorder calls ────────────────────────────────────────────
+    def on_open(self, call: ModelCall, seam: str | None) -> None:
+        self._safe(C.KIND_MODEL_REQUEST, {
+            "provider": call.provider, "path": call.path, "model": call.model,
+            "request_fp": call.request_fp, "stream": call.stream, "partial": call.partial,
+            "capture_seam": seam,
+            "coalesce_bytes": self.coalesce_bytes, "coalesce_ms": self.coalesce_ms,
+        })
+        self.groups[id(call)] = _Group(first_ns=self._clock())
+        self.raw_chunks[id(call)] = 0
+
+    def on_chunk(self, call: ModelCall, chunk: bytes, *, first_byte_ms: float | None = None) -> None:
+        group = self.groups.get(id(call))
+        if group is None:                                  # a chunk after close: count it, do not invent a call
+            self.write_errors += 1
+            return
+        now = self._clock()
+        group.chunks.append(chunk)
+        group.bytes += len(chunk)
+        group.raw_chunks += 1
+        group.last_ns = now
+        self.raw_chunks[id(call)] = self.raw_chunks.get(id(call), 0) + 1
+        if first_byte_ms is not None:
+            group.first_ns = now
+        due_bytes = group.bytes >= self.coalesce_bytes
+        due_ms = (now - group.first_ns) >= int(self.coalesce_ms * 1_000_000)
+        if due_bytes or due_ms:
+            self._flush(call, group, now)
+
+    def on_close(self, call: ModelCall) -> None:
+        group = self.groups.pop(id(call), None)
+        if group is None:
+            return
+        self._flush(call, group, self._clock())
+        summary = {
+            "provider": call.provider, "path": call.path, "model": call.model, "status": call.status,
+            "chunks_events": call.chunks, "chunks_raw": self.raw_chunks.pop(id(call), 0),
+            "bytes_received": call.bytes_received, "first_byte_ms": call.first_byte_ms, "total_ms": call.total_ms,
+            "response_fp": call.response_fp, "partial": call.partial, "error": call.error,
+        }
+        kind = C.KIND_MODEL_ERROR if call.error else C.KIND_MODEL_RESPONSE
+        self._safe(kind, summary)
+
+    # ── internals ───────────────────────────────────────────────────────────
+    def _flush(self, call: ModelCall, group: _Group, now: int) -> None:
+        if not group.chunks:
+            return
+        payload = b"".join(group.chunks)
+        # The payload is the raw bytes and nothing else: a reader concatenates the frames to get the body back, and
+        # `recovery` counts `len(payload)` as bytes received. Per-frame metadata goes in the frame's own fields.
+        self._safe(C.KIND_MODEL_CHUNK, payload, mono_ns=group.last_ns or now)
+        self.bytes_written += len(payload)
+        group.chunks.clear()
+        group.bytes = 0
+        group.first_ns = now
+
+    def _safe(self, kind: int, payload: Any, **fields: Any) -> None:
+        try:
+            body = payload if isinstance(payload, bytes) else json.dumps(payload, sort_keys=True).encode()
+            self._emit(kind, body, node_slot=self.node_slot, **fields)
+            self.events_written += 1
+        except Exception:
+            self.write_errors += 1                          # counted, never raised (fail-open)
+
+
+class SinkRecorder(Receiver):
+    """A `Recorder` that also forwards to a sink, in order, and never lets the sink break the call."""
+
+    def __init__(self, sink: Any = None) -> None:
+        from blackbox.cap_sdk.base import Recorder
+
+        self._recorder = Recorder()
+        self.sink = sink
+        self.installed_seam: str | None = None
+        self.sink_errors = 0
+
+    @property
+    def calls(self) -> list[ModelCall]:
+        return self._recorder.calls
+
+    def open_call(self, provider: str, path: str, request: Any) -> ModelCall:
+        call = self._recorder.open_call(provider, path, request)
+        self._forward("on_open", call, self.installed_seam)
+        return call
+
+    def receive(self, call: ModelCall, chunk: bytes, *, first_byte_ms: float | None = None) -> None:
+        self._recorder.receive(call, chunk, first_byte_ms=first_byte_ms)
+        self._forward("on_chunk", call, chunk, first_byte_ms=first_byte_ms)
+
+    def close_call(self, call: ModelCall, *, status: int = 0, total_ms: float | None = None,
+                   error: str | None = None) -> None:
+        self._recorder.close_call(call, status=status, total_ms=total_ms, error=error)
+        self._forward("on_close", call)
+
+    def _forward(self, name: str, *args: Any, **kwargs: Any) -> None:
+        if self.sink is None:
+            return
+        try:
+            getattr(self.sink, name)(*args, **kwargs)
+        except Exception:
+            self.sink_errors += 1                           # the app never sees a recorder error (fail-open)
