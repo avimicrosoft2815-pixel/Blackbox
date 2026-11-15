@@ -33,6 +33,8 @@ from typing import Any
 
 from blackbox.cap_sdk import http_clients
 from blackbox.cap_sdk.base import Receiver, SeamHandle, SeamUnavailable
+from blackbox.cap_sdk.failopen import fail_open
+from blackbox.cap_sdk.scope import CaptureScope
 from blackbox.cap_sdk.tee import wrap_stream
 
 NAME = "httpx-transport"
@@ -48,12 +50,21 @@ def probe() -> tuple[bool, str]:
 class RecordingTransport:
     """A drop-in for `httpx.BaseTransport`. Wraps any transport whose `handle_request` returns a `Response`."""
 
-    def __init__(self, inner: Any, recorder: Receiver) -> None:
+    def __init__(self, inner: Any, recorder: Receiver, scope: CaptureScope | None = None) -> None:
         self.inner = inner
-        self.recorder = recorder
+        self.receiver = recorder
+        self.scope = scope or CaptureScope.from_config()
+        # Every receiver call in this class goes through the wrapper: `open_call` raising here used to reach the
+        # application directly, because unlike seam A's hook this method had no `try` around it (reported at `ee210ae`).
+        self.recorder = fail_open(recorder)
 
     def handle_request(self, request: Any) -> Any:
         started = time.perf_counter_ns()
+        if not self.scope.allows(request.url.host):
+            # Out of scope: the request goes to the inner transport untouched, with no call opened and no frame
+            # written. The skip is counted, so a capsule can say "not looked at" rather than implying "nothing there".
+            self.scope.skip()
+            return self.inner.handle_request(request)
         body = getattr(request, "content", b"") or b""
         call = self.recorder.open_call(request.url.host or "unknown", request.url.path or "/", body)
         call.stream = True
@@ -72,6 +83,9 @@ class RecordingTransport:
     async def handle_async_request(self, request: Any) -> Any:
         """The async twin of `handle_request`: same bookkeeping, same tee, awaited instead of iterated."""
         started = time.perf_counter_ns()
+        if not self.scope.allows(request.url.host):
+            self.scope.skip()
+            return await self.inner.handle_async_request(request)
         body = getattr(request, "content", b"") or b""
         call = self.recorder.open_call(request.url.host or "unknown", request.url.path or "/", body)
         call.stream = True
@@ -122,26 +136,32 @@ class RecordingTransport:
         return None
 
 
-def install(recorder: Receiver, *, client: Any = None) -> SeamHandle:
+def install(recorder: Receiver, *, client: Any = None, scope: CaptureScope | None = None) -> SeamHandle:
     """Wrap an existing client's transport (`client=`), the way the SDK's client factory hands one over.
 
     With no client given, this patches `httpx.HTTPTransport.handle_request` so clients created afterwards are
     covered. Patching a *class* is riskier than wrapping an instance, so the preflight prefers the instance form and
     `SUPPORTED.md` says which one each integration uses.
+
+    `scope` (`cap_sdk/scope.py`) decides which hosts are recorded: wrapping a client is not a licence to record every
+    request it makes — the same client often talks to a vector store or a metrics endpoint.
     """
     ok, reason = probe()
     if not ok:
         raise SeamUnavailable(reason)
 
+    scope = scope or CaptureScope.from_config()
+
     if client is not None:
         original = client._transport
-        client._transport = RecordingTransport(original, recorder)
+        client._transport = RecordingTransport(original, recorder, scope)
 
         def undo_instance() -> None:
             client._transport = original
 
         return SeamHandle(name=NAME, undo=undo_instance,
-                          detail={"patched": "client._transport", "form": "instance"})
+                          detail={"patched": "client._transport", "form": "instance",
+                                  "scope": scope.as_dict()})
 
     # Two classes, not one: an async client builds an `AsyncHTTPTransport`, so patching only `HTTPTransport` records
     # sync clients and silently misses every async one.
@@ -150,7 +170,7 @@ def install(recorder: Receiver, *, client: Any = None) -> SeamHandle:
         for attribute in ("HTTPTransport", "AsyncHTTPTransport"):
             transport_class = getattr(module, attribute, None)
             if transport_class is not None:
-                patched.append((transport_class, _patch_transport_class(transport_class, recorder)))
+                patched.append((transport_class, _patch_transport_class(transport_class, recorder, scope)))
 
     def undo_class() -> None:
         for transport_class, originals in patched:
@@ -160,6 +180,7 @@ def install(recorder: Receiver, *, client: Any = None) -> SeamHandle:
     return SeamHandle(name=NAME, undo=undo_class,
                       detail={"patched": [f"{cls.__module__}.{cls.__name__}" for cls, _ in patched],
                               "modules": [cls.__module__.split(".")[0] for cls, _ in patched],
+                              "scope": scope.as_dict(),
                               "form": "class"})
 
 
@@ -167,14 +188,14 @@ def _restore(cls: Any, attribute: str, value: Any) -> None:
     setattr(cls, attribute, value)
 
 
-def _patch_transport_class(cls: Any, recorder: Receiver) -> dict[str, Any]:
+def _patch_transport_class(cls: Any, recorder: Receiver, scope: CaptureScope) -> dict[str, Any]:
     """Patch both directions, because a client that is never used synchronously still has to be recorded."""
     originals: dict[str, Any] = {}
     if hasattr(cls, "handle_request"):
         sync_original = cls.handle_request
 
         def handle(self: Any, request: Any) -> Any:
-            return RecordingTransport(_Bound(sync_original, self), recorder).handle_request(request)
+            return RecordingTransport(_Bound(sync_original, self), recorder, scope).handle_request(request)
 
         cls.handle_request = handle
         originals["handle_request"] = sync_original
@@ -182,7 +203,8 @@ def _patch_transport_class(cls: Any, recorder: Receiver) -> dict[str, Any]:
         async_original = cls.handle_async_request
 
         async def handle_async(self: Any, request: Any) -> Any:
-            return await RecordingTransport(_AsyncBound(async_original, self), recorder).handle_async_request(request)
+            return await RecordingTransport(_AsyncBound(async_original, self), recorder,
+                                            scope).handle_async_request(request)
 
         cls.handle_async_request = handle_async
         originals["handle_async_request"] = async_original

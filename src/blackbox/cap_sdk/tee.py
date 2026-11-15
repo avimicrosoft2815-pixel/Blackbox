@@ -12,6 +12,10 @@ Two properties are load-bearing and are why this is not just a generator:
 * **The recorder is told even when the application abandons the stream.** A `break`, a timeout or a `kill -9` leaves
   the call open; `close()` still records the chunks that arrived, because a partial call honestly labelled is worth
   more than a complete-looking one that is a guess.
+* **A recorder that raises cannot reach the application.** Every receiver call goes through `fail_open`
+  (`cap_sdk/failopen.py`). This was a real defect, reported at `ee210ae`: `receive()` was called bare, so a receiver
+  bug propagated out of `iter_bytes()` and killed the host. The unit of the fix is the *callback*, not the seam — the
+  earlier test exercised `open_call` and nothing else.
 
 **Two tee classes, chosen by the stream.** `httpx.AsyncClient` hands back an `AsyncByteStream`, and a sync wrapper
 around one is not merely untested — it fails the moment anything iterates it. So `wrap_stream` asks the stream which
@@ -30,6 +34,7 @@ from typing import Any
 
 from blackbox.cap_sdk import http_clients
 from blackbox.cap_sdk.base import ModelCall, Receiver
+from blackbox.cap_sdk.failopen import fail_open
 
 _TEE_STREAMS: dict[str, Any] = {}       # built on first use, per client module
 _ASYNC_TEE_STREAMS: dict[str, Any] = {}
@@ -159,6 +164,7 @@ def wrap_stream(stream: Any, recorder: Receiver, call: ModelCall, status: int, s
     if module_name not in ("httpx", "httpx2"):         # a test double or an unknown client: any valid base will do
         available = http_clients.available()
         module_name = available[0][0] if available else "httpx"
+    guarded = fail_open(recorder)
     if hasattr(stream, "__aiter__"):
-        return async_tee_stream_class(module_name)(stream, recorder, call, status, started)
-    return tee_stream_class(module_name)(stream, recorder, call, status, started)
+        return async_tee_stream_class(module_name)(stream, guarded, call, status, started)
+    return tee_stream_class(module_name)(stream, guarded, call, status, started)

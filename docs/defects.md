@@ -125,3 +125,14 @@ plan's §10 shape, and it is append-only.
     `segment_bytes=1`. This is the same failure family as defect 23 — a recorder that looks like it is recording —
     and it is why the writer's own `degraded_reason` path (S17) exists. It cannot be reproduced from this sandbox:
     there is no Windows host here and the CI job log is unreachable, so the check-run annotation is the evidence.
+27. **reported by the independent reviewer at `ee210ae`, reproduced here before any change** → a recorder failure must
+    not reach the application through *any* callback → `tee.py` called `self.recorder.receive(...)` bare, so a
+    receiver exception during a real `httpx.SyncByteStream` came out of the application's `for chunk in
+    response.iter_bytes()` and killed the host. Seam A's hook had a `try` around the open-call path — which is why the
+    existing fail-open test passed — and seam B's `open_call` had none. Reproduced in a clean worktree at `ee210ae`
+    with the reviewer's script: `ESCAPED RuntimeError: recorder blew up on a chunk`; after the fix, the same script
+    prints `SURVIVED bytes=849` and the receiver's failure is counted. → `cap_sdk/failopen.py` guards all three
+    callbacks in one wrapper, the seams and the tee both hand their receiver through it (idempotent), and
+    `tests/test_capture_failopen.py` (18) covers `open_call`/`receive`/`close_call` × sync/async × seams A and B, plus
+    cancellation, a provider 429 reaching the application unchanged, the bounded failure sample and the rule that the
+    message is never recorded (D-027).

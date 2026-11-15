@@ -126,11 +126,11 @@ def test_a_recorder_that_refuses_to_start_leaves_the_application_untouched(tmp_p
     assert "BBX-E130" in (installed.get("disabled_reason") or ""), installed
 
 
-@pytest.mark.skipif(os.name == "nt",
-                    reason="Windows let the writer open against a data directory that is a file (defect 26); the "
-                           "case is unproven there, so it is not claimed there")
-def test_a_data_directory_that_cannot_be_created_leaves_the_application_untouched(tmp_path):
-    """The data directory is a *file*: someone's `BLACKBOX_HOME` points at a path that is not a directory."""
+def test_a_data_directory_that_is_a_file_is_refused_on_every_os(tmp_path):
+    """Defect 26, and the fix that does not depend on the filesystem's mood. `BLACKBOX_HOME` pointing at a *file* is
+    now refused by name in `api.install`, before any directory is touched, on every OS — rather than relying on
+    Windows `os.makedirs` to raise, which it did not: the writer opened and 100 calls ran against a tape directory
+    that cannot exist. The test asserts the *reason*, so a platform that starts tolerating it cannot pass silently."""
     with MockProvider(Scenario(chunks=2)) as provider:
         bare = _run(provider.base_url)
 
@@ -149,6 +149,7 @@ def test_a_data_directory_that_cannot_be_created_leaves_the_application_untouche
     assert recorded[1] == bare[1] and recorded[0] == bare[0]
     assert installed["enabled"] is False, "this test proves nothing unless the recorder really is broken here"
     assert "NotADirectoryError" in (installed.get("disabled_reason") or ""), installed
+    assert "is not a directory" in (installed.get("disabled_reason") or ""), "the refusal must name the reason"
 
 
 @pytest.mark.skipif(os.name == "nt", reason="on Windows the permission bits do not stop a file being created")

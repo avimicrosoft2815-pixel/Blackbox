@@ -298,6 +298,17 @@
       "commit": "714554c",
       "tests": "tests/test_mock_provider.py (9)",
       "note": "D-021: the plan's own P3-13 is rec/buffer.py, still todo; the mock provider is tracked here so that neither ticket can be ticked by the other's evidence"
+    },
+    {
+      "id": "P0-review-ee210ae",
+      "what": "the independent reviewer's three P0 findings at ee210ae: a receiver exception escaping through any callback (defect 27, cap_sdk/failopen.py, tests/test_capture_failopen.py 18), the blanket capture of unrelated HTTP traffic (D-026, cap_sdk/scope.py, tests/test_capture_scope.py 12), and defect 26 (data directory that is a file, now refused by name on every OS)",
+      "commit": "this turn",
+      "tests": [
+        "tests/test_capture_failopen.py",
+        "tests/test_capture_scope.py",
+        "tests/test_failopen.py"
+      ],
+      "label": "self"
     }
   ]
 }

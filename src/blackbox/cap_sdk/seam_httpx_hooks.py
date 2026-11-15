@@ -32,6 +32,8 @@ from typing import Any
 
 from blackbox.cap_sdk import http_clients
 from blackbox.cap_sdk.base import ModelCall, Receiver, SeamHandle, SeamUnavailable
+from blackbox.cap_sdk.failopen import fail_open
+from blackbox.cap_sdk.scope import CaptureScope
 from blackbox.cap_sdk.tee import wrap_stream
 
 NAME = "httpx-hooks"
@@ -80,7 +82,8 @@ def _restore_init(cls: Any, original: Any) -> None:
     cls.__init__ = original
 
 
-def install(recorder: Receiver, *, hook_name: str = "response") -> SeamHandle:
+def install(recorder: Receiver, *, hook_name: str = "response",
+            scope: CaptureScope | None = None) -> SeamHandle:
     """Patch `httpx.Client`/`AsyncClient` so every request and response is recorded.
 
     Two hooks, not one: a *request* hook stamps the clock before the request is sent, and the response hook takes the
@@ -90,15 +93,26 @@ def install(recorder: Receiver, *, hook_name: str = "response") -> SeamHandle:
 
     Patching `__init__` covers clients created *after* install; a client created before it is not captured, which
     the preflight reports instead of pretending. `uninstall` puts the original `__init__` back.
+
+    **What it may look at** is `scope` (`cap_sdk/scope.py`), not "everything this process sends": the patch reaches
+    every client in the process, and a recorder that scoops an unrelated internal request is a privacy incident. A
+    request outside the scope returns before any call is opened, so nothing half-written is left behind, and the skip
+    is counted in `detail["scope"]["stats"]["out_of_scope"]` — an absence the report can tell apart from silence.
     """
     ok, reason = probe()
     if not ok:
         raise SeamUnavailable(reason)
 
+    recorder = fail_open(recorder)      # the tee wraps too; both are idempotent, and the hook's own `try` is not a
+                                        # substitute for guarding the callbacks it hands to the stream
+    scope = scope or CaptureScope.from_config()
     starts: dict[int, int] = {}
 
     def on_request(request: Any) -> None:
         try:
+            if not scope.allows(request.url.host):
+                scope.skip()
+                return
             if len(starts) > 256:                     # a request that never got a response must not leak
                 for stale in list(starts)[: len(starts) - 256]:
                     starts.pop(stale, None)
@@ -109,6 +123,10 @@ def install(recorder: Receiver, *, hook_name: str = "response") -> SeamHandle:
     def on_response(response: Any) -> None:
         try:
             request = response.request
+            if not scope.allows(request.url.host):
+                # Not ours. The response is handed back exactly as it arrived, untouched and unwrapped.
+                starts.pop(id(request), None)
+                return
             started = starts.pop(id(request), time.perf_counter_ns())
             body = request.content or b""
             status = int(response.status_code)
@@ -148,6 +166,7 @@ def install(recorder: Receiver, *, hook_name: str = "response") -> SeamHandle:
     return SeamHandle(name=NAME, undo=undo,
                       detail={"patched": [f"{cls.__module__}.{cls.__name__}.__init__" for cls, _ in patched],
                               "modules": [cls.__module__.split(".")[0] for cls, _ in patched],
+                              "scope": scope.as_dict(),
                               "form": "init"})
 
 

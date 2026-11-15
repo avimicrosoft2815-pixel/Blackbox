@@ -30,6 +30,7 @@ import inspect
 from typing import Any
 
 from blackbox.cap_sdk.base import Receiver, SeamHandle, SeamUnavailable
+from blackbox.cap_sdk.failopen import fail_open
 
 NAME = "sdk-methods"
 
@@ -211,6 +212,7 @@ def install(recorder: Receiver, *, targets: tuple[tuple[str, str, str, str, str]
     """Patch every target that exists. Anything that does not is skipped, with the import or attribute error."""
     import importlib
 
+    recorder = fail_open(recorder)          # this seam's callbacks are the host's callbacks if they raise
     patched: list[tuple[Any, str, Any]] = []
     skipped: list[str] = []
     for module_name, class_name, method, provider, path in targets:

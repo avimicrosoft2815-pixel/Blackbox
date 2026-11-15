@@ -107,6 +107,12 @@ def install(*, data_dir: str | None = None, signal_number: int | None = None,
             from blackbox.tape.writer import TapeWriter
 
             root = os.path.abspath(data_dir or os.environ.get("BLACKBOX_HOME") or ".blackbox")
+            # Defect 26: on Windows `os.makedirs` under a path that is a *file* did not raise, so the writer opened
+            # and 100 calls ran against a tape directory that cannot exist. Asking the question directly is
+            # platform-independent: an existing non-directory is refused here, by name, instead of being left to
+            # whatever the filesystem's `mkdir` does with it.
+            if os.path.exists(root) and not os.path.isdir(root):
+                raise NotADirectoryError(f"data directory {root!r} exists and is not a directory")
             writer = TapeWriter(root, mode=mode, **writer_kw).open()
             _STATE.writer = writer
             _STATE.data_dir = root
