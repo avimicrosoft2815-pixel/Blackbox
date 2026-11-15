@@ -184,3 +184,44 @@ first-byte row had been reading 0.44–0.52 ms with PASS/FAIL alternating and wa
 origin, proxy and client shared one interpreter, so the row measured a GIL hand-off. With each in its own process — the
 topology the budget is about — the same code reads p50 **0.184 ms**, every 20-sample block under the 0.5 ms budget, first
 byte p50 0.184 ms, RSS growth **0.0 MiB**. Budgets were not touched.
+
+## D-035 — a disconnect is classified by the side that closed first, and recorded on the tape as a class
+
+*Date: 2026-11-16. Plan refs: §14.4a, §10.3, P3B-08. Found while implementing §14.4a: the proxy already knew which side
+had gone, and threw it away.*
+
+§14.4a names three classes the proxy can tell apart because it sees both ends of a call: `INTERRUPTED_CLIENT` (the app
+died, the model kept talking), `INTERRUPTED_UPSTREAM` (the provider died, the app saw a truncated stream) and
+`INTERRUPTED_PROXY` (the recorder itself died). They are different bugs in different code owned by different people, and
+the byte counts are the evidence: the tokens a dead client never received were still paid for.
+
+The code had one `except (ConnectionError, asyncio.IncompleteReadError)` around the whole relay, so a client that hung up
+and an upstream that reset both became `error="upstream-truncated: ..."` on the tape. The proxy was blaming the provider
+for the client's death — and a reader of the recording, who is by definition looking for the cause, would have gone to the
+wrong end of the call (defect 34).
+
+**The rule.** Every client write goes through one helper (`_to_client`) and every client drain through one (`_flush`); the
+only thing those raise for a dead peer is `_ClientGone`, carrying a tally. Upstream failures keep their own path. Each
+side's class is then decided by `closed_first`, and written on the tape as `INTERRUPTED_CLIENT: client received N B, proxy
+received M B from the upstream; <what it means>` — a line a human reads and `disconnects.parse()` reads back. The counts are
+**payload** bytes on both sides (no head, no chunk framing), so they can be compared with the byte count an SDK tape keeps;
+the last chunk the proxy handed to a socket that had already died is counted as delivered, because at that boundary the
+proxy cannot know otherwise and the class — not the count — is what says the client was the one that left.
+
+`INTERRUPTED_PROXY` is different in kind: nobody writes it, because the process that would have written anything is the one
+that died. `disconnects.from_tape(frames, writer_alive=...)` derives it from an open call whose writer's lease is dead, and
+reports the bytes the proxy had received with `client_received_bytes = None` — a dead proxy cannot say what the client got,
+and inventing zero would be a lie a report would repeat.
+
+**Why the classes live in `proxy/disconnects.py` rather than in the server.** The writer of the class name and the reader of
+it are different programs, and two spellings of `INTERRUPTED_CLIENT` is how a vocabulary rots. The same module reads the
+error line back (`parse`, `counts`, `error_of`, `from_tape`), which is what `explain` will use when it prints the pair of
+tapes and their two byte counts.
+
+**What it cost to get the tests honest.** The first version of the client-gone test asserted
+`client_received_bytes < proxy_received_bytes` and failed with `3136 == 3136`. The assertion was wrong, not the code: the
+proxy reads a chunk and writes it, so the chunk that broke the socket was both read and written. The cost is not between the
+proxy's own two counters — it is the difference between what the provider produced and what the client received, which is
+why the test asserts `origin.sent_stream_bytes > client_received_bytes` against an origin we own, and says in a comment why
+the two tape counts may coincide.
+

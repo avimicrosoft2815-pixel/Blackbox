@@ -190,3 +190,16 @@ plan's §10 shape, and it is append-only.
   `DELETE` are never resent. The bench that made this class hard to see had its own version of the same bug: it measured the
   proxy from inside the proxy's interpreter, so its first-byte row (0.44–0.52 ms, PASS/FAIL alternating) was a GIL hand-off
   rather than the proxy. Origin, proxy and client now each run in their own process, and the row reads 0.184 ms. D-032c.
+- **defect 34 — a client that hung up was recorded as an upstream truncation.** Found while implementing §14.4a's three
+  disconnect classes, which exist *because* the proxy is the only component that sees both ends of a call. It saw both and
+  then put them in one bucket: `_relay_body` was wrapped in a single `except (ConnectionError, asyncio.IncompleteReadError)`
+  that stamped the tape `upstream-truncated`, whatever side had actually gone. A client that died mid-stream — the case
+  where the provider keeps billing for tokens nobody received — read back as the provider's failure, so the recording
+  blamed the wrong party in exactly the situation a user opens it to diagnose. Fix: one helper for client writes
+  (`_to_client`) and one for drains (`_flush`), raising `_ClientGone` with a per-side byte tally; upstream failures keep
+  their own path; each side's class is written as `INTERRUPTED_CLIENT` / `INTERRUPTED_UPSTREAM` with both counts, and
+  `stats.client_gone` / `stats.upstream_gone` count them separately (one `upstream_errors` number is what hid this).
+  `INTERRUPTED_PROXY` gets no frame at all — the writer is dead — so it is derived from an open call plus a stale lease.
+  Tests: `tests/proxy/test_disconnect_classes.py` (real sockets both ways, real tape, class read back off it) and
+  `tests/proxy/test_proxy_death.py` (S16: `SIGKILL` a real proxy mid-stream, recover, `INTERRUPTED_PROXY`).
+

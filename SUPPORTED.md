@@ -156,6 +156,10 @@ routes = Routes([Route(name="openai", base="https://api.openai.com")], default="
   for `GET`/`HEAD`/`OPTIONS`, and it is a statement the operator makes about their own upstreams — HTTP only *intends* those
   methods to be safe, and a `GET` that bills or warms a cache is a real thing. `POST`/`PUT`/`PATCH`/`DELETE` are never resent,
   flag or no flag, so a duplicated effect is never the recorder's surprise (D-032b, corrected by D-032c).
+* **A disconnect is classified, and the class is on the tape.** `INTERRUPTED_CLIENT` (the app died, the model kept
+  talking), `INTERRUPTED_UPSTREAM` (the provider died, the app saw a truncated stream) and `INTERRUPTED_PROXY` (the recorder
+  died — derived from an open call plus a dead writer lease, because no frame can say it). Each carries the bytes each side
+  actually moved, so the tokens a dead client never received are visible as the cost they are (D-035).
 * **Recording is a tap, and the tap can fail**: a sink that raises costs frames, never a request
   (`stats.record_errors` counts them).
 * **TLS**: `ssl.create_default_context()` upstream; a route built with `verify_tls=False` (the plan's
