@@ -1,8 +1,11 @@
-# BlackBox build status — 2026-11-16 — trunk `4f42397` — gates: **G-Promise pass** (built and self-reviewed at `af908bc`, independently counter-signed at `fdb3875`; see `docs/gates/G-Promise.md`), G-Capture, G-Attach, G-Capsule, G-Sec, G-Release not yet opened
+# BlackBox build status — 2026-11-16 — trunk `d43b208` — gates: **G-Promise pass** (built and self-reviewed at `af908bc`, independently counter-signed at `fdb3875`; see `docs/gates/G-Promise.md`), G-Capture, G-Attach, G-Capsule, G-Sec, G-Release not yet opened
 
-**Branch** `arena/a781c68f-blackbox` · **base** `31241d6` · CI at `4f42397`: run `43705007628`, ten jobs, ten
-`success`; before it `4ce0f7c` (`43704041733`), `07e5c29` (`43703761892`) and `ce1439b` (`43701652852`) were also ten
-of ten, and the five before those — `47ec45a` (`43701107412`), `da6ef3e` (`43694261034`), `d901811` (`43698231222`),
+**Branch** `arena/a781c68f-blackbox` · **base** `31241d6` · CI at `d43b208`: run `43706220024`, ten jobs, ten
+`success`; `705fc59` (`43705488648`) and `9fe6d72` (`43705818997`) are **red and stay red** (defect 31: seven cells
+failed on the new key code — the creator of the key file creates it before writing it, so a reader could see zero
+bytes; and two tests asserted POSIX-only facts), and `d43b208` is the fix verified on Windows, macOS and Linux.
+Before that `4f42397` (`43705007628`), `4ce0f7c` (`43704041733`), `07e5c29` (`43703761892`) and `ce1439b`
+(`43701652852`) were ten of ten, and the five before those — `47ec45a` (`43701107412`), `da6ef3e` (`43694261034`), `d901811` (`43698231222`),
 `43697929744` at `54c3aba` — ended four commits of Windows red on defect 25, with `846e01a` (`43697198262`) the
 **first all-OS green since `c7919f9`**.
 This note's own commit is docs-only and its run is pending when it is written, which is what the `STOPPED` line
@@ -164,9 +167,10 @@ row in the same commit.
 0b. **The nightly has never succeeded and `main` has not moved**: `origin/main` is at `31241d6`, this branch's base,
    so the scheduled workflow's clock has not started; its one historical run failed because it named files that do not
    exist (defect 28, fixed here). Merge is the owner's.
-0c. **`4f42397` is green on all ten cells** (`43705007628`), as are `4ce0f7c` (`43704041733`), `07e5c29`
-   (`43703761892`) and `ce1439b` (`43701652852`). `STATE.last_green_commit` is `4f42397`; the P3-11d commit after it
-   (`705fc59`) was in flight when this note was written, so it is not called green here.
+0c. **`d43b208` is green on all ten cells** (`43706220024`) — the fix for defect 31, which reddened seven of ten
+   cells at `705fc59` and kept `9fe6d72` red with it. Before that `4f42397` (`43705007628`), `4ce0f7c`
+   (`43704041733`), `07e5c29` (`43703761892`) and `ce1439b` (`43701652852`) were ten of ten. `STATE.last_green_commit`
+   is `d43b208`; the red pair keep their numbers and their verdicts (C40).
 1. **G-Promise is signed** (`docs/gates/G-Promise.md`, verdict pass, self-signed — see §Labelled) and `STATE.json`
    carries `gates["G-Promise"] = "pass"`.
 2. **G-Capture is open, and its three mechanism rows are green**: the day-14 rule (an unmodified `openai` script
