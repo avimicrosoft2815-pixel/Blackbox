@@ -80,7 +80,7 @@ the open-view case exists only on Windows). ruff 0.17.5 and mypy 2.4.1 (`strict 
 | 3-person stranger test | requires humans | Prepared to one command: `docs/onboarding.md` holds the setup line and three tasks; nobody outside this session has run it. |
 | Blinded diagnosis benchmark | requires humans | Prepared: `docs/benchmarks/diagnosis.md` holds the checklist and the capsule set is reproducible with `blackbox recover`. Needs a second and third person. |
 | S17 sparse-control run under `sudo` | requires humans | `tools/s17_control.sh` builds the 2 MiB tmpfs control and prints the signal; no superuser here. |
-| Windows / macOS benchmark rows | not measured | The **test** gates are green there (run `43678447134`); no §15.1 number in this repository comes from a runner, and none will. |
+| Windows / macOS benchmark rows | not measured | The **test** gates are green there (run `43698231222`); no §15.1 number in this repository comes from a runner, and none will. |
 | Real-provider capture (day-14 rule) | not testable here | No provider keys in the environment; the gate is the mock provider, as the plan allows. |
 | Licence decision, release tag, merge to `main` | requires humans | `release.yml` is prepared and **not** triggered; no tag, no `LICENSE`, no licence field. |
 | P10, P12 | blocked (not started by design) | P10 starts only after every v1.0 gate is green; P12 never without instruction. |
@@ -136,9 +136,9 @@ row in the same commit.
 
 ## What is next
 
-0. **`23cdb7b` is green on all ten cells** (`43697556490`), and `846e01a` before it was too (`43697198262`) — the
-   first all-OS green since `c7919f9`, after four commits of Windows red on defect 25 and one on defect 26.
-   `STATE.last_green_commit` is `23cdb7b`.
+0. **`d901811` is green on all ten cells** (`43698231222`), as are `54c3aba` (`43697929744`), `23cdb7b`
+   (`43697556490`) and `846e01a` (`43697198262`) — the first all-OS green since `c7919f9`, after four commits of
+   Windows red on defect 25 and one on defect 26. `STATE.last_green_commit` is `d901811`.
 1. **G-Promise is signed** (`docs/gates/G-Promise.md`, verdict pass, self-signed — see §Labelled) and `STATE.json`
    carries `gates["G-Promise"] = "pass"`.
 2. **G-Capture is open, and its two mechanism rows are now green**: the day-14 rule (an unmodified `openai` script
