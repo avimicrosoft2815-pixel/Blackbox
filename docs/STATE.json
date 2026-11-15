@@ -7,8 +7,8 @@
   ],
   "next_ticket": "P3B-09",
   "next_note": "L3: the hook path is real and now covers two tools — `blackbox ingest` writes one atomic inbox file, the fold maps ten Claude Code events and twelve Codex events into frames, both adapters install/remove byte-identically (P3B-05, P3B-06/D-041). Codex's settings schema could not be verified here, so the adapter is labelled unverified in the product surface, not only in prose. Cold start measured here at p50 32.0 ms / p95 40.2 ms end to end; the bench-box row is still owed (P3B-07). Suite 820. Next: P3B-09 (docs/attach.md), then P3B-08 (the proxy bench).",
-  "last_green_commit": "9a29ad1",
-  "last_green_commit_note": "run 43762164945 (and 43761993947), ten jobs ten success — this branch's own run, which is the first commit here to carry the hook path *and* the launcher's fold. 9145a22 (43761530464) was ten of ten before it. The six commits above that point (44eb786…18d6008) are PR #11's, cherry-picked from main 1390c9b; they ran green on their own branch too (897803f / 43751123140, 4b49f9c / 43751657114).",
+  "last_green_commit": "2946000",
+  "last_green_commit_note": "run 43765148998 on 2946000, ten jobs ten success — the first commit on this branch to carry the Codex adapter and the labelled-unverified surface (D-041). 3dedbd4 is the merge of PR #12 on main and ran ten of ten as 43763381784; 9a29ad1 (43762632684) was ten of ten on the previous branch before the merge.",
   "gates": {
     "G-A": "pass",
     "G-Promise": "pass",
