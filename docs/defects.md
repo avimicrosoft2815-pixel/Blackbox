@@ -165,3 +165,9 @@ plan's §10 shape, and it is append-only.
   request and summary frames declare the mode, and `recovery` reads the byte count from a payload header so an
   interrupted call still reports how much arrived. Three suites depend on the body being on the tape and now ask for
   `content="full"` explicitly rather than relying on a default that was not what it said.
+- **defect 32 — `Expect: 100-continue` answered after the body was read.** The proxy read the request body first and
+  wrote `HTTP/1.1 100 Continue` afterwards. A client that honours the header sends nothing until it sees the interim
+  response, so the two waited on each other: the test that speaks raw bytes to the proxy hung on the first `recv`.
+  Fixed by moving the interim response before `_read_body`, which is the only order that cannot deadlock;
+  `test_expect_100_continue_is_answered_before_the_body_is_read` is the test that would have caught it, written before
+  the fix because the plan names `Expect: 100-continue` in P3B-01's acceptance.

@@ -27,8 +27,10 @@ loopback mock provider and capture seams A (client hooks over `httpx` **and** `h
 with the ordered preflight are real and tested, as is seam C (SDK method patches, against the real `openai` 3.51.0 and
 `anthropic` 2.8.0), the tape sink that turns seam events into `MODEL_CHUNK` frames, and the day-14 rule: an unmodified
 `openai` script killed with `SIGKILL` mid-stream is recovered with chunk and byte counts that never exceed what the
-provider pushed. The proxy, the launcher integration, the viewer and the diagnosis workflow are not built yet.**
-Suite: **Total: 649 tests** — 648 pass here and 1 is skipped on POSIX by name
+provider pushed. The proxy's **core and routing** are real and tested (P3B-01/P3B-02: loopback listener, byte-exact
+passthrough, the route table as the egress allowlist); the launcher integration, the hooks, the viewer and the
+diagnosis workflow are not built yet.**
+Suite: **Total: 675 tests** — 674 pass here and 1 is skipped on POSIX by name
 (`test_an_open_view_blocks_the_unlink_only_on_windows`: POSIX permits unlinking a file another fd still holds, so
 the open-view case exists only on Windows). ruff 0.17.5 and mypy 2.4.1 (`strict = true`, nothing disabled):
 0 findings.
@@ -37,6 +39,8 @@ the open-view case exists only on Windows). ruff 0.17.5 and mypy 2.4.1 (`strict 
 
 | Gate or budget row | Plan ref | Evidence (test path, results JSON, or CI run URL) |
 |---|---|---|
+| **P3B-01** the proxy core: loopback in, the provider out, a tee onto the tape | §13, P3B-01 | `src/blackbox/proxy/server.py`, `tests/test_proxy_server.py` (12): an origin and the proxy share one background loop and the test body speaks HTTP to it **synchronously**, so nothing passes because two coroutines agreed; a POST arrives with its body and the upstream sees the routed path and its own `Host`; an SSE response is **sha256-identical** to what the origin pushed and is still relayed as `Transfer-Encoding: chunked`; hop-by-hop headers are not forwarded in either direction and an `x-blackbox-*` header from upstream never reaches the client; an unknown route is `502` + `x-blackbox-error: upstream-not-allowed` with the caller's input **not** echoed back; a dead route is `504 upstream-unreachable` and the listener survives it; `Expect: 100-continue` is answered **before** the body is read; two requests share one keep-alive connection; a client that hangs up mid-stream leaves the proxy serving; behind a real `TapeWriter` + `TapeSink` (`coalesce_bytes=1`) the scan finds one `MODEL_REQUEST`, one `MODEL_RESPONSE` and chunks whose concatenation hashes to the body; and a recorder that raises on every hook changes nothing the client receives (stat `record_errors` rises) |
+| **P3B-02** routing: the table is the allowlist | P3B-02 | `src/blackbox/proxy/routes.py`, `tests/test_proxy_routes.py` (10) + `tests/test_no_egress.py::test_the_proxy_can_only_reach_its_configured_upstreams`: the single default route takes what no prefix claims; the **longest** prefix wins, is stripped, and the base path is kept (`/local/v1/models` → `/v1/v1/models` against `http://127.0.0.1:8000/v1`); the bare prefix is the base path; the `x-blackbox-upstream` header names a route and an unknown name is `BBX-E140`, never a fallback; no default + no match is an error; a non-loopback bind is `BBX-E143` unless `bind_unsafe` is said out loud; destinations are a closed set (`{("api.openai.com", 443), ("127.0.0.1", 8000)}` in the test); a route can be made to skip verification and `verify_all()` moves only towards verification; `proxy/` is the second declared network exception (`asyncio`, `ssl`, `socket`, and `urllib.parse` **only** — `urllib.request` stays banned), and the single `open_connection` call site is handed `route.destination` by an AST assertion |
 | Canonical CBOR; decoder hardening | §8.4, P1-03 | `tests/test_codec.py`, `bench/fuzz_cbor.py` → `bench/results/2026-11-14-fuzz-cbor.json`: 100 000 buffers, 0 non-`CBORError` |
 | One checksum (CRC-32/ISO-HDLC), conformance vectors | §8.3, DV-005 | `tests/test_conformance.py`, `tests/conformance/vectors/crc32.json` check value `0xCBF43926` |
 | Frame layout, CRC scope, head two-slot publish + rebuild | §8.3, §8.5 | `tests/test_frame.py`, `tests/test_head_creation.py` |

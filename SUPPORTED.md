@@ -119,3 +119,35 @@ D-020 through D-022 are recorded in `docs/DECISIONS.md`: the capture layer's dec
 and the manifest; the decision object and its `as_dict()` exist and are tested
 (`tests/test_preflight.py::test_the_decision_survives_being_written_to_a_manifest`), but nothing writes a `run.json`
 until P3-06 lands the sink, so that half of the Done-when is **pending**, not done.
+
+## The proxy (P3B-01/P3B-02)
+
+`blackbox` can sit between an application and a provider, so an SDK written in any language can be recorded without a
+code change — point its base-URL variable at the proxy. **The launcher integration that does that for you (P3B-03) is
+not built yet**; the core and the routing are.
+
+```python
+from blackbox.proxy.routes import Route, Routes
+from blackbox.proxy.server import ProxyServer
+# one default upstream; the table is the egress allowlist
+routes = Routes([Route(name="openai", base="https://api.openai.com")], default="openai")
+```
+
+* **Listens on loopback only** (`127.0.0.1`, `::1`, `localhost`). A non-loopback bind raises `BBX-E143` unless
+  `bind_unsafe=True` is said out loud.
+* **Routing order**, and nothing else: the `x-blackbox-upstream` header names a route (an unknown name is
+  `BBX-E140`, never a fallback) → the longest path prefix wins and is stripped (`/openai/v1/…` → `…/v1/…`) → the single
+  default route → otherwise `502 upstream-not-allowed`.
+* **The configured upstreams are the allowlist.** A request can only leave for a host in the table; redirects are not
+  followed. `tests/test_no_egress.py` asserts the shape (one outbound call site, handed `route.destination`) and the
+  destination set.
+* **Passthrough is byte-exact**: what a client receives from a streamed response is sha256-identical to what the
+  upstream sent, and is relayed still chunked. `Expect: 100-continue`, keep-alive, hop-by-hop headers and
+  `x-blackbox-*` stripping are handled; upstream failures are `502`/`504` with `x-blackbox-error`.
+* **Recording is a tap, and the tap can fail**: a sink that raises costs frames, never a request
+  (`stats.record_errors` counts them).
+* **TLS**: `ssl.create_default_context()` upstream; a route built with `verify_tls=False` (the plan's
+  `--insecure-upstream`) is the only way to skip verification, and `Routes.verify_all()` undoes it.
+* **Not built yet**: `blackbox run` starting the proxy and exporting `OPENAI_BASE_URL`/`ANTHROPIC_BASE_URL`
+  (P3B-03), the bench of §15.1's proxy rows and the kill/disconnect classes (P3B-08), the header links (P3B-04) and
+  the hook adapters (P3B-05/06).

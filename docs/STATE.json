@@ -6,7 +6,7 @@
     "bench/results/*.json"
   ],
   "next_ticket": "P3-11",
-  "next_note": "P3-11 is nearly closed: redaction before persistence (139 tests), content modes (9), the keyed pseudonym (13, D-031/DV-014, defect 31 for the CI-only race and the two Windows-mode assumptions) and the five §15.1 capture rows. What is left is mask offsets, which belong with the viewer. Next: verify 9fe6d72+ on CI, then L3 (P3B-01 proxy core). origin/main is still 31241d6; the nightly clock has not started.",
+  "next_note": "L3 has started: P3B-01 (proxy/server.py) and P3B-02 (proxy/routes.py) are built and tested — 22 new tests, the route table is the egress allowlist (D-032), and the tee lands MODEL_REQUEST/CHUNK/RESPONSE on a real tape. Next: P3B-03 (blackbox run starts the proxy, exports base URLs only when unset, supervises the thread), then P3B-08 (the proxy bench and the kill/disconnect classes). origin/main is e8c3f6f (PR #2 merged), so the nightly clock has started.",
   "last_green_commit": "d43b208",
   "last_green_commit_note": "run 43706220024, ten jobs ten success — the fix for defect 31 verified on Windows, macOS and Linux. 705fc59 (43705488648) and 9fe6d72 (43705818997) are red and stay red: seven cells failed on the key-file race and two POSIX-only assertions. Before the red pair, 4f42397 (43705007628), 4ce0f7c (43704041733), 07e5c29 (43703761892) and ce1439b (43701652852) were ten of ten (C40: no commit borrows another run's verdict)",
   "gates": {
