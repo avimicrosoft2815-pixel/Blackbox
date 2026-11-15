@@ -1,6 +1,6 @@
 # STATUS — BlackBox v1.0 build
 
-**Branch** `arena/e10fc603-blackbox` · **base** `30c9433` · **HEAD** `8d77587`+ (pushed after every ticket)
+**Branch** `arena/e10fc603-blackbox` · **base** `30c9433` · **HEAD** `8e2256e`+ (pushed after every ticket)
 **trunk: mergeable** — every C12 check passes from a clean clone and the README says what exists.
 **product: pre-alpha — storage and recovery layer only; no SDK, proxy or viewer yet.**
 
@@ -159,7 +159,7 @@ to `P2-11`** (`blackbox run`), not P5 — corrected here and in `DECISIONS.md`.
 | docs + `bench/results/*.json` committed | yes |
 | no absolute sandbox paths | grep over `bench/results/` = 0 |
 | forbidden words, tree + commit messages | green |
-| **C7 CI** | **ran; eight of nine cells green.** Run `43656191825`: **docs, ubuntu × 3 and macOS × 3 green**; **Windows × 3 red**, and now *named* — C27's follow-up turns every failure into a `::error::` annotation, so `gh run view` lists the eight failing test ids without a log or a login. Run `43657997367`: **all ten cells green** (ubuntu × 3, macOS × 3, Windows × 3, docs) after C29's `O_BINARY` fix. Earlier run `43656494686` had named **nine** Windows failures and surfaces the smoking gun: **`BBX-E224: sealed segment does not match its footer`** — a header CRC and a seal body that do not match the bytes the writer just wrote, on the path that now goes through `platform.windows.pwrite` (`lseek` + `os.write`). `docs/compatibility.md` lists the nine ids, the two candidate causes (a buffered `open("wb")` left on the header/seal path, or a caller still doing a single `os.read` and getting a short read) and the one id that is only a POSIX-only assertion (`st_blocks`). That is the next ticket. |
+| **C7 CI** | **ran; eight of nine cells green.** Run `43656191825`: **docs, ubuntu × 3 and macOS × 3 green**; **Windows × 3 red**, and now *named* — C27's follow-up turns every failure into a `::error::` annotation, so `gh run view` lists the eight failing test ids without a log or a login. Run `43657997367`: **all ten cells green** (ubuntu × 3, macOS × 3, Windows × 3, docs) after C29's `O_BINARY` fix; run `43659827155` (commit `8e2256e`) repeats it with the blob store, the retention randomizer, the 24 kill-resume trials and the capsule v0 in the tree. Earlier run `43656494686` had named **nine** Windows failures and surfaces the smoking gun: **`BBX-E224: sealed segment does not match its footer`** — a header CRC and a seal body that do not match the bytes the writer just wrote, on the path that now goes through `platform.windows.pwrite` (`lseek` + `os.write`). `docs/compatibility.md` lists the nine ids, the two candidate causes (a buffered `open("wb")` left on the header/seal path, or a caller still doing a single `os.read` and getting a short read) and the one id that is only a POSIX-only assertion (`st_blocks`). That is the next ticket. |
 
 ## 7. Not done — and why that is the honest state
 

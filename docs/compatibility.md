@@ -45,30 +45,31 @@ Not yet applicable — no capture layer exists (phase P3). The declared matrix l
 Cell values are the **test** verdict only. No benchmark number in this repository comes from a CI runner: those
 rows stay `smoke only` on a runner and `not measured` for an OS that has not run the benchmark.
 
-Last update: run [`43657997367`](https://github.com/avimicrosoft2815-pixel/Blackbox/actions/runs/43657997367)
-(commit `0d7d9a9`-era) — **all ten cells green**, read with `gh run view`.
+Last update: run [`43659827155`](https://github.com/avimicrosoft2815-pixel/Blackbox/actions/runs/43659827155)
+(commit `8e2256e`) — **all ten cells green**, read with `gh run view`. This is the run that first carries the blob
+store, the retention randomizer, the recovery machine (24 real kill-resume trials) and the capsule v0.
 
 | OS | 3.11 | 3.12 | 3.13 | Evidence |
 |---|---|---|---|---|
-| ubuntu-latest (Linux 6.x, x86-64) | **green** | **green** | **green** | `gh run view 43657997367` |
+| ubuntu-latest (Linux 6.x, x86-64) | **green** | **green** | **green** | `gh run view 43659827155` |
 | macos-latest (arm64 runner) | **green** | **green** | **green** | same run |
-| windows-latest | **green** | **green** | **green** | same run — after C29 (`O_BINARY` on every descriptor) and C26 (the lease through the dispatch) |
+| windows-latest | **green** | **green** | **green** | same run — `os.replace` over an existing blob, `O_EXCL` tmp files, the sharing-violation retry and a second recoverer process all ran there |
 | docs job | green | — | — | same run |
 
 Cumulative effect on the OS gates, now that the cells are real:
 
 | Gate | State | Evidence |
 |---|---|---|
-| `P2-03` Windows | **ticked** — the shim's `OpenProcess`+`GetProcessTimes` start token, `winreg` `BootId`, `lseek`-based positional I/O and zero-fill preallocation all ran in the Windows cell, and the lease tests ran there **through `platform.current()`** | run `43657997367`, windows × 3 |
-| `P2-04` macOS | **ticked** — `sysctl(KERN_PROC_PID)` start token, `kern.boottime`, `F_FULLFSYNC` on the sync path | run `43657997367`, macOS × 3 |
+| `P2-03` Windows | **ticked** — the shim's `OpenProcess`+`GetProcessTimes` start token, `winreg` `BootId`, `lseek`-based positional I/O and zero-fill preallocation all ran in the Windows cell, and the lease tests ran there **through `platform.current()`** | run `43659827155`, windows × 3 |
+| `P2-04` macOS | **ticked** — `sysctl(KERN_PROC_PID)` start token, `kern.boottime`, `F_FULLFSYNC` on the sync path | run `43659827155`, macOS × 3 |
 | Windows/macOS **benchmark** rows | `not measured` — no number in this repository comes from a runner | — |
 | P2-09 nightlies | still `requires time (nightly CI × 7 days)` | clock starts at merge |
 
 Consequences for the gates, stated plainly:
 
-* **P2-03 / P2-04 are NOT ticked.** Their shims exist and their contract tests pass on Linux, but a cell has to
-  be green before an OS gate moves off `not testable in this environment`.
-* Every Linux test gate is `passed (CI, run 43647132716)` **and** passed here.
+* **P2-03 / P2-04 are ticked** (C26's condition was: the cells green **and** the lease tests running there through
+  the dispatch, with the exact test ids named — both hold since run `43657997367`, reconfirmed by `43659827155`).
+* Every Linux test gate is `passed (CI, run 43659827155)` **and** passed here.
 * Benchmark rows: the §15.1 numbers in `docs/STATUS.md` are from this machine only (`requires hardware`), never
   from a runner.
 
