@@ -23,7 +23,7 @@ import asyncio
 import contextlib
 import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from blackbox.proxy.routes import Route, Routes
@@ -45,37 +45,49 @@ START_TIMEOUT = 10.0
 class ExportPlan:
     """What the child sees, and what the proxy is thereby allowed to reach."""
 
-    exports: dict[str, str] = field(default_factory=dict)
+    exports: dict[str, str] = field(default_factory=dict)        # filled by `with_url()`, once the port exists
+    point: dict[str, str] = field(default_factory=dict)          # variable → the route it should be pointed at
     adopted: dict[str, str] = field(default_factory=dict)        # variable → the upstream it already named
     routes: list[Route] = field(default_factory=list)
     default_route: str | None = None
 
+    def with_url(self, proxy_url: str) -> ExportPlan:
+        """Render the exports now that the listener has a port — the second half of a plan made before it did."""
+        rendered = {var: f"{proxy_url.rstrip('/')}/{name}" for var, name in self.point.items()}
+        rendered[ENV_PROXY] = "1"
+        return replace(self, exports=rendered)
+
     def as_dict(self) -> dict[str, Any]:
-        return {"exports": dict(sorted(self.exports.items())), "adopted": dict(sorted(self.adopted.items())),
+        return {"exports": dict(sorted(self.exports.items())), "point": dict(sorted(self.point.items())),
+                "adopted": dict(sorted(self.adopted.items())),
                 "upstreams": [route.name for route in self.routes], "default_route": self.default_route}
 
 
-def plan_exports(env: dict[str, str], proxy_url: str) -> ExportPlan:
-    """Union the child's variables with the proxy's routes, without ever overwriting the child's own value."""
+def plan_exports(env: dict[str, str], proxy_url: str | None = None) -> ExportPlan:
+    """Union the child's variables with the proxy's routes, without ever overwriting the child's own value.
+
+    Called with no `proxy_url` it decides *what to point where* (`plan.point`), which is what the launcher needs
+    before it can start a listener; `plan.with_url(url)` fills in the values afterwards. Called with a URL it does
+    both, which is what the tests and any caller that already has a port want.
+    """
     plan = ExportPlan()
     adopted: list[Route] = []
     for var, name in BASE_URL_VARS:
         value = (env.get(var) or "").strip()
         if value:
             plan.adopted[var] = value
-            host = _host_of(value)
-            if host is not None:
-                adopted.append(Route(name=f"{name}-own", base=value, prefix=f"/{name}", verify_tls=True))
+            if _host_of(value) is not None:
+                adopted.append(Route(name=f"{name}-own", base=value, prefix=f"/{name}"))
         else:
-            plan.exports[var] = f"{proxy_url.rstrip('/')}/{name}"
+            plan.point[var] = name
     plan.routes = adopted
-    plan.exports[ENV_PROXY] = "1"
     # The route a request lands on when nothing else claims it: the first variable that was ours to point, or the
     # first one that was already pointing somewhere. Never invented — if every variable was set, there is no default
     # and `Routes` will refuse to build one (`BBX-E140`), which is the honest outcome.
-    pointed = [name for var, name in BASE_URL_VARS if var in plan.exports]
-    plan.default_route = pointed[0] if pointed else (adopted[0].name if adopted else None)
-    return plan
+    pointed = [name for var, name in BASE_URL_VARS if var in plan.point]
+    plan.default_route = "openai" if "openai" in pointed else (pointed[0] if pointed else
+                                                               (adopted[0].name if adopted else None))
+    return plan.with_url(proxy_url) if proxy_url is not None else replace(plan, exports={})
 
 
 def _host_of(url: str) -> str | None:

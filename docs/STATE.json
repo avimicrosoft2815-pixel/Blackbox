@@ -6,7 +6,7 @@
     "bench/results/*.json"
   ],
   "next_ticket": "P3-11",
-  "next_note": "L3: the proxy core, routes and supervised thread are built (P3B-01/02, P3B-03 first half). Next: P3B-03 second half — `launch()` starts the ProxyThread, applies plan_exports() to the child env, and stops it after the wait; then P3B-08. origin/main is dd92c7b (PR #3 merged).",
+  "next_note": "L3: proxy core, routes, supervised thread and launcher integration are built (P3B-01..03). Next: P3B-08 (the proxy §15.1 rows and the kill/disconnect classes), then P3B-04 header links and P3B-05/06 hooks. origin/main is ec98aa2; this branch starts there.",
   "last_green_commit": "1c3db9d",
   "last_green_commit_note": "run 43710478316, ten jobs ten success. 50d6b37 (43710184175), c869d9e (43707004115) and d43b208 (43706220024) before it, all ten of ten. PRs #2, #3 and #4 merged, so origin/main is past 31241d6 for the first time and the nightly clock has started (C40: every commit names its own run).",
   "gates": {

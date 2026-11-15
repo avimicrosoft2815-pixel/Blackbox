@@ -42,6 +42,10 @@ package-dir = { "" = "src" }
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+# The provider base URLs are data, not code (D-034): `tests/test_no_egress.py` forbids URL literals inside `proxy/`.
+"blackbox.proxy" = ["*.json"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"

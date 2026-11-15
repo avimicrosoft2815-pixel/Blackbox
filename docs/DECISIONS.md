@@ -83,3 +83,19 @@ watchdog's back and asserts service returns **on the same port** inside the 100 
 
 **Consequences.** Supervision is a number (`rebinds`, in milliseconds) rather than a claim; the launcher's second half
 (P3B-03) only has to call `start()` before `Popen` and `stop()` after `wait()`.
+
+## D-034 — the provider base URLs are data in the package, not literals in `proxy/`
+
+*Date: 2026-11-16. Plan refs: §13, P3B-02/P3B-03, P0-08.*
+
+**The problem**: a bare `blackbox run` has to know that `openai` means a particular host, and `tests/test_no_egress.py`
+forbids URL literals in `src/` — including `proxy/`, where loopback is the only scheme allowed to appear. Weakening
+that test to let four provider URLs sit in Python would have been the wrong trade: the test is what stops a fifth one
+appearing somewhere else.
+
+**The decision**: `src/blackbox/proxy/upstreams.json`, loaded by `Routes.provider_defaults()`, with `_comment` keys
+skipped. It is package data (`[tool.setuptools.package-data]`), so an installed wheel has it. Three consequences worth
+writing down: a reviewer reads the destination list without reading Python; a name with no default and no
+`--upstream` override is an **error** rather than a missing route; and a route built from the table is still only
+reachable through the table (P3B-02's allowlist is unchanged — this is where the values come from, not where the
+permission comes from).
