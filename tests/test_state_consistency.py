@@ -28,6 +28,7 @@ sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "tools"))
 
 import bench_smoke
+import git_history
 
 PLAN = ROOT / "docs" / "BLACKBOX_FINAL_ARCHITECTURE_v1.1.md"
 PROGRESS = ROOT / "docs" / "progress.md"
@@ -100,11 +101,11 @@ def test_every_state_ticket_exists_in_the_plan() -> None:
 
 
 def test_last_green_commit_is_an_ancestor_of_head() -> None:
+    """C35: on a depth-1 clone this can only ever see HEAD, so a shallow checkout is a failure, not a skip."""
+    git_history.require_history()
     sha = _state()["last_green_commit"]
     assert re.fullmatch(r"[0-9a-f]{7,40}", sha), sha
-    proc = subprocess.run(["git", "merge-base", "--is-ancestor", sha, "HEAD"], cwd=ROOT,
-                          capture_output=True, text=True)
-    assert proc.returncode == 0, f"last_green_commit {sha} is not an ancestor of HEAD"
+    assert git_history.is_ancestor(sha), f"last_green_commit {sha} is not an ancestor of HEAD"
 
 
 def test_next_ticket_is_a_real_ticket_that_is_not_done() -> None:

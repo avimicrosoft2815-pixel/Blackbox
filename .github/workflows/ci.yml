@@ -13,7 +13,12 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
         python: ["3.11", "3.12", "3.13"]
     steps:
+      # C35: full history. A depth-1 clone has one commit, so `git merge-base --is-ancestor` can only ever see
+      # HEAD, the forbidden-word scan over `git log` sees exactly one message, and the ancestry tests fail for
+      # every sha — which is what turned every run on this branch red while the same tests passed locally.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
@@ -40,7 +45,12 @@ jobs:
   docs:
     runs-on: ubuntu-latest
     steps:
+      # C35: full history. A depth-1 clone has one commit, so `git merge-base --is-ancestor` can only ever see
+      # HEAD, the forbidden-word scan over `git log` sees exactly one message, and the ancestry tests fail for
+      # every sha — which is what turned every run on this branch red while the same tests passed locally.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"

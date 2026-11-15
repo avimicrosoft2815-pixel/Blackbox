@@ -15,6 +15,7 @@ has to name the claims it forbids.
 from __future__ import annotations
 
 import subprocess
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -69,6 +70,13 @@ def test_no_forbidden_word_in_the_tree():
 
 
 def test_no_forbidden_word_in_commit_messages():
+    """C35: on a depth-1 clone this scans exactly one message, so it must prove it can see more than that."""
+    sys.path.insert(0, str(ROOT / "tools"))
+    import git_history
+
+    assert git_history.commit_count() > 1, (
+        "this checkout has one commit, so a `git log` scan would check one message and call it the history: "
+        + git_history.SHALLOW_MESSAGE)
     try:
         log = subprocess.run(["git", "log", "--format=%s%n%b"], cwd=ROOT, capture_output=True,
                              text=True, timeout=30, check=False)
