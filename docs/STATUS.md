@@ -1,9 +1,9 @@
 # BlackBox build status — 2026-11-14 — trunk `af908bc` — gates: **G-Promise pass** (self-signed; see §Labelled), G-Capture, G-Attach, G-Capsule, G-Sec, G-Release not yet opened
 
-**Branch** `arena/a781c68f-blackbox` · **base** `31241d6` · CI for `fdb3875`: run `43680002424`, ten jobs, ten
-`success`. **`af908bc` — the sha this gate was first signed at — has a failed run (`43678767989`, 9/10:
-`py3.13 / windows-latest`); that is C40, fixed here, and the gate is re-signed at `fdb3875`.** The commit this text
-lands in is documentation and tests; its run is the next one.
+**Branch** `arena/a781c68f-blackbox` · **base** `31241d6` · CI for `37d56df`: run `43689197151`, ten jobs, ten
+`success`. Two red runs are named rather than buried: `af908bc` (`43678767989`, 9/10) is C40 — the gate was re-signed
+at `fdb3875` — and `15cb55c` (`43689004423`, 7/10) was three Windows cells failing on a POSIX-only test of mine, now
+defect 19 in `docs/defects.md`. The commit this text lands in is documentation; its run is the next one.
 **product: pre-alpha — storage, recovery, launcher and capsule layer only; no SDK, proxy or viewer yet.**
 Suite: **Total: 353 tests** — 352 pass here and 1 is skipped on POSIX by name
 (`test_an_open_view_blocks_the_unlink_only_on_windows`: POSIX permits unlinking a file another fd still holds, so
@@ -82,9 +82,10 @@ One line per §15.1 row: fs · N · warm-up · p50 / p95 / p99 · raw JSON.
 
 ## Deviations applied (DEVIATIONS.md) and held findings (F#)
 
-The defect list (seed → invariant → cause → fix → test) lives in `docs/defects.md` — eighteen entries, two of them
-added by C40: the Windows group-commit flake and the recovery row's mislabelled denominator (checked against the
-reviewer's hypothesis: the division was right, the sentence and the n=7 sample were not).
+The defect list (seed → invariant → cause → fix → test) lives in `docs/defects.md` — nineteen entries. Three are
+from this turn: C40's Windows group-commit flake, the recovery row's mislabelled denominator (checked against the
+reviewer's hypothesis: the division was right, the sentence and the n=7 sample were not), and a fork-only
+multiprocessing test of mine that reddened three Windows cells in `43689004423`.
 Twelve deviations, all dated and argued in `docs/DEVIATIONS.md`: DV-005 (one checksum, CRC-32), DV-006/007 (S17
 degrades instead of raising, including the first segment), DV-008 (P2-03/P2-04 written with an honest
 `capabilities()`), DV-009/010 (ADR-005 store change; the head is no longer mapped), DV-011 (every OS call through
@@ -114,7 +115,9 @@ row in the same commit.
 4. **C40 is committed** with the counter-signature: the flaky Windows cell no longer depends on wall-clock speed,
    the window row is stated per OS, the gate is re-signed at `fdb3875`, and `STATE.last_green_commit` is `fdb3875`.
 5. **P3-02/P3-03/P3-04 are committed**: decorators, the contextvar node stack, `run`/`step`/`capture`/`mark`/
-   `handled_error`/`freeze`, 50-level nesting, the detached-root rule for threads and the async path. **Next ticket:
-   P3-05a** (seam A, httpx response hooks), then 05b/05c/05d against the mock provider — the day-14 rule needs seams
-   A→B→C before G-Capture can be attempted.
+   `handled_error`/`freeze`, 50-level nesting, the detached-root rule for threads and the async path — and the
+   Windows cells are green on them (`43689197151`). **Next ticket: P3-05a** (seam A, httpx response hooks), then
+   05b/05c/05d against the mock provider — the day-14 rule needs seams A→B→C before G-Capture can be attempted.
+6. The independent reviewer's loop is now the gate loop: a counter-signature at every gate, with the reproduce block
+   in `docs/gates/` and `docs/reviews.md` as the ledger.
 5. The 2 000-trial kill run starts in the background during L5–L8; it is not needed for L2/L3.
