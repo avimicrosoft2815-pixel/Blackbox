@@ -48,7 +48,7 @@ def main(argv: list[str]) -> int:
     # non-zero with no `FAILED` line at all (a crash, a collection error whose summary never printed, a timeout that
     # kills the process). Then the only useful thing left is the tail itself, annotated line by line.
     if proc.returncode != 0 and annotated == 0:
-        for line in [line for line in lines if line.strip()][-10:]:
+        for line in [line for line in lines if line.strip()][-30:]:
             print(f"::error title={title}::{line.strip()[:600]}", flush=True)
     status = "passed" if proc.returncode == 0 else f"**failed** (exit {proc.returncode})"
     block = (f"\n### `{title}` — {status}\n\n"

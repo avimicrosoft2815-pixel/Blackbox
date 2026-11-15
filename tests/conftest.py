@@ -59,7 +59,18 @@ def _fail_a_test_that_overruns(request: pytest.FixtureRequest) -> object:
             return
         # The real file descriptors, not `sys.stdout`: pytest has replaced those with capture objects, and `os._exit`
         # does not let a capture buffer reach the log. This is the one place where the output *must* survive.
-        line = f"FAILED {request.node.nodeid} — ran longer than {TEST_TIMEOUT_S:.0f} s and was stopped\n".encode()
+        # The stack of the *main* thread, compacted: the dump below is complete but long, and the one line that names
+        # the culprit should not depend on how much of the tail survives to the annotation.
+        import traceback
+
+        where = ""
+        main = sys._current_frames().get(threading.main_thread().ident)
+        if main is not None:
+            frames = [frame for frame in traceback.extract_stack(main) if "pytest" not in frame.filename]
+            if frames:
+                tail = frames[-1]
+                where = f" at {tail.filename}:{tail.lineno} in {tail.name}"
+        line = (f"FAILED {request.node.nodeid} — ran longer than {TEST_TIMEOUT_S:.0f} s{where}\n").encode()
         with contextlib.suppress(OSError):
             os.write(_REAL_STDOUT if _REAL_STDOUT is not None else 1, line)
         faulthandler.dump_traceback(file=sys.__stderr__, all_threads=True)
