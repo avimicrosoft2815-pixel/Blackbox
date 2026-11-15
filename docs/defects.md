@@ -105,3 +105,14 @@ plan's §10 shape, and it is append-only.
     → `Receiver.open_call` now takes `model`/`stream`/`partial` as hints, seams pass them at open time, and the
     ordering is asserted by `tests/test_day14_kill.py::test_the_capsule_says_which_seam_captured_it` reading
     `model` back off the tape.
+25. **found by reading the CI annotations, `c7919f9` → `d075a32`, Windows only, 3 cells red** → a cleanup fixture must
+    identify its targets, not interrogate every object the collector knows → `tests/conftest.py`'s Windows teardown
+    called `getattr(obj, "_head", None)` on **every** object in `gc.get_objects()`. `anthropic` keeps its optional
+    dependencies behind `LazyProxy`, whose `__getattr__` calls `__load__()` and raises `MissingDependencyError`; so
+    the fixture raised during teardown and pytest blamed whichever test was running — nine property tests picked up
+    `ERROR … anthropic.lib._extras._common.MissingDependencyError`. It needed both conditions: Windows (the block
+    returns early on POSIX) and `anthropic` in the environment (added to CI by `capture-sdks` in the same commit).
+    → `tests/_hygiene.py` selects by **exact type** (`type(obj) is TapeWriter`), never by attribute, and
+    `tests/test_gc_hygiene.py` proves it against an object that raises on `__getattr__` and `__class__` plus the
+    SDK's real proxy. The annotations came from `tools/ci_summary.py`'s `::error::` lines (C27) — job logs are
+    redirected to a storage host this sandbox cannot reach, the check-run annotations are readable through the API.
