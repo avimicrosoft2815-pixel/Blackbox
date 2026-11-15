@@ -1,9 +1,10 @@
-# BlackBox build status — 2026-11-16 — trunk `ce1439b` — gates: **G-Promise pass** (built and self-reviewed at `af908bc`, independently counter-signed at `fdb3875`; see `docs/gates/G-Promise.md`), G-Capture, G-Attach, G-Capsule, G-Sec, G-Release not yet opened
+# BlackBox build status — 2026-11-16 — trunk `4f42397` — gates: **G-Promise pass** (built and self-reviewed at `af908bc`, independently counter-signed at `fdb3875`; see `docs/gates/G-Promise.md`), G-Capture, G-Attach, G-Capsule, G-Sec, G-Release not yet opened
 
-**Branch** `arena/a781c68f-blackbox` · **base** `31241d6` · CI at `ce1439b`: run `43701652852`, ten jobs, ten
-`success`; before it `47ec45a` (`43701107412`), `da6ef3e` (`43694261034`) and `d901811` (`43698231222`) were also ten
-of ten, and the four before those — `43697929744` at `54c3aba`, `43697556490` at `23cdb7b`, `43697198262` at
-`846e01a` — ended four commits of Windows red on defect 25, with `846e01a` the **first all-OS green since `c7919f9`**.
+**Branch** `arena/a781c68f-blackbox` · **base** `31241d6` · CI at `4f42397`: run `43705007628`, ten jobs, ten
+`success`; before it `4ce0f7c` (`43704041733`), `07e5c29` (`43703761892`) and `ce1439b` (`43701652852`) were also ten
+of ten, and the five before those — `47ec45a` (`43701107412`), `da6ef3e` (`43694261034`), `d901811` (`43698231222`),
+`43697929744` at `54c3aba` — ended four commits of Windows red on defect 25, with `846e01a` (`43697198262`) the
+**first all-OS green since `c7919f9`**.
 This note's own commit is docs-only and its run is pending when it is written, which is what the `STOPPED` line
 reports. The three Windows cells had been red for four commits and the
 cause was mine: the Windows teardown fixture in `tests/conftest.py` called `getattr(obj, "_head", None)` on every
@@ -163,9 +164,9 @@ row in the same commit.
 0b. **The nightly has never succeeded and `main` has not moved**: `origin/main` is at `31241d6`, this branch's base,
    so the scheduled workflow's clock has not started; its one historical run failed because it named files that do not
    exist (defect 28, fixed here). Merge is the owner's.
-0c. **`d901811` is green on all ten cells** (`43698231222`), as are `54c3aba` (`43697929744`), `23cdb7b`
-   (`43697556490`) and `846e01a` (`43697198262`) — the first all-OS green since `c7919f9`, after four commits of
-   Windows red on defect 25 and one on defect 26. `STATE.last_green_commit` is `d901811`.
+0c. **`4f42397` is green on all ten cells** (`43705007628`), as are `4ce0f7c` (`43704041733`), `07e5c29`
+   (`43703761892`) and `ce1439b` (`43701652852`). `STATE.last_green_commit` is `4f42397`; the P3-11d commit after it
+   (`705fc59`) was in flight when this note was written, so it is not called green here.
 1. **G-Promise is signed** (`docs/gates/G-Promise.md`, verdict pass, self-signed — see §Labelled) and `STATE.json`
    carries `gates["G-Promise"] = "pass"`.
 2. **G-Capture is open, and its three mechanism rows are green**: the day-14 rule (an unmodified `openai` script

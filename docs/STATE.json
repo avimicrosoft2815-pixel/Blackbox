@@ -7,8 +7,8 @@
   ],
   "next_ticket": "P3-11",
   "next_note": "P3-11 is nearly closed: redaction before persistence (139 tests), content modes (9), the keyed pseudonym (11, D-031/DV-014) and the five §15.1 capture rows (bench/results/2026-11-15-capture-overhead.json). What is left is mask offsets, which belong with the viewer. Next: G-Capture needs a reviewer signature (not mine to give), so the builder lane moves to L3 (P3B-01). origin/main is still 31241d6; the nightly clock has not started.",
-  "last_green_commit": "ce1439b",
-  "last_green_commit_note": "run 43701652852, ten jobs ten success (47ec45a 43701107412 before it, da6ef3e 43694261034, d901811 43698231222). The tree at this commit is the one the redaction work was built on; the commit that carries the redaction itself is verified by its own run, not by this one",
+  "last_green_commit": "4f42397",
+  "last_green_commit_note": "run 43705007628, ten jobs ten success (4ce0f7c 43704041733, 07e5c29 43703761892, ce1439b 43701652852 before it, all ten of ten). The commits after it — 705fc59 and this docs note — are not called green on the strength of it (C40); each names its own run when it has one",
   "gates": {
     "G-A": "pass",
     "G-Promise": "pass",
