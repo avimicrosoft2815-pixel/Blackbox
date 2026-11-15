@@ -6,7 +6,7 @@
     "bench/results/*.json"
   ],
   "next_ticket": "P3-11",
-  "next_note": "P3-11 redaction is built and green on the branch: 60 synthetic secrets of 10 kinds, every split offset of every one, 20 random chunkings, a byte-at-a-time stream, and a real tape grepped afterwards (139 tests); the default policy redacts without being asked, holds only unfinished credentials so a SIGKILL costs the last unfinished token rather than the last 4 KiB, and fails closed with [REDACTION_FAILED]. Named as not built: the keyed HMAC (DV-013), mask offsets, the patterns split — P3-11 stays wip. Next ticket is P3-11's remainder: the anthropic zero-code-change child first (it is the gate row), then the four unmeasured §15.1 capture rows, then the keyed hash and mask offsets (P3-11c), then a reviewer signature on G-Capture. Nightly still has zero successful runs and cannot start until merge; origin/main is at 31241d6.",
+  "next_note": "P3-11 redaction is built and green (139 tests); the zero-code-change row now covers both SDKs (openai 3.51.0 and anthropic 2.8.0, unmodified scripts killed mid-stream, same seam, counts never above the mock provider's own tally). Next: the four unmeasured §15.1 capture rows, then P3-11's remainder (keyed hash, mask offsets — DV-013), then a reviewer signature on G-Capture. Named as not built: keyed HMAC, mask offsets, the patterns split; P3-11 stays wip. Nightly still has zero successful runs and cannot start until merge; origin/main is at 31241d6.",
   "last_green_commit": "ce1439b",
   "last_green_commit_note": "run 43701652852, ten jobs ten success (47ec45a 43701107412 before it, da6ef3e 43694261034, d901811 43698231222). The tree at this commit is the one the redaction work was built on; the commit that carries the redaction itself is verified by its own run, not by this one",
   "gates": {
@@ -318,6 +318,15 @@
       "commit": "—",
       "tests": "—",
       "note": "DV-013 records that the built `hash` mode is an unkeyed sha256[:8] prefix and that mask offsets are absent; neither is claimed by the P3-11 row, which stays wip until they exist",
+      "label": "self"
+    },
+    {
+      "id": "P3-11b",
+      "name": "the zero-code-change row for anthropic (the openai half landed with the day-14 rule)",
+      "status": "done",
+      "commit": "HEAD",
+      "tests": "tests/test_day14_kill.py (6), tests/_day14_child_anthropic.py",
+      "note": "unmodified anthropic 2.8.0 script killed mid-stream: recovered as INTERRUPTED_MID_STREAM with counts never above the mock provider's own tally; the control records path /v1/messages and bytes equal to the concatenated chunk payloads; both SDKs take the same seam in the same run",
       "label": "self"
     }
   ]
