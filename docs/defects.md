@@ -77,3 +77,11 @@ plan's §10 shape, and it is append-only.
     honest reading of `99a5164 · success` is that the run was lucky, not that the tree changed. This is
     the third timing test of mine to be wrong in the same direction (C40 was the second); the rule that comes out of
     it is in the test's own docstring: assert an effect, not a schedule.
+
+22. **`5e7feb8` was pushed red, by me, in this session** → a green gate has to be an exit code, not the last lines of
+    output → `PYTHONPATH=src pytest tests -q 2>&1 | tail -2 && git commit …` reports **`tail`'s** exit status, so the
+    `&&` ran on a failing suite and `5e7feb8` went to trunk with `test_status_doc` failing (the suite grew by two
+    tests and STATUS still said 397). Nothing was wrong with the code; the process was, and every previous commit in
+    this session had the same shape and was only green because the suite happened to pass → the count is now 399,
+    `tests/test_status_doc.py` is the test that caught it, and the rule is `set -o pipefail` before any command whose
+    exit code is used to decide a commit — or, better, no pipe at all.

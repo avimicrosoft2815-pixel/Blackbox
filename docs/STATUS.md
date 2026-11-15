@@ -15,7 +15,7 @@ cells, fixed at `d5e1bb6` (defect 19).
 loopback mock provider and capture seams A (httpx response hooks) and B (transport byte tee) with the ordered
 preflight are real and tested; seam C (SDK method patches), the tape sink that turns seam events into frames, the
 proxy, the launcher integration, the viewer and the diagnosis workflow are not built yet.**
-Suite: **Total: 397 tests** — 396 pass here and 1 is skipped on POSIX by name
+Suite: **Total: 399 tests** — 398 pass here and 1 is skipped on POSIX by name
 (`test_an_open_view_blocks_the_unlink_only_on_windows`: POSIX permits unlinking a file another fd still holds, so
 the open-view case exists only on Windows). ruff 0.17.5 and mypy 2.4.1 (`strict = true`, nothing disabled):
 0 findings.
