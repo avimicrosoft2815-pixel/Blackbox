@@ -147,7 +147,7 @@ to `P2-11`** (`blackbox run`), not P5 — corrected here and in `DECISIONS.md`.
 | docs + `bench/results/*.json` committed | yes |
 | no absolute sandbox paths | grep over `bench/results/` = 0 |
 | forbidden words, tree + commit messages | green |
-| **C7 CI** | **ran; eight of nine cells green.** Run `43656191825`: **docs, ubuntu × 3 and macOS × 3 green**; **Windows × 3 red**, and now *named* — C27's follow-up turns every failure into a `::error::` annotation, so `gh run view` lists the eight failing test ids without a log or a login. Run `43656494686` (after the harness stopped swallowing the child's traceback) names **nine** Windows failures and surfaces the smoking gun: **`BBX-E224: sealed segment does not match its footer`** — a header CRC and a seal body that do not match the bytes the writer just wrote, on the path that now goes through `platform.windows.pwrite` (`lseek` + `os.write`). `docs/compatibility.md` lists the nine ids, the two candidate causes (a buffered `open("wb")` left on the header/seal path, or a caller still doing a single `os.read` and getting a short read) and the one id that is only a POSIX-only assertion (`st_blocks`). That is the next ticket. |
+| **C7 CI** | **ran; eight of nine cells green.** Run `43656191825`: **docs, ubuntu × 3 and macOS × 3 green**; **Windows × 3 red**, and now *named* — C27's follow-up turns every failure into a `::error::` annotation, so `gh run view` lists the eight failing test ids without a log or a login. Run `43657997367`: **all ten cells green** (ubuntu × 3, macOS × 3, Windows × 3, docs) after C29's `O_BINARY` fix. Earlier run `43656494686` had named **nine** Windows failures and surfaces the smoking gun: **`BBX-E224: sealed segment does not match its footer`** — a header CRC and a seal body that do not match the bytes the writer just wrote, on the path that now goes through `platform.windows.pwrite` (`lseek` + `os.write`). `docs/compatibility.md` lists the nine ids, the two candidate causes (a buffered `open("wb")` left on the header/seal path, or a caller still doing a single `os.read` and getting a short read) and the one id that is only a POSIX-only assertion (`st_blocks`). That is the next ticket. |
 
 ## 7. Not done — and why that is the honest state
 
@@ -158,12 +158,12 @@ to `P2-11`** (`blackbox run`), not P5 — corrected here and in `DECISIONS.md`.
 | `P1-14` / `P1-15` `store/blobs.py` | **pending** | blob write/read, compression queue |
 | `P1-16` small-model state machine | **pending** | the kill matrix covers the same invariants empirically, but it is not the model |
 | `P1-02b` mypy `type-arg` + `no-untyped-def` | **pending, closes before G-Promise** | 75 strict findings in the two disabled categories |
-| `P2-03` / `P2-04` OS gates | **written, `not testable in this environment`** | Windows `OpenProcess`+`GetProcessTimes` through `ctypes` (fake-`kernel32` test on Linux), macOS `F_FULLFSYNC` issued when available; the cells themselves have never run |
+| `P2-03` / `P2-04` OS gates | **ticked — CI, run `43657997367`** | all ten cells green: Windows ran `OpenProcess`+`GetProcessTimes`, `winreg` `BootId`, `lseek`-based positional I/O and zero-fill preallocation, and the lease tests through `platform.current()`; macOS ran `sysctl(KERN_PROC_PID)`, `kern.boottime` and `F_FULLFSYNC`. Benchmark rows stay `not measured` for those OSes |
 | `P2-06` / `P2-07` / `P2-10`…`P2-13` | **pending** | see `docs/progress.md` |
 | P2-09 week of nightlies | **requires time (nightly CI × 7 days)** | GitHub `schedule` runs only on the default branch; the clock starts at merge |
 | P11-05, P11-12 | **requires humans** | a human operator and a real incident |
 | S17 sparse control (C20) | **requires humans (root on any Linux box, two minutes)** | `tools/s17_control.sh` builds the 2 MiB tmpfs control and prints the signal; it cannot be run here (no superuser) |
-| Windows/macOS rows of the OS gates | **CI cells red — cause not yet named** | `docs/compatibility.md` lists them per cell with the run URL; the job logs are outside this sandbox's egress. C22's two known causes are fixed (the hard-coded `tested_here`, and `os.pwrite`/`os.pread` on Windows, both now behind the platform layer) and a second layer remains |
+| Windows/macOS **benchmark** rows | `not measured` | the test gates are green (run `43657997367`); no §15.1 number in this repository comes from a runner, and none will |
 | P10, P12 | **not started** | P10 only after every v1.0 gate is green; P12 never without instruction |
 
 ## 8. Next, in order

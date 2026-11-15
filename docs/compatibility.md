@@ -45,16 +45,24 @@ Not yet applicable — no capture layer exists (phase P3). The declared matrix l
 Cell values are the **test** verdict only. No benchmark number in this repository comes from a CI runner: those
 rows stay `smoke only` on a runner and `not measured` for an OS that has not run the benchmark.
 
-Last update: run [`43656191825`](https://github.com/avimicrosoft2815-pixel/Blackbox/actions/runs/43656191825)
-(commit `9960fc5`-era). Since C27's follow-up every failing test is emitted as a `::error::` annotation, so
-`gh run view <id>` prints **which tests failed** — no job log, no login, no guessing.
+Last update: run [`43657997367`](https://github.com/avimicrosoft2815-pixel/Blackbox/actions/runs/43657997367)
+(commit `0d7d9a9`-era) — **all ten cells green**, read with `gh run view`.
 
 | OS | 3.11 | 3.12 | 3.13 | Evidence |
 |---|---|---|---|---|
-| ubuntu-latest (Linux 6.x, x86-64) | **green** | **green** | **green** | `gh run view 43647132716` — three cells completed successfully |
-| macOS (arm64 runner) | **green** | **green** | **green** | `gh run view 43656191825` — all three cells completed successfully (C25/C26/C28 fixed this) |
-| windows-latest | **red** | **red** | **red** | exit 1 in ~30 s; **the failing tests are named by the annotations**, see below |
-| docs job | green | — | — | `ci.yml` docs job, `tests/test_docs_links.py` |
+| ubuntu-latest (Linux 6.x, x86-64) | **green** | **green** | **green** | `gh run view 43657997367` |
+| macos-latest (arm64 runner) | **green** | **green** | **green** | same run |
+| windows-latest | **green** | **green** | **green** | same run — after C29 (`O_BINARY` on every descriptor) and C26 (the lease through the dispatch) |
+| docs job | green | — | — | same run |
+
+Cumulative effect on the OS gates, now that the cells are real:
+
+| Gate | State | Evidence |
+|---|---|---|
+| `P2-03` Windows | **ticked** — the shim's `OpenProcess`+`GetProcessTimes` start token, `winreg` `BootId`, `lseek`-based positional I/O and zero-fill preallocation all ran in the Windows cell, and the lease tests ran there **through `platform.current()`** | run `43657997367`, windows × 3 |
+| `P2-04` macOS | **ticked** — `sysctl(KERN_PROC_PID)` start token, `kern.boottime`, `F_FULLFSYNC` on the sync path | run `43657997367`, macOS × 3 |
+| Windows/macOS **benchmark** rows | `not measured` — no number in this repository comes from a runner | — |
+| P2-09 nightlies | still `requires time (nightly CI × 7 days)` | clock starts at merge |
 
 Consequences for the gates, stated plainly:
 
