@@ -59,3 +59,9 @@ plan's §10 shape, and it is append-only.
     builder's machine and blocks the gate exactly on the cells that matter — and `6d52088` shows why a docs-only
     commit still has to be read for its CI verdict: it inherited the failure and would have been recorded as green
     by anyone who trusted "it only touched markdown".
+
+20. **found by writing `SUPPORTED.md`** → both seams implemented the async path (`AsyncClient` hooks, the async
+    tee) but **no test exercises it**: no async HTTP harness is installed here, so an async client is a claim, not
+    evidence → recorded in `SUPPORTED.md` as a gap in that word rather than left to read as verified → the fix is a
+    test, so this entry stays open until `tests/test_seam_async.py` exists and runs (P3-14 / the `anyio` decision,
+    whichever lands first). Until then `SUPPORTED.md`'s async row says so, and no gate may cite the async path.
