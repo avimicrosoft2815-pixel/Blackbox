@@ -23,8 +23,9 @@ Modes, because "redact" is not one policy:
 
 * `full` (the default) — `[REDACTED:openai]`.
 * `hash` — `[REDACTED:openai:a1b2c3d4]`: a stable pseudonym, so two appearances of the same key can be correlated
-  without the key being recoverable. A keyed digest would be stronger; a bare sha256 of a secret is brute-forceable
-  for short secrets, which is why the placeholder says which one it is and the docs say what it means.
+  without the key being recoverable. The digest is **HMAC-SHA256 under the per-machine key** (`blackbox.keys`), because
+  a bare sha256 of a short secret is brute-forceable — and when the key cannot be had, the placeholder is unkeyed and
+  the summary says `"keyed": false` instead of implying a key that was never used (DV-013).
 * `off` — no redaction, on purpose, for a run whose content is already synthetic. It is a decision a user makes
   explicitly, and it is recorded in the capsule as such.
 
@@ -39,9 +40,12 @@ next one is.
 from __future__ import annotations
 
 import hashlib
+import hmac
 import os
 import re
 from typing import Any
+
+from blackbox.patterns import PATTERNS, PENDING
 
 # The hard ceiling on what may be held back, whatever the reason. Larger than any credential in the corpus, so a
 # secret cannot be split by the release point; a secret longer than this can still be split, and `SUPPORTED.md` says
@@ -61,42 +65,6 @@ MODES = ("full", "hash", "off")
 ENV_MODE = "BLACKBOX_REDACTION"
 ENV_KINDS = "BLACKBOX_REDACTION_KINDS"
 
-# The *beginnings* of each kind: what a credential looks like while it is still arriving. Each one may end in a
-# partial body, which is the point — a hold that only recognises finished credentials is a hold that releases
-# `sk-ant-api03-` on one read and leaks the rest on the next. They mirror `PATTERNS` one for one; a new pattern
-# without a matching entry here is a split the corpus test will find.
-PENDING: tuple[tuple[str, bytes], ...] = (
-    # From the `BEGIN` line to now, unless a *complete* closing line has arrived: the hold stops only at
-    # `-----END … PRIVATE KEY-----`, so a half-arrived `-----END` keeps the whole block held rather than releasing the
-    # body and then failing to recognise what is left of it.
-    ("private_key", rb"-----BEGIN(?:(?!--END [A-Z ]*PRIVATE KEY-----)[\s\S])*\Z"),
-    ("anthropic", rb"sk-ant-[A-Za-z0-9_\-]*\Z"),
-    ("openai", rb"sk-[A-Za-z0-9_\-]*\Z"),
-    ("aws", rb"(?:AKIA|ASIA)[0-9A-Z]*\Z"),
-    ("github", rb"gh[pousr]_[A-Za-z0-9]*\Z"),
-    ("slack", rb"xox[baprs]-[A-Za-z0-9\-]*\Z"),
-    ("jwt", rb"eyJ[A-Za-z0-9_\-]*(?:\.[A-Za-z0-9_\-]*){0,2}\Z"),
-    ("bearer", rb"bearer\s*[A-Za-z0-9._\-]*\Z"),
-    ("assignment", rb"(?:api[_-]?key|secret|token|password|passwd|access[_-]?key)\"?\s*"
-                   rb"(?:[:=]\s*\"?[A-Za-z0-9._\-+/=]*)?\Z"),
-    ("email", rb"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]*\Z"),
-)
-
-# Order matters: `sk-ant-` before `sk-`, and the private-key block before the generic assignment rule, or a shorter
-# pattern would claim the text first and leave the rest of the longer secret in place.
-PATTERNS: tuple[tuple[str, bytes], ...] = (
-    ("private_key", rb"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]{0,8192}?-----END [A-Z ]*PRIVATE KEY-----"),
-    ("anthropic", rb"sk-ant-[A-Za-z0-9_\-]{16,}"),
-    ("openai", rb"sk-[A-Za-z0-9_\-]{16,}"),
-    ("aws", rb"(?:AKIA|ASIA)[0-9A-Z]{16}"),
-    ("github", rb"gh[pousr]_[A-Za-z0-9]{16,}"),
-    ("slack", rb"xox[baprs]-[A-Za-z0-9\-]{10,}"),
-    ("jwt", rb"eyJ[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}"),
-    ("bearer", rb"bearer\s+[A-Za-z0-9._\-]{16,}"),
-    ("assignment", rb"(?:api[_-]?key|secret|token|password|passwd|access[_-]?key)\"?\s*[:=]\s*\"?"
-                   rb"[A-Za-z0-9._\-+/=]{12,}"),
-    ("email", rb"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}"),
-)
 
 _COMPILED = tuple((kind, re.compile(pattern)) for kind, pattern in PATTERNS)
 _PENDING = tuple((kind, re.compile(pattern)) for kind, pattern in PENDING)
@@ -190,12 +158,33 @@ class Redactor:
     """Feed it chunks; it returns the bytes that are safe to persist. `flush()` ends the stream."""
 
     def __init__(self, mode: str = "full", *, window: int = WINDOW,
-                 kinds: tuple[str, ...] | None = None) -> None:
+                 kinds: tuple[str, ...] | None = None, key: bytes | None = None,
+                 key_path: str | None = None) -> None:
         if mode not in MODES:
             raise ValueError(f"unknown redaction mode {mode!r}; expected one of {MODES}")
         self.mode = mode
         self.window = window
         self.kinds = kinds or tuple(kind for kind, _ in PATTERNS)
+        # The key is loaded only when a pseudonym is actually going to be written, and its absence is recorded rather
+        # than papered over: `keyed: false` in the summary is the difference between "correlation without plaintext"
+        # and a digest a reader can brute-force.
+        self.key: bytes | None = None
+        self.keyed = False
+        self.key_id: str | None = None
+        if mode == "hash":
+            self.key = key
+            if self.key is None:
+                try:
+                    from blackbox.keys import load_or_create_key
+
+                    self.key = load_or_create_key(key_path)
+                except Exception:                          # a read-only home must not stop the recorder
+                    self.key = None
+            if self.key is not None:
+                from blackbox.keys import key_id
+
+                self.keyed = True
+                self.key_id = key_id(self.key)
         self.counts: dict[str, int] = {}
         self.bytes_in = 0
         self.bytes_out = 0
@@ -280,25 +269,37 @@ class Redactor:
         for match in matches:
             pieces.append(buf[cursor:match.start()])
             kind = self._kind_of(match)
-            pieces.append(self._placeholder(kind, match.group(0)))
+            # Sliced from `buf`, not taken from the match: a case-insensitive kind was matched against the lowercased
+            # copy, and a pseudonym of the wrong case would make two distinct secrets share one.
+            pieces.append(self._placeholder(kind, buf[match.start():match.end()]))
             self.counts[kind] = self.counts.get(kind, 0) + 1
             cursor = match.end()
         pieces.append(buf[cursor:])
         return b"".join(pieces)
 
     def _kind_of(self, match: re.Match[bytes]) -> str:
+        text = match.group(0)
         for kind, pattern in _COMPILED:
-            if pattern.fullmatch(match.group(0)):
+            if pattern.fullmatch(text) or pattern.fullmatch(text.lower()):
                 return kind
         return "secret"
 
     def _placeholder(self, kind: str, secret: bytes) -> bytes:
         if self.mode == "hash":
-            digest = hashlib.sha256(secret).hexdigest()[:8]
-            return f"[REDACTED:{kind}:{digest}]".encode()
+            return f"[REDACTED:{kind}:{self._pseudonym(secret)}]".encode()
         return f"[REDACTED:{kind}]".encode()
+
+    def _pseudonym(self, text: bytes) -> str:
+        """The 8 hex characters in `[REDACTED:<kind>:…]`: an HMAC when a key was available, a digest when not."""
+        if self.keyed and self.key is not None:
+            return hmac.new(self.key, text, hashlib.sha256).hexdigest()[:8]
+        return hashlib.sha256(text).hexdigest()[:8]
 
     def as_dict(self) -> dict[str, Any]:
         """The only thing a capsule may say about what it removed: counts by kind, never the bytes."""
         return {"mode": self.mode, "counts": dict(self.counts), "bytes_in": self.bytes_in,
-                "bytes_out": self.bytes_out, "window": self.window}
+                "bytes_out": self.bytes_out, "window": self.window,
+                # Which key produced the pseudonyms — and whether one did at all. A reader who sees `keyed: false`
+                # knows the digest is brute-forceable for a short value; one who sees a `key_id` knows which key to
+                # delete if it needs rotating.
+                "keyed": self.keyed, "key_id": self.key_id}

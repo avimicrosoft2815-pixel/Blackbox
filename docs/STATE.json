@@ -6,7 +6,7 @@
     "bench/results/*.json"
   ],
   "next_ticket": "P3-11",
-  "next_note": "Content modes are real now (defect 30 fixed) and the five §15.1 capture rows are measured on ext4: disabled 0.12 µs/call, content=off 1.4 µs/read, content=hash 11 µs/read (worst case 139 µs), provider Δ p95 −1.0 % (noise on n=20), install p50 2.9 ms — bench/results/2026-11-15-capture-overhead.json. Next: P3-11d (keyed hash, mask offsets, patterns split), then a reviewer signature on G-Capture. Named as not built: keyed HMAC, mask offsets; P3-11 stays wip. Nightly still has zero successful runs and cannot start until merge; origin/main is at 31241d6.",
+  "next_note": "P3-11 is nearly closed: redaction before persistence (139 tests), content modes (9), the keyed pseudonym (11, D-031/DV-014) and the five §15.1 capture rows (bench/results/2026-11-15-capture-overhead.json). What is left is mask offsets, which belong with the viewer. Next: G-Capture needs a reviewer signature (not mine to give), so the builder lane moves to L3 (P3B-01). origin/main is still 31241d6; the nightly clock has not started.",
   "last_green_commit": "ce1439b",
   "last_green_commit_note": "run 43701652852, ten jobs ten success (47ec45a 43701107412 before it, da6ef3e 43694261034, d901811 43698231222). The tree at this commit is the one the redaction work was built on; the commit that carries the redaction itself is verified by its own run, not by this one",
   "gates": {
@@ -313,11 +313,11 @@
     },
     {
       "id": "P3-11d",
-      "name": "redaction remainder: keyed HMAC in ~/.blackbox/keys/ (0600), mask offsets, patterns split out",
-      "status": "todo",
-      "commit": "—",
-      "tests": "—",
-      "note": "DV-013 records that the built `hash` mode is an unkeyed sha256[:8] prefix and that mask offsets are absent; neither is claimed by the P3-11 row, which stays wip until they exist",
+      "name": "keyed pseudonym (HMAC under ~/.blackbox/keys/redaction.key) + patterns split to src/blackbox/patterns.py",
+      "status": "done",
+      "commit": "HEAD",
+      "tests": "tests/test_redaction_key.py (11)",
+      "note": "D-031/DV-014: HMAC-SHA256 keyed by a 0600 per-machine key (O_EXCL, four-process race test); the capsule carries the key id, never the key; an unusable key falls back to an unkeyed digest and records keyed:false. Mask offsets are still absent and named as absent.",
       "label": "self"
     },
     {

@@ -57,7 +57,7 @@ the tape holds is what it wrote, so there is no state in which a secret is on th
 | mode | what is written | verified |
 |---|---|---|
 | `full` (**the default**) | `[REDACTED:<kind>]` | 60 synthetic secrets of 10 kinds, every split offset of every one of them, 20 random chunkings, a byte-at-a-time stream, and a real tape grepped afterwards — `tests/test_redaction.py` |
-| `hash` | `[REDACTED:<kind>:<sha256[:8]>]`: the same secret gives the same pseudonym, so two appearances correlate without the secret being stored | stable across processes; two different secrets never share a pseudonym. **Unkeyed** — see the limits below and DV-013 |
+| `hash` | `[REDACTED:<kind>:<HMAC-SHA256[:8]>]`: the same secret gives the same pseudonym, so two appearances correlate without the secret being stored | **keyed** by `~/.blackbox/keys/redaction.key` (32 bytes, 0600, created once with `O_EXCL`, `BLACKBOX_KEY_PATH` overrides); stable across processes; two different secrets never share a pseudonym; the capsule records the **key id**, never the key. When the key cannot be had the digest is unkeyed and the summary says `"keyed": false` |
 | `off` | the content, unchanged | the test asserts it is really off rather than quietly redacting |
 
 The policy is chosen by `BLACKBOX_REDACTION` (`full` when unset) and narrowed by `BLACKBOX_REDACTION_KINDS`. A
@@ -77,8 +77,10 @@ misspelt mode is `full`, not `off`: a typo is not a privacy decision.
 
 **What this is not.** It is pattern matching, and it is not called "safe" anywhere: a credential in a bespoke format, a
 secret inside a binary blob, or a value longer than `WINDOW` (4 096 bytes) that straddles a release point can still
-reach the tape. The corpus proves 60 shapes out of the ones somebody wrote a pattern for. `hash` mode is a bare
-`sha256` prefix rather than a keyed HMAC, so a short secret's digest is brute-forceable (DV-013). A redactor that
+reach the tape. The corpus proves 60 shapes out of the ones somebody wrote a pattern for. `hash` mode is keyed
+(HMAC-SHA256 under a per-machine key, D-031); rotate by deleting the key, which stops new pseudonyms matching old ones.
+Mask offsets are **not** built: the placeholder replaces the whole value, so a viewer cannot yet point at where a key
+was (DV-014). A redactor that
 raises does not pass content through: `[REDACTION_FAILED]` replaces it, the event keeps its place in the stream, and
 `redaction.failures` in the response summary counts how often that happened.
 
