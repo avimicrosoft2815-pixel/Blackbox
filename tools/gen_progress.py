@@ -43,6 +43,11 @@ S: dict[str, tuple[str, str, str, str, str, str]] = {
               "self", "500 randomized kills recover exactly the committed prefix, 0 violations"),
     "P1-12": ("done", "55b4d42", "test_tape.py (implicit)", "—", "self", "gap marker yielded"),
     "P1-13": ("done", "260bfd0", "test_tape.py::test_seal_*", "—", "self", "F4 applied; re-seal idempotence todo"),
+    "P1-16": ("done", "HEAD", "tests/property/test_tape_model.py (6)",
+              "bench/results/p1-16-counterexamples.json", "self",
+              "exhaustive interleavings of append/publish/roll/retain up to 6 steps, 8-frame segments, "
+              "3-segment budget: 38 states, 0 violations of I1-I5/I9/I10; the real writer is run over "
+              "model-generated schedules and must recover exactly the model's committed prefix"),
     "P1-17": ("done", "HEAD", "bench/bench_frame.py", "bench/results/2026-11-14-frame.json",
               "self", "N=100k, 10k warm-up, paired toggles; protocol for every §15.1 row"),
     "P1-18": ("done", "55b4d42", "test_tape.py::test_roll_* (chain link)", "—", "self", "mutation walk todo"),

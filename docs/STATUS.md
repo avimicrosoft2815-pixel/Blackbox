@@ -156,7 +156,7 @@ to `P2-11`** (`blackbox run`), not P5 — corrected here and in `DECISIONS.md`.
 | `P1-09b` retention + `GAP{RETENTION}` | **next, decided by me** | F2/F3 are mine to decide in that commit (`format.md` + `DEVIATIONS.md` together), not blocked |
 | `P1-13` seal verifier + compaction | **partial** | footer writer + verifier tested; `arch/` compaction not written |
 | `P1-14` / `P1-15` `store/blobs.py` | **pending** | blob write/read, compression queue |
-| `P1-16` small-model state machine | **pending** | the kill matrix covers the same invariants empirically, but it is not the model |
+| `P1-16` small-model state machine | **done** | `tests/property/test_tape_model.py`; the retention ordering (`GAP` before unlink) is modelled now and is the spec `P1-09b` has to satisfy |
 | `P1-02b` mypy `type-arg` + `no-untyped-def` | **pending, closes before G-Promise** | 75 strict findings in the two disabled categories |
 | `P2-03` / `P2-04` OS gates | **ticked — CI, run `43657997367`** | all ten cells green: Windows ran `OpenProcess`+`GetProcessTimes`, `winreg` `BootId`, `lseek`-based positional I/O and zero-fill preallocation, and the lease tests through `platform.current()`; macOS ran `sysctl(KERN_PROC_PID)`, `kern.boottime` and `F_FULLFSYNC`. Benchmark rows stay `not measured` for those OSes |
 | `P2-06` / `P2-07` / `P2-10`…`P2-13` | **pending** | see `docs/progress.md` |

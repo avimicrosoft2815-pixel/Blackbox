@@ -38,7 +38,7 @@ A † marks a Done-when cell paraphrased because the plan's wording uses a word 
 | `P1-13` | re-seal ⇒ identical footer bytes; mutate one byte ⇒ `BBX-E224` naming the offset | **done** | 260bfd0 | test_tape.py::test_seal_* | — | self | F4 applied; re-seal idempotence todo |
 | `P1-14` | kill during blob write leaves no visible blob (S9-style test) | **todo** | — | — | — | — |  |
 | `P1-15` | compressed and raw blobs both readable; no partial file visible | **todo** | — | — | — | — |  |
-| `P1-16` | finds 0 violations of I1–I5, I9–I10; seeded counterexamples stored | **todo** | — | — | — | — |  |
+| `P1-16` | finds 0 violations of I1–I5, I9–I10; seeded counterexamples stored | **done** | HEAD | tests/property/test_tape_model.py (6) | bench/results/p1-16-counterexamples.json | self | exhaustive interleavings of append/publish/roll/retain up to 6 steps, 8-frame segments, 3-segment budget: 38 states, 0 violations of I1-I5/I9/I10; the real writer is run over model-generated schedules and must recover exactly the model's committed prefix |
 | `P1-17` | writes `bench/results/<date>.json` with hardware metadata | **done** | HEAD | bench/bench_frame.py | bench/results/2026-11-14-frame.json | self | N=100k, 10k warm-up, paired toggles; protocol for every §15.1 row |
 | `P1-18` | one-byte mutation anywhere ⇒ first break reported with seq + segment; retention `GAP` verifies as a declared hole | **done** | 55b4d42 | test_tape.py::test_roll_* (chain link) | — | self | mutation walk todo |
 | `P1-19` | JSON result committed; ADR-001 reopened if `write()` is within 20 % | **todo** | — | — | — | — |  |
