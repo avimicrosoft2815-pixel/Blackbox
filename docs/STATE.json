@@ -7,8 +7,8 @@
   ],
   "next_ticket": "P3B-06",
   "next_note": "L3: the hook path is real — `blackbox ingest` writes one atomic inbox file, the fold maps §11.9's ten Claude Code events into frames (allocation of node slots survives the process), and the Claude Code adapter installs/removes byte-identically (P3B-05 done, D-039). Cold start measured here at p50 32.0 ms / p95 40.2 ms end to end. Left in P3B-07: the launcher's keeper folding the inbox every 250 ms. Suite 786. Next: P3B-06 (the Codex adapter), then P3B-09 docs/attach.md.",
-  "last_green_commit": "ac25b4a",
-  "last_green_commit_note": "run 43744646557, ten jobs ten success (3 OS x 3 Python, py3.12 included); before it e18ce61 (43744575973) and 8a8b58b (43743421915) at ten of ten. d6ab810 (43743518320) was nine of ten on a single py3.13 cell — defect 36, a chunk count compared to an event count — and is fixed by ac25b4a. The four 3.12-red runs before 8a8b58b were defect 35, the shared-loop hang (D-037).",
+  "last_green_commit": "6a8a742",
+  "last_green_commit_note": "run 43749402312, ten jobs ten success, the first green run that contains the hook path (P3B-05, P3B-07's first half). 4f285ed (43749014701) was nine of ten — three Windows cells on defect 37, a POSIX path join in a new test — fixed by 6a8a742. Also: the first nightly ever to pass, dispatch 43748375862 on main 1390c9b (kill-matrix 2000 trials and cbor-fuzz 100 000 buffers); it is a workflow_dispatch, not a schedule, and the P2-09 clock still needs a scheduled run.",
   "gates": {
     "G-A": "pass",
     "G-Promise": "pass",

@@ -1,7 +1,12 @@
 # BlackBox build status — 2026-11-16 — trunk `1c3db9d` — gates: **G-Promise pass** (built and self-reviewed at `af908bc`, independently counter-signed at `fdb3875`; see `docs/gates/G-Promise.md`), G-Capture, G-Attach, G-Capsule, G-Sec, G-Release not yet opened
 
-**Branch** `arena/4de12d5a-blackbox` · **base** `e8cd2f6` (the merge of PR #9) · CI at `ac25b4a`: run
-`43744646557`, ten jobs, ten `success` (`e18ce61` `43744575973` and `8a8b58b` `43743421915` before it, ten of ten).
+**Branch** `arena/4de12d5a-blackbox` · **base** `e8cd2f6` (PRs #10 and #11) · CI at `6a8a742`: run
+`43749402312`, ten jobs, ten `success` — the first green run containing the hook path. `4f285ed` (`43749014701`) was
+nine of ten (three Windows cells, defect 37: a POSIX path join in a new test), and before it `ac25b4a`
+(`43744646557`), `e18ce61` (`43744575973`) and `8a8b58b` (`43743421915`) were ten of ten.
+**The nightly has run green once**: `43748375862` on `main` `1390c9b` — both jobs, `kill-matrix` (2000 randomized
+`kill -9` trials) and `cbor-fuzz` (100 000 buffers). It was a **`workflow_dispatch`**, not a `schedule`, so the P2-09
+clock is started but not yet evidenced by the event the plan asks for.
 `8a8b58b` was the first commit to take the whole 3 OS × 3 Python matrix green, **py3.12 included**, since the proxy
 landed. `7aa5105` (`43727756275`), `72fdc8a` (`43741188969`), `70420ed` (`43741876100`) and
 `a54dda0` (`43742600971`) were each red on their three 3.12 cells and green on the other seven, and the failure was a
@@ -121,7 +126,7 @@ the open-view case exists only on Windows). ruff 0.17.5 and mypy 2.4.1 (`strict 
 | Item | Label (requires humans / requires time / not testable here / blocked) | Reason / fix attempts |
 |---|---|---|
 | **Independent gate review** | G-Promise: **independent review pass (owner-relayed)**; every other ticket row: requires humans | G-Promise was counter-signed by a different model family on a different machine (fresh clone of `fdb3875`, CPython 3.13.18, ext4): 337 passed / 1 skipped, 100/100 kill trials with 0 violations, smoke 9 keys, launcher recovery, and it was that reviewer who found C40. The signature and a copy-paste reproduce block are in `docs/gates/G-Promise.md`. **Ticket rows in `docs/reviews.md` stay `self`** until a second model is wired into the loop; none of them counts as independent. |
-| P2-09 week of nightlies | requires time | **One scheduled run has ever happened**: `43675454143` on `main` at `31241d6`, 2026-11-15 04:08Z, and both jobs failed on defect 28 — the steps named `tests/kill/randomized_kills.py` and `tests/test_cbor_fuzz.py`, which do not exist (exit 2 and exit 4). Both now call the real drivers, smoke-run locally (3 trials, 500 buffers). The clock cannot start until this work is merged: `origin/main` is still at `31241d6`, the branch's base — verified with `git merge-base --is-ancestor`, not assumed from a report. |
+| P2-09 week of nightlies | requires time | **The nightly has now passed once, and not yet on the event that counts.** `43748375862` on `main` `1390c9b` (a **`workflow_dispatch`**) is the first green nightly in this repository's history: `kill-matrix` ran 2000 randomized `kill -9` trials and `cbor-fuzz` 100 000 buffers, both `success`. The only `schedule` run that has ever fired is `43675454143` at `31241d6` (2026-11-15 04:08Z), and both of its jobs failed on defect 28 — the steps named `tests/kill/randomized_kills.py` and `tests/test_cbor_fuzz.py`, which do not exist (exit 2 and exit 4); both now call the real drivers, which is what the dispatch proves. The clock the plan asks for is seven consecutive `schedule` runs, so it still has not started: **one green dispatch is evidence that the jobs work, not evidence of a week** |
 | 3-person stranger test | requires humans | Prepared to one command: `docs/onboarding.md` holds the setup line and three tasks; nobody outside this session has run it. |
 | Blinded diagnosis benchmark | requires humans | Prepared: `docs/benchmarks/diagnosis.md` holds the checklist and the capsule set is reproducible with `blackbox recover`. Needs a second and third person. |
 | S17 sparse-control run under `sudo` | requires humans | `tools/s17_control.sh` builds the 2 MiB tmpfs control and prints the signal; no superuser here. |

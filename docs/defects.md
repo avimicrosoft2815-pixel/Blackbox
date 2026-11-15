@@ -240,3 +240,10 @@ plan's §10 shape, and it is append-only.
   have said "exit 1". Fix: "short" is now measured against an **oracle** (the same request through an unseamed client,
   untruncated: the truncated body must be strictly smaller and must lack `[DONE]`), and the chunk count is compared to
   the reads that run's application actually made, which is the only relation the seam guarantees.
+- **defect 37 — my own new test hard-coded a POSIX path join, and the Windows cells said so within the hour.** The
+  inbox-defaults test asserted `inbox.default_dir(None) == "/tmp/bbx-data/inbox"` on every platform; `os.path.join`
+  produces `…\inbox` on Windows, so all three Windows cells of run `43749014701` failed while the six POSIX cells were
+  green — the mirror image of defect 35, and the same lesson from the other direction: *the platform is a variable, and
+  a test that spells a separator has decided the answer in advance.* Found by the annotation, which had the two strings
+  side by side (`'/tmp/bbx-data\\inbox' == '/tmp/bbx-data/inbox'`) and named the test, in a run whose log this sandbox
+  cannot read. Fixed by comparing against `os.path.join("/tmp/bbx-data", "inbox")`; `6a8a742` is ten of ten (`43749402312`).
