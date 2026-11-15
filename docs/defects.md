@@ -48,3 +48,10 @@ plan's §10 shape, and it is append-only.
     `frames_on_tape`: that would have printed 115.46, not 52.1, so the defect was the sentence and the sample size,
     not the division. `tests/test_bench_results.py` keeps every percentile inside its own sample; the row sits at
     88 % of its 120 ms budget, so any change to `scanner.py` or `discover.py` re-measures it.
+
+19. **C40 follow-up — three Windows cells failed on a POSIX-only test** → run `43689004423` at `15cb55c`:
+    `ValueError: cannot find context for 'fork'` in `test_a_forked_process_records_into_its_own_tape` → the test
+    hard-coded a start method that does not exist on Windows, and its child body was a closure, which `spawn`
+    cannot pickle → the test takes `fork` where it exists and `spawn` where it does not, and the child body is a
+    module-level function. The recorder was never wrong. A POSIX-only assumption in a test is invisible on the
+    builder's machine and blocks the gate exactly on the cells that matter.
