@@ -15,22 +15,12 @@ is `43695177370` at `27b82a3`, ten of ten. Older red runs keep their numbers and
 (`43678767989`, 9/10, C40), `15cb55c` and `6d52088` (7/10, a fork-only multiprocessing test) — because a later green
 tree is not a green commit.
 
-**Branch** `arena/a781c68f-blackbox` · **base** `31241d6` · CI for trunk `e40fece`: run `43693723611`, ten jobs, ten
-`success`; this STATUS commit is docs-only and its own run is pending (`tools/ci_status.py` is run before every
-`STOPPED` line, and the line says what it returned). The run before it, `280b7fe`, was also ten of ten
-(`43693470163`). Four runs before it were red on one defect: `714554c` (`43693106857`), `1112881` (`43693172961`) and
-`0f81445` (`43693216632`) failed `py3.11 / windows-latest` on a wall-clock assertion in a test of mine (2 × 40 ms
-asserted ≥ 80 ms; the cells measured 79, 78, 78 ms), fixed at `771f5ea` — and `99a5164`, between two of them, passed
-with the same test, which is what a flake looks like and why its green is luck rather than evidence. The run before
-this batch is `43692338730` at `e1ebc73`. Every other red run: `af908bc`
-(`43678767989`, 9/10) is C40 — the gate was re-signed at `fdb3875`; `15cb55c` (`43689004423`, 7/10) **and** `6d52088`
-(`43689012017`, 7/10) are the same defect — a fork-only multiprocessing test of mine failing on the three Windows
-cells, fixed at `d5e1bb6` (defect 19).
 **product: pre-alpha — the recorder, the tape, recovery, the launcher, the SDK lifecycle/decorator/node layer, the
-loopback mock provider and capture seams A (httpx response hooks) and B (transport byte tee) with the ordered
-preflight are real and tested, as is seam C (SDK method patches, against the real `openai` 3.51.0 and `anthropic`
-2.8.0) and the tape sink that turns seam events into `MODEL_CHUNK` frames; the proxy, the launcher integration, the
-viewer and the diagnosis workflow are not built yet.**
+loopback mock provider and capture seams A (client hooks over `httpx` **and** `httpx2`) and B (transport byte tee)
+with the ordered preflight are real and tested, as is seam C (SDK method patches, against the real `openai` 3.51.0 and
+`anthropic` 2.8.0), the tape sink that turns seam events into `MODEL_CHUNK` frames, and the day-14 rule: an unmodified
+`openai` script killed with `SIGKILL` mid-stream is recovered with chunk and byte counts that never exceed what the
+provider pushed. The proxy, the launcher integration, the viewer and the diagnosis workflow are not built yet.**
 Suite: **Total: 439 tests** — 438 pass here and 1 is skipped on POSIX by name
 (`test_an_open_view_blocks_the_unlink_only_on_windows`: POSIX permits unlinking a file another fd still holds, so
 the open-view case exists only on Windows). ruff 0.17.5 and mypy 2.4.1 (`strict = true`, nothing disabled):
@@ -119,11 +109,13 @@ One line per §15.1 row: fs · N · warm-up · p50 / p95 / p99 · raw JSON.
 
 ## Deviations applied (DEVIATIONS.md) and held findings (F#)
 
-The defect list (seed → invariant → cause → fix → test) lives in `docs/defects.md` — twenty-one entries. Five are
-from this turn: two capture-layer gaps recorded rather than papered over (defect 20, the untested async path, still
-open; defect 21, a wall-clock assertion that reddened `43693106857` at `714554c`, fixed at `771f5ea`), C40's Windows group-commit flake, the recovery row's mislabelled denominator (checked against the
-reviewer's hypothesis: the division was right, the sentence and the n=7 sample were not), and a fork-only
-multiprocessing test of mine that reddened three Windows cells in `43689004423`.
+The defect list (seed → invariant → cause → fix → test) lives in `docs/defects.md` — twenty-six entries. Six are
+from this stretch of work: defects 23 and 24 (a seam that installed, reported `installed`, and captured nothing because both real SDKs speak
+`httpx2`; and a request frame that could say `model: null`), defect 25 (the Windows teardown fixture that probed
+every object in the collector and turned `anthropic`'s `LazyProxy` into nine teardown errors), defect 26 (open: on
+Windows `install()` accepted a data directory that is a file), and the two older capture-layer gaps (defect 20, the
+untested async path, still open; defect 21, a wall-clock assertion that reddened `43693106857` at `714554c`, fixed at
+`771f5ea`).
 Twelve deviations, all dated and argued in `docs/DEVIATIONS.md`: DV-005 (one checksum, CRC-32), DV-006/007 (S17
 degrades instead of raising, including the first segment), DV-008 (P2-03/P2-04 written with an honest
 `capabilities()`), DV-009/010 (ADR-005 store change; the head is no longer mapped), DV-011 (every OS call through
@@ -143,8 +135,9 @@ row in the same commit.
 
 ## What is next
 
-0. **`846e01a` is green on all ten cells** (`43697198262`) — the first all-OS green since `c7919f9`, after four
-   commits of Windows red on defect 25 and one on defect 26. `STATE.last_green_commit` is `23cdb7b`.
+0. **`23cdb7b` is green on all ten cells** (`43697556490`), and `846e01a` before it was too (`43697198262`) — the
+   first all-OS green since `c7919f9`, after four commits of Windows red on defect 25 and one on defect 26.
+   `STATE.last_green_commit` is `23cdb7b`.
 1. **G-Promise is signed** (`docs/gates/G-Promise.md`, verdict pass, self-signed — see §Labelled) and `STATE.json`
    carries `gates["G-Promise"] = "pass"`.
 2. **G-Capture is open, and its two mechanism rows are now green**: the day-14 rule (an unmodified `openai` script
