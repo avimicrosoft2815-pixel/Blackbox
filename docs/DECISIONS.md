@@ -412,7 +412,7 @@ shorter:
   session's last events (`SessionEnd`, the `PostToolUse` of the tool that was running when the user quit) into the tape
   even when the child exits the instant after writing them: `folder.close()` folds, then writes the hook tape's
   `RUN_END`, then the launcher writes its own. A kill still loses whatever arrived after the last fold — that window is
-  one interval wide, it is stated here, and it is why folding is at-least-once rather than a promise of zero loss.
+  one interval wide, it is stated here, and it is why folding is at-least-once rather than a promise of no loss.
 
 **What this buys, and it is the claim the plan actually makes.** `tests/test_hook_launcher.py` runs a child that fires
 five real hooks through `blackbox ingest`, and then asserts the whole chain end to end: the hook tape exists with
