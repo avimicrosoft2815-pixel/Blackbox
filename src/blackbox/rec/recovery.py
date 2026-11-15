@@ -428,8 +428,10 @@ class Recovery:
     def _segments_entries(self) -> dict[str, bytes]:
         out: dict[str, bytes] = {}
         for n in segments.list_segments(self.tape_dir):
-            with open(segments.seg_path(self.tape_dir, n), "rb") as fh:
-                out[cap.seg_entry_name(n)] = fh.read()
+            path = segments.seg_path_any(self.tape_dir, n)
+            if path is None:
+                continue
+            out[cap.seg_entry_name(n)] = segments.logical_bytes(path)
         return out
 
     def step_sealed(self) -> str:

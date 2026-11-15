@@ -70,15 +70,13 @@ class ScanResult:
 
 
 def _seg_paths(tape_dir: str) -> list[str]:
-    return [segments.seg_path(tape_dir, n) for n in segments.list_segments(tape_dir)]
+    return [p for p in (segments.seg_path_any(tape_dir, n) for n in segments.list_segments(tape_dir)) if p]
 
 
 def _segment_has_frames(path: str) -> bool:
     """Content check, not a size check: every segment is preallocated to its full size, so size proves nothing."""
     try:
-        with open(path, "rb") as fh:
-            fh.seek(C.SEGMENT_HEADER_BYTES)
-            head = fh.read(C.FRAME_OVERHEAD_BYTES)
+        head = segments.logical_bytes(path)[C.SEGMENT_HEADER_BYTES:C.SEGMENT_HEADER_BYTES + C.FRAME_OVERHEAD_BYTES]
     except OSError:
         return False
     if len(head) < C.FRAME_OVERHEAD_BYTES:
@@ -91,8 +89,8 @@ def _segment_has_frames(path: str) -> bool:
 
 
 def _read_file(path: str, limit: int | None = None) -> bytes:
-    with open(path, "rb") as fh:
-        return fh.read() if limit is None else fh.read(limit)
+    """Logical bytes: a compacted segment is decompressed, so every caller above sees the same frame region."""
+    return segments.logical_bytes(path, limit=limit)
 
 
 def scan(data_dir: str, writer_uuid_hex: str, *, max_frames: int = 2_000_000) -> ScanResult:
@@ -140,8 +138,8 @@ def scan(data_dir: str, writer_uuid_hex: str, *, max_frames: int = 2_000_000) ->
     for n in sorted(segs):
         if n >= n_active:
             continue
-        path = segments.seg_path(tape_dir, n)
-        if not os.path.exists(path):
+        path = segments.seg_path_any(tape_dir, n)
+        if path is None:
             result.bad_segments.append(n)
             continue
         seal = seal_mod.read(segments.seal_path(tape_dir, n))
@@ -153,7 +151,7 @@ def scan(data_dir: str, writer_uuid_hex: str, *, max_frames: int = 2_000_000) ->
         if seal is not None:
             body_end = C.SEGMENT_HEADER_BYTES + seal["body_len"]
             result.sealed_segments.append(n)
-            if os.path.getsize(path) < body_end:
+            if len(buf) < body_end:          # logical length: a compacted segment is smaller on disk (P1-13)
                 result.bad_segments.append(n)
                 continue
         else:

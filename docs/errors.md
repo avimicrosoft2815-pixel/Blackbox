@@ -54,4 +54,4 @@ same table, so a code in a log line always has a next step attached to it.
 | `BBX-E601` | serverless: /tmp not writable | set data_dir to a writable path |
 | `BBX-E602` | serverless: recovered a previous invocation's run | expected; the capsule path was handed to on_capsule |
 
-45 codes.
+48 codes.

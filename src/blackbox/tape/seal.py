@@ -92,9 +92,9 @@ def verify(segment_path: str, seal_path: str) -> dict:
     seal = read(seal_path)
     if seal is None:
         raise bbx("BBX-E224", f"no seal for {segment_path}")
-    with open(segment_path, "rb") as fh:
-        fh.seek(C.SEGMENT_HEADER_BYTES)
-        body = fh.read(seal["body_len"])
+    from blackbox.tape import segments  # local: segments imports this module's constants only
+
+    body = segments.logical_bytes(segment_path)[C.SEGMENT_HEADER_BYTES:C.SEGMENT_HEADER_BYTES + seal["body_len"]]
     if len(body) != seal["body_len"]:
         raise bbx("BBX-E224", "body shorter than the footer declares")
     if crc32(body) != seal["body_crc32"] or blake2b(body) != seal["body_hash"]:

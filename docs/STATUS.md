@@ -1,6 +1,6 @@
 # STATUS — BlackBox v1.0 build
 
-**Branch** `arena/e10fc603-blackbox` · **base** `30c9433` · **HEAD** `f3e7765`+ (pushed after every ticket)
+**Branch** `arena/a781c68f-blackbox` · **base** `31241d6` · **HEAD** `8aeff7f`+ (pushed after every ticket)
 **trunk: mergeable** — every C12 check passes from a clean clone and the README says what exists.
 **product: pre-alpha — storage and recovery layer only; no SDK, proxy or viewer yet.**
 
@@ -47,11 +47,12 @@ mapped-file-cannot-be-deleted problem. Every number below was re-measured on the
 | ENOSPC (S17) | `tests/test_enospc.py`, `tests/test_prealloc.py` | both segments **and the first one**: exit 0, identical stdout, `DEGRADED`; no first segment ⇒ sink (`recording=False`), never an exception |
 | Group-commit window + keeper | `tests/test_keeper.py` (6) | window ≤ 5 ms at 1 / 1 000 / unbounded ev/s |
 | Syscalls on the append path (C11) | `tests/test_no_syscall.py` | 100 000 appends ⇒ **exactly two `pwrite`s per batch** (segment data + 64 B head slot), nothing else |
-| Seal footer + chain link | `tests/test_tape.py` | green |
 | Platform shims (P2-03/P2-04, C20) | `tests/test_platform_shims.py` (21) | contract green on Linux; Windows start-time path exercised through a fake `kernel32`; `is_current` is computed, so exactly one shim claims the machine |
 | Retention + declared holes (`P1-09b`) | `tests/test_retention.py` (13), `tests/property/test_retention_random.py` (9) | **8 seeds × 60 randomized steps: 133 kills, 65 retention passes, 34 segments pruned, 0 violations of I1 or I9** (`bench/results/p1-09b-retention.json`) |
 | Chain walk across a hole (`P1-09b`, I9) | `tape.scanner.verify_chain` | per-segment `prev_chain` links + every `CHAIN` frame's `prev`; every declared hole's `prev` must be a value on that walk |
-| Blob store write/read (`P1-14`) | `tests/test_blobs.py` | hash → tmp → fsync → replace; **a kill at `S9` leaves a tmp file and no visible blob**, `S9b` leaves a complete one; every read re-verifies CRC and hash and refuses a blob stored under another name (`BBX-E162`) |
+| Blob store write/read (`P1-14`) | `tests/test_blobs.py` | hash → tmp → write → replace, **no sync on the calling thread** (D-019/C32); a kill at `S9` leaves a tmp file and no visible blob, `S9b` leaves a complete one; every read re-verifies CRC and hash and refuses a blob stored under another name (`BBX-E162`) |
+| Blob durability per mode (`D-019`, C32) | `tests/test_blob_durability.py` (4), `tests/test_no_syscall.py` | `process` records **no** sync at all; `kernel` syncs the blob and its directory in the keeper tick **before** the tape sync; `paranoid` syncs before the frame is appended; every `has_blob` frame read back from a durable tape has a synced blob. A 64 KiB event costs 4 calls per new blob (open/write/close/replace) + 2 `pwrite`s per publish + **0** `fsync`/`fdatasync` |
+| Seal footer + compaction (`P1-13`) | `tests/test_tape.py`, `tests/test_compact.py` (7) | re-seal is byte-identical, one changed byte is `BBX-E224`; compaction writes `arch/<writer>/<n>.seg` at `codec=zlib`, the `.seal` file is **not rewritten** (hash before = after, re-verify passes on the archived bytes), the frames read back identical, a second compaction is a no-op, an unsealed or corrupted segment is refused |
 | Blob compression queue (`P1-15`) | `tests/test_blobs.py`, `tape/keeper.py` | keeper-driven, 1 job per tick in the test; the rename is observed with the old file still raw and the new one whole; `ChunkCoalescer` turns 2 000 chunks into 3 blobs |
 | Recovery state machine (`P2-06`) | `tests/test_recovery.py` | 8 steps × 3 kill modes (before/mid/after) all resume to the **identical capsule root**; each step writes `recovery.done.<STEP>` with input/output hashes; an archived run is a no-op |
 | Interrupted nodes (`P2-07`) | `tests/test_recovery.py` | the five §14.4 strings exactly; mid-stream carries `chunks`, `partial_stream_bytes`, `last_chunk_age_ms`; `TOOL_REQUEST` without result says the side effect may have happened |
@@ -60,11 +61,13 @@ mapped-file-cannot-be-deleted problem. Every number below was re-measured on the
 | Lint + types (C6) | `make fmt` (ruff 0.17.5, mypy 2.4.1) | **0 findings** both |
 | Forbidden words (C12) | `tests/test_forbidden_words.py` | green over the tree **and** `git log` |
 
-Total: **281 tests** — 280 pass here and 1 is skipped on POSIX by name (`test_an_open_view_blocks_the_unlink_only_on_windows`: POSIX permits unlinking a file another fd still holds, so the open-view case only exists on Windows). ruff and mypy: 0 findings.
+Total: **315 tests** — 314 pass here and 1 is skipped on POSIX by name (`test_an_open_view_blocks_the_unlink_only_on_windows`: POSIX permits unlinking a file another fd still holds, so the open-view case only exists on Windows). ruff and mypy: 0 findings.
 
 ## 2. §15.1 rows — ext4 is the gate column (C1); every row carries its verdict
 
-Gate: **p50 ≤ 25 µs, p99 ≤ 250 µs, ≥ 40 000 ev/s** for one full event with `content=hash`, CHAIN included.
+Gate: **p50 ≤ 25 µs, p99 ≤ 250 µs, ≥ 40 000 ev/s** for one full event with `content=hash`, CHAIN included. The
+recovery and 64 KiB rows carry their own budgets, named in the row; the amplification row is ≤ 1.25× with a 2× hard
+fail. tmpfs is a labelled second column and never gate evidence (D-010).
 
 | Row | ext4 (gate) | tmpfs (label only) | Verdict | Source |
 |---|---|---|---|---|
@@ -73,10 +76,14 @@ Gate: **p50 ≤ 25 µs, p99 ≤ 250 µs, ≥ 40 000 ev/s** for one full event wi
 | kernel mode (`sync_ms=250`, `1 MiB`) | p50 11.278 · p99 89.903 · 60,368 ev/s · sync stall max 2866 µs over 28 syncs | p50 10.953 | reported, not gated | same |
 | kernel mode, sync-dense (64 KiB) | p50 11.387 · p99 81.232 · stall max 11875 µs over 453 syncs | — | reported, not gated | same |
 | group-commit window | 4.603 ms @ 1 ev/s · 4.999 ms @ 1 000 ev/s · 3.572 ms unbounded (120.99 ev/commit) | 0.0 / 5.0 / 1.65 ms | bound 5 ms: **PASS** | same |
-| recovery, 10 k frames | p50 117.09 ms (**53.9 ms/10k**) | p50 106.03 ms | no §15.1 row for scan time | `-recovery.json` |
-| disk amplification | 1.843× per-event · 1.231× 16 KiB | identical | ≤ 1.25×: **PASS** | same |
+| **Recovery — per 10 k frames ≤ 120 ms, hard fail > 1 s** | **p50 115.46 ms for 10 000 frames of 22 144 on the tape = 52.1 ms/10k** (7 rounds, p95 122.16, p99 122.28, max 121.93) | p50 110.55 ms = 49.6 ms/10k | **PASS** (52.1 ms against the 120 ms row; hard fail is 1 s) | `-recovery.json` |
+| **Disk amplification, default config (16 KiB group commit)** | **1.231×** (4,718,976 committed / 2,560,000 payload) | 1.231× | ≤ 1.25×: **PASS** | `-recovery.json` |
+| Disk amplification, other configs, measured | per-event publish 1.843× · 4 KiB batch 1.263× · 64 KiB batch 1.222× · per-event (batch table) 1.219× | identical | **reported, not gated** — 1.843× and 1.263× are above the row's 1.25× and below the 2× hard fail; the row is written against the default | same |
+| **`content=full`, 64 KiB payload incl. blob write (C32)** | **p50 226.864 µs · p99 461.281 µs · 4,356 ev/s** (N 20,000, warm-up 2,000, 1 024 distinct bodies) | p50 187.020 · p99 443.173 µs | p50 ≤ 400 µs / p99 ≤ 3 ms / hard fail 10 ms: **PASS** | `-payload-blob.json` |
+| same row, keeper off | p50 167.899 · p99 304.614 µs | p50 157.529 µs | reported, not gated | same |
+| same row, `kernel` mode (keeper syncs) | p50 194.982 · p99 477.095 µs · 1 024 blob syncs | p50 179.265 µs | reported, not gated | same |
 | RSS above baseline | **1.15 MiB** (anon +1.02, file +0.12) at `head_off` 4,723,072 (28.13 % of the segment) | 1.15 MiB | under 24 MiB: **PASS**, no `P1-08b` | same |
-| mmap vs `pwrite` (P1-19 / ADR-005) | median p50 ratio 1.028 [0.906, 1.176] · **1.059** · **1.065** at 1 k / 10 k / 40 k | 1.076 / 1.064 | **adopt `pwrite`** (inside 20 % at both decision rates) | `-writer-ab.json` |
+| mmap vs `pwrite` (P1-19 / ADR-005) | median p50 ratio 1.028 [0.906, 1.176] · **1.059** · **1.065** at 1 k / 10 k / 40 k | 1.076 / 1.064 | **PASS** — adopt `pwrite` (inside 20 % at both decision rates) | `-writer-ab.json` |
 
 **C16 — why the stage table never added up to the event p50, and the distribution that replaces the guess:**
 two mistakes, both now fixed. (a) The stage table's `cbor_encode_event` encodes a record with the **1 KiB body
@@ -119,6 +126,9 @@ Each correction is answered where a reviewer will look:
 | C24 | print STATUS verbatim with the numbers | **this file** |
 | C29 | `O_BINARY` on every descriptor; guard; byte-exact regression test | **done** — DV-012, `platform.open_fd`, `test_positional_io_is_byte_exact_for_all_256_values` |
 | C30 | `test_sparse_detection` is false on NTFS, not unmeasurable | **done** — skipped with that sentence; `prealloc.is_sparse` documents the `FSCTL_SET_SPARSE` fact |
+| C31 | `STATE.json` must agree with the ledger, and nothing may silently drop a baseline key | **done** — `docs/STATE.json` rewritten from `progress.md` (P2-11 next, gates, `last_green_commit`), the baseline is the ext4 gate column with a JSON path per key, and `tests/test_state_consistency.py` + `tools/bench_smoke.py` (`make smoke`) fail on disagreement, a non-ancestor `last_green_commit`, a missing key, a missing provenance or a 10 % regression |
+| C32 | the calling thread never syncs a blob; blob before tape; the invariant is a test | **done** — D-019, `format.md` §7.1 rewritten, `BlobWriter` per mode, `Keeper.tick` syncs blobs before publishing, `tests/test_blob_durability.py`, the AST guard on `os.fsync`/`os.fdatasync`, and the 64 KiB row measured (§2) |
+| C33 | recovery row stated and labelled; delete the stale CI narrative; amplification verdicts name their config; finish `P1-13` | **done** — §2 recovery row PASS at 52.1 ms/10k over 10 000 frames; §6 is one run and one verdict per cell; amplification names 16 KiB (1.231× PASS) and per-event (1.843×, reported); `tape/arch.py` + `tests/test_compact.py`; `tests/test_status_doc.py` keeps this file to one HEAD and one verdict per row |
 
 ## 4. Defects found and fixed (C9: seed → invariant → cause → fix → test)
 
@@ -149,7 +159,7 @@ to `P2-11`** (`blackbox run`), not P5 — corrected here and in `DECISIONS.md`.
 
 | Check | State |
 |---|---|
-| `make test` from a clean clone | green, `280 passed, 1 skipped` (8.5 s) |
+| `make test` from a clean clone | green, `314 passed, 1 skipped` (12.9 s) |
 | `make kill` (500 trials, ext4) | 0 violations, 0 `not_started` |
 | `make bench` into `bench/results/` | green, both columns |
 | `make fuzz` | 100 000 iterations, 0 non-`CBORError` |
@@ -159,15 +169,15 @@ to `P2-11`** (`blackbox run`), not P5 — corrected here and in `DECISIONS.md`.
 | docs + `bench/results/*.json` committed | yes |
 | no absolute sandbox paths | grep over `bench/results/` = 0 |
 | forbidden words, tree + commit messages | green |
-| **C7 CI** | **ran; eight of nine cells green.** Run `43656191825`: **docs, ubuntu × 3 and macOS × 3 green**; **Windows × 3 red**, and now *named* — C27's follow-up turns every failure into a `::error::` annotation, so `gh run view` lists the eight failing test ids without a log or a login. Run `43657997367`: **all ten cells green** (ubuntu × 3, macOS × 3, Windows × 3, docs) after C29's `O_BINARY` fix; run `43659827155` (commit `8e2256e`) repeats it with the blob store, the retention randomizer, the 24 kill-resume trials and the capsule v0 in the tree. Earlier run `43656494686` had named **nine** Windows failures and surfaces the smoking gun: **`BBX-E224: sealed segment does not match its footer`** — a header CRC and a seal body that do not match the bytes the writer just wrote, on the path that now goes through `platform.windows.pwrite` (`lseek` + `os.write`). `docs/compatibility.md` lists the nine ids, the two candidate causes (a buffered `open("wb")` left on the header/seal path, or a caller still doing a single `os.read` and getting a short read) and the one id that is only a POSIX-only assertion (`st_blocks`). That is the next ticket. |
+| **C7 CI** | **green, run `43660321110`** (commit `a9f0953`, the PR head) — ubuntu × 3 **pass** · macOS × 3 **pass** · Windows × 3 **pass** · docs × 1 **pass**. The cells that used to fail were `O_BINARY` (DV-012): every `os.open` gave the CRT a text-mode descriptor, so `0x0A` expanded to `0x0D 0x0A` on the way out and the seal footer stopped matching the bytes the writer had just written. `docs/compatibility.md` holds the per-cell verdicts and the run URLs. |
 
 ## 7. Not done — and why that is the honest state
 
 | Ticket | State | Note |
 |---|---|---|
 | `P1-09b` retention + `GAP{RETENTION}` | **done** | `tape/retention.py`; F2/F3 decided as D-016/D-017, tombstone pinning/merging as D-018, `GAP` payload frozen in `format.md` §4.1; acceptance = 8 seeds × 60 steps, 133 kills, 0 violations of I1/I9 |
-| `P1-13` seal verifier + compaction | **partial** | footer writer + verifier tested; `arch/` compaction not written |
-| `P1-14` / `P1-15` `store/blobs.py` | **done** | container frozen in `format.md` §7.1; crash stages `S9`/`S9b`; compression runs on the keeper, not the app thread |
+| `P1-13` seal verifier + compaction | **done** | footer writer + verifier (F4: body hash over the *uncompressed* body, codec in the header) and `tape/arch.py`: `arch/<writer>/<n>.seg` at `codec=zlib`, tmp + `fdatasync` + `replace`, idempotent, the `.seal` file never rewritten, frames read back identical (`tests/test_compact.py`) |
+| `P1-14` / `P1-15` `store/blobs.py` | **done** | container frozen in `format.md` §7.1; crash stages `S9`/`S9b`; compression runs on the keeper, not the app thread; **D-019**: the calling thread never syncs a blob, and the keeper syncs blob + directory before the tape sync that covers the frame |
 | `P1-16` small-model state machine | **done** | `tests/property/test_tape_model.py`; the retention ordering (`GAP` before unlink) is modelled now and is the spec `P1-09b` has to satisfy |
 | `P1-02b` mypy `type-arg` + `no-untyped-def` | **pending, closes before G-Promise** | 75 strict findings in the two disabled categories |
 | `P2-03` / `P2-04` OS gates | **ticked — CI, run `43657997367`** | all ten cells green: Windows ran `OpenProcess`+`GetProcessTimes`, `winreg` `BootId`, `lseek`-based positional I/O and zero-fill preallocation, and the lease tests through `platform.current()`; macOS ran `sysctl(KERN_PROC_PID)`, `kern.boottime` and `F_FULLFSYNC`. Benchmark rows stay `not measured` for those OSes |
@@ -182,7 +192,7 @@ to `P2-11`** (`blackbox run`), not P5 — corrected here and in `DECISIONS.md`.
 ## 8. Next, in order
 
 1. `P2-11` / `P2-13` — `rec/launcher.py`: `blackbox run -- cmd`, the child lock, the stall watchdog and the
-   `SIGUSR1` stack dump.
-2. `P1-02b` (mypy `type-arg` + `no-untyped-def`) → **G-Promise on ext4** → STATUS.
-3. `P1-13` compaction of sealed segments; the blob GC (§9.9) once segments reference blobs; `P2-09` nights start
-   at merge.
+   `SIGUSR1` stack dump. Then `P1-02b` (mypy `type-arg` + `no-untyped-def`).
+2. **G-Promise on ext4** → a reviewer-signed gate file under `docs/gates/` → STATUS in the §10 shape.
+3. `P1-13` compaction: **done** (C33) — `tape/arch.py` and `tests/test_compact.py`; the blob GC (§9.9) follows
+   once segments reference blobs; `P2-09` nights start at merge.

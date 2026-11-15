@@ -5,6 +5,7 @@ import contextlib
 import os
 import struct
 import time
+import zlib
 
 from blackbox import constants as C
 from blackbox.errors import bbx
@@ -119,15 +120,27 @@ def create(tape_dir: str, n: int, *, writer_uuid: bytes, segment_bytes: int, pre
                   prev_chain=prev_chain)
 
 
+def seg_path_any(tape_dir: str, n: int) -> str | None:
+    """The segment wherever it lives: the live `<n>.seg`, else its compacted copy under `arch/` (P1-13)."""
+    live = seg_path(tape_dir, n)
+    if os.path.exists(live):
+        return live
+    from blackbox.tape import arch  # local import: arch imports this module for `seg_path`
+    return arch.find(tape_dir, n)
+
+
 def list_segments(tape_dir: str) -> list[int]:
-    out: list[int] = []
+    """Every segment number a reader must account for, live **and** archived (P1-13 compaction)."""
+    out: set[int] = set()
     try:
         names = os.listdir(tape_dir)
     except FileNotFoundError:
-        return out
+        names = []
     for name in names:
         if name.endswith(".seg") and name[:-4].isdigit():
-            out.append(int(name[:-4]))
+            out.add(int(name[:-4]))
+    from blackbox.tape import arch
+    out.update(arch.archived_numbers(tape_dir))
     return sorted(out)
 
 
@@ -143,3 +156,33 @@ def seal_segment(tape_dir: str, n: int, *, reason: int, body: bytes, prev_chain:
     return seal_mod.write(seal_path(tape_dir, n), segment_no=n, reason=reason, start_seq=start_seq,
                           end_seq=end_seq, frame_count=frame_count, body=body,
                           prev_chain=prev_chain, sealer=sealer)
+
+
+def codec_of(raw: bytes) -> int:
+    codec: int = struct.unpack_from("<I", raw, C.SEG_CODEC_OFF)[0]
+    return codec
+
+
+def logical_bytes(path: str, *, limit: int | None = None) -> bytes:
+    """The segment as a reader wants it: header, then the **uncompressed** frames region (P1-13).
+
+    A compacted segment stores its body with `codec = zlib` and says so in the header, so every reader goes through
+    here instead of `open().read()`; the limit applies to logical bytes, which keeps prefix reads identical on both
+    layouts.
+    """
+    with open(path, "rb") as fh:
+        raw = fh.read()
+    if len(raw) < C.SEGMENT_HEADER_BYTES:
+        return raw if limit is None else raw[:limit]
+    codec = codec_of(raw)
+    header = raw[:C.SEGMENT_HEADER_BYTES]
+    body = raw[C.SEGMENT_HEADER_BYTES:]
+    if codec == C.CODEC_ZLIB:
+        try:
+            body = zlib.decompress(body)
+        except zlib.error as exc:
+            raise bbx("BBX-E224", f"{path}: compacted body does not decompress: {exc}") from None
+    elif codec != C.CODEC_RAW:
+        raise bbx("BBX-E221", f"{path}: segment codec {codec} is not readable by this reader")
+    out = header + body
+    return out if limit is None else out[:C.SEGMENT_HEADER_BYTES + max(0, limit - C.SEGMENT_HEADER_BYTES)]

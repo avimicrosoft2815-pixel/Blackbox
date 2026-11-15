@@ -42,7 +42,10 @@ S: dict[str, tuple[str, str, str, str, str, str]] = {
     "P1-11": ("done", "HEAD", "test_crash_points.py, tests/kill/kill_matrix.py", "bench/results/2026-11-14-kill-random.json",
               "self", "500 randomized kills recover exactly the committed prefix, 0 violations"),
     "P1-12": ("done", "55b4d42", "test_tape.py (implicit)", "—", "self", "gap marker yielded"),
-    "P1-13": ("done", "260bfd0", "test_tape.py::test_seal_*", "—", "self", "F4 applied; re-seal idempotence todo"),
+    "P1-13": ("done", "HEAD", "tests/test_tape.py (seal), tests/test_compact.py (7)", "—", "self",
+              "footer writer + verifier (F4: body hash over the uncompressed body, codec in the header); "
+              "compaction into arch/<writer>/<n>.seg at codec zlib, tmp + fsync + replace, idempotent, the "
+              ".seal file untouched (re-verify passes on the archived bytes) and the frames read back identical"),
     "P1-09b": ("done", "HEAD", "tests/test_retention.py (13), tests/property/test_retention_random.py (9)",
                "bench/results/p1-09b-retention.json", "self",
                "GAP{RETENTION} committed and published before every unlink; 8 seeds x 60 randomized steps, "
