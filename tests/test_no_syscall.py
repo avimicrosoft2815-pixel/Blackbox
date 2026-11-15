@@ -28,6 +28,65 @@ posix = pytest.mark.skipif(os.name != "posix", reason="counts POSIX syscall wrap
 pytestmark = posix
 
 
+class _SyncCounter:
+    """Counts syncs **where they happen**, not where one OS happens to implement them (C36).
+
+    Since C32/D-019 `platform.<shim>.fdatasync` and `.fsync_dir` are the only sync chokepoints (the AST guard in
+    `tests/test_platform_dispatch.py` enforces it), so that is what a "syncs happen, and only at commit boundaries"
+    claim has to count. Counting `os.fdatasync`/`os.fsync` was blind on macOS, where `fdatasync` issues
+    `fcntl(F_FULLFSYNC)` and never touches either: the run said "0 syncs for 4000 events" and looked like a bug in
+    the writer. On Darwin the `fcntl` path is counted as well, so a direct call that bypassed the shim is seen.
+    """
+
+    def __init__(self, monkeypatch) -> None:
+        from blackbox import platform
+
+        self.monkeypatch = monkeypatch
+        self.plat = platform.current()
+        self.counts = {"n": 0, "where": ""}
+        self._unpatch: list[tuple[object, str, object]] = []
+
+    def __enter__(self) -> dict:
+        names: list[str] = []
+        for name in ("fdatasync", "fsync_dir"):
+            real = getattr(self.plat, name)
+            self._patch(self.plat, name, real)
+            names.append(name)
+        self.counts["where"] = ", ".join(f"platform.{name}" for name in names)
+        if sys.platform == "darwin":                      # pragma: no cover - exercised by the macOS cells
+            import fcntl
+
+            full = getattr(fcntl, "F_FULLFSYNC", None)
+            if full is not None:
+                real_fcntl = fcntl.fcntl
+
+                def fcntl_counting(fd, cmd, *args, **kwargs):
+                    if cmd == full:
+                        self.counts["n"] += 1
+                    return real_fcntl(fd, cmd, *args, **kwargs)
+
+                self._unpatch.append((fcntl, "fcntl", real_fcntl))
+                self.monkeypatch.setattr(fcntl, "fcntl", fcntl_counting)
+                self.counts["where"] += ", fcntl(F_FULLFSYNC)"
+        return self.counts
+
+    def _patch(self, holder, name: str, real) -> None:
+        def counting(*args, **kwargs):
+            self.counts["n"] += 1
+            return real(*args, **kwargs)
+
+        self._unpatch.append((holder, name, real))
+        self.monkeypatch.setattr(holder, name, counting)
+
+    def __exit__(self, *exc) -> None:
+        for holder, name, real in reversed(self._unpatch):
+            self.monkeypatch.setattr(holder, name, real)
+
+
+def count_syncs(monkeypatch) -> _SyncCounter:
+    return _SyncCounter(monkeypatch)
+
+
 def test_process_mode_append_path_makes_no_syscall(tmp_path, monkeypatch):
     w = TapeWriter(str(tmp_path), segment_bytes=C.DEFAULT_SEGMENT_BYTES, mode="process",
                    chain_enabled=True).open()
@@ -79,22 +138,14 @@ def test_kernel_mode_syncs_only_on_the_commit_boundary(tmp_path, monkeypatch):
                    sync_bytes=64 << 10).open()
     w.batch_bytes = C.DEFAULT_BATCH_BYTES
     w.batch_ms = 60_000.0                          # only the byte bound can publish
-    synced = {"n": 0}
-    real = os.fdatasync if hasattr(os, "fdatasync") else os.fsync
-
-    def counting(fd):
-        synced["n"] += 1
-        return real(fd)
-
-    monkeypatch.setattr(os, "fdatasync", counting, raising=False)
-    monkeypatch.setattr(os, "fsync", counting, raising=False)
-    payload = b"k" * 64
-    events = 4_000
-    for _ in range(events):
-        w.emit(C.KIND_MODEL_REQUEST, payload)
-    w.flush()
-    monkeypatch.setattr(os, "fdatasync", real, raising=False)
-    assert 0 < synced["n"] < events // 10, f"{synced['n']} syncs for {events} events"
+    with count_syncs(monkeypatch) as synced:
+        payload = b"k" * 64
+        events = 4_000
+        for _ in range(events):
+            w.emit(C.KIND_MODEL_REQUEST, payload)
+        w.flush()
+    assert 0 < synced["n"] < events // 10, (
+        f"{synced['n']} syncs for {events} events (counted at the platform chokepoint: {synced['where']})")
     w.close()
 
 
@@ -133,9 +184,10 @@ def test_a_64kib_full_event_costs_a_bounded_named_set_of_calls(tmp_path, monkeyp
         monkeypatch.setattr(os, name, counting(name, real), raising=False)
     publishes_before = w.publishes
     try:
-        for i in range(20):
-            blobs.append_payload(w, bw, C.KIND_MODEL_RESPONSE, payload + bytes([i]))
-        w.flush()
+        with count_syncs(monkeypatch) as chokepoint:
+            for i in range(20):
+                blobs.append_payload(w, bw, C.KIND_MODEL_RESPONSE, payload + bytes([i]))
+            w.flush()
     finally:
         for name, real in patched.items():
             monkeypatch.setattr(os, name, real, raising=False)
@@ -143,6 +195,9 @@ def test_a_64kib_full_event_costs_a_bounded_named_set_of_calls(tmp_path, monkeyp
     made = {name: n for name, n in counts.items() if n}
     publishes = w.publishes - publishes_before
     assert counts["fsync"] == 0 and counts["fdatasync"] == 0, f"the calling thread synced: {made}"
+    # The OS-level count is necessary but not sufficient: on macOS `fdatasync` is `fcntl(F_FULLFSYNC)`, which touches
+    # neither `os.fsync` nor `os.fdatasync`. Counting the platform chokepoint closes that hole (C36).
+    assert chokepoint["n"] == 0, f"a sync went through {chokepoint['where']} on the 64 KiB process-mode path"
     assert set(made) <= {"open", "pwrite", "close", "replace", "lseek", "ftruncate"}, (
         f"unexpected syscalls on the 64 KiB path: {made}")
     # 20 blobs, one file each: open + pwrite + close + replace. The tape adds 2 pwrites per publish.

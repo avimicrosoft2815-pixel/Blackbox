@@ -26,7 +26,6 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from blackbox import constants as C
 from blackbox.store import blobs
-from blackbox.tape import writer as writer_mod
 from blackbox.tape.keeper import Keeper
 from blackbox.tape.writer import TapeWriter
 
@@ -39,8 +38,14 @@ BIG = 64 << 10
 class Recorder:
     """A platform shim that forwards to the real one and remembers what was synced, in order, with the path."""
 
-    def __init__(self, real) -> None:
-        self.real = real
+    def __init__(self, shim) -> None:
+        # The real functions are captured here, before the fixture replaces the shim's attributes: reading them off
+        # `shim` later would resolve to this recorder and recurse (the C36 lesson — count at the chokepoint, but
+        # hold the real callable from before the swap).
+        self.real = shim
+        self._real_fdatasync = shim.fdatasync
+        self._real_fsync_dir = shim.fsync_dir
+        self._real_open_fd = shim.open_fd
         self.calls: list[tuple[str, str]] = []
         self._paths: dict[int, str] = {}
 
@@ -48,17 +53,17 @@ class Recorder:
         return getattr(self.real, name)
 
     def open_fd(self, path, flags, mode=0o600):
-        fd = self.real.open_fd(path, flags, mode)
+        fd = self._real_open_fd(path, flags, mode)
         self._paths[fd] = str(path)
         return fd
 
     def fdatasync(self, fd: int) -> None:
         self.calls.append(("fdatasync", self._paths.get(fd, f"fd:{fd}")))
-        self.real.fdatasync(fd)
+        self._real_fdatasync(fd)
 
     def fsync_dir(self, path: str) -> None:
         self.calls.append(("fsync_dir", str(path)))
-        self.real.fsync_dir(path)
+        self._real_fsync_dir(path)
 
     # ── queries ────────────────────────────────────────────────────────────
     def syncs(self) -> list[tuple[str, str]]:
@@ -73,10 +78,20 @@ class Recorder:
 
 @pytest.fixture()
 def recorder(monkeypatch):
-    """One recorder in front of both the blob store's and the writer's platform handle, so the two are ordered."""
-    rec = Recorder(blobs._plat)
-    monkeypatch.setattr(blobs, "_plat", rec)
-    monkeypatch.setattr(writer_mod, "_plat", rec)
+    """Count at the **platform chokepoint**, in place (C36).
+
+    Replacing two modules' `_plat` references only caught the two modules that were named; `HeadFile` captures its
+    shim in `__init__` and every other module holds the same module object. Patching the shim's own functions means
+    no sync can happen anywhere without being recorded, and it is OS-independent: on Darwin the shim's `fdatasync`
+    issues `fcntl(F_FULLFSYNC)` internally, which is exactly why counting `os.fdatsync` saw zero.
+    """
+    from blackbox import platform
+
+    shim = platform.current()
+    rec = Recorder(shim)
+    monkeypatch.setattr(shim, "fdatasync", rec.fdatasync)
+    monkeypatch.setattr(shim, "fsync_dir", rec.fsync_dir)
+    monkeypatch.setattr(shim, "open_fd", rec.open_fd)
     return rec
 
 
