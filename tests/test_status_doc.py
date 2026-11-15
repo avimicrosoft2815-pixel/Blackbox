@@ -19,6 +19,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
+sys.path.insert(0, str(ROOT / "tools"))
+
+import git_history
 
 STATUS = ROOT / "docs" / "STATUS.md"
 STATE = ROOT / "docs" / "STATE.json"
@@ -49,13 +52,12 @@ def _rows(section: str) -> list[list[str]]:
 
 
 def test_status_names_exactly_one_head_and_it_is_in_the_past() -> None:
+    git_history.require_history()
     header = "\n".join(_text().splitlines()[:6])
     heads = re.findall(r"\*\*HEAD\*\*\s+`([0-9a-f]{7,40})`", header)
     assert len(heads) == 1, f"the header must name one HEAD, found {heads}"
     sha = heads[0]
-    proc = subprocess.run(["git", "merge-base", "--is-ancestor", sha, "HEAD"], cwd=ROOT,
-                          capture_output=True, text=True)
-    assert proc.returncode == 0, f"STATUS points at {sha}, which is not an ancestor of HEAD"
+    assert git_history.is_ancestor(sha), f"STATUS points at {sha}, which is not an ancestor of HEAD"
 
 
 def test_no_claim_in_status_is_hedged_with_two_answers() -> None:
@@ -91,7 +93,8 @@ def test_the_recovery_row_is_labelled_against_its_own_row() -> None:
     row = next(r for r in rows if "Recovery" in r[0])
     line = " | ".join(row)
     assert "120 ms" in line, "the row's budget must be printed next to the number"
-    assert "52.1" in line and "10 000" in line, "the row needs the ms/10k figure and the N frames"
+    assert "ms per 10 k frames" in line and "22 312" in line, "the row needs the ms/10k figure and the N frames"
+    assert re.search(r"n \d+ rounds", line), "the row must say how many rounds stand behind the percentiles"
     assert "**PASS**" in line, "the verdict must be stated, not implied"
 
 
@@ -126,3 +129,48 @@ def test_the_test_count_line_matches_the_suite_size() -> None:
     collected = sum(int(n) for n in counts)
     assert collected == total, f"STATUS says {total} tests, collection found {collected}"
     assert passed == total - 1, "the one skip is named in the same sentence"
+
+
+def test_every_quoted_ratio_recomputes_from_its_own_bytes() -> None:
+    """C38 — `1.231× (4,718,976 / 2,560,000)` was printed for a week; 4 718 976 is the *per-event* numerator.
+
+    1.231 is `results.ext4.amplification_by_batch[batch_bytes=16384]` = 3 150 352 / 2 560 000, and 4 718 976 /
+    2 560 000 = 1.843, which is the per-publish figure. Two different "amplification" numbers were published under
+    one label with the other number's arithmetic beside it, so a reader who checked the division found 1.843 where
+    the row said 1.231. The file cannot be trusted on arithmetic it does not do itself, so this does the division.
+    """
+    offenders = []
+    for number, line in enumerate(_text().splitlines(), start=1):
+        if "×" not in line:
+            continue
+        pairs = re.findall(r"\(([\d\s,]+) / ([\d\s,]+)\)", line)
+        if not pairs:
+            continue
+        quoted = [float(value) for value in re.findall(r"([0-9]+\.[0-9]+)×", line)]
+        for numerator, denominator in pairs:
+            num = float(numerator.replace(",", "").replace(" ", ""))
+            den = float(denominator.replace(",", "").replace(" ", ""))
+            if den == 0 or not quoted:
+                offenders.append(f"line {number}: a ratio with no multiplier beside it")
+                continue
+            expected, printed = num / den, quoted.pop(0)
+            if abs(expected - printed) > 0.001 * expected:
+                offenders.append(f"line {number}: {printed}× printed for {num:,.0f} / {den:,.0f} = {expected:.3f}")
+    assert offenders == [], "STATUS.md arithmetic does not check out: " + "; ".join(offenders)
+
+
+def test_every_numeric_row_in_the_gate_table_cites_its_json() -> None:
+    """A row without a source is a claim a reviewer cannot follow back to a file (C38)."""
+    rows = [line for line in _section("## 2.").splitlines()
+            if line.startswith("|") and re.search(r"\d+(\.\d+)?", line) and "---" not in line]
+    bodies = [row for row in rows if not row.lower().startswith("| row |")]
+    offenders, carried = [], None
+    for row in bodies:
+        cells = [cell.strip() for cell in row.strip().strip("|").split("|")]
+        if ".json" in row:
+            carried = cells[-1]
+            continue
+        if cells[-1] == "same" and carried is not None:      # "same" means the row directly above it
+            continue
+        offenders.append(cells[0])
+    assert offenders == [], "gate-table rows with no JSON source: " + "; ".join(offenders)
