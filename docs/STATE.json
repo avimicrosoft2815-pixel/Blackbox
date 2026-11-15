@@ -7,8 +7,8 @@
   ],
   "next_ticket": "P3B-08",
   "next_note": "L3: attach is a one-command story with the receipts — `blackbox run` exports the base URLs, two coding-agent adapters install byte-identically, and `docs/attach.md` labels every surface with a version+date or the word unverified (four rows were run with real clients: openai 3.51.0, anthropic 2.8.0, curl 7.88.1, node v22.22.3). Running them found defect 39 — the OpenAI export lost the `/v1` — fixed in `BASE_URL_SUFFIX` (D-042). Still owed: P3B-07's bench-box cold-start row, P3B-08's proxy bench (next), and confirmation of Codex's real hook schema. Suite 841.",
-  "last_green_commit": "2946000",
-  "last_green_commit_note": "run 43765148998 on 2946000, ten jobs ten success — the first commit on this branch to carry the Codex adapter and the labelled-unverified surface (D-041). 3dedbd4 is the merge of PR #12 on main and ran ten of ten as 43763381784; 9a29ad1 (43762632684) was ten of ten on the previous branch before the merge.",
+  "last_green_commit": "53b8aeb",
+  "last_green_commit_note": "run 43766701588 on 53b8aeb, ten jobs ten success (py3.11/3.12/3.13 × ubuntu/macos/windows + docs) — the attach matrix, the four client rows run through the exported base URL, and defect 39's fix. 1a162fd is the merge of PR #13 on main (P3B-06, run 43765485763 ten of ten on 2d9501e); 2946000 was ten of ten as 43765148998.",
   "gates": {
     "G-A": "pass",
     "G-Promise": "pass",
