@@ -21,9 +21,9 @@ def _payload() -> dict:
     return {"model": "mock-1", "stream": True, "messages": [{"role": "user", "content": "hi"}]}
 
 
-def test_the_default_order_is_the_plans_a_then_b():
+def test_the_default_order_is_the_plans_a_then_b_then_c():
     names = [name for name, _ in preflight.default_seams()]
-    assert names == ["httpx-hooks", "httpx-transport"]
+    assert names == ["httpx-hooks", "httpx-transport", "sdk-methods"]
 
 
 def test_the_first_working_seam_installs_and_is_recorded():
@@ -55,12 +55,30 @@ def test_forcing_a_to_fail_chooses_b_and_records_the_reason():
         result.handle.uninstall()
 
 
-def test_forcing_both_leaves_the_recorder_installed_but_not_capturing():
-    result = preflight.choose(Recorder(), forced={"httpx-hooks": "forced", "httpx-transport": "forced"})
+def test_forcing_a_and_b_falls_through_to_seam_c():
+    """The plan's chain has three links, so the third has to be reachable — and its record must say what it costs:
+    seam C counts events, not bytes, so the decision is not equivalent to the two above it."""
+    recorder = Recorder()
+    result = preflight.choose(recorder, forced={"httpx-hooks": "forced", "httpx-transport": "forced"})
+    try:
+        assert result.seam == "sdk-methods"
+        assert recorder.installed_seam == "sdk-methods"
+        assert [(a.name, a.status) for a in result.attempts] == [
+            ("httpx-hooks", "forced-failed"), ("httpx-transport", "forced-failed"), ("sdk-methods", "installed")]
+        assert result.handle is not None
+        assert result.handle.detail["units"] == "parsed stream events, not wire bytes"
+    finally:
+        assert result.handle is not None
+        result.handle.uninstall()
+
+
+def test_forcing_all_three_leaves_the_recorder_installed_but_not_capturing():
+    result = preflight.choose(Recorder(), forced={"httpx-hooks": "forced", "httpx-transport": "forced",
+                                                  "sdk-methods": "forced"})
     assert result.seam is None
     assert result.capturing is False
     assert result.handle is None
-    assert [a.status for a in result.attempts] == ["forced-failed", "forced-failed"]
+    assert [a.status for a in result.attempts] == ["forced-failed", "forced-failed", "forced-failed"]
     assert result.as_dict()["capture_seam"] is None
 
 

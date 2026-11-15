@@ -13,7 +13,8 @@ Order and why:
 * **B — transport tee**: needs nothing from the SDK at all, which is what catches a library that builds its own
   client and ignores event hooks. Fatter (wraps the transport), so it is the fallback rather than the default.
 * **C — SDK method patches** (P3-05c): works when the SDK owns the client and hands us nothing at the HTTP layer.
-  Last, because it is the most version-sensitive.
+  Last, because it is the most version-sensitive — and because it is the only seam whose byte count is absent by
+  construction (`partial=True`, events counted instead), which makes it worth reaching only when the others cannot.
 
 The order is the plan's (`A → B → C`). It is not a quality ordering — A and B both see every chunk — it is an
 invasiveness ordering: try the seam that touches least of the application first, and record which one won so a
@@ -58,9 +59,10 @@ class PreflightResult:
 
 def default_seams() -> list[tuple[str, Any]]:
     """The ordered list, imported lazily so a machine without httpx pays nothing for this module."""
-    from blackbox.cap_sdk import seam_httpx_hooks, seam_httpx_transport
+    from blackbox.cap_sdk import seam_httpx_hooks, seam_httpx_transport, seam_sdk_methods
 
-    return [("httpx-hooks", seam_httpx_hooks), ("httpx-transport", seam_httpx_transport)]
+    return [("httpx-hooks", seam_httpx_hooks), ("httpx-transport", seam_httpx_transport),
+            ("sdk-methods", seam_sdk_methods)]
 
 
 def _kwargs_for(module: Any, client: Any) -> dict[str, Any]:

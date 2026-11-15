@@ -14,10 +14,11 @@ currently ends at B and a two-seam failure means *not capturing*, recorded rathe
 |---|---|---|---|---|---|
 | A — client hooks | `cap_sdk/seam_httpx_hooks.py` | `httpx.Client.__init__`, `httpx.AsyncClient.__init__` (adds a request hook and a response hook) | httpx | **httpx 0.28.1, Linux, 2026-11-15** | the response hook wraps the still-unread stream with the shared tee, so A sees every chunk. Clients built *before* install are not captured — the preflight records that instead of pretending |
 | B — transport tee | `cap_sdk/seam_httpx_transport.py` | a client's `_transport`, or `httpx.HTTPTransport.handle_request` | httpx | **httpx 0.28.1, Linux, 2026-11-15** | works when the SDK owns the client. Bytes forwarded unchanged: sha256-compared against an unmodified client in `tests/test_seam_transport.py` |
-| C — SDK methods | `cap_sdk/seam_sdk_methods.py` | `openai` chat/responses/embeddings, `anthropic` messages | the SDKs | **not built** | P3-05c. Until it exists, an SDK that ignores `event_hooks` *and* hides its transport is not captured at all, and the preflight says so |
+| C — SDK methods | `cap_sdk/seam_sdk_methods.py` | `openai` `chat.completions.create`, `embeddings.create`, `responses.create` and `anthropic` `messages.create` (sync and async classes) | the SDKs | **openai 3.51.0 + anthropic 2.8.0, Linux, 2026-11-15** | the fallback for an SDK that hides its client. **Counts parsed stream events, not wire bytes**: every call it records is `partial=True` with `bytes_received = 0`, and no claim about bytes may be made from it (D-023) |
 
 | seam | verified on | unverified |
 |---|---|---|
+| C | openai 3.51.0, anthropic 2.8.0 | any other version or any SDK this table does not name. Every target is looked up by module, class and attribute: what is missing is skipped and listed in the handle's `detail["skipped"]`, never guessed. An SDK version whose shape differs will therefore *not* install, which the preflight records |
 | A | httpx 0.28.1 (sync and async) | httpx 0.27.x, 0.26.x, and every future version: the seam's capability depends on httpx firing response hooks before the body is read, which is a timing fact, not an API contract. `tests/test_seam_hooks.py` fails loudly if a version moves it, rather than writing zero-byte calls |
 | B | httpx 0.28.1 | anything that stops exposing `HTTPTransport.handle_request`, or a client whose transport is not reachable as `_transport`. `client=` install is the supported path; the class patch is the fallback |
 
@@ -43,7 +44,10 @@ about any real provider — no row in this file that says "verified" means "the 
 
 `pip install blackbox-recorder` installs **nothing**. `httpx` is the optional `capture` extra
 (`pip install blackbox-recorder[capture]`), imported inside functions only, and `tests/test_stdlib_only.py` fails if
-it ever appears at module scope. Python `>=3.11`.
+it ever appears at module scope. Seam C's tests use the published SDKs, so they live in a third extra,
+`blackbox-recorder[capture-sdks]` — a fixture that imitates an SDK can only prove the seam agrees with my idea of the
+SDK, and the day-14 rule is about scripts nobody edited. CI installs `.[dev,capture,capture-sdks]` so the count in
+`docs/STATUS.md` means the same thing on a runner as it does here. Python `>=3.11`.
 
 ## What is still pending in this table
 

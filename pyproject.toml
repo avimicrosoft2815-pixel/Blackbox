@@ -29,6 +29,9 @@ dev = ["pytest==8.3.4", "hypothesis==6.122.3"]
 # import it inside functions, and the suite skips them when it is absent. The pin is the version range P3-05d's
 # SUPPORTED table is verified against.
 capture = ["httpx==0.28.1"]
+# P3-05c's seam patches the SDKs' own methods, so its tests need the real libraries: a fixture that imitates an SDK
+# can only prove the seam agrees with my idea of the SDK. Kept out of `dev` and out of the runtime dependencies.
+capture-sdks = ["openai==3.51.0", "anthropic==2.8.0"]
 
 [project.urls]
 Documentation = "https://github.com/avimicrosoft2815-pixel/Blackbox"

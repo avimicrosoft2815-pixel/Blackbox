@@ -36,7 +36,7 @@ def test_dev_extra_is_pinned_and_minimal():
     # a runtime dependency — `[project].dependencies` is asserted empty above, and that is what keeps the core
     # stdlib-only.
     for extra, contents in extras.items():
-        assert extra in {"dev", "capture"}, f"unexpected optional extra {extra!r}"
+        assert extra in {"dev", "capture", "capture-sdks"}, f"unexpected optional extra {extra!r}"
         for spec in contents:
             assert "==" in spec, f"{extra} dependency must be pinned exactly: {spec}"
 
