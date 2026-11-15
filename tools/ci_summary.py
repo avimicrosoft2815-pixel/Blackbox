@@ -39,8 +39,16 @@ def main(argv: list[str]) -> int:
     # test id, so a red cell names its tests from the CLI. 600 characters rather than 200: an assertion message is
     # usually a dict, and the field that explains the failure is rarely in the first 200 (defect 26 was found by
     # reading these annotations, and the truncated tail was the part that would have explained it).
+    annotated = 0
     for line in lines:
         if line.startswith(("FAILED ", "ERROR ")):
+            print(f"::error title={title}::{line.strip()[:600]}", flush=True)
+            annotated += 1
+    # A red step that names nothing is how a suite fails for a week without anyone learning why: `pytest -q` can exit
+    # non-zero with no `FAILED` line at all (a crash, a collection error whose summary never printed, a timeout that
+    # kills the process). Then the only useful thing left is the tail itself, annotated line by line.
+    if proc.returncode != 0 and annotated == 0:
+        for line in [line for line in lines if line.strip()][-10:]:
             print(f"::error title={title}::{line.strip()[:600]}", flush=True)
     status = "passed" if proc.returncode == 0 else f"**failed** (exit {proc.returncode})"
     block = (f"\n### `{title}` — {status}\n\n"
