@@ -62,15 +62,19 @@ S: dict[str, tuple[str, str, str, str, str, str]] = {
     "P1-17": ("done", "HEAD", "bench/bench_frame.py", "bench/results/2026-11-14-frame.json",
               "self", "N=100k, 10k warm-up, paired toggles; protocol for every §15.1 row"),
     "P1-18": ("done", "55b4d42", "test_tape.py::test_roll_* (chain link)", "—", "self", "mutation walk todo"),
+    "P1-19": ("done", "HEAD", "bench/bench_writer_ab.py", "bench/results/2026-11-14-writer-ab.json",
+              "self", "ADR-005 supersedes ADR-001: median p50 ratio 1.059 / 1.065 at 10k / 40k ev/s, inside the "
+              "plan's 20 % rule, so the simpler store won and the mapping is gone"),
     "P1-20": ("done", "260bfd0", "test_prealloc.py (5)", "—", "self", "S17 still open, claim not made"),
     "P2-01": ("done", "8c99b96", "test_tape.py::test_lease_*", "—", "self", "stale/reboot/pid-reuse/live"),
     "P2-02": ("wip", "8c99b96", "—", "—", "—", "Linux only; macOS untested here"),
-    "P2-03": ("wip", "HEAD", "tests/test_platform_shims.py", "—", "—",
-              "shim written (zero-fill prealloc, no directory fsync, no start token) and its contract is "
-              "tested on Linux; the Windows cell itself has never run (C7)"),
-    "P2-04": ("wip", "HEAD", "tests/test_platform_shims.py", "—", "—",
-              "shim written and contract-tested; F_FULLFSYNC is not in stdlib so F2 on macOS is labelled weaker; "
-              "no fsync latency measured on a Mac"),
+    "P2-03": ("done", "HEAD", "tests/test_platform_shims.py, CI windows x 3", "—", "self",
+              "ticked on run 43657997367 (reconfirmed 43659827155): the Windows cell ran OpenProcess + "
+              "GetProcessTimes, winreg BootId, lseek-based positional I/O and zero-fill preallocation, and the "
+              "lease tests went through platform.current(); benchmark rows stay not measured"),
+    "P2-04": ("done", "HEAD", "tests/test_platform_shims.py, CI macOS x 3", "—", "self",
+              "ticked on run 43657997367 (reconfirmed 43659827155): sysctl(KERN_PROC_PID) start token, "
+              "kern.boottime and F_FULLFSYNC ran in the macOS cells; F_FULLFSYNC latency is not measured there"),
     "P2-05": ("done", "HEAD", "tests/test_adoption.py::test_discover_order_is_stable", "—", "self",
               "stable queue by created_ns then uuid; classifies orphan/missing-seal/damaged/.tmp"),
     "P2-06": ("done", "HEAD", "tests/test_recovery.py (36)", "—", "self",
@@ -155,8 +159,9 @@ def main() -> None:
             "0.576–9.14 µs p50 | — | stages are non-additive | `bench/results/2026-11-14-frame.json` |",
             "| `P1-11` | recovery scan, 10 000 frames | 7 rounds | 120.25 / — / 124.34 ms | 58.0 ms per 10k | "
             "| `bench/results/2026-11-14-recovery.json` |",
-            "| `P1-19` | mmap vs `write()`-append, interleaved blocks | 3 s per rate per arm | ratio 1.395 / 1.233 / 1.211 "
-            "at 1 k / 10 k / 40 k ev/s | — | keep mmap (ADR-001) | `bench/results/2026-11-14-writer-ab.json` |",
+            "| `P1-19` | mmap vs `pwrite`-append, interleaved blocks | 3 s per rate per arm | median p50 ratio "
+            "1.059 / 1.065 at 10 k / 40 k ev/s | — | **pwrite** (ADR-005 supersedes ADR-001) | "
+            "`bench/results/2026-11-14-writer-ab.json` |",
             "| `P2-09` | randomized parent-`SIGKILL` | 500 trials × 2 filesystems | violations: 0 | — | "
             "| `bench/results/2026-11-14-kill-random.json` |",
             "| `P1-03` | CBOR fuzz | 100 000 buffers | non-`CBORError` exceptions: 0 | — | "
