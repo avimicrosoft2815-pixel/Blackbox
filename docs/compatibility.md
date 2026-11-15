@@ -45,14 +45,18 @@ Not yet applicable — no capture layer exists (phase P3). The declared matrix l
 Cell values are the **test** verdict only. No benchmark number in this repository comes from a CI runner: those
 rows stay `smoke only` on a runner and `not measured` for an OS that has not run the benchmark.
 
-Last update: run [`43659827155`](https://github.com/avimicrosoft2815-pixel/Blackbox/actions/runs/43659827155)
-(commit `8e2256e`) — **all ten cells green**, read with `gh run view`. This is the run that first carries the blob
+Last update: run [`43678447134`](https://github.com/avimicrosoft2815-pixel/Blackbox/actions/runs/43678447134)
+(commit `4619b90`) — **all ten cells green** (docs + `py3.11/3.12/3.13` × ubuntu/macOS/Windows), read back with the
+runs API: ten jobs, ten `success`. **This is the first green run of this branch**: the seven earlier runs
+(`fec6fed` … `ff30196`) all failed, and two distinct causes were found and fixed under C35/C36 — a depth-1 checkout
+made the ancestry tests fail by construction, and on macOS the sync counter watched `os.fdatasync`, which the shim
+never calls because it uses `fcntl(F_FULLFSYNC)`. This is the run that first carries the blob
 store, the retention randomizer, the recovery machine (24 real kill-resume trials) and the capsule v0.
 
 | OS | 3.11 | 3.12 | 3.13 | Evidence |
 |---|---|---|---|---|
-| ubuntu-latest (Linux 6.x, x86-64) | **green** | **green** | **green** | `gh run view 43659827155` |
-| macos-latest (arm64 runner) | **green** | **green** | **green** | same run |
+| ubuntu-latest (Linux 6.x, x86-64) | **green** | **green** | **green** | run `43678447134` |
+| macos-latest (arm64 runner) | **green** | **green** | **green** | same run — including the commit-boundary sync test that had failed in three macOS cells for six runs (C36) |
 | windows-latest | **green** | **green** | **green** | same run — `os.replace` over an existing blob, `O_EXCL` tmp files, the sharing-violation retry and a second recoverer process all ran there |
 | docs job | green | — | — | same run |
 

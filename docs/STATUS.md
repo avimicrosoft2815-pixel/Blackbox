@@ -1,6 +1,6 @@
 # STATUS — BlackBox v1.0 build
 
-**Branch** `arena/a781c68f-blackbox` · **base** `31241d6` · **HEAD** `adb25b4`+ (pushed after every ticket)
+**Branch** `arena/a781c68f-blackbox` · **base** `31241d6` · **HEAD** `4619b90` — CI green, 10/10 cells
 **trunk: mergeable** — every C12 check passes from a clean clone and the README says what exists.
 **product: pre-alpha — storage and recovery layer only; no SDK, proxy or viewer yet.**
 
@@ -170,7 +170,7 @@ to `P2-11`** (`blackbox run`), not P5 — corrected here and in `DECISIONS.md`.
 | docs + `bench/results/*.json` committed | yes |
 | no absolute sandbox paths | grep over `bench/results/` = 0 |
 | forbidden words, tree + commit messages | green |
-| **C7 CI** | **green, run `43660321110`** (commit `a9f0953`, the PR head) — ubuntu × 3 **pass** · macOS × 3 **pass** · Windows × 3 **pass** · docs × 1 **pass**. The cells that used to fail were `O_BINARY` (DV-012): every `os.open` gave the CRT a text-mode descriptor, so `0x0A` expanded to `0x0D 0x0A` on the way out and the seal footer stopped matching the bytes the writer had just written. `docs/compatibility.md` holds the per-cell verdicts and the run URLs. |
+| **C7 CI** | **green, run `43678447134` ([link](https://github.com/avimicrosoft2815-pixel/Blackbox/actions/runs/43678447134))(https://github.com/avimicrosoft2815-pixel/Blackbox/actions/runs/43678447134) at `4619b90`** — docs × 1 **pass** · ubuntu × 3 **pass** · macOS × 3 **pass** · Windows × 3 **pass**; ten jobs, ten `success`, read back from the runs API. It is the first green run of this branch: the seven runs before it failed, on two causes this turn's tickets name — a depth-1 checkout made the ancestry tests fail by construction (C35), and the macOS cells counted syncs at `os.fdatasync`, which the shim never calls because it uses `fcntl(F_FULLFSYNC)` (C36). `docs/compatibility.md` holds the per-cell verdicts and the run URL. Earlier green runs quoted in this file (`43660321110`, `43659827155`) belong to other commits and are not evidence for this HEAD. |
 
 ## 7. Not done — and why that is the honest state
 
