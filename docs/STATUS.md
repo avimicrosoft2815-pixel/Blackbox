@@ -1,7 +1,8 @@
-# BlackBox build status — 2026-11-16 — trunk `846e01a` — gates: **G-Promise pass** (built and self-reviewed at `af908bc`, independently counter-signed at `fdb3875`; see `docs/gates/G-Promise.md`), G-Capture, G-Attach, G-Capsule, G-Sec, G-Release not yet opened
+# BlackBox build status — 2026-11-16 — trunk `23cdb7b` — gates: **G-Promise pass** (built and self-reviewed at `af908bc`, independently counter-signed at `fdb3875`; see `docs/gates/G-Promise.md`), G-Capture, G-Attach, G-Capsule, G-Sec, G-Release not yet opened
 
-**Branch** `arena/a781c68f-blackbox` · **base** `31241d6` · CI at `846e01a`: run `43697198262`, ten jobs, ten
-`success` — **the first all-OS green since `c7919f9`**. The three Windows cells had been red for four commits and the
+**Branch** `arena/a781c68f-blackbox` · **base** `31241d6` · CI at `23cdb7b`: run `43697556490`, ten jobs, ten
+`success`; the run before it, `43697198262` at `846e01a`, was also ten of ten — **the first all-OS green since
+`c7919f9`**. This note's own commit is docs-only and its run is pending when it is written. The three Windows cells had been red for four commits and the
 cause was mine: the Windows teardown fixture in `tests/conftest.py` called `getattr(obj, "_head", None)` on every
 object in `gc.get_objects()`, `anthropic` keeps its optional dependencies behind a `LazyProxy` that raises
 `MissingDependencyError` when the extra is absent, and the teardown error landed on nine innocent property tests once
@@ -143,7 +144,7 @@ row in the same commit.
 ## What is next
 
 0. **`846e01a` is green on all ten cells** (`43697198262`) — the first all-OS green since `c7919f9`, after four
-   commits of Windows red on defect 25 and one on defect 26. `STATE.last_green_commit` is `846e01a`.
+   commits of Windows red on defect 25 and one on defect 26. `STATE.last_green_commit` is `23cdb7b`.
 1. **G-Promise is signed** (`docs/gates/G-Promise.md`, verdict pass, self-signed — see §Labelled) and `STATE.json`
    carries `gates["G-Promise"] = "pass"`.
 2. **G-Capture is open, and its two mechanism rows are now green**: the day-14 rule (an unmodified `openai` script
