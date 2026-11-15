@@ -22,11 +22,14 @@ matched prefix, so `http://127.0.0.1:PORT/openai/v1/models` with route `openai` 
 """
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, replace
+from pathlib import Path
 from urllib.parse import urlsplit
 
 from blackbox.errors import BlackBoxError, bbx
 
+UPSTREAM_DEFAULTS = Path(__file__).with_name("upstreams.json")   # data, not code (D-034)
 UPSTREAM_HEADER = "x-blackbox-upstream"          # the route, by name; stripped before it reaches the upstream
 PROXY_HEADERS_PREFIX = "x-blackbox-"             # every one of ours: never forwarded, in either direction
 LOOPBACK_HOSTS = ("127.0.0.1", "::1", "localhost")
@@ -130,6 +133,27 @@ class Routes:
 
     # -- construction --------------------------------------------------------------------------------------------
     @classmethod
+    def provider_defaults(cls, *, names: tuple[str, ...] | None = None, overrides: dict[str, str] | None = None,
+                          default: str | None = None, bind: str = "127.0.0.1",
+                          bind_unsafe: bool = False) -> Routes:
+        """The table a bare `blackbox run` builds: a route per provider name, at `/<name>`, to the documented base.
+
+        `names` narrows it (the launcher asks for the four the plan's variables cover); `overrides` replaces a base
+        (`--upstream name=url`). A name with no default and no override is an error rather than a silently missing
+        route, because a variable pointed at `/gemini` that routes nowhere is worse than refusing to start.
+        """
+        table = _provider_table()
+        wanted = names or tuple(sorted(table))
+        specs: list[Route] = []
+        for name in wanted:
+            base = (overrides or {}).get(name, table.get(name))
+            if not base:
+                raise upstream_not_allowed(f"no default upstream for {name!r}; pass --upstream {name}=<url>")
+            specs.append(Route(name=name, base=base, prefix=f"/{name}"))
+        chosen = default or ("openai" if "openai" in wanted else wanted[0])
+        return cls(specs, default=chosen, bind=bind, bind_unsafe=bind_unsafe)
+
+    @classmethod
     def from_specs(cls, specs: list[str], *, default: str | None = None, bind: str = "127.0.0.1",
                    bind_unsafe: bool = False, unverified: tuple[str, ...] = ()) -> Routes:
         """`["openai=<provider base>", "local=http://127.0.0.1:8000/v1@/local"]` → a table.
@@ -174,6 +198,11 @@ class Routes:
                 "upstreams": {name: {"base": r.base, "prefix": r.prefix, "strip": r.strip,
                                      "verify_tls": r.verify_tls} for name, r in sorted(self._routes.items())}}
 
+    def extended(self, extra: list[Route], *, default: str | None = None) -> Routes:
+        """This table plus more routes — used by the launcher for base URLs the user already had set (P3B-03)."""
+        return Routes([*self._routes.values(), *extra], default=default or self._default, bind=self._bind,
+                      bind_unsafe=self._bind != "127.0.0.1")
+
     def verify_all(self) -> None:
         """Undo every `--insecure-upstream`: the only direction this table moves is towards verification."""
         self._routes = {name: replace(r, verify_tls=True) for name, r in self._routes.items()}
@@ -194,6 +223,15 @@ class Routes:
         if self._default is not None:
             return self._routes[self._default]
         raise upstream_not_allowed(f"no route matches {clean!r} and there is no default upstream")
+
+
+def _provider_table(path: Path = UPSTREAM_DEFAULTS) -> dict[str, str]:
+    """The JSON map, with its `_comment` keys skipped. Data on disk so a reviewer can read the destinations."""
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except OSError as exc:                                  # pragma: no cover - a broken install
+        raise upstream_not_allowed(f"cannot read {path}: {exc}") from exc
+    return {name: base for name, base in raw.items() if not name.startswith("_") and isinstance(base, str)}
 
 
 def check_bind(host: str, unsafe: bool = False) -> str:
@@ -224,6 +262,7 @@ def coded_error(code: str, detail: str, *, reason: str, status: int = 502) -> Ro
 
 
 __all__ = [
-    "DEFAULT_PORT", "LOOPBACK_HOSTS", "MAX_BODY_BYTES", "PROXY_HEADERS_PREFIX", "UPSTREAM_HEADER", "Route",
-    "RouteError", "Routes", "bbx", "check_bind", "coded_error", "is_ours", "upstream_not_allowed",
+    "DEFAULT_PORT", "LOOPBACK_HOSTS", "MAX_BODY_BYTES", "PROXY_HEADERS_PREFIX", "UPSTREAM_DEFAULTS",
+    "UPSTREAM_HEADER", "Route", "RouteError", "Routes", "bbx", "check_bind", "coded_error", "is_ours",
+    "upstream_not_allowed",
 ]

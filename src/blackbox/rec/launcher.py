@@ -57,6 +57,7 @@ class RunResult:
     writer_uuid: str = ""
     recovered: dict[str, Any] = field(default_factory=dict)
     recovery_error: str | None = None
+    proxy: dict[str, Any] = field(default_factory=dict)      # P3B-03: url, port, exports, adopted, rebinds
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -159,7 +160,8 @@ class _Watch:
 
 def launch(argv: list[str], *, data_dir: str | None = None, stall_ms: int = 5_000,
            env: dict[str, str] | None = None, out: IO[str] | None = None, recover: bool = True,
-           run_id: str | None = None) -> RunResult:
+           run_id: str | None = None, proxy: bool = False, proxy_routes: Any = None,
+           proxy_port: int = 0, proxy_receiver: Any = None) -> RunResult:
     """Run `argv` under the recorder, watch for a stall, then recover the tape that the child left behind."""
     if not argv:
         raise ValueError("launch() needs a command")
@@ -176,12 +178,26 @@ def launch(argv: list[str], *, data_dir: str | None = None, stall_ms: int = 5_00
     child_env["BLACKBOX_RUN_ID"] = run_id
     child_env["BLACKBOX_HOME"] = data_dir
     child_env["BLACKBOX_STALL_MS"] = str(stall_ms)
+    # ---- the proxy (P3B-03): started before the child, because the child's environment names its port ----------
+    proxy_thread, proxy_plan = (None, None)
+    if proxy:
+        proxy_thread, proxy_plan = _start_proxy(child_env, proxy_routes, proxy_port, proxy_receiver)
+        child_env.update(proxy_plan.exports)
+        child_env["BLACKBOX_PROXY_URL"] = proxy_thread.url
+
     writer.emit(C.KIND_RUN_START, cbor.encode({"run_id": run_id, "argv": list(argv), "pid": None,
                                                "stall_ms": stall_ms}))
     writer.flush()
     started = time.monotonic()
     # no shell: argv is the caller's list, and nothing here is built from a string
-    child = subprocess.Popen(argv, env=child_env)  # noqa: S603
+    try:
+        child = subprocess.Popen(argv, env=child_env)  # noqa: S603
+    except BaseException:                      # a command that does not exist must not leave a listener behind
+        if proxy_thread is not None:
+            proxy_thread.stop()
+        keeper.stop()
+        writer.close()
+        raise
     result = RunResult(run_id=run_id, argv=list(argv), pid=child.pid, exit_code=0, stall_ms=stall_ms)
     watch = _Watch(data_dir, child.pid, stall_ms, out).start()
     try:
@@ -194,6 +210,20 @@ def launch(argv: list[str], *, data_dir: str | None = None, stall_ms: int = 5_00
         result.exit_code = 128 - raw
     else:
         result.exit_code = raw
+    if proxy_thread is not None and proxy_plan is not None:
+        try:
+            server = proxy_thread.server
+            result.proxy = {
+                "url": proxy_thread.url,
+                "port": proxy_thread.port,
+                "exports": dict(sorted(proxy_plan.exports.items())),
+                "adopted": dict(sorted(proxy_plan.adopted.items())),
+                "rebinds": list(proxy_thread.rebinds),
+                "port_changed": proxy_thread.port_changed,
+                "stats": server.stats.as_dict() if server is not None else {},
+            }
+        finally:
+            proxy_thread.stop()
     try:
         writer.emit(C.KIND_RUN_END, cbor.encode({"run_id": run_id, "exit_code": result.exit_code,
                                                  "signaled": result.signaled, "stalled": watch.stalled,
@@ -220,8 +250,30 @@ def launch(argv: list[str], *, data_dir: str | None = None, stall_ms: int = 5_00
     return result
 
 
+def _start_proxy(env: dict[str, str], routes: Any = None, port: int = 0,
+                 receiver: Any = None) -> tuple[Any, Any]:
+    """Build the table from the plan, start the listener, and return it with the plan that names its port (P3B-03).
+
+    The plan is made **before** the listener exists because the table depends on it (a base URL the user already set
+    becomes a route); the exports are filled in afterwards, from the port that was actually bound.
+    """
+    from blackbox.proxy.routes import Routes
+    from blackbox.proxy.supervisor import BASE_URL_VARS, ProxyThread, plan_exports
+
+    wanted = tuple(name for _var, name in BASE_URL_VARS)
+    plan = plan_exports(env)
+    table = routes or Routes.provider_defaults(names=wanted, default=plan.default_route or "openai")
+    if plan.routes:
+        table = table.extended(plan.routes, default=table.default or plan.default_route)
+    thread = ProxyThread(table, receiver=receiver, port=port).start()
+    return thread, plan_exports(env, thread.url)
+
+
 def _summary_line(result: RunResult) -> str:
     bits = [f"run {result.run_id}", f"exit {result.exit_code}"]
+    if result.proxy:
+        bits.append(f"proxy {result.proxy['url']} ({len(result.proxy['exports'])} vars exported"
+                    + (f", {len(result.proxy['adopted'])} adopted" if result.proxy["adopted"] else "") + ")")
     if result.signaled:
         bits.append(f"signal {result.signaled}")
     if result.stalled:
@@ -251,14 +303,26 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--stall-ms", type=int, default=5_000)
     ap.add_argument("--data-dir", default=None)
     ap.add_argument("--no-recover", action="store_true")
+    ap.add_argument("--no-proxy", action="store_true", help="do not start the loopback proxy (P3B-03)")
+    ap.add_argument("--proxy-port", type=int, default=0)
+    ap.add_argument("--upstream", action="append", default=[], metavar="NAME=URL[@/prefix]",
+                    help="add or replace an upstream route; the table is the proxy's egress allowlist")
+    ap.add_argument("--insecure-upstream", action="append", default=[], metavar="NAME",
+                    help="do not verify TLS for this upstream (local servers only)")
     ap.add_argument("cmd", nargs=argparse.REMAINDER)
     args = ap.parse_args(argv)
     cmd = args.cmd[1:] if args.cmd[:1] == ["--"] else args.cmd
     if not cmd:
         print("blackbox run: a command is required (blackbox run -- cmd ...)", file=sys.stderr)
         return 2
+    routes = None
+    if args.upstream:
+        from blackbox.proxy.routes import Routes
+
+        routes = Routes.from_specs(args.upstream, unverified=tuple(args.insecure_upstream), default=None)
     result = launch(cmd, data_dir=args.data_dir, stall_ms=args.stall_ms, out=sys.stderr,
-                    recover=not args.no_recover)
+                    recover=not args.no_recover, proxy=not args.no_proxy, proxy_routes=routes,
+                    proxy_port=args.proxy_port)
     return result.exit_code
 
 

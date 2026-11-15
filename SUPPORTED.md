@@ -152,5 +152,10 @@ routes = Routes([Route(name="openai", base="https://api.openai.com")], default="
   the proxy; a **set** one is left exactly as it is and becomes an upstream, so the recorder never moves traffic the
   user put somewhere on purpose. `ProxyThread` runs the listener on its own thread with a watchdog that rebinds a dead
   listener **on the port the child was told**.
-* **Not built yet**: `blackbox run` calling that thread and applying the plan (P3B-03's second half), the bench of §15.1's proxy rows and the kill/disconnect classes (P3B-08), the header links (P3B-04) and
+* **`blackbox run` starts it for you** (P3B-03): the child sees `OPENAI_BASE_URL` / `ANTHROPIC_BASE_URL` /
+  `OLLAMA_HOST` / `GOOGLE_GEMINI_BASE_URL` pointing at the proxy plus `BLACKBOX_PROXY=1`, unless the variable was
+  already set — in which case it is left exactly as it was and its destination becomes a route. `--no-proxy` turns the
+  listener off, `--upstream NAME=URL[@/prefix]` adds or replaces a route, `--insecure-upstream NAME` skips verification
+  for one, `--proxy-port` pins the port. The provider base URLs themselves live in `proxy/upstreams.json` (D-034).
+* **Not built yet**: the bench of §15.1's proxy rows and the kill/disconnect classes (P3B-08), the header links (P3B-04) and
   the hook adapters (P3B-05/06).

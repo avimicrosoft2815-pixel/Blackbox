@@ -1,0 +1,7 @@
+{
+  "_comment": "The provider base URLs a name means. This is data, not code, for two reasons: `tests/test_no_egress.py` forbids URL literals inside `proxy/`, and a destination list is something a reviewer should be able to read without reading Python. A name here is only a default — `--upstream name=url` replaces it, and nothing in the table is reachable until a route is built from it (P3B-02).",
+  "openai": "https://api.openai.com",
+  "anthropic": "https://api.anthropic.com",
+  "gemini": "https://generativelanguage.googleapis.com",
+  "ollama": "http://127.0.0.1:11434"
+}
