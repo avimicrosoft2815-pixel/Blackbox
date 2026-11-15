@@ -154,24 +154,31 @@ def test_async_tasks_keep_their_own_nodes_under_one_run(tmp_path):
     assert sorted(o["kind"] for o in opens) == ["run", "step", "step"]
 
 
-def test_a_forked_process_records_into_its_own_tape(tmp_path):
-    """Multiprocessing: the child must not inherit a file descriptor into the parent's tape and write there."""
-    ctx = multiprocessing.get_context("fork" if hasattr(multiprocessing, "get_context") else None)
+def _child_body(child_dir: str) -> None:
+    """Runs in the child process (module level, so `spawn` can pickle it)."""
+    api.shutdown()                    # a forked child inherits the parent's writer; drop it before opening its own
+    api.install(data_dir=child_dir)
+    api.mark("from-child")
+    api.shutdown()
+
+
+def test_a_child_process_records_into_its_own_tape(tmp_path):
+    """Multiprocessing: the child must not inherit a file descriptor into the parent's tape and write there.
+
+    Uses `fork` where it exists and `spawn` where it does not (Windows), which is why the child body is a module
+    level function: `spawn` pickles it, and a closure would fail on the Windows cells with
+    `AttributeError: Can't pickle local object` instead of testing anything.
+    """
+    method = "fork" if "fork" in multiprocessing.get_all_start_methods() else "spawn"
+    ctx = multiprocessing.get_context(method)
     api.install(data_dir=str(tmp_path))
     parent_tape = pathlib.Path(str(tmp_path)) / "tape"
     before = {p.name for p in parent_tape.iterdir()}
 
-    def child_body(child_dir: str) -> None:
-        api.shutdown()
-        api._STATE.writer = None
-        api.install(data_dir=child_dir)
-        api.mark("from-child")
-        api.shutdown()
-
     child_dir = str(tmp_path / "child")
-    proc = ctx.Process(target=child_body, args=(child_dir,))
+    proc = ctx.Process(target=_child_body, args=(child_dir,))
     proc.start()
-    proc.join(20)
+    proc.join(60)
     api.shutdown()
     assert proc.exitcode == 0, proc.exitcode
     assert (pathlib.Path(child_dir) / "tape").exists(), "the child wrote nothing"
