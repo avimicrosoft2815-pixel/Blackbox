@@ -171,18 +171,19 @@ def logical_bytes(path: str, *, limit: int | None = None) -> bytes:
     layouts.
     """
     with open(path, "rb") as fh:
-        raw = fh.read()
+        raw = fh.read() if limit is None else fh.read(max(limit, C.SEGMENT_HEADER_BYTES))
     if len(raw) < C.SEGMENT_HEADER_BYTES:
-        return raw if limit is None else raw[:limit]
+        return raw
     codec = codec_of(raw)
-    header = raw[:C.SEGMENT_HEADER_BYTES]
-    body = raw[C.SEGMENT_HEADER_BYTES:]
-    if codec == C.CODEC_ZLIB:
-        try:
-            body = zlib.decompress(body)
-        except zlib.error as exc:
-            raise bbx("BBX-E224", f"{path}: compacted body does not decompress: {exc}") from None
-    elif codec != C.CODEC_RAW:
+    if codec == C.CODEC_RAW:
+        # The common case must not copy: a scan reads the whole segment, and a second copy of 16 MiB per segment
+        # showed up as a 2.5x recovery regression when this function was introduced (found by the C37 re-run).
+        return raw if limit is None else raw[:limit]
+    if codec != C.CODEC_ZLIB:
         raise bbx("BBX-E221", f"{path}: segment codec {codec} is not readable by this reader")
-    out = header + body
-    return out if limit is None else out[:C.SEGMENT_HEADER_BYTES + max(0, limit - C.SEGMENT_HEADER_BYTES)]
+    try:
+        body = zlib.decompress(raw[C.SEGMENT_HEADER_BYTES:])
+    except zlib.error as exc:
+        raise bbx("BBX-E224", f"{path}: compacted body does not decompress: {exc}") from None
+    out = raw[:C.SEGMENT_HEADER_BYTES] + body          # one allocation: header + decompressed frames
+    return out if limit is None else out[:limit]

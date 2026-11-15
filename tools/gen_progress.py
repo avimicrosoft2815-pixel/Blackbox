@@ -49,7 +49,7 @@ S: dict[str, tuple[str, str, str, str, str, str]] = {
     "P1-09b": ("done", "HEAD", "tests/test_retention.py (13), tests/property/test_retention_random.py (9)",
                "bench/results/p1-09b-retention.json", "self",
                "GAP{RETENTION} committed and published before every unlink; 8 seeds x 60 randomized steps, "
-               "133 kills, 65 retention passes, 34 segments pruned, 0 violations of I1 or I9; tombstone "
+               "8 seeds x 60 steps per run, 320 recorded runs (`totals.runs`), 0 violations of I1 or I9; tombstone "
                "segments are pinned and merged so a declared hole outlives the segment that announced it"),
     "P1-14": ("done", "HEAD", "tests/test_blobs.py (14 of 18)", "—", "self",
               "hash to tmp to fsync to replace; a kill at S9 leaves a tmp file and no visible blob, and S9b leaves "

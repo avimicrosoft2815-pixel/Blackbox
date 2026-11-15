@@ -24,6 +24,7 @@ sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "bench"))
 
 import _fs
+import _stats
 from bench_frame import hardware
 
 from blackbox import constants as C
@@ -46,7 +47,8 @@ def _body(i: int) -> bytes:
 
 
 def pct(ordered: list[int], q: float) -> int:
-    return ordered[min(int(q * (len(ordered) - 1)), len(ordered) - 1)] if ordered else 0
+    """Delegates to the one nearest-rank definition (`bench/_stats.py`), so every bench file answers the same way."""
+    return round(_stats.nearest_rank([float(x) for x in ordered], q))
 
 
 def run(column: dict, n: int, warmup: int, *, mode: str = "process", batch_bytes: int,

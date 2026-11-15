@@ -76,7 +76,8 @@ def _seg_paths(tape_dir: str) -> list[str]:
 def _segment_has_frames(path: str) -> bool:
     """Content check, not a size check: every segment is preallocated to its full size, so size proves nothing."""
     try:
-        head = segments.logical_bytes(path)[C.SEGMENT_HEADER_BYTES:C.SEGMENT_HEADER_BYTES + C.FRAME_OVERHEAD_BYTES]
+        head = segments.logical_bytes(path, limit=C.SEGMENT_HEADER_BYTES + C.FRAME_OVERHEAD_BYTES)[
+            C.SEGMENT_HEADER_BYTES:C.SEGMENT_HEADER_BYTES + C.FRAME_OVERHEAD_BYTES]
     except OSError:
         return False
     if len(head) < C.FRAME_OVERHEAD_BYTES:

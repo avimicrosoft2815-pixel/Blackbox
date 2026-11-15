@@ -28,6 +28,7 @@ sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "bench"))
 
 import _fs
+import _stats
 from bench_frame import hardware
 
 from blackbox import constants as C
@@ -228,10 +229,9 @@ def _summarise(blocks: list[dict], rate: int, seconds: float) -> dict:
     lat = [x for b in blocks for x in b["lat"]]
     n = len(lat)
     cpu = sum(b["cpu"] for b in blocks)
-    q = statistics.quantiles(lat, n=100)
+    out = _stats.summary([x / 1000 for x in lat], digits=3)
     return {"offered_ev_s": rate, "events": n, "achieved_ev_s": round(n / seconds, 1),
-            "p50_us": round(q[49] / 1000, 3), "p95_us": round(q[94] / 1000, 3),
-            "p99_us": round(q[98] / 1000, 3),
+            "p50_us": out["p50"], "p95_us": out["p95"], "p99_us": out["p99"], "n": out["n"],
             "cpu_us_per_event": round(cpu / n * 1e6, 3) if n else None,
             "blocks": len(blocks)}
 
@@ -310,8 +310,8 @@ def measure(column: dict, seconds: float, pairs: int) -> dict:
             b_lat = got["write"]["lat"]
             a50 = statistics.median(a_lat)
             b50 = statistics.median(b_lat)
-            a99 = statistics.quantiles(a_lat, n=100)[98]
-            b99 = statistics.quantiles(b_lat, n=100)[98]
+            a99 = _stats.nearest_rank(sorted(a_lat), 0.99)
+            b99 = _stats.nearest_rank(sorted(b_lat), 0.99)
             ratios.append({"p50_ratio": round(b50 / a50, 3), "p99_ratio": round(b99 / a99, 3),
                            "mmap_p50_us": round(a50 / 1000, 3), "write_p50_us": round(b50 / 1000, 3),
                            "order": "".join(x[0].upper() for x in order)})
@@ -326,9 +326,9 @@ def measure(column: dict, seconds: float, pairs: int) -> dict:
         write_all = [x for b in blocks["write"] for x in b["lat"]]
         row = {"offered_ev_s": rate, "pairs": pairs,
                "mmap_p50_us": round(statistics.median(mmap_all) / 1000, 3),
-               "mmap_p99_us": round(statistics.quantiles(mmap_all, n=100)[98] / 1000, 3),
+               "mmap_p99_us": round(_stats.nearest_rank(sorted(mmap_all), 0.99) / 1000, 3),
                "write_p50_us": round(statistics.median(write_all) / 1000, 3),
-               "write_p99_us": round(statistics.quantiles(write_all, n=100)[98] / 1000, 3),
+               "write_p99_us": round(_stats.nearest_rank(sorted(write_all), 0.99) / 1000, 3),
                "p50_ratio_median": statistics.median(p50s), "p50_ratio_min": p50s[0],
                "p50_ratio_max": p50s[-1], "p99_ratio_median": statistics.median(p99s),
                "per_pair": ratios,

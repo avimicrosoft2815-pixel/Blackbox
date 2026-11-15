@@ -11,7 +11,6 @@ import argparse
 import json
 import os
 import platform
-import statistics
 import sys
 import time
 from pathlib import Path
@@ -21,6 +20,7 @@ sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "bench"))
 
 import _fs
+import _stats
 
 from blackbox import constants as C
 from blackbox.codec import cbor
@@ -57,12 +57,11 @@ def hardware() -> dict:
 
 
 def stats(samples: list[int]) -> dict:
-    q = statistics.quantiles(samples, n=100)
-    return {
-        "p50_us": round(q[49] / 1000, 3), "p95_us": round(q[94] / 1000, 3),
-        "p99_us": round(q[98] / 1000, 3), "mean_us": round(statistics.fmean(samples) / 1000, 3),
-        "min_us": round(min(samples) / 1000, 3), "max_us": round(max(samples) / 1000, 3),
-    }
+    """Nearest rank from one sorted array (C37); `n` travels with the percentiles."""
+    out = _stats.summary([x / 1000 for x in samples], digits=3, unit="us")
+    return {"n": out["n"], "p50_us": out["p50"], "p95_us": out["p95"], "p99_us": out["p99"],
+            "mean_us": out["mean"], "min_us": out["min"], "max_us": out["max"],
+            **({"note": out["note"]} if "note" in out else {})}
 
 
 def measure(fn, n: int, warmup: int) -> dict:

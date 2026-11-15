@@ -55,7 +55,8 @@ def resolve(document, selector: str):
 
 
 def load_state(path: Path | None = None) -> dict:
-    return json.loads((path or STATE).read_text(encoding="utf-8"))
+    loaded: dict = json.loads((path or STATE).read_text(encoding="utf-8"))
+    return loaded
 
 
 def check(state: dict, documents: dict[str, dict] | None = None,

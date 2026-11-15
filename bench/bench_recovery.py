@@ -12,7 +12,6 @@ import argparse
 import json
 import os
 import resource
-import statistics
 import subprocess
 import sys
 import tempfile
@@ -28,6 +27,7 @@ from blackbox.tape.writer import TapeWriter
 
 sys.path.insert(0, str(ROOT / "bench"))
 import _fs
+import _stats
 from bench_frame import hardware
 
 CHILD = ROOT / "tests" / "kill" / "_append_loop.py"
@@ -103,9 +103,14 @@ w.flush()
 committed = w.head.head_off - C.SEGMENT_HEADER_BYTES
 seals = 0
 w.close()
-print(json.dumps({"batch_bytes": batch, "committed_frame_bytes": committed,
-                  "payload_bytes": frames * event_bytes,
-                  "ratio": round(committed / (frames * event_bytes), 3)}))
+print(json.dumps({"batch_bytes": batch,
+                  "config": "one publish per event" if batch == 0 else f"group commit, {batch} B batch",
+                  "committed_frame_bytes": committed, "payload_bytes": frames * event_bytes,
+                  "ratio": round(committed / (frames * event_bytes), 3),
+                  "chain": True,
+                  "counts": ("bytes between the segment header and the committed head offset: frame headers, "
+                             "payloads and one CHAIN frame per publish, CRC trailers included; excludes the "
+                             "reservation, the segment header and the head slots")}))
 """
 
 
@@ -143,7 +148,7 @@ def measure_column(column: dict, args) -> dict:
         t0 = time.perf_counter()
         result = scanner.scan(tmp, uuid)
         times.append((time.perf_counter() - t0) * 1000)
-    q = statistics.quantiles(times, n=100) if len(times) > 2 else [min(times)] * 99
+    stats = _stats.summary(times, digits=2, unit="ms")
     recovered = result.frame_count
 
     # amplification with the default 16 MiB segment: a 64 MiB segment would measure the segment size
@@ -174,16 +179,27 @@ def measure_column(column: dict, args) -> dict:
     _fs.release(tmp2)
     return {
         "filesystem": column["name"], "scratch": _fs.label(column["dir"]),
+        # C37: nearest rank from one sorted array (bench/_stats.py), so min <= p50 <= p95 <= p99 <= max, and `n` is
+        # printed next to the percentiles: with 7 rounds a "p99" is the maximum and the note says so.
         "recovery": {"frames_on_tape": recovered, "requested_frames": args.frames, "rounds": args.rounds,
-                     "p50_ms": round(q[49], 2), "p95_ms": round(q[94], 2), "p99_ms": round(q[98], 2),
-                     "min_ms": round(min(times), 2), "max_ms": round(max(times), 2),
-                     "per_10k_frames_ms": round(q[49] / max(1, recovered) * 10_000, 1)},
+                     "n": stats["n"], "min_ms": stats["min"], "p50_ms": stats["p50"], "p95_ms": stats["p95"],
+                     "p99_ms": stats["p99"], "max_ms": stats["max"],
+                     "per_10k_frames_ms": round(stats["p50"] / max(1, recovered) * 10_000, 1),
+                     **({"note": stats["note"]} if "note" in stats else {})},
         "rss_this_process_kib": rss_kib,
         "amplification_by_batch": amp_runs,
         "amplification": {"payload_bytes": payload_bytes, "committed_frame_bytes": committed,
                           "ratio": round(committed / payload_bytes, 3) if payload_bytes else None,
                           "reserved_segment_bytes": reserved,
-                          "append_events_per_s": round(args.frames / append_s, 1)},
+                          "append_events_per_s": round(args.frames / append_s, 1),
+                          # C38: an object has to say what it counts, or two different "per-event" numbers end up
+                          # under one label in STATUS and a reader checking the arithmetic finds the wrong pair.
+                          "config": "one publish per event (no group commit)",
+                          "chain": True,
+                          "counts": ("committed_frame_bytes = bytes written between the segment header and the "
+                                     "committed head offset: frame headers, payloads and one CHAIN frame per "
+                                     "publish, CRC trailers included. Excludes the 16 MiB reservation, the segment "
+                                     "header and the 64 B head slots")},
     }
 
 
@@ -191,7 +207,7 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--frames", type=int, default=10_000)
     ap.add_argument("--event-bytes", type=int, default=256)
-    ap.add_argument("--rounds", type=int, default=7)
+    ap.add_argument("--rounds", type=int, default=30)
     ap.add_argument("--out", default=None)
     ap.add_argument("--only", default=None)
     args = ap.parse_args(argv)

@@ -1,186 +1,188 @@
 {
-  "date": "2026-11-14",
-  "probe": "recovery time, RSS, amplification",
-  "gate_column": "ext4",
-  "hardware": {
-    "cpu": "Intel(R) Xeon(R) Processor @ 2.60GHz",
-    "cpu_count": 2,
-    "python": "3.11.2",
-    "implementation": "CPython",
-    "os": "Linux-6.1.158+-x86_64-with-glibc2.36",
-    "machine": "x86_64",
-    "mem_total_kib": 4034452
+ "date": "2026-11-14",
+ "probe": "recovery time, RSS, amplification",
+ "gate_column": "ext4",
+ "hardware": {
+  "cpu": "Intel(R) Xeon(R) Processor @ 2.60GHz",
+  "cpu_count": 2,
+  "python": "3.11.2",
+  "implementation": "CPython",
+  "os": "Linux-6.1.158+-x86_64-with-glibc2.36",
+  "machine": "x86_64",
+  "mem_total_kib": 4034452
+ },
+ "columns": {
+  "ext4": {
+   "path": ".bench/scratch",
+   "gate": true,
+   "note": "gate column: numbers here are measured on the repository's real filesystem"
   },
-  "columns": {
-    "ext4": {
-      "path": ".bench/scratch",
-      "gate": true,
-      "note": "gate column: numbers here are measured on the repository's real filesystem"
-    },
-    "tmpfs": {
-      "path": "<scratch>/shm",
-      "gate": false,
-      "note": "labelled second column only: fdatasync is a no-op on tmpfs, so no durability claim"
-    }
-  },
-  "rss_write_only_process": {
-    "ext4": {
-      "events": 10000,
-      "segment_bytes": 16777216,
-      "procedure": "read /proc/self/status twice - before `open()` and after the last append - and report the difference; since ADR-005 the segment is not mapped, so a shared file mapping's RssFile accounting does not apply and the batch buffer (16 KiB + 1 MiB worst case) is RssAnon",
-      "head_off_at_sampling": 4723072,
-      "bytes_written": 4718976,
-      "segment_percent_written": 28.13,
-      "peak_kib": 19148,
-      "peak_mib": 18.7,
-      "above_baseline_mib": 1.15,
-      "rss_anon_delta_mib": 1.02,
-      "rss_file_delta_mib": 0.12,
-      "baseline": {
-        "ru_maxrss_kib": 19148,
-        "VmRSS": 17664,
-        "RssAnon": 8420,
-        "RssFile": 9244,
-        "RssShmem": 0,
-        "VmSwap": 0
-      },
-      "after": {
-        "ru_maxrss_kib": 19148,
-        "VmRSS": 18840,
-        "RssAnon": 9468,
-        "RssFile": 9372,
-        "RssShmem": 0,
-        "VmSwap": 0
-      }
-    },
-    "tmpfs": {
-      "events": 10000,
-      "segment_bytes": 16777216,
-      "procedure": "read /proc/self/status twice - before `open()` and after the last append - and report the difference; since ADR-005 the segment is not mapped, so a shared file mapping's RssFile accounting does not apply and the batch buffer (16 KiB + 1 MiB worst case) is RssAnon",
-      "head_off_at_sampling": 4723072,
-      "bytes_written": 4718976,
-      "segment_percent_written": 28.13,
-      "peak_kib": 19148,
-      "peak_mib": 18.7,
-      "above_baseline_mib": 1.15,
-      "rss_anon_delta_mib": 1.02,
-      "rss_file_delta_mib": 0.12,
-      "baseline": {
-        "ru_maxrss_kib": 19148,
-        "VmRSS": 17504,
-        "RssAnon": 8424,
-        "RssFile": 9080,
-        "RssShmem": 0,
-        "VmSwap": 0
-      },
-      "after": {
-        "ru_maxrss_kib": 19148,
-        "VmRSS": 18680,
-        "RssAnon": 9472,
-        "RssFile": 9208,
-        "RssShmem": 0,
-        "VmSwap": 0
-      }
-    }
-  },
-  "results": {
-    "ext4": {
-      "filesystem": "ext4",
-      "scratch": ".bench/scratch",
-      "recovery": {
-        "frames_on_tape": 22144,
-        "requested_frames": 10000,
-        "rounds": 7,
-        "p50_ms": 115.46,
-        "p95_ms": 122.16,
-        "p99_ms": 122.28,
-        "min_ms": 113.0,
-        "max_ms": 121.93,
-        "per_10k_frames_ms": 52.1
-      },
-      "rss_this_process_kib": 126204,
-      "amplification_by_batch": [
-        {
-          "batch_bytes": 0,
-          "committed_frame_bytes": 3121904,
-          "payload_bytes": 2560000,
-          "ratio": 1.219
-        },
-        {
-          "batch_bytes": 4096,
-          "committed_frame_bytes": 3234264,
-          "payload_bytes": 2560000,
-          "ratio": 1.263
-        },
-        {
-          "batch_bytes": 16384,
-          "committed_frame_bytes": 3150352,
-          "payload_bytes": 2560000,
-          "ratio": 1.231
-        },
-        {
-          "batch_bytes": 65536,
-          "committed_frame_bytes": 3127664,
-          "payload_bytes": 2560000,
-          "ratio": 1.222
-        }
-      ],
-      "amplification": {
-        "payload_bytes": 2560000,
-        "committed_frame_bytes": 4718976,
-        "ratio": 1.843,
-        "reserved_segment_bytes": 16777216,
-        "append_events_per_s": 37807.6
-      }
-    },
-    "tmpfs": {
-      "filesystem": "tmpfs",
-      "scratch": "<scratch>/shm",
-      "recovery": {
-        "frames_on_tape": 22280,
-        "requested_frames": 10000,
-        "rounds": 7,
-        "p50_ms": 110.55,
-        "p95_ms": 134.43,
-        "p99_ms": 138.96,
-        "min_ms": 100.67,
-        "max_ms": 125.95,
-        "per_10k_frames_ms": 49.6
-      },
-      "rss_this_process_kib": 126700,
-      "amplification_by_batch": [
-        {
-          "batch_bytes": 0,
-          "committed_frame_bytes": 3121744,
-          "payload_bytes": 2560000,
-          "ratio": 1.219
-        },
-        {
-          "batch_bytes": 4096,
-          "committed_frame_bytes": 3234416,
-          "payload_bytes": 2560000,
-          "ratio": 1.263
-        },
-        {
-          "batch_bytes": 16384,
-          "committed_frame_bytes": 3150352,
-          "payload_bytes": 2560000,
-          "ratio": 1.231
-        },
-        {
-          "batch_bytes": 65536,
-          "committed_frame_bytes": 3127816,
-          "payload_bytes": 2560000,
-          "ratio": 1.222
-        }
-      ],
-      "amplification": {
-        "payload_bytes": 2560000,
-        "committed_frame_bytes": 4718976,
-        "ratio": 1.843,
-        "reserved_segment_bytes": 16777216,
-        "append_events_per_s": 47964.5
-      }
-    }
+  "tmpfs": {
+   "path": "<scratch>/shm",
+   "gate": false,
+   "note": "labelled second column only: fdatasync is a no-op on tmpfs, so no durability claim"
   }
+ },
+ "rss_write_only_process": {
+  "ext4": {
+   "events": 10000,
+   "segment_bytes": 16777216,
+   "procedure": "read /proc/self/status twice - before `open()` and after the last append - and report the difference; since ADR-005 the segment is not mapped, so a shared file mapping's RssFile accounting does not apply and the batch buffer (16 KiB + 1 MiB worst case) is RssAnon",
+   "head_off_at_sampling": 4723072,
+   "bytes_written": 4718976,
+   "segment_percent_written": 28.13,
+   "peak_kib": 19148,
+   "peak_mib": 18.7,
+   "above_baseline_mib": 1.15,
+   "rss_anon_delta_mib": 1.02,
+   "rss_file_delta_mib": 0.12,
+   "baseline": {
+    "ru_maxrss_kib": 19148,
+    "VmRSS": 17664,
+    "RssAnon": 8420,
+    "RssFile": 9244,
+    "RssShmem": 0,
+    "VmSwap": 0
+   },
+   "after": {
+    "ru_maxrss_kib": 19148,
+    "VmRSS": 18840,
+    "RssAnon": 9468,
+    "RssFile": 9372,
+    "RssShmem": 0,
+    "VmSwap": 0
+   }
+  },
+  "tmpfs": {
+   "events": 10000,
+   "segment_bytes": 16777216,
+   "procedure": "read /proc/self/status twice - before `open()` and after the last append - and report the difference; since ADR-005 the segment is not mapped, so a shared file mapping's RssFile accounting does not apply and the batch buffer (16 KiB + 1 MiB worst case) is RssAnon",
+   "head_off_at_sampling": 4723072,
+   "bytes_written": 4718976,
+   "segment_percent_written": 28.13,
+   "peak_kib": 19148,
+   "peak_mib": 18.7,
+   "above_baseline_mib": 1.15,
+   "rss_anon_delta_mib": 1.02,
+   "rss_file_delta_mib": 0.12,
+   "baseline": {
+    "ru_maxrss_kib": 19148,
+    "VmRSS": 17504,
+    "RssAnon": 8424,
+    "RssFile": 9080,
+    "RssShmem": 0,
+    "VmSwap": 0
+   },
+   "after": {
+    "ru_maxrss_kib": 19148,
+    "VmRSS": 18680,
+    "RssAnon": 9472,
+    "RssFile": 9208,
+    "RssShmem": 0,
+    "VmSwap": 0
+   }
+  }
+ },
+ "results": {
+  "ext4": {
+   "filesystem": "ext4",
+   "scratch": ".bench/scratch",
+   "recovery": {
+    "frames_on_tape": 22144,
+    "requested_frames": 10000,
+    "rounds": 7,
+    "p50_ms": 115.46,
+    "p95_ms": 122.16,
+    "p99_ms": 122.28,
+    "min_ms": 113.0,
+    "max_ms": 121.93,
+    "per_10k_frames_ms": 52.1
+   },
+   "rss_this_process_kib": 126204,
+   "amplification_by_batch": [
+    {
+     "batch_bytes": 0,
+     "committed_frame_bytes": 3121904,
+     "payload_bytes": 2560000,
+     "ratio": 1.219
+    },
+    {
+     "batch_bytes": 4096,
+     "committed_frame_bytes": 3234264,
+     "payload_bytes": 2560000,
+     "ratio": 1.263
+    },
+    {
+     "batch_bytes": 16384,
+     "committed_frame_bytes": 3150352,
+     "payload_bytes": 2560000,
+     "ratio": 1.231
+    },
+    {
+     "batch_bytes": 65536,
+     "committed_frame_bytes": 3127664,
+     "payload_bytes": 2560000,
+     "ratio": 1.222
+    }
+   ],
+   "amplification": {
+    "payload_bytes": 2560000,
+    "committed_frame_bytes": 4718976,
+    "ratio": 1.843,
+    "reserved_segment_bytes": 16777216,
+    "append_events_per_s": 37807.6
+   }
+  },
+  "tmpfs": {
+   "filesystem": "tmpfs",
+   "scratch": "<scratch>/shm",
+   "recovery": {
+    "frames_on_tape": 22280,
+    "requested_frames": 10000,
+    "rounds": 7,
+    "p50_ms": 110.55,
+    "p95_ms": 134.43,
+    "p99_ms": 138.96,
+    "min_ms": 100.67,
+    "max_ms": 125.95,
+    "per_10k_frames_ms": 49.6
+   },
+   "rss_this_process_kib": 126700,
+   "amplification_by_batch": [
+    {
+     "batch_bytes": 0,
+     "committed_frame_bytes": 3121744,
+     "payload_bytes": 2560000,
+     "ratio": 1.219
+    },
+    {
+     "batch_bytes": 4096,
+     "committed_frame_bytes": 3234416,
+     "payload_bytes": 2560000,
+     "ratio": 1.263
+    },
+    {
+     "batch_bytes": 16384,
+     "committed_frame_bytes": 3150352,
+     "payload_bytes": 2560000,
+     "ratio": 1.231
+    },
+    {
+     "batch_bytes": 65536,
+     "committed_frame_bytes": 3127816,
+     "payload_bytes": 2560000,
+     "ratio": 1.222
+    }
+   ],
+   "amplification": {
+    "payload_bytes": 2560000,
+    "committed_frame_bytes": 4718976,
+    "ratio": 1.843,
+    "reserved_segment_bytes": 16777216,
+    "append_events_per_s": 47964.5
+   }
+  }
+ },
+ "superseded_by": "bench/results/2026-11-15-recovery.json",
+ "percentile_method": "statistics.quantiles (interpolating) with 7 rounds: p99 122.28 ms is above the observed max 121.93 ms, so every percentile in this file is unreliable. Kept as history; the numbers in use are the 30-round nearest-rank run in the file named above (C37)."
 }
