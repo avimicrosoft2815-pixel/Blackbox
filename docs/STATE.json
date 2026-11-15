@@ -22,7 +22,7 @@
     "G-Sec": "pending",
     "G-Release": "pending"
   },
-  "gate_note": "a gate flips to pass only with a reviewer-signed docs/gates/G-<name>.md (AGENT_FINAL.md §4); the builder never ticks its own gate",
+  "gate_note": "a gate flips to pass only with a reviewer-signed docs/gates/G-<name>.md (AGENT_FINAL.md \u00a74); the builder never ticks its own gate",
   "open_blockers": [],
   "lane_status": {
     "L0": {
@@ -242,8 +242,8 @@
       "full_event_p50_us": 11.057,
       "full_event_p99_us": 51.662,
       "events_per_s": 73338,
-      "recovery_ms_per_10k_frames": 52.1,
-      "rss_above_baseline_mib": 1.15,
+      "recovery_ms_per_10k_frames": 106.1,
+      "rss_above_baseline_mib": 1.56,
       "amplification_16kib": 1.231,
       "amplification_per_event": 1.843,
       "payload_64kib_p50_us": 226.864,
@@ -263,19 +263,19 @@
         "selector": "results.ext4.rows[gate=true].events_per_s"
       },
       "recovery_ms_per_10k_frames": {
-        "json": "bench/results/2026-11-14-recovery.json",
+        "json": "bench/results/2026-11-15-recovery.json",
         "selector": "results.ext4.recovery.per_10k_frames_ms"
       },
       "rss_above_baseline_mib": {
-        "json": "bench/results/2026-11-14-recovery.json",
+        "json": "bench/results/2026-11-15-recovery.json",
         "selector": "rss_write_only_process.ext4.above_baseline_mib"
       },
       "amplification_16kib": {
-        "json": "bench/results/2026-11-14-recovery.json",
+        "json": "bench/results/2026-11-15-recovery.json",
         "selector": "results.ext4.amplification_by_batch[batch_bytes=16384].ratio"
       },
       "amplification_per_event": {
-        "json": "bench/results/2026-11-14-recovery.json",
+        "json": "bench/results/2026-11-15-recovery.json",
         "selector": "results.ext4.amplification.ratio"
       },
       "payload_64kib_p50_us": {
