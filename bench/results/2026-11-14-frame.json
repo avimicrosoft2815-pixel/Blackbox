@@ -1,0 +1,490 @@
+{
+  "date": "2026-11-14",
+  "probe": "P1-17 frame/append stages",
+  "protocol": "N=100000, warm-up=10000, per-call perf_counter_ns, single process",
+  "gate_column": "ext4",
+  "hardware": {
+    "cpu": "Intel(R) Xeon(R) Processor @ 2.60GHz",
+    "cpu_count": 2,
+    "python": "3.11.2",
+    "implementation": "CPython",
+    "os": "Linux-6.1.158+-x86_64-with-glibc2.36",
+    "machine": "x86_64",
+    "mem_total_kib": 4034452
+  },
+  "workload": {
+    "payload_1kib": 1024,
+    "event_payload_bytes": 138,
+    "frame_1kib_bytes": 1080
+  },
+  "columns": {
+    "ext4": {
+      "path": ".bench/scratch",
+      "gate": true,
+      "note": "gate column: numbers here are measured on the repository's real filesystem"
+    },
+    "tmpfs": {
+      "path": "<scratch>/shm",
+      "gate": false,
+      "note": "labelled second column only: fdatasync is a no-op on tmpfs, so no durability claim"
+    }
+  },
+  "results": {
+    "ext4": {
+      "stages": {
+        "crc32_1kib": {
+          "label": "CRC-32 over 1 KiB",
+          "p50_us": 0.576,
+          "p95_us": 0.612,
+          "p99_us": 1.752,
+          "mean_us": 0.623,
+          "min_us": 0.551,
+          "max_us": 53.502,
+          "n": 100000,
+          "warmup": 10000
+        },
+        "crc32_44b": {
+          "label": "CRC-32 over a 44 B frame header",
+          "p50_us": 0.318,
+          "p95_us": 0.478,
+          "p99_us": 1.348,
+          "mean_us": 0.36,
+          "min_us": 0.305,
+          "max_us": 57.388,
+          "n": 100000,
+          "warmup": 10000
+        },
+        "blake2b_1kib": {
+          "label": "BLAKE2b-256 over 1 KiB (batch hash)",
+          "p50_us": 1.958,
+          "p95_us": 3.32,
+          "p99_us": 3.781,
+          "mean_us": 2.215,
+          "min_us": 1.894,
+          "max_us": 103.958,
+          "n": 100000,
+          "warmup": 10000
+        },
+        "cbor_encode_event": {
+          "label": "CBOR encode the fixed event payload",
+          "p50_us": 9.187,
+          "p95_us": 11.487,
+          "p99_us": 29.656,
+          "mean_us": 9.738,
+          "min_us": 8.774,
+          "max_us": 187.953,
+          "n": 100000,
+          "warmup": 10000
+        },
+        "cbor_decode_event": {
+          "label": "CBOR decode the fixed event payload",
+          "p50_us": 10.213,
+          "p95_us": 16.667,
+          "p99_us": 31.109,
+          "mean_us": 11.072,
+          "min_us": 9.83,
+          "max_us": 177.101,
+          "n": 100000,
+          "warmup": 10000
+        },
+        "frame_encode_1kib": {
+          "label": "frame encode, 1 KiB payload",
+          "p50_us": 3.303,
+          "p95_us": 6.007,
+          "p99_us": 23.383,
+          "mean_us": 4.245,
+          "min_us": 3.024,
+          "max_us": 167.319,
+          "n": 100000,
+          "warmup": 10000
+        },
+        "frame_encode_90b": {
+          "label": "frame encode, 26 B payload",
+          "p50_us": 2.939,
+          "p95_us": 3.087,
+          "p99_us": 5.906,
+          "mean_us": 3.064,
+          "min_us": 2.684,
+          "max_us": 50.334,
+          "n": 100000,
+          "warmup": 10000
+        },
+        "chain_frame_encode": {
+          "label": "CHAIN payload + frame encode",
+          "p50_us": 2.956,
+          "p95_us": 3.102,
+          "p99_us": 5.976,
+          "mean_us": 3.081,
+          "min_us": 2.678,
+          "max_us": 45.847,
+          "n": 100000,
+          "warmup": 10000
+        },
+        "cbor_encode_hash_record": {
+          "label": "CBOR encode the content=hash event the throughput bench writes",
+          "p50_us": 7.935,
+          "p95_us": 8.327,
+          "p99_us": 28.309,
+          "mean_us": 8.346,
+          "min_us": 7.52,
+          "max_us": 145.925,
+          "n": 100000,
+          "warmup": 10000
+        },
+        "frame_encode_hash_record": {
+          "label": "frame encode of that record into the batch buffer",
+          "p50_us": 2.527,
+          "p95_us": 2.657,
+          "p99_us": 4.839,
+          "mean_us": 2.639,
+          "min_us": 2.328,
+          "max_us": 219.078,
+          "n": 100000,
+          "warmup": 10000
+        },
+        "memcpy_buffer_1kib": {
+          "label": "slice-copy 1 KiB into the batch buffer",
+          "p50_us": 0.338,
+          "p95_us": 0.367,
+          "p99_us": 0.452,
+          "mean_us": 0.358,
+          "min_us": 0.315,
+          "max_us": 38.453,
+          "n": 100000,
+          "warmup": 10000
+        },
+        "pwrite_batch_16kib": {
+          "label": "one pwrite of a 16 KiB batch (the per-batch store syscall)",
+          "p50_us": 1.253,
+          "p95_us": 1.299,
+          "p99_us": 1.969,
+          "mean_us": 1.315,
+          "min_us": 1.2,
+          "max_us": 77.194,
+          "n": 100000,
+          "warmup": 10000
+        },
+        "head_publish": {
+          "label": "head pack_into + CRC (one publish)",
+          "p50_us": 2.758,
+          "p95_us": 3.253,
+          "p99_us": 7.792,
+          "mean_us": 3.036,
+          "min_us": 2.613,
+          "max_us": 128.287,
+          "n": 100000,
+          "warmup": 10000
+        },
+        "append_1kib_no_publish": {
+          "label": "writer.append, 1 KiB payload",
+          "p50_us": 4.004,
+          "p95_us": 6.626,
+          "p99_us": 11.687,
+          "mean_us": 8.966,
+          "min_us": 3.735,
+          "max_us": 402571.612,
+          "n": 100000,
+          "warmup": 10000
+        },
+        "event_append_publish": {
+          "label": "writer.append_and_publish, 26 B payload (chain on)",
+          "p50_us": 20.924,
+          "p95_us": 35.085,
+          "p99_us": 59.556,
+          "mean_us": 29.36,
+          "min_us": 18.397,
+          "max_us": 613460.893,
+          "n": 100000,
+          "warmup": 10000
+        },
+        "event_append_publish_nochain": {
+          "label": "writer.append_and_publish, 26 B payload (chain off)",
+          "p50_us": 9.108,
+          "p95_us": 11.954,
+          "p99_us": 32.384,
+          "mean_us": 9.849,
+          "min_us": 8.544,
+          "max_us": 210.008,
+          "n": 100000,
+          "warmup": 10000
+        },
+        "event_emit_chain_off": {
+          "label": "writer.emit with no publish (enqueue only)",
+          "p50_us": 3.891,
+          "p95_us": 4.761,
+          "p99_us": 10.276,
+          "mean_us": 4.295,
+          "min_us": 3.627,
+          "max_us": 557.801,
+          "n": 100000,
+          "warmup": 10000
+        }
+      },
+      "pairs": [
+        {
+          "pair": "publish_cost",
+          "with": "event_append_publish",
+          "without": "event_emit_chain_off",
+          "note": "append+chain+publish vs enqueue only",
+          "delta_p50_us": 17.033,
+          "ratio": 5.38
+        },
+        {
+          "pair": "chain_cost",
+          "with": "event_append_publish",
+          "without": "event_append_publish_nochain",
+          "note": "CHAIN frame + blake2b + payload encode per publish",
+          "delta_p50_us": 11.816,
+          "ratio": 2.3
+        },
+        {
+          "pair": "crc_vs_payload",
+          "with": "frame_encode_1kib",
+          "without": "memcpy_buffer_1kib",
+          "note": "encode allocates header+payload+trailer; the copy is the unavoidable part",
+          "delta_p50_us": 2.965,
+          "ratio": 9.77
+        },
+        {
+          "pair": "body_vs_hash_record",
+          "with": "cbor_encode_event",
+          "without": "cbor_encode_hash_record",
+          "note": "the stage table's event carries the 1 KiB body inline; the throughput bench hashes it and encodes only the hash, which is why the stage rows do not add up to the event p50 (C16)",
+          "delta_p50_us": 1.252,
+          "ratio": 1.16
+        }
+      ],
+      "note": "C16: `cbor_encode_event` / `frame_encode_1kib` encode a record with the 1 KiB body inline; the throughput bench writes `content=hash`, whose encode is `cbor_encode_hash_record` + `frame_encode_hash_record`. The stage rows are not a sum of the event p50 for that reason and because publish/CHAIN happen on the batch boundary, not per event.",
+      "filesystem": "ext4",
+      "scratch": ".bench/scratch"
+    },
+    "tmpfs": {
+      "stages": {
+        "crc32_1kib": {
+          "label": "CRC-32 over 1 KiB",
+          "p50_us": 0.587,
+          "p95_us": 1.015,
+          "p99_us": 1.867,
+          "mean_us": 0.788,
+          "min_us": 0.55,
+          "max_us": 63.468,
+          "n": 100000,
+          "warmup": 10000
+        },
+        "crc32_44b": {
+          "label": "CRC-32 over a 44 B frame header",
+          "p50_us": 0.558,
+          "p95_us": 0.607,
+          "p99_us": 1.451,
+          "mean_us": 0.594,
+          "min_us": 0.307,
+          "max_us": 58.694,
+          "n": 100000,
+          "warmup": 10000
+        },
+        "blake2b_1kib": {
+          "label": "BLAKE2b-256 over 1 KiB (batch hash)",
+          "p50_us": 1.955,
+          "p95_us": 2.987,
+          "p99_us": 3.539,
+          "mean_us": 2.104,
+          "min_us": 1.891,
+          "max_us": 50.411,
+          "n": 100000,
+          "warmup": 10000
+        },
+        "cbor_encode_event": {
+          "label": "CBOR encode the fixed event payload",
+          "p50_us": 9.189,
+          "p95_us": 12.809,
+          "p99_us": 30.259,
+          "mean_us": 9.825,
+          "min_us": 8.783,
+          "max_us": 166.292,
+          "n": 100000,
+          "warmup": 10000
+        },
+        "cbor_decode_event": {
+          "label": "CBOR decode the fixed event payload",
+          "p50_us": 10.21,
+          "p95_us": 15.426,
+          "p99_us": 31.085,
+          "mean_us": 10.996,
+          "min_us": 9.852,
+          "max_us": 180.149,
+          "n": 100000,
+          "warmup": 10000
+        },
+        "frame_encode_1kib": {
+          "label": "frame encode, 1 KiB payload",
+          "p50_us": 3.32,
+          "p95_us": 3.815,
+          "p99_us": 6.889,
+          "mean_us": 3.555,
+          "min_us": 3.073,
+          "max_us": 259.396,
+          "n": 100000,
+          "warmup": 10000
+        },
+        "frame_encode_90b": {
+          "label": "frame encode, 26 B payload",
+          "p50_us": 2.921,
+          "p95_us": 3.072,
+          "p99_us": 4.617,
+          "mean_us": 3.05,
+          "min_us": 2.689,
+          "max_us": 45.654,
+          "n": 100000,
+          "warmup": 10000
+        },
+        "chain_frame_encode": {
+          "label": "CHAIN payload + frame encode",
+          "p50_us": 2.95,
+          "p95_us": 3.077,
+          "p99_us": 4.036,
+          "mean_us": 3.066,
+          "min_us": 2.704,
+          "max_us": 93.478,
+          "n": 100000,
+          "warmup": 10000
+        },
+        "cbor_encode_hash_record": {
+          "label": "CBOR encode the content=hash event the throughput bench writes",
+          "p50_us": 7.916,
+          "p95_us": 8.303,
+          "p99_us": 28.445,
+          "mean_us": 8.373,
+          "min_us": 7.484,
+          "max_us": 128.617,
+          "n": 100000,
+          "warmup": 10000
+        },
+        "frame_encode_hash_record": {
+          "label": "frame encode of that record into the batch buffer",
+          "p50_us": 2.531,
+          "p95_us": 2.654,
+          "p99_us": 3.76,
+          "mean_us": 2.637,
+          "min_us": 2.331,
+          "max_us": 48.737,
+          "n": 100000,
+          "warmup": 10000
+        },
+        "memcpy_buffer_1kib": {
+          "label": "slice-copy 1 KiB into the batch buffer",
+          "p50_us": 0.337,
+          "p95_us": 0.363,
+          "p99_us": 0.377,
+          "mean_us": 0.352,
+          "min_us": 0.32,
+          "max_us": 38.1,
+          "n": 100000,
+          "warmup": 10000
+        },
+        "pwrite_batch_16kib": {
+          "label": "one pwrite of a 16 KiB batch (the per-batch store syscall)",
+          "p50_us": 1.114,
+          "p95_us": 1.146,
+          "p99_us": 1.18,
+          "mean_us": 1.151,
+          "min_us": 1.067,
+          "max_us": 42.028,
+          "n": 100000,
+          "warmup": 10000
+        },
+        "head_publish": {
+          "label": "head pack_into + CRC (one publish)",
+          "p50_us": 1.736,
+          "p95_us": 2.918,
+          "p99_us": 3.294,
+          "mean_us": 2.025,
+          "min_us": 1.599,
+          "max_us": 154.24,
+          "n": 100000,
+          "warmup": 10000
+        },
+        "append_1kib_no_publish": {
+          "label": "writer.append, 1 KiB payload",
+          "p50_us": 4.054,
+          "p95_us": 6.886,
+          "p99_us": 14.243,
+          "mean_us": 9.268,
+          "min_us": 3.753,
+          "max_us": 448828.469,
+          "n": 100000,
+          "warmup": 10000
+        },
+        "event_append_publish": {
+          "label": "writer.append_and_publish, 26 B payload (chain on)",
+          "p50_us": 19.43,
+          "p95_us": 30.577,
+          "p99_us": 53.593,
+          "mean_us": 27.197,
+          "min_us": 17.052,
+          "max_us": 597403.63,
+          "n": 100000,
+          "warmup": 10000
+        },
+        "event_append_publish_nochain": {
+          "label": "writer.append_and_publish, 26 B payload (chain off)",
+          "p50_us": 7.717,
+          "p95_us": 10.943,
+          "p99_us": 29.957,
+          "mean_us": 8.405,
+          "min_us": 7.127,
+          "max_us": 163.446,
+          "n": 100000,
+          "warmup": 10000
+        },
+        "event_emit_chain_off": {
+          "label": "writer.emit with no publish (enqueue only)",
+          "p50_us": 3.898,
+          "p95_us": 4.222,
+          "p99_us": 8.475,
+          "mean_us": 4.181,
+          "min_us": 3.622,
+          "max_us": 273.866,
+          "n": 100000,
+          "warmup": 10000
+        }
+      },
+      "pairs": [
+        {
+          "pair": "publish_cost",
+          "with": "event_append_publish",
+          "without": "event_emit_chain_off",
+          "note": "append+chain+publish vs enqueue only",
+          "delta_p50_us": 15.532,
+          "ratio": 4.98
+        },
+        {
+          "pair": "chain_cost",
+          "with": "event_append_publish",
+          "without": "event_append_publish_nochain",
+          "note": "CHAIN frame + blake2b + payload encode per publish",
+          "delta_p50_us": 11.713,
+          "ratio": 2.52
+        },
+        {
+          "pair": "crc_vs_payload",
+          "with": "frame_encode_1kib",
+          "without": "memcpy_buffer_1kib",
+          "note": "encode allocates header+payload+trailer; the copy is the unavoidable part",
+          "delta_p50_us": 2.983,
+          "ratio": 9.85
+        },
+        {
+          "pair": "body_vs_hash_record",
+          "with": "cbor_encode_event",
+          "without": "cbor_encode_hash_record",
+          "note": "the stage table's event carries the 1 KiB body inline; the throughput bench hashes it and encodes only the hash, which is why the stage rows do not add up to the event p50 (C16)",
+          "delta_p50_us": 1.273,
+          "ratio": 1.16
+        }
+      ],
+      "note": "C16: `cbor_encode_event` / `frame_encode_1kib` encode a record with the 1 KiB body inline; the throughput bench writes `content=hash`, whose encode is `cbor_encode_hash_record` + `frame_encode_hash_record`. The stage rows are not a sum of the event p50 for that reason and because publish/CHAIN happen on the batch boundary, not per event.",
+      "filesystem": "tmpfs",
+      "scratch": "<scratch>/shm"
+    }
+  }
+}

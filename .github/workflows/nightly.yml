@@ -1,0 +1,29 @@
+name: nightly
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+jobs:
+  kill-matrix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install -e ".[dev]"
+      - name: 2000 randomized kill -9 trials (plan §24 G3)
+        run: python tests/kill/randomized_kills.py --trials 2000 --out bench/results/kill-nightly.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kill-nightly
+          path: bench/results/kill-nightly.json
+  cbor-fuzz:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install -e ".[dev]"
+      - run: python -m pytest tests/test_cbor_fuzz.py -q

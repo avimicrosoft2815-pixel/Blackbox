@@ -1,0 +1,52 @@
+{
+  "date": "2026-11-14",
+  "probe": "writer-append",
+  "python": "3.11.2",
+  "machine": "x86_64",
+  "os": "Linux-6.1.158+-x86_64-with-glibc2.36",
+  "note": "single process, tmpfs-backed temp dir, chain frames enabled/disabled; append+publish per event",
+  "results": [
+    {
+      "mode": "process",
+      "chain": true,
+      "n": 2000,
+      "warmup": 200,
+      "payload_bytes": 200,
+      "p50_us": 148.05,
+      "p95_us": 225.99,
+      "p99_us": 281.5,
+      "mean_us": 160.46,
+      "max_us": 1738.57,
+      "events_per_s": 6218.3,
+      "segment_allocated_bytes": 16777216
+    },
+    {
+      "mode": "process",
+      "chain": false,
+      "n": 2000,
+      "warmup": 200,
+      "payload_bytes": 200,
+      "p50_us": 97.63,
+      "p95_us": 175.53,
+      "p99_us": 229.14,
+      "mean_us": 109.25,
+      "max_us": 1144.3,
+      "events_per_s": 9127.2,
+      "segment_allocated_bytes": 16777216
+    },
+    {
+      "mode": "kernel",
+      "chain": true,
+      "n": 2000,
+      "warmup": 200,
+      "payload_bytes": 200,
+      "p50_us": 321.26,
+      "p95_us": 426.09,
+      "p99_us": 508.78,
+      "mean_us": 335.45,
+      "max_us": 1433.29,
+      "events_per_s": 2976.6,
+      "segment_allocated_bytes": 16777216
+    }
+  ]
+}

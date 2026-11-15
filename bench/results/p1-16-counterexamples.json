@@ -1,0 +1,9 @@
+{
+  "probe": "P1-16 small-model search",
+  "states_explored": 38,
+  "depth": 6,
+  "segment_frames": 8,
+  "segment_budget": 3,
+  "violations": [],
+  "note": "an empty list here is the result the plan asks for"
+}

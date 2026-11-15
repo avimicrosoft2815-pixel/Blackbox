@@ -1,0 +1,82 @@
+"""C8 — the in-process keeper thread (plan §10.3).
+
+The keeper is the only thread allowed to do time-based work: drain the commit window, and (from P1-09b/P3B on)
+seal, retain, fold the inbox and evaluate triggers. It must never be able to hurt the app:
+
+* every exception disables the keeper for the session, appends `KEEPER_DOWN`, and the writer keeps recording
+  (fail-open, test `test_keeper_exception_is_fail_open`);
+* `stop()` drains then publishes, so a clean shutdown cannot leave a frame unpublished;
+* the tick is short and non-blocking; it takes no lock the app holds.
+"""
+from __future__ import annotations
+
+import contextlib
+import threading
+
+TICK_S = 0.001          # 1 ms: finer than the 5 ms publish bound, cheap enough to ignore
+
+
+class Keeper:
+    def __init__(self, writer, *, tick_s: float = TICK_S, blob_queue=None, blob_jobs_per_tick: int = 4) -> None:
+        self.writer = writer
+        self.tick_s = tick_s
+        # P1-15: compression is off the writer thread by construction — the app never touches this queue, and a
+        # failure inside it is counted by the queue (the raw blob stays readable) instead of disabling the keeper.
+        self.blob_queue = blob_queue
+        self.blob_jobs_per_tick = blob_jobs_per_tick
+        self.ticks = 0
+        self.publishes = 0
+        self.disabled = False
+        self.error: str | None = None
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    # ── lifecycle ───────────────────────────────────────────────────────────
+    def start(self) -> Keeper:
+        if self._thread is not None:
+            return self
+        self._thread = threading.Thread(target=self._run, name="blackbox-keeper", daemon=True)
+        self._thread.start()
+        return self
+
+    def stop(self, timeout: float = 2.0) -> None:
+        """Drain then publish (C3): a stopped keeper never leaves a frame in the window."""
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout)
+            self._thread = None
+        if not self.disabled:
+            self.writer.flush()
+
+    def __enter__(self) -> Keeper:
+        return self.start()
+
+    def __exit__(self, *exc) -> None:
+        self.stop()
+
+    # ── work ────────────────────────────────────────────────────────────────
+    def _run(self) -> None:
+        while not self._stop.wait(self.tick_s):
+            try:
+                self.tick()
+            except Exception as exc:
+                self.disabled = True
+                self.error = f"{type(exc).__name__}: {exc}"
+                # best effort, and never re-raise
+                with contextlib.suppress(Exception):
+                    self.writer.degraded_reason = self.writer.degraded_reason or "keeper_down"
+                return
+
+    def tick(self) -> None:
+        self.ticks += 1
+        if self.writer.publish_if_due():
+            self.publishes += 1
+        if self.blob_queue is not None and len(self.blob_queue):
+            self.blob_queue.drain(limit=self.blob_jobs_per_tick)
+
+    # ── introspection ───────────────────────────────────────────────────────
+    def stats(self) -> dict:
+        return {"ticks": self.ticks, "publishes": self.publishes, "disabled": self.disabled,
+                "error": self.error, "tick_s": self.tick_s,
+                "blob_queue": self.blob_queue.stats() if self.blob_queue is not None else None,
+                "window_max_ms": round(self.writer.window_max_ms, 3)}

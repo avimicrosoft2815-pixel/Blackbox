@@ -1,0 +1,75 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "blackbox-recorder"
+version = "0.1.0.dev0"
+description = "Local-first flight recorder for LLM-calling programs: crash-durable event tape, portable capsules, no account, no server."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Apache-2.0" }
+authors = [{ name = "BlackBox contributors" }]
+keywords = ["llm", "observability", "flight-recorder", "tracing", "crash-recovery"]
+classifiers = [
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Operating System :: POSIX :: Linux",
+  "Operating System :: MacOS",
+  "Operating System :: Microsoft :: Windows",
+  "Typing :: Typed",
+]
+# Runtime dependencies: deliberately empty. Core must import stdlib only (test-enforced: tests/test_stdlib_only.py).
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest==8.3.4", "hypothesis==6.122.3"]
+
+[project.urls]
+Documentation = "https://github.com/avimicrosoft2815-pixel/Blackbox"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+filterwarnings = ["error::DeprecationWarning"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+exclude = [".venv", ".bench", "docs/archive"]
+
+# Deliberate, documented exceptions (C6). Each ignored rule is one the design *requires*:
+#   BLE001 / S110 / S112  fail-open: the recorder swallows its own errors so the app never sees them
+#   PLW1510               probes run subprocesses whose return code they inspect themselves
+#   SIM115                the writer keeps a segment fd and mapping open for its whole lifetime
+#   PYI034                __enter__ returns the concrete type through a type annotation, not `self`
+#   EXE001                scripts are invoked as `python path/to/script`
+#   PLC0205               __slots__ as a single string is intentional in two hot classes
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF", "S", "PIE"]
+#   E501 / RUF001-003  the docs are prose in this repo: long lines and box-drawing/× glyphs are deliberate
+#   B007              a loop variable that only counts iterations is clearer than `_`
+#   S101              `assert` states internal invariants after open(); the package is not run under -O
+ignore = ["BLE001", "S110", "S112", "SIM115", "EXE001", "E501", "RUF001", "RUF002", "RUF003", "B007", "S101"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S101", "S108", "E402", "S603", "S607"]
+"bench/*" = ["S", "E402"]
+# one-shot measurement recipes: terse is the point, their JSON output is what is reviewed
+"bench/probes/*" = ["S", "E402", "E701", "E702", "E741", "UP031", "SIM105", "RUF046"]
+"tools/*" = ["S", "E402"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+# Two strictness knobs are off for now and are tracked as a follow-up row in docs/STATUS.md:
+# `type-arg` (bare `dict`/`list` annotations) and `no-untyped-def` (older helper signatures).
+disable_error_code = ["type-arg", "no-untyped-def"]
+files = ["src/blackbox"]
