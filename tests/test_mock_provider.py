@@ -36,7 +36,7 @@ def _post(provider: MockProvider, path: str, payload: dict) -> tuple[int, bytes,
 
 def test_openai_style_stream_arrives_in_several_chunks():
     with MockProvider(Scenario(chunks=4)) as provider:
-        status, body, chunks = _post(provider, "/v1/chat/completions", {"model": "mock-1", "messages": []})
+        status, body, chunks = _post(provider, "/v1/chat/completions", {"model": "mock-1", "stream": True, "messages": []})
     assert status == 200
     assert len(chunks) >= 2, "the body arrived in one piece; the chunk boundary is the thing under test"
     assert body.count(b"data: ") == 5, "four content chunks plus [DONE]"
@@ -53,14 +53,14 @@ def test_anthropic_style_stream_uses_event_lines():
 
 def test_the_request_reaches_the_server_and_is_recorded():
     with MockProvider() as provider:
-        _post(provider, "/v1/chat/completions", {"model": "mock-1", "messages": [{"role": "user", "content": "hi"}]})
+        _post(provider, "/v1/chat/completions", {"model": "mock-1", "stream": True, "messages": [{"role": "user", "content": "hi"}]})
     assert provider.scenario.requests == 1
     assert provider.received[0]["body"]["messages"][0]["content"] == "hi"
 
 
 def test_a_non_200_status_is_returned_with_a_json_error():
     with MockProvider(Scenario(status=429)) as provider:
-        status, body, _ = _post(provider, "/v1/chat/completions", {"model": "mock-1"})
+        status, body, _ = _post(provider, "/v1/chat/completions", {"model": "mock-1", "stream": True})
     assert status == 429
     assert json.loads(body)["error"]["type"] == "rate_limit_error"
 
@@ -68,7 +68,7 @@ def test_a_non_200_status_is_returned_with_a_json_error():
 def test_truncation_closes_the_stream_early_without_the_done_marker():
     """The client must see a *short* stream, not an error: that is what a killed connection looks like."""
     with MockProvider(Scenario(chunks=10, truncate_after=3)) as provider:
-        status, body, _ = _post(provider, "/v1/chat/completions", {"model": "mock-1"})
+        status, body, _ = _post(provider, "/v1/chat/completions", {"model": "mock-1", "stream": True})
     assert status == 200
     assert b"[DONE]" not in body
     assert body.count(b"data: ") == 3
@@ -76,7 +76,7 @@ def test_truncation_closes_the_stream_early_without_the_done_marker():
 
 def test_an_error_event_mid_stream_is_followed_by_the_done_marker():
     with MockProvider(Scenario(chunks=6, error_after=2)) as provider:
-        status, body, _ = _post(provider, "/v1/chat/completions", {"model": "mock-1"})
+        status, body, _ = _post(provider, "/v1/chat/completions", {"model": "mock-1", "stream": True})
     assert status == 200
     assert b"mock overloaded" in body
     assert body.rstrip().endswith(b"data: [DONE]")
@@ -95,7 +95,7 @@ def test_inter_chunk_delay_is_real_time():
     def elapsed_ms(delay_ms: float) -> float:
         with MockProvider(Scenario(chunks=4, delay_ms=delay_ms)) as provider:
             started = time.monotonic()
-            _post(provider, "/v1/chat/completions", {"model": "mock-1"})
+            _post(provider, "/v1/chat/completions", {"model": "mock-1", "stream": True})
             return (time.monotonic() - started) * 1000
 
     quick = elapsed_ms(0.0)
@@ -108,5 +108,29 @@ def test_inter_chunk_delay_is_real_time():
 @pytest.mark.parametrize("path,marker", [("/v1/chat/completions", b"data: "), ("/v1/messages", b"event: ")])
 def test_both_dialects_mark_up_their_streams_differently(path, marker):
     with MockProvider(Scenario(chunks=2)) as provider:
-        _, body, _ = _post(provider, path, {"model": "mock-1"})
+        _, body, _ = _post(provider, path, {"model": "mock-1", "stream": True})
     assert marker in body
+
+
+def test_a_non_streaming_request_gets_json_and_a_streaming_one_gets_sse():
+    """A real provider distinguishes on `stream` in the body, so the mock must too: an SDK parses JSON with its own
+    model classes and would fail inside *itself* if handed SSE, which is the one failure a fixture must never fake."""
+    with MockProvider(Scenario(chunks=3)) as provider:
+        _, plain, _ = _post(provider, "/v1/chat/completions", {"model": "mock-1"})
+        _, streamed, _ = _post(provider, "/v1/chat/completions", {"model": "mock-1", "stream": True})
+    parsed = json.loads(plain)
+    assert parsed["object"] == "chat.completion"
+    assert parsed["choices"][0]["finish_reason"] == "stop"
+    assert parsed["usage"]["total_tokens"] == 10
+    assert b"data: " not in plain
+    assert b"data: " in streamed
+
+
+def test_anthropic_style_message_body_and_embeddings():
+    with MockProvider(Scenario(chunks=2)) as provider:
+        _, message, _ = _post(provider, "/v1/messages", {"model": "mock-1", "max_tokens": 8})
+        _, vectors, _ = _post(provider, "/v1/embeddings", {"model": "mock-1", "input": "x"})
+    parsed = json.loads(message)
+    assert parsed["type"] == "message" and parsed["content"][0]["type"] == "text"
+    assert parsed["usage"] == {"input_tokens": 7, "output_tokens": 2}
+    assert json.loads(vectors)["data"][0]["embedding"] == [0.1, 0.2, 0.3]

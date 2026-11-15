@@ -32,6 +32,7 @@ class Scenario:
     model: str = "mock-1"
     chunks: int = 5
     chunk_text: str = "token "
+    finish_reason: str = "stop"
     delay_ms: float = 0.0              # between chunks: the window a kill has to land in
     first_byte_delay_ms: float = 0.0
     truncate_after: int | None = None  # close the socket after N chunks: a killed stream, from the client's view
@@ -104,6 +105,15 @@ class MockProvider:
         if self.scenario.status != 200:
             return self.scenario.status, [(self._error_body(429), 0.0)]
         anthropic = path.endswith("/messages")
+        if path.endswith("/embeddings"):
+            return 200, [(self._embedding_body(), 0.0)]
+        streaming = bool(request.get("stream")) if isinstance(request, dict) else False
+        if not streaming:
+            # A real SDK asks for JSON when `stream` is absent, and parses it with its own model classes. Serving SSE
+            # here would have made every non-streaming test fail inside the SDK, which is the one place a mock must
+            # not put the interesting failure.
+            body_json = self._message_body() if anthropic else self._completion_body()
+            return 200, [(body_json, 0.0)]
         chunks = [self._chunk(i, anthropic) for i in range(self.scenario.chunks)]
         timed: list[tuple[bytes, float]] = []
         for index, chunk in enumerate(chunks):
@@ -114,6 +124,36 @@ class MockProvider:
                 break
         timed.append((self._done(anthropic), 0.0))
         return 200, timed
+
+    # ── non-streaming bodies ────────────────────────────────────────────────
+    def _text(self) -> str:
+        pad = "" if self.scenario.body_bytes == 0 else "x" * self.scenario.body_bytes
+        return (self.scenario.chunk_text + pad) * self.scenario.chunks
+
+    def _completion_body(self) -> bytes:
+        body = {
+            "id": "chatcmpl-mock", "object": "chat.completion", "created": 1_700_000_000,
+            "model": self.scenario.model,
+            "choices": [{"index": 0, "finish_reason": self.scenario.finish_reason,
+                         "message": {"role": "assistant", "content": self._text()}}],
+            "usage": {"prompt_tokens": 7, "completion_tokens": self.scenario.chunks, "total_tokens": 7 + self.scenario.chunks},
+        }
+        return json.dumps(body).encode()
+
+    def _message_body(self) -> bytes:
+        body = {
+            "id": "msg_mock", "type": "message", "role": "assistant", "model": self.scenario.model,
+            "content": [{"type": "text", "text": self._text()}],
+            "stop_reason": self.scenario.finish_reason, "stop_sequence": None,
+            "usage": {"input_tokens": 7, "output_tokens": self.scenario.chunks},
+        }
+        return json.dumps(body).encode()
+
+    def _embedding_body(self) -> bytes:
+        body = {"object": "list", "model": self.scenario.model,
+                "data": [{"object": "embedding", "index": 0, "embedding": [0.1, 0.2, 0.3]}],
+                "usage": {"prompt_tokens": 4, "total_tokens": 4}}
+        return json.dumps(body).encode()
 
     # ── payloads ────────────────────────────────────────────────────────────
     def _chunk(self, index: int, anthropic: bool) -> bytes:
