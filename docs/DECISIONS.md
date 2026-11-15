@@ -258,3 +258,41 @@ run identities come back unchanged and distinct. A recorder whose totals cannot 
 recovery/seal time and `blackbox link <a> <b>` are the remaining half of P3B-04 and are listed as such in `docs/STATUS.md`.
 The classes are named in one module now precisely so that half has a vocabulary to write against.
 
+## D-037 — a hung test must cost a failure that names itself, and the report travels in a file
+
+*Date: 2026-11-14. Plan refs: C7, C40, P0-14. Discovered through defect 35.*
+
+A suite that hangs costs more than a suite that fails. A failure arrives with a node id and a traceback; a hang arrives,
+in CI, as `The action 'Unit + property tests' has timed out after 15 minutes` — an artefact of the orchestrator, not of
+the code — and the process that knew where it was stopped is gone. Three 3.12 cells failed that way on a branch whose
+other seven cells were green, and the only way to learn which test it was, was to guess and re-run. So the rule is: **a
+test that overruns is a failure, and it names itself, in a channel that survives the process being killed.**
+
+Four consequences, each paid for by something that did not work:
+
+* **The watchdog is stdlib, in `conftest.py`, and autouse.** `pytest-timeout` was the obvious answer and is not
+  available: `[project.optional-dependencies].dev` is asserted to be exactly `{pytest, hypothesis}` by
+  `tests/test_packaging.py`, because the test toolchain is part of what a contributor installs and it should stay small
+  and boring. The watchdog is a thread that samples the current test node id and, past `BLACKBOX_TEST_TIMEOUT`
+  (default 120 s), writes the line, dumps tracebacks and `os._exit(1)`s. It cannot be npm-style "detected" per test;
+  it is one clock for the suite, and 120 s is chosen to be far longer than the slowest honest test.
+* **The channel is a file, not a descriptor.** pytest's capture is `fd`-level `dup2` from the start of the session, so
+  whatever `os.write(1, …)` does inside a test may go into a buffer nobody flushes, and `os._exit` skips `atexit`,
+  `finally` and the flush it would have needed. A `dup(1)` taken in `conftest` does not help either — it duplicates the
+  *capture* descriptor. A path in the tempdir, appended to by the watchdog and read-and-unlinked by the summary tool, is
+  the only channel that does not depend on the process surviving its own exit.
+* **One annotation, fixed shape, always printed.** GitHub accepts about ten annotations per step, and a
+  `faulthandler.dump_traceback(all_threads=True)` filled every one of them with `_pytest/runner.py` and `pluggy` frames
+  — ten true statements that together said nothing. `tools/ci_summary.py` now prints exactly one
+  `::error title=…::` whose text is `exit N · out M lines · hung yes|no · <FAILED/ERROR lines> | <last non-traceback
+  lines>`, capped at 600 characters. The shape is fixed and unconditional because the conditional version had a hole:
+  a child that produced no output produced no annotation at all, and the run looked like a run with nothing to say.
+* **`-s` stays on the pytest invocation.** It is a concession — capture is useful — but a test that is about to be
+  killed at a `select()` needs its output to have already left the process. With capture on, the log of a hung run ends
+  at the last test that finished.
+
+None of this makes a hang impossible. It makes a hang *cheap to read*: the run that previously said only that it had
+timed out now says `FAILED tests/test_headers.py::test_the_proxy_reads_the_run_id_and_the_upstream_never_sees_it — ran
+longer than 120 s at …/python3.12/selectors.py:468 in select`. That line is what turned defect 35 from a platform
+mystery into a shared-loop bug in one afternoon, and it is the reason the diagnostics were worth keeping after the test
+itself was fixed.
