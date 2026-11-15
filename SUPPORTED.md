@@ -148,6 +148,11 @@ routes = Routes([Route(name="openai", base="https://api.openai.com")], default="
   against the same request without the proxy); first-byte passthrough 0.42 ms (n 100, budget 0.5 ms); 200 concurrent
   streams, no errors, every body identical; 0.3 MiB RSS growth at 50 req/s for 10 s. Upstream connections are pooled
   per route and a pooled connection that turns out to be dead is retried once, invisibly (D-032a).
+* **An uncertain upstream outcome is reported, never retried.** Idle upstream connections are pooled, and one found
+  dead *before* the request is written is replaced for free. If a connection dies *after* the request went out, only
+  `GET`/`HEAD`/`OPTIONS` are retried (once) — anything else is answered `502` with
+  `x-blackbox-error: upstream-closed-uncertain` and a body saying the request may have been applied, so a duplicated
+  effect is the caller's decision and never the recorder's surprise (D-032b).
 * **Recording is a tap, and the tap can fail**: a sink that raises costs frames, never a request
   (`stats.record_errors` counts them).
 * **TLS**: `ssl.create_default_context()` upstream; a route built with `verify_tls=False` (the plan's

@@ -216,7 +216,11 @@ def run(n: int, streams: bool) -> dict:
             "added_latency_ms": {"direct": summary(direct_latency), "proxied": summary(proxied_latency),
                                  "added": summary(added)},
             "first_byte_ms": {"direct": summary(first_direct), "proxied": summary(first_proxied),
-                              "added": summary(first_added)},
+                              "added": summary(first_added),
+                              # The block medians are the honesty check: one p50 from one long run hides a row that
+                              # is close to its budget, and this row is the closest in the file.
+                              "block_p50": [summary(first_added[i:i + 20])["p50"]
+                                            for i in range(0, len(first_added), 20)]},
             "gate": {
                 "added_latency_ms": {"n": summary(added)["n"], "p50": summary(added)["p50"],
                                      "p99": summary(added)["p99"], "budget_p50": 1.0, "budget_p99": 5.0,

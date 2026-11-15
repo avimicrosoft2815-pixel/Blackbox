@@ -119,3 +119,25 @@ proves the retry (the origin advertises keep-alive, drops the connection, and th
 **Consequences**: first byte 0.42 ms (in budget, n 100), added latency p50 0.27 ms / p99 0.65 ms (n 500), 200
 concurrent streams with byte-identical bodies. The rule "never write to the client before the upstream's head has been
 read" is what makes the retry invisible; it was already true, and it is now load-bearing.
+
+## D-032b — an uncertain outcome is reported, not retried: idempotent methods only
+
+*Date: 2026-11-16. Supersedes the retry half of D-032a, which a reviewer flagged as a P0. Plan refs: §13, P3B-08.*
+
+D-032a said a dead pooled connection is "retried once on a fresh connection before anything is written to the client",
+and called that invisible. It was invisible to the client and **not** invisible to the provider: the request had already
+been written to the dead connection, so the retry could deliver it twice. For `POST /v1/chat/completions` that is a
+second charge.
+
+**The rule now, in two halves.** *Before* the write, a pooled connection is probed (`at_eof`, `is_closing`, `exception`)
+and a dead one is discarded — nothing has been sent, so nothing can be duplicated, and the connection is replaced for
+free. *After* the write, the outcome is uncertain by construction and the proxy says so: the exchange is retried only
+for `GET`, `HEAD` and `OPTIONS`, whose repetition cannot produce a second effect. Everything else gets
+`502 upstream-closed-uncertain`, an `x-blackbox-error` header naming the class, a body that says the request may have
+been applied, and a `stats.uncertain` counter. `PUT`/`DELETE` are deliberately in the "reported" half: their repetition
+is idempotent *in intent*, but the proxy cannot know whether the far end agrees.
+
+**Why not just never pool?** Because the §15.1 first-byte row cannot be met without it (0.67–0.82 ms against a 0.5 ms
+budget), and pooling is now safe by construction rather than by hope. **Why not buffer the request and replay from a
+reconstruction?** Because a replay is still a second request; the honest answer to "did this take effect" is to tell the
+caller, not to guess twice.

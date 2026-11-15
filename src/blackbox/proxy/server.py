@@ -71,8 +71,19 @@ STATUS_TEXT = {
 }
 
 
+# A method whose repetition cannot cause a second side effect. Only these are ever retried after a request may have
+# been transmitted; everything else is reported as an uncertain failure instead (P3B-08, the P0 that named this).
+RETRYABLE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+
+
 class _StaleConnection(Exception):
-    """A pooled upstream connection turned out to be dead. Never shown to the client: the exchange is retried once."""
+    """A pooled upstream connection was dead after the request went out.
+
+    **This is an uncertain outcome, not a retryable one.** The request may have reached the upstream and may have been
+    acted on; only its response never arrived. A proxy that quietly sends it again can double a charge, a write or a
+    deployment, so the decision is made by the caller: an idempotent method (see `RETRYABLE_METHODS`) is retried once,
+    anything else is answered `502 upstream-closed-uncertain` with a body that says the request may have taken effect.
+    """
 
 
 @dataclass
@@ -98,6 +109,7 @@ class _UpstreamPool:
         self._idle: dict[str, list[_Pooled]] = {}
         self.reused = 0
         self.retries = 0
+        self.discarded = 0                 # found dead *before* the request was written: free, no uncertainty
 
     def acquire(self, route: Route) -> _Pooled | None:
         stack = self._idle.get(route.name) or []
@@ -128,7 +140,7 @@ class _UpstreamPool:
         self._idle.clear()
 
     def as_dict(self) -> dict[str, Any]:
-        return {"reused": self.reused, "retries": self.retries,
+        return {"reused": self.reused, "retries": self.retries, "discarded": self.discarded,
                 "idle": {name: len(stack) for name, stack in sorted(self._idle.items())}}
 
 
@@ -140,6 +152,7 @@ class ProxyStats:
     streamed: int = 0
     refused: int = 0
     upstream_errors: int = 0
+    uncertain: int = 0                 # a request that may have reached the upstream and got no response
     record_errors: int = 0
     bytes_to_client: int = 0
     bytes_to_upstream: int = 0
@@ -147,7 +160,8 @@ class ProxyStats:
 
     def as_dict(self) -> dict[str, Any]:
         return {"requests": self.requests, "streamed": self.streamed, "refused": self.refused,
-                "upstream_errors": self.upstream_errors, "record_errors": self.record_errors,
+                "upstream_errors": self.upstream_errors, "uncertain": self.uncertain,
+                "record_errors": self.record_errors,
                 "bytes_to_client": self.bytes_to_client, "bytes_to_upstream": self.bytes_to_upstream,
                 "per_route": dict(sorted(self.per_route.items()))}
 
@@ -339,8 +353,18 @@ class ProxyServer:
             keep, reusable = await self._exchange(request, route, target_path, query, body, upstream_reader,
                                                   upstream_writer, writer, call, reused=reused)
         except _StaleConnection:
-            # The pooled connection died while idle. Nothing has been written to the client yet, so a fresh
-            # connection and one honest retry are invisible — which is the point.
+            # The request went out and no response head came back. It may have been acted on, so a retry is only
+            # defensible for a method whose repetition cannot have a second side effect.
+            if request.method.upper() not in RETRYABLE_METHODS:
+                self.stats.upstream_errors += 1
+                self.stats.uncertain += 1
+                self._close_call(call, status=502, error="upstream-closed-uncertain")
+                with contextlib.suppress(Exception):
+                    upstream_writer.close()
+                await self._fail(writer, 502, "upstream-closed-uncertain", request.keep_alive,
+                                 note=f"{request.method} was sent once and may have been applied; "
+                                      "blackbox does not resend it")
+                return request.keep_alive
             self.pool.retries += 1
             with contextlib.suppress(Exception):
                 upstream_writer.close()
@@ -364,11 +388,21 @@ class ProxyServer:
                         upstream_reader: asyncio.StreamReader, upstream_writer: asyncio.StreamWriter,
                         writer: asyncio.StreamWriter, call: Any, *, reused: bool = False) -> tuple[bool, bool]:
         out = self._upstream_head(request, route, target_path, query, body)
-        upstream_writer.write(out)
-        if body:
-            upstream_writer.write(body)
-            self.stats.bytes_to_upstream += len(body)
-        await upstream_writer.drain()
+        try:
+            upstream_writer.write(out)
+            if body:
+                upstream_writer.write(body)
+                self.stats.bytes_to_upstream += len(body)
+            await upstream_writer.drain()
+        except (ConnectionError, OSError):
+            # The request was written into a socket whose peer is gone. Whether any of it was *received* is exactly
+            # the thing a proxy cannot know, so it takes the same path as a missing response head.
+            if reused:
+                raise _StaleConnection from None
+            self.stats.upstream_errors += 1
+            self._close_call(call, status=502, error="upstream-closed")
+            await self._fail(writer, 502, "upstream-closed", request.keep_alive)
+            return request.keep_alive, False
 
         try:
             status, reason, headers, upstream_version = await self._read_response_head(upstream_reader)
@@ -385,8 +419,9 @@ class ProxyServer:
         upstream_keeps = ("close" not in connection_hdr and upstream_version != "HTTP/1.0") or \
                          (upstream_version == "HTTP/1.0" and "keep-alive" in connection_hdr)
         keep = request.keep_alive and upstream_keeps
+        # The head goes out now, and the first body bytes go out with the relay's first flush: waiting to *coalesce*
+        # head and body would delay the only bytes the client is waiting for before it can parse anything.
         writer.write(self._client_head(status, reason, headers, keep))
-        await writer.drain()
 
         try:
             streamed, complete = await self._relay_body(status, headers, upstream_reader, writer, call)
@@ -459,9 +494,21 @@ class ProxyServer:
         return bytes(out)
 
     async def _connect(self, route: Route) -> tuple[asyncio.StreamReader, asyncio.StreamWriter, bool]:
-        """A pooled connection if the route has a live idle one, otherwise a fresh one. `bool` says which."""
-        pooled = self.pool.acquire(route)
-        if pooled is not None:
+        """A pooled connection if the route has one that is *still* open, otherwise a fresh one. `bool` says which.
+
+        The liveness check happens here, **before any byte of the request is written**, because that is the only point
+        at which discarding a connection is free of consequences. A pooled connection that passes this check can still
+        be closed a microsecond later; that case is `_StaleConnection`, and it is not free.
+        """
+        while True:
+            pooled = self.pool.acquire(route)
+            if pooled is None:
+                break
+            if pooled.writer.is_closing() or pooled.reader.at_eof() or pooled.reader.exception() is not None:
+                self.pool.discarded += 1
+                with contextlib.suppress(Exception):
+                    pooled.writer.close()
+                continue
             return pooled.reader, pooled.writer, True
         reader, writer = await self._connect_fresh(route)
         return reader, writer, False
@@ -526,24 +573,29 @@ class ProxyServer:
         return ("\r\n".join(lines) + "\r\n\r\n").encode("latin-1")
 
     async def _relay_body(self, status: int, headers: list[tuple[str, str]], upstream_reader: asyncio.StreamReader,
-                          writer: asyncio.StreamWriter, call: Any) -> tuple[bool, bool]:
+                          writer: asyncio.StreamWriter, call: Any, *, head: bytes = b"") -> tuple[bool, bool]:
         """Relay the body as it arrives, teeing each *data* chunk into the receiver. Returns True if it streamed."""
         declared = next((v for k, v in headers if k.lower() == "content-length"), None)
         chunked = any(k.lower() == "transfer-encoding" and "chunked" in v.lower() for k, v in headers)
         if declared is not None:
             remaining = int(declared)
             streamed = remaining > 0
+            if remaining == 0:
+                writer.write(head)
+                await writer.drain()
             while remaining > 0:
                 data = await upstream_reader.read(min(READ_CHUNK, remaining))
                 if not data:
                     raise asyncio.IncompleteReadError(b"", remaining)
                 remaining -= len(data)
-                writer.write(data)
+                writer.write(head + data if head else data)
+                head = b""
                 self.stats.bytes_to_client += len(data)
                 self._receive(call, data)
                 await writer.drain()
             return streamed, True
         if chunked:
+            first = True
             while True:
                 size_line = await upstream_reader.readuntil(CRLF)
                 size = int(size_line.split(b";")[0].strip() or b"0", 16)
@@ -554,33 +606,42 @@ class ProxyServer:
                         tail += line
                         if line in (CRLF, b"\n"):
                             break
-                    writer.write(bytes(tail))
+                    writer.write((head if first else b"") + bytes(tail))
                     await writer.drain()
                     return True, True
                 data = await upstream_reader.readexactly(size)
                 await upstream_reader.readexactly(2)
-                writer.write(size_line + data + CRLF)
+                writer.write((head if first else b"") + size_line + data + CRLF)
+                head, first = b"", False
                 self.stats.bytes_to_client += len(data)
                 self._receive(call, data)
                 await writer.drain()
         if status in (204, 304):
+            writer.write(head)
+            await writer.drain()
             return False, True
         while True:
             data = await upstream_reader.read(READ_CHUNK)
             if not data:
+                if head:
+                    writer.write(head)
+                    await writer.drain()
                 return True, False          # read to EOF: there is no framing left to trust, so do not pool it
-            writer.write(data)
+            writer.write(head + data if head else data)
+            head = b""
             self.stats.bytes_to_client += len(data)
             self._receive(call, data)
             await writer.drain()
 
-    async def _fail(self, writer: asyncio.StreamWriter, status: int, reason: str, keep: bool) -> None:
-        text = f"{status} {reason}\n".encode()
+    async def _fail(self, writer: asyncio.StreamWriter, status: int, reason: str, keep: bool,
+                    *, note: str | None = None) -> None:
+        text = f"{status} {reason}\n".encode() + (f"{note}\n".encode() if note else b"")
         head = [
             f"HTTP/1.1 {status} {STATUS_TEXT.get(status, 'Error')}",
             "Content-Type: text/plain; charset=utf-8",
             f"Content-Length: {len(text)}",
             f"{ERROR_HEADER}: {reason}",
+            *([f"{ERROR_HEADER}-detail: uncertain"] if note else []),
             "Connection: keep-alive" if keep else "Connection: close",
         ]
         writer.write(("\r\n".join(head) + "\r\n\r\n").encode("latin-1") + text)
