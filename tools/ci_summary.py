@@ -12,9 +12,11 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 TAIL = 150
+HUNG_FILE = os.path.join(tempfile.gettempdir(), "blackbox-hung.txt")
 
 
 def main(argv: list[str]) -> int:
@@ -43,7 +45,16 @@ def main(argv: list[str]) -> int:
     # bottom of a traceback, and the line naming the test — written before the dump — was the one dropped. The message
     # carries the `FAILED`/`ERROR` lines (where they exist) *and* the last few non-traceback lines, inside 600 chars.
     if proc.returncode != 0:
-        failed = [line.strip() for line in lines if line.startswith(("FAILED ", "ERROR "))][:3]
+        # The watchdog's account first: a hung test writes its own line to a file precisely because the capture layer
+        # and `os._exit` cannot be trusted to carry it.
+        hung: list[str] = []
+        try:
+            with open(HUNG_FILE, encoding="utf-8") as handle:
+                hung = [line.strip() for line in handle if line.strip()]
+            os.unlink(HUNG_FILE)
+        except OSError:
+            pass
+        failed = hung + [line.strip() for line in lines if line.startswith(("FAILED ", "ERROR "))][:3]
         useful = [line.strip() for line in lines if line.strip() and not line.startswith(("  File ", "File "))]
         message = " | ".join([*failed, "…", *useful[-6:]]) if failed else " | ".join(useful[-8:])
         print(f"::error title={title}::exit {proc.returncode} · {message[:600]}", flush=True)

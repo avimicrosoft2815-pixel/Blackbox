@@ -36,11 +36,7 @@ jobs:
         # guess. `faulthandler_timeout` dumps every thread's stack once a test exceeds the bound, and
         # `timeout-minutes` turns the hang into a red cell that names itself.
         timeout-minutes: 15
-        # `-s` is not a debugging leftover: pytest's global capture is an fd-level dup2, so the one line this suite
-        # needs to survive a hang — `tests/conftest.py`'s watchdog writing `FAILED <nodeid>` before it exits — would
-        # otherwise land in a capture buffer that `os._exit` never flushes. The fixture-level `capfd`/`capsys` tests
-        # do their own capture and are unaffected.
-        run: python tools/ci_summary.py --title "${{ matrix.python }} / ${{ matrix.os }} · unit + property" -- python -m pytest -q -rfE --tb=short -s
+        run: python tools/ci_summary.py --title "${{ matrix.python }} / ${{ matrix.os }} · unit + property" -- python -m pytest -q -rfE --tb=short
       - name: Crash stages S1-S5 + a 20-trial kill smoke run (POSIX only)
         if: runner.os != 'Windows'
         # `tests/kill/` holds drivers, not test modules, so `pytest tests/kill` collected nothing and exited 5.

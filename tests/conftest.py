@@ -14,6 +14,7 @@ from __future__ import annotations
 import contextlib
 import gc
 import os
+import tempfile
 
 import pytest
 from _hygiene import leaked_writers
@@ -39,9 +40,10 @@ def close_leaked_handles() -> object:
 # tools (asserted in `test_packaging.py`), and this needs nothing but the standard library.
 
 TEST_TIMEOUT_S = float(os.environ.get("BLACKBOX_TEST_TIMEOUT", "120"))
-# Captured at import time, before pytest swaps fd 1 for its capture file: the watchdog's line is the one piece of output
-# in this suite that must reach the log no matter what the capture layer is doing.
-_REAL_STDOUT = os.dup(1) if os.name != "nt" else None
+# A file, not a file descriptor. Every fd trick failed for the same reason: pytest's capture, `os._exit` and the CI
+# wrapper each get a say over fd 1, and the one line that must survive all three is the one that says which test hung.
+# `tools/ci_summary.py` reads this file after the run and turns it into an annotation.
+HUNG_FILE = os.path.join(tempfile.gettempdir(), "blackbox-hung.txt")
 
 
 
@@ -70,9 +72,13 @@ def _fail_a_test_that_overruns(request: pytest.FixtureRequest) -> object:
             if frames:
                 tail = frames[-1]
                 where = f" at {tail.filename}:{tail.lineno} in {tail.name}"
-        line = (f"FAILED {request.node.nodeid} — ran longer than {TEST_TIMEOUT_S:.0f} s{where}\n").encode()
+        line = f"FAILED {request.node.nodeid} — ran longer than {TEST_TIMEOUT_S:.0f} s{where}\n"
+        # The report `tools/ci_summary.py` annotates from: a file, because a descriptor can be captured, buffered or
+        # closed on the way out and this line has to survive all three.
+        with contextlib.suppress(OSError), open(HUNG_FILE, "a", encoding="utf-8") as handle:
+            handle.write(line)
         with contextlib.suppress(OSError):
-            os.write(_REAL_STDOUT if _REAL_STDOUT is not None else 1, line)
+            os.write(1, line.encode())
         faulthandler.dump_traceback(file=sys.__stderr__, all_threads=True)
         os._exit(1)
 

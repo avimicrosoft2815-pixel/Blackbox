@@ -45,14 +45,19 @@ class _SlowOrigin(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
     def do_GET(self) -> None:                    # http.server's spelling, not ours to rename
-        self.send_response(200)
-        self.send_header("Content-Type", "text/event-stream")
-        self.send_header("Transfer-Encoding", "chunked")
-        self.end_headers()
-        for _ in range(CHUNKS):
-            self.wfile.write(f"{len(PIECE):x}\r\n".encode() + PIECE + b"\r\n")
-            self.wfile.flush()
-            time.sleep(0.005)
+        try:
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Transfer-Encoding", "chunked")
+            self.end_headers()
+            for _ in range(CHUNKS):
+                self.wfile.write(f"{len(PIECE):x}\r\n".encode() + PIECE + b"\r\n")
+                self.wfile.flush()
+                time.sleep(0.005)
+        except (BrokenPipeError, ConnectionError):
+            # The proxy was killed, which is the whole test: an unhandled traceback here would be noise in the log that
+            # the run's one annotation is made of, and it once was exactly that.
+            pass
 
     def log_message(self, *args: object) -> None:
         pass
