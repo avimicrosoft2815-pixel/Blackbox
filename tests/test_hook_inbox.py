@@ -225,9 +225,11 @@ def test_every_frame_carries_the_ingest_id_so_a_refold_is_detectable(tmp_path: P
 def test_the_inbox_defaults_follow_the_run_and_never_the_working_directory(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("BLACKBOX_INBOX", raising=False)
     monkeypatch.setenv("BLACKBOX_DATA_DIR", "/tmp/bbx-data")
-    assert inbox.default_dir(None) == "/tmp/bbx-data/inbox"
+    # `os.path.join`, not a literal slash: this ran red on all three Windows cells of a run whose other six were green,
+    # because the environment variable is "/tmp/bbx-data" on every OS and the *join* is the platform's business.
+    assert inbox.default_dir(None) == os.path.join("/tmp/bbx-data", "inbox")
     monkeypatch.setenv("BLACKBOX_INBOX", "/tmp/bbx-inbox")
-    assert inbox.default_dir(None) == "/tmp/bbx-inbox"
+    assert inbox.default_dir(None) == "/tmp/bbx-inbox", "an explicit value is used verbatim"
     assert inbox.default_dir("/explicit") == "/explicit"
     monkeypatch.delenv("BLACKBOX_INBOX")
     monkeypatch.delenv("BLACKBOX_DATA_DIR")
