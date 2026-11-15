@@ -36,7 +36,9 @@ jobs:
         # guess. `faulthandler_timeout` dumps every thread's stack once a test exceeds the bound, and
         # `timeout-minutes` turns the hang into a red cell that names itself.
         timeout-minutes: 15
-        run: python tools/ci_summary.py --title "${{ matrix.python }} / ${{ matrix.os }} · unit + property" -- python -m pytest -q -rfE --tb=short
+        # `-s`: the run's evidence has to survive the process, and a captured stdout is a buffer that `os._exit` never
+        # flushes (the watchdog exits that way by design). Fixture-level `capfd`/`capsys` tests do their own capture.
+        run: python tools/ci_summary.py --title "${{ matrix.python }} / ${{ matrix.os }} · unit + property" -- python -m pytest -q -rfE --tb=short -s
       - name: Crash stages S1-S5 + a 20-trial kill smoke run (POSIX only)
         if: runner.os != 'Windows'
         # `tests/kill/` holds drivers, not test modules, so `pytest tests/kill` collected nothing and exited 5.

@@ -56,8 +56,11 @@ def main(argv: list[str]) -> int:
             pass
         failed = hung + [line.strip() for line in lines if line.startswith(("FAILED ", "ERROR "))][:3]
         useful = [line.strip() for line in lines if line.strip() and not line.startswith(("  File ", "File "))]
-        message = " | ".join([*failed, "…", *useful[-6:]]) if failed else " | ".join(useful[-8:])
-        print(f"::error title={title}::exit {proc.returncode} · {message[:600]}", flush=True)
+        # The shape is fixed and never empty: a failed step that annotates nothing tells the next reader that this
+        # tool did not run, when the truth is usually that the child died before it flushed anything.
+        facts = (f"exit {proc.returncode} · out {len(lines)} lines · "
+                 f"hung {'yes' if hung else 'no'} · {' | '.join([*failed, '…', *useful[-4:]]) or 'no output captured'}")
+        print(f"::error title={title}::{facts[:600]}", flush=True)
     status = "passed" if proc.returncode == 0 else f"**failed** (exit {proc.returncode})"
     block = (f"\n### `{title}` — {status}\n\n"
              f"```\n{tail}\n```\n")
