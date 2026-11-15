@@ -142,7 +142,16 @@ row in the same commit.
 
 ## What is next
 
-0. **`d901811` is green on all ten cells** (`43698231222`), as are `54c3aba` (`43697929744`), `23cdb7b`
+0. **The reviewer's three P0s are fixed and reproduced first** (`ecf8b88`): a receiver exception no longer reaches
+   the application through any callback (defect 27 — reproduced at `ee210ae` with the reviewer's script, which printed
+   `ESCAPED RuntimeError` before the fix and `SURVIVED bytes=849` after it), capture is scoped to an explicit host
+   allowlist with skips counted (D-026), and a data directory that is a file is refused by name on every OS
+   (defect 26). `47ec45a` then verified both client modules directly for streaming, truncation, async and
+   cancellation, and found two things that were only true by assumption (D-028).
+0b. **The nightly has never succeeded and `main` has not moved**: `origin/main` is at `31241d6`, this branch's base,
+   so the scheduled workflow's clock has not started; its one historical run failed because it named files that do not
+   exist (defect 28, fixed here). Merge is the owner's.
+0c. **`d901811` is green on all ten cells** (`43698231222`), as are `54c3aba` (`43697929744`), `23cdb7b`
    (`43697556490`) and `846e01a` (`43697198262`) — the first all-OS green since `c7919f9`, after four commits of
    Windows red on defect 25 and one on defect 26. `STATE.last_green_commit` is `d901811`.
 1. **G-Promise is signed** (`docs/gates/G-Promise.md`, verdict pass, self-signed — see §Labelled) and `STATE.json`
