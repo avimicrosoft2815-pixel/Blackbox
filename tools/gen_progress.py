@@ -104,7 +104,7 @@ S: dict[str, tuple[str, str, str, str, str, str]] = {
               "2 000 chunks => 8 chunk frames, payloads concatenate to the identical body; 8 KiB / 100 ms bounds; "
               "request/chunks/response ordering; unfinished call left as chunks for INTERRUPTED_MID_STREAM; "
               "fail-open counted, never raised"),
-    "P3-14": ("done", "HEAD", "tests/test_failopen.py (6)", "—", "self",
+    "P3-14": ("done", "HEAD", "tests/test_failopen.py (7)", "—", "self",
               "100-call agent, bare vs recorded: identical return value and identical stdout; raises at call 37 with "
               "the same exception type and message; three real breakages (read-only data dir where install() reports "
               "enabled: False + PermissionError, a keeper that raises on every publish, a tape truncated by 512 B) "

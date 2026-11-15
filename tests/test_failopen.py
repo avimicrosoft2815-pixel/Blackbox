@@ -99,6 +99,32 @@ def test_an_exception_from_the_application_is_the_same_exception_with_the_record
     assert recorded[1] == bare[1]
 
 
+def test_a_data_directory_that_cannot_be_created_leaves_the_application_untouched(tmp_path):
+    """The breakage that works on all three operating systems: the data directory is a *file*. Someone's
+    `BLACKBOX_HOME` points at a path that is not a directory, or the mount is what it is; either way the tape cannot
+    be made, and the application must not notice. (On Windows the permission bits do not stop a file being created,
+    so a read-only directory would prove nothing there — the POSIX-only case is the test below.)"""
+    with MockProvider(Scenario(chunks=2)) as provider:
+        bare = _run(provider.base_url)
+
+        blocked = tmp_path / "blocked"
+        blocked.write_bytes(b"not a directory")
+        installed = api.install(data_dir=str(blocked))
+        recorder = SinkRecorder(TapeSink(api.emit))
+        handle = install_hooks(recorder)
+        try:
+            recorded = _run(provider.base_url)
+        finally:
+            handle.uninstall()
+            api.uninstall()
+
+    assert recorded[2] is None
+    assert recorded[1] == bare[1] and recorded[0] == bare[0]
+    assert installed["enabled"] is False, "this test proves nothing unless the recorder really is broken here"
+    assert "NotADirectoryError" in (installed.get("disabled_reason") or ""), installed
+
+
+@pytest.mark.skipif(os.name == "nt", reason="on Windows the permission bits do not stop a file being created")
 @pytest.mark.skipif(hasattr(os, "geteuid") and os.geteuid() == 0,
                     reason="root ignores the permission bits, so the recorder would not actually be broken")
 def test_an_unwritable_data_directory_leaves_the_application_untouched(tmp_path):
