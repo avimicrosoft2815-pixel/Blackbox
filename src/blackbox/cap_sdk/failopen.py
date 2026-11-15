@@ -51,13 +51,15 @@ class FailOpenReceiver(Receiver):
 
     # ── the three callbacks ─────────────────────────────────────────────────
     def open_call(self, provider: str, path: str, request: Any, *, model: str | None = None,
-                  stream: bool = False, partial: bool = False) -> ModelCall:
+                  stream: bool = False, partial: bool = False, linked_run: str | None = None) -> ModelCall:
         try:
-            return self.inner.open_call(provider, path, request, model=model, stream=stream, partial=partial)
+            return self.inner.open_call(provider, path, request, model=model, stream=stream, partial=partial,
+                                        linked_run=linked_run)
         except Exception as exc:
             self._note("open_call", exc)
             # `request_fp=""` says *not fingerprinted*, which a reader can tell apart from a fingerprint of b"".
-            return ModelCall(provider=provider, path=path, model=model, stream=stream, partial=True)
+            return ModelCall(provider=provider, path=path, model=model, stream=stream, partial=True,
+                             linked_run=linked_run)
 
     def receive(self, call: ModelCall, chunk: bytes, *, first_byte_ms: float | None = None) -> None:
         try:

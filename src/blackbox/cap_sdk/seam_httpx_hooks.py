@@ -30,6 +30,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
+from blackbox.cap_sdk import headers as run_header
 from blackbox.cap_sdk import http_clients
 from blackbox.cap_sdk.base import ModelCall, Receiver, SeamHandle, SeamUnavailable
 from blackbox.cap_sdk.failopen import fail_open
@@ -110,6 +111,9 @@ def install(recorder: Receiver, *, hook_name: str = "response",
 
     def on_request(request: Any) -> None:
         try:
+            # §11.10: the run id travels on the request so a proxy-written call can be linked to this run exactly. Only
+            # when the launcher said a proxy is in front of us — an unproxied app's bytes are the app's business.
+            run_header.inject(request.headers)
             if not scope.allows(request.url.host):
                 scope.skip()
                 return

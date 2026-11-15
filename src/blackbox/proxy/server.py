@@ -34,6 +34,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
+from blackbox.cap_sdk import headers as cap_headers
 from blackbox.errors import bbx
 from blackbox.proxy import disconnects
 from blackbox.proxy.routes import (
@@ -734,13 +735,16 @@ class ProxyServer:
                    *, stream: bool) -> Any:
         if self.receiver is None:
             return None
+        # `x-blackbox-run` is the one header the proxy *reads*: it names the run this call belongs to, which is how an
+        # exact link is made across a process boundary. It is stripped before the upstream like every other ours.
+        linked_run, _node = cap_headers.parse(request.header(cap_headers.HEADER))
         try:
             return self.receiver.open_call(
                 provider=route.name, path=target_path + (f"?{query}" if query else ""),
                 request={"method": request.method, "path": target_path,
                          "headers": {k.lower(): v for k, v in request.headers if not is_ours(k)},
                          "body_sha256": hashlib.sha256(body or b"").hexdigest()},
-                stream=stream, partial=True)
+                stream=stream, partial=True, linked_run=linked_run)
         except Exception:
             self.stats.record_errors += 1
             return None

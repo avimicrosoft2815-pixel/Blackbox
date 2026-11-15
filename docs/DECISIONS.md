@@ -225,3 +225,36 @@ proxy's own two counters — it is the difference between what the provider prod
 why the test asserts `origin.sent_stream_bytes > client_received_bytes` against an origin we own, and says in a comment why
 the two tape counts may coincide.
 
+## D-036 — `x-blackbox-run` travels only behind a proxy, and a link's class is the strength of the claim
+
+*Date: 2026-11-16. Plan refs: §11.10, CH-07, P3B-04. Risk R16 in §22.3 is about this header.*
+
+§11.10's `exact` link needs one fact to cross a process boundary: the proxy must know which run the socket belongs to.
+There is no way to do that without touching the request, so the header is the single place where this product modifies
+somebody else's bytes, and it is therefore governed by two rules that the code enforces rather than documents:
+
+* **Inject only when `BLACKBOX_PROXY=1`** — set by `blackbox run` and by nothing else. The alternative ("the header is
+  harmless") is what produces R16: an unproxied app with its own header on the wire to a real provider, for our benefit.
+  `headers.inject()` returns False and touches nothing unless the variable says exactly `1` *and* there is a run id; a
+  header with a run but no node still names its run, and a run with no run id is dropped rather than guessed at.
+* **Strip it before the upstream.** The proxy reads the value and removes every `x-blackbox-*` header in both directions,
+  so a user who exported the variable by hand leaks an internal name as far as the proxy and no further.
+
+The value is `<run_id>/<node>`; the node half is a hint. The proxy records the run id on the call it opens
+(`linked_run` on `MODEL_REQUEST`), which is the anchor the resolver matches on — so the link is established from the
+*tape*, not from a live in-memory pairing that a crash would lose.
+
+**Three classes, three strengths of claim.** `rec/links.py` resolves `exact` (same run id — by construction),
+`declared` (the user said so; recorded with `asserted_by: user` so it is never mistaken for a measurement) and `inferred`
+(a ±2 s window **and** a content-fingerprint match, with both numbers in the evidence and a confidence capped below 1.0).
+Authority is ordered — declared, then exact, then inferred — and a pair that got a stronger link never also gets a weaker
+one, because two edges for one relation is how a graph starts disagreeing with itself.
+
+**An inference never merges runs.** This is the invariant the plan puts in bold and the one a "helpful" refactor would
+break first, so `resolve()` returns links and nothing else, and `test_an_inference_never_merges_two_runs` asserts that both
+run identities come back unchanged and distinct. A recorder whose totals cannot be checked is not a record.
+
+**What is not here yet.** The resolver and the header path are real and tested; the emission of `LINK` frames at
+recovery/seal time and `blackbox link <a> <b>` are the remaining half of P3B-04 and are listed as such in `docs/STATUS.md`.
+The classes are named in one module now precisely so that half has a vocabulary to write against.
+

@@ -34,6 +34,7 @@ class ModelCall:
     error: str | None = None
     model: str | None = None
     partial: bool = False         # the seam saw the call but not all of it; never a guess, always a marker
+    linked_run: str | None = None  # `x-blackbox-run` seen on the request: the run this call belongs to (P3B-04)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -41,7 +42,7 @@ class ModelCall:
             "response_fp": self.response_fp, "status": self.status, "chunks": self.chunks,
             "bytes_received": self.bytes_received, "first_byte_ms": self.first_byte_ms,
             "total_ms": self.total_ms, "stream": self.stream, "error": self.error, "model": self.model,
-            "partial": self.partial,
+            "partial": self.partial, "linked_run": self.linked_run,
         }
 
 
@@ -62,7 +63,7 @@ class Receiver:
     installed_seam: str | None = None
 
     def open_call(self, provider: str, path: str, request: Any, *, model: str | None = None,
-                  stream: bool = False, partial: bool = False) -> ModelCall:
+                  stream: bool = False, partial: bool = False, linked_run: str | None = None) -> ModelCall:
         """Open a call. The hints are not decoration: a sink writes the request frame *here*, so a seam that set
         `call.model` afterwards would leave a durable frame saying `model: null` for a call that named its model."""
         raise NotImplementedError
@@ -84,9 +85,9 @@ class Recorder(Receiver):
         self.installed_seam: str | None = None
 
     def open_call(self, provider: str, path: str, request: Any, *, model: str | None = None,
-                  stream: bool = False, partial: bool = False) -> ModelCall:
+                  stream: bool = False, partial: bool = False, linked_run: str | None = None) -> ModelCall:
         call = ModelCall(provider=provider, path=path, request_fp=fingerprint(request),
-                         model=model, stream=stream, partial=partial)
+                         model=model, stream=stream, partial=partial, linked_run=linked_run)
         self.calls.append(call)
         return call
 
