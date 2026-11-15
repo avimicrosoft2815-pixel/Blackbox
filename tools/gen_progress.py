@@ -68,6 +68,14 @@ S: dict[str, tuple[str, str, str, str, str, str]] = {
     "P1-19": ("done", "HEAD", "bench/bench_writer_ab.py", "bench/results/2026-11-14-writer-ab.json",
               "self", "ADR-005 supersedes ADR-001: median p50 ratio 1.059 / 1.065 at 10k / 40k ev/s, inside the "
               "plan's 20 % rule, so the simpler store won and the mapping is gone"),
+    "P2-11": ("done", "HEAD", "tests/test_launcher.py (6)", "—", "self",
+              "blackbox run -- cmd: spawn with BLACKBOX_RUN_ID/BLACKBOX_HOME, the launcher owns the tape (RUN_START/"
+              "RUN_END), stall_ms watchdog, immediate recovery on exit, exit code propagated (128+n for a signal); "
+              "the plan's acceptance line, `kill -9 $$`, leaves one capsule root"),
+    "P2-13": ("done", "HEAD", "tests/test_launcher.py::test_a_stalled_child_is_detected_and_dumps_its_stacks", "—",
+              "self", "on stall the launcher writes stall.json and sends SIGUSR1; api.install() registers "
+              "faulthandler(all_threads=True) on it, so two deliberately deadlocked threads both appear in "
+              "stall_tb.txt within stall_ms + 1 s; Windows is documented as stall.json only, not claimed"),
     "P1-20": ("done", "260bfd0", "test_prealloc.py (5)", "—", "self", "S17 still open, claim not made"),
     "P2-01": ("done", "8c99b96", "test_tape.py::test_lease_*", "—", "self", "stale/reboot/pid-reuse/live"),
     "P2-02": ("wip", "8c99b96", "—", "—", "—", "Linux only; macOS untested here"),

@@ -5,8 +5,8 @@
     "docs/STATUS.md",
     "bench/results/*.json"
   ],
-  "next_ticket": "P2-11",
-  "next_note": "corrections C31-C34 first (AGENT_FINAL.md §1), then P2-11 launcher + P2-13 stall dump, P1-13 compaction, P1-02b types, the C32 64 KiB row, then G-Promise",
+  "next_ticket": "P3-01",
+  "next_note": "in flight: P1-02b (mypy type-arg + no-untyped-def, the residual knobs of P1-02) then G-Promise on ext4 with a reviewer-signed gate file under docs/gates/; after the gate, L2 capture (P3-01) and L3 attach (P3B-01) fan out in parallel",
   "last_green_commit": "31241d676201ac83f2e5309b38e6a6a377a15e2d",
   "last_green_commit_note": "CI run 43660321110, all ten cells green; this file is rewritten at every turn boundary",
   "gates": {
@@ -75,7 +75,9 @@
         "P2-06",
         "P2-07",
         "P2-10",
-        "P2-12"
+        "P2-12",
+        "P2-11",
+        "P2-13"
       ],
       "wip": [
         "P1-03",
@@ -84,10 +86,7 @@
         "P2-08",
         "P2-09"
       ],
-      "todo": [
-        "P2-11",
-        "P2-13"
-      ]
+      "todo": []
     },
     "L2": {
       "done": [],

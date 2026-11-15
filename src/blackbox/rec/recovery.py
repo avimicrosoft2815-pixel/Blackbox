@@ -557,6 +557,21 @@ class Recovery:
         return self.result
 
 
+def run_id_for(data_dir: str, writer_uuid_hex: str) -> str:
+    """The tape's canonical run id: the same value every recovery of this tape derives (so ids stay stable).
+
+    The launcher needs it *before* the child starts (`BLACKBOX_RUN_ID` is how hooks and the proxy link to the run),
+    and deriving it here rather than in the launcher keeps one definition of "which run is this".
+    """
+    tape_dir = os.path.join(data_dir, "tape", writer_uuid_hex)
+    try:
+        with open(os.path.join(tape_dir, "meta"), "rb") as fh:
+            meta = meta_mod.decode(fh.read(C.META_BYTES))
+    except FileNotFoundError:
+        meta = {}
+    return "r_" + _hash(writer_uuid_hex, meta.get("created_wall_ns", 0))[:16]
+
+
 def recover(data_dir: str, writer_uuid_hex: str | None = None, *, now_ns: int | None = None) -> RecoveryResult:
     """Convenience entry point: pick the newest unsealed tape and recover it."""
     if writer_uuid_hex is None:

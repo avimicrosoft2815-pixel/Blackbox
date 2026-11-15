@@ -53,9 +53,9 @@ A † marks a Done-when cell paraphrased because the plan's wording uses a word 
 | `P2-08` | 18 stages × 3 modes × 3 segment sizes green | **wip** | 1a3d505 | test_crash_points.py (7 stages) | — | — | S1-S5, S14, S15 of 18 stages; S6-S13 have no code path yet |
 | `P2-09` | 0 invariant violations over a week of runs | **wip** | HEAD | tests/kill/kill_matrix.py | bench/results/2026-11-14-kill-random.json | self | 500 parent-SIGKILL trials, 0 violations; nightly runs still pending |
 | `P2-10` | capsule opens; sha256 root verifies; re-seal identical bytes | **done** | HEAD | tests/test_capsule.py (9) | — | self | capsule v0 = raw segment frames + chain.json + manifest + INTEGRITY.sha256; .partial then os.replace; re-sealing the same inputs is byte-identical, one changed byte breaks the root |
-| `P2-11` | `blackbox run -- sh -c 'kill -9 $$'` yields a recovered run on the next line | **todo** | — | — | — | — |  |
+| `P2-11` | `blackbox run -- sh -c 'kill -9 $$'` yields a recovered run on the next line | **done** | HEAD | tests/test_launcher.py (6) | — | self | blackbox run -- cmd: spawn with BLACKBOX_RUN_ID/BLACKBOX_HOME, the launcher owns the tape (RUN_START/RUN_END), stall_ms watchdog, immediate recovery on exit, exit code propagated (128+n for a signal); the plan's acceptance line, `kill -9 $$`, leaves one capsule root |
 | `P2-12` | both pass on Linux+Windows | **done** | HEAD | tests/test_recovery.py::test_recovery_is_idempotent_ten_times | — | self | ten recoveries produce one capsule hash and one .bbx; a second recoverer process is refused with BBX-E210 while the holder is alive, and takes the stale lock over once it dies |
-| `P2-13` | a deliberately deadlocked child yields all thread stacks in `stall_tb.txt` within `stall_ms + 1 s` | **todo** | — | — | — | — |  |
+| `P2-13` | a deliberately deadlocked child yields all thread stacks in `stall_tb.txt` within `stall_ms + 1 s` | **done** | HEAD | tests/test_launcher.py::test_a_stalled_child_is_detected_and_dumps_its_stacks | — | self | on stall the launcher writes stall.json and sends SIGUSR1; api.install() registers faulthandler(all_threads=True) on it, so two deliberately deadlocked threads both appear in stall_tb.txt within stall_ms + 1 s; Windows is documented as stall.json only, not claimed |
 
 ## Hot-path numbers (Stage-2 item 8: p50/p95/p99, N, warm-up, raw JSON)
 

@@ -58,10 +58,11 @@ mapped-file-cannot-be-deleted problem. Every number below was re-measured on the
 | Interrupted nodes (`P2-07`) | `tests/test_recovery.py` | the five §14.4 strings exactly; mid-stream carries `chunks`, `partial_stream_bytes`, `last_chunk_age_ms`; `TOOL_REQUEST` without result says the side effect may have happened |
 | Capsule v0 (`P2-10`) | `tests/test_capsule.py` (9) | raw frames + `chain.json` + manifest + `INTEGRITY.sha256`; `.partial` → `os.replace`; re-seal is byte-identical, one changed byte breaks the root, traversal/duplicate/newer-manifest rejected |
 | Recovery idempotence (`P2-12`) | `tests/test_recovery.py` | 10 recoveries ⇒ 1 capsule hash, 1 `.bbx`; a second recoverer process gets `BBX-E210`, and a dead holder's lock is taken over |
+| Launcher + stall dump (`P2-11`, `P2-13`) | `tests/test_launcher.py` (6) | `blackbox run -- cmd`: the launcher owns the tape (`RUN_START`/`RUN_END`), a child killed by signal 9 exits **137** and still leaves a recovered capsule (`SEAL_INTERRUPTED`); a real two-thread deadlock is caught within `stall_ms`, `stall.json` records pid/last-seq/idle-ms, and `api.install()` + `SIGUSR1` puts **both** thread stacks in `stall_tb.txt` (Windows: `stall.json` only, not claimed) |
 | Lint + types (C6) | `make fmt` (ruff 0.17.5, mypy 2.4.1) | **0 findings** both |
 | Forbidden words (C12) | `tests/test_forbidden_words.py` | green over the tree **and** `git log` |
 
-Total: **315 tests** — 314 pass here and 1 is skipped on POSIX by name (`test_an_open_view_blocks_the_unlink_only_on_windows`: POSIX permits unlinking a file another fd still holds, so the open-view case only exists on Windows). ruff and mypy: 0 findings.
+Total: **323 tests** — 322 pass here and 1 is skipped on POSIX by name (`test_an_open_view_blocks_the_unlink_only_on_windows`: POSIX permits unlinking a file another fd still holds, so the open-view case only exists on Windows). ruff and mypy: 0 findings.
 
 ## 2. §15.1 rows — ext4 is the gate column (C1); every row carries its verdict
 
@@ -159,7 +160,7 @@ to `P2-11`** (`blackbox run`), not P5 — corrected here and in `DECISIONS.md`.
 
 | Check | State |
 |---|---|
-| `make test` from a clean clone | green, `314 passed, 1 skipped` (12.9 s) |
+| `make test` from a clean clone | green, `322 passed, 1 skipped` (17.8 s) |
 | `make kill` (500 trials, ext4) | 0 violations, 0 `not_started` |
 | `make bench` into `bench/results/` | green, both columns |
 | `make fuzz` | 100 000 iterations, 0 non-`CBORError` |
@@ -181,7 +182,7 @@ to `P2-11`** (`blackbox run`), not P5 — corrected here and in `DECISIONS.md`.
 | `P1-16` small-model state machine | **done** | `tests/property/test_tape_model.py`; the retention ordering (`GAP` before unlink) is modelled now and is the spec `P1-09b` has to satisfy |
 | `P1-02b` mypy `type-arg` + `no-untyped-def` | **pending, closes before G-Promise** | 75 strict findings in the two disabled categories |
 | `P2-03` / `P2-04` OS gates | **ticked — CI, run `43657997367`** | all ten cells green: Windows ran `OpenProcess`+`GetProcessTimes`, `winreg` `BootId`, `lseek`-based positional I/O and zero-fill preallocation, and the lease tests through `platform.current()`; macOS ran `sysctl(KERN_PROC_PID)`, `kern.boottime` and `F_FULLFSYNC`. Benchmark rows stay `not measured` for those OSes |
-| `P2-11` / `P2-13` launcher + stall watchdog | **pending** | `rec/launcher.py`: spawn, env, child lock, `stall_ms` watchdog, immediate recovery, exit-code propagation; `SIGUSR1` + `faulthandler` stack dump on POSIX |
+| `P2-11` / `P2-13` launcher + stall watchdog | **done** | `rec/launcher.py` + `api.py`: spawn with `BLACKBOX_RUN_ID`/`BLACKBOX_HOME`, the launcher owns the tape, `stall_ms` watchdog, immediate recovery on exit, exit-code propagation (`128+n` for a signal); on stall `stall.json` plus `SIGUSR1` → `faulthandler(all_threads=True)` writes `stall_tb.txt`; Windows is documented as `stall.json` only |
 | `P2-06` / `P2-07` / `P2-10` / `P2-12` | **done** | recovery machine, node classification, capsule v0 and idempotence, each with the test named in §1 |
 | P2-09 week of nightlies | **requires time (nightly CI × 7 days)** | GitHub `schedule` runs only on the default branch; the clock starts at merge |
 | P11-05, P11-12 | **requires humans** | a human operator and a real incident |
@@ -191,8 +192,8 @@ to `P2-11`** (`blackbox run`), not P5 — corrected here and in `DECISIONS.md`.
 
 ## 8. Next, in order
 
-1. `P2-11` / `P2-13` — `rec/launcher.py`: `blackbox run -- cmd`, the child lock, the stall watchdog and the
-   `SIGUSR1` stack dump. Then `P1-02b` (mypy `type-arg` + `no-untyped-def`).
-2. **G-Promise on ext4** → a reviewer-signed gate file under `docs/gates/` → STATUS in the §10 shape.
+1. `P1-02b` — mypy `type-arg` + `no-untyped-def` (the two residual knobs of P1-02; 75 findings to close).
+2. **G-Promise on ext4** → a reviewer-signed gate file under `docs/gates/` → STATUS in the §10 shape, then L2
+   (capture) and L3 (attach) fan out in parallel as the plan orders.
 3. `P1-13` compaction: **done** (C33) — `tape/arch.py` and `tests/test_compact.py`; the blob GC (§9.9) follows
    once segments reference blobs; `P2-09` nights start at merge.
