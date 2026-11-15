@@ -35,6 +35,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from blackbox.errors import bbx
+from blackbox.proxy import disconnects
 from blackbox.proxy.routes import (
     MAX_BODY_BYTES,
     Route,
@@ -78,6 +79,28 @@ STATUS_TEXT = {
 # obliged to tell a proxy. So post-transmission retries are **off by default** and this set only ever applies when a
 # caller has said, in so many words, that their upstreams are the well-behaved kind (D-032c).
 SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+
+
+@dataclass
+class _Tally:
+    """What each side of this one call actually moved, so a disconnect can report two numbers (§14.4a)."""
+
+    to_client: int = 0
+    from_upstream: int = 0
+
+
+class _ClientGone(Exception):
+    """The client's socket went away while we were writing to it: §14.4a's `INTERRUPTED_CLIENT`.
+
+    It is its own exception because it was once the *same* exception as an upstream failure — one `except
+    (ConnectionError, asyncio.IncompleteReadError)` covered both directions and stamped the client's hang-up
+    `upstream-truncated`, which blames the provider for the client's death and sends a reader to the wrong end of the
+    call. The proxy sees both ends; it has no excuse for confusing them.
+    """
+
+    def __init__(self, tally: _Tally) -> None:
+        super().__init__("client went away mid-response")
+        self.tally = tally
 
 
 class _StaleConnection(Exception):
@@ -158,6 +181,8 @@ class ProxyStats:
     refused: int = 0
     upstream_errors: int = 0
     uncertain: int = 0                 # a request that may have reached the upstream and got no response
+    client_gone: int = 0               # the client hung up while the upstream was still sending (§14.4a)
+    upstream_gone: int = 0             # the upstream closed before a terminal event, client still listening (§14.4a)
     record_errors: int = 0
     bytes_to_client: int = 0
     bytes_to_upstream: int = 0
@@ -166,6 +191,7 @@ class ProxyStats:
     def as_dict(self) -> dict[str, Any]:
         return {"requests": self.requests, "streamed": self.streamed, "refused": self.refused,
                 "upstream_errors": self.upstream_errors, "uncertain": self.uncertain,
+                "client_gone": self.client_gone, "upstream_gone": self.upstream_gone,
                 "record_errors": self.record_errors,
                 "bytes_to_client": self.bytes_to_client, "bytes_to_upstream": self.bytes_to_upstream,
                 "per_route": dict(sorted(self.per_route.items()))}
@@ -430,15 +456,27 @@ class ProxyServer:
         upstream_keeps = ("close" not in connection_hdr and upstream_version != "HTTP/1.0") or \
                          (upstream_version == "HTTP/1.0" and "keep-alive" in connection_hdr)
         keep = request.keep_alive and upstream_keeps
-        # The head goes out now, and the first body bytes go out with the relay's first flush: waiting to *coalesce*
-        # head and body would delay the only bytes the client is waiting for before it can parse anything.
-        writer.write(self._client_head(status, reason, headers, keep))
-
+        tally = _Tally()
         try:
-            streamed, complete = await self._relay_body(status, headers, upstream_reader, writer, call)
-        except (ConnectionError, asyncio.IncompleteReadError) as exc:
+            # The head goes out now, and the first body bytes go out with the relay's first flush: waiting to *coalesce*
+            # head and body would delay the only bytes the client is waiting for before it can parse anything.
+            self._to_client(writer, self._client_head(status, reason, headers, keep), tally)
+            streamed, complete = await self._relay_body(status, headers, upstream_reader, writer, call, tally=tally)
+        except _ClientGone as gone:
+            # The app died or cancelled and the model kept talking: the tokens it produced are a cost nobody received,
+            # which is the single most useful thing this record can say (§14.4a). The upstream connection is not pooled
+            # — there is a half-read body on it — and the client socket is already gone.
+            self.stats.client_gone += 1
+            self._close_call(call, status=0, error=disconnects.classify(
+                closed_first="client", status=0, client_received_bytes=gone.tally.to_client,
+                proxy_received_bytes=gone.tally.from_upstream).as_error())
+            return False, False
+        except (ConnectionError, OSError, asyncio.IncompleteReadError):
             self.stats.upstream_errors += 1
-            self._close_call(call, status=status, error=f"upstream-truncated: {exc!r}")
+            self.stats.upstream_gone += 1
+            self._close_call(call, status=status, error=disconnects.classify(
+                closed_first="upstream", status=status, client_received_bytes=tally.to_client,
+                proxy_received_bytes=tally.from_upstream).as_error())
             return False, False
         self.stats.streamed += 1 if streamed else 0
         self._close_call(call, status=status)
@@ -583,8 +621,28 @@ class ProxyServer:
         lines.append("Connection: keep-alive" if keep else "Connection: close")
         return ("\r\n".join(lines) + "\r\n\r\n").encode("latin-1")
 
+    def _to_client(self, writer: asyncio.StreamWriter, data: bytes, tally: _Tally) -> None:
+        """The only place the proxy writes to a client, so the only place a dead client has to be named correctly.
+
+        It does not count bytes: the caller counts the *payload* it is writing (a chunk's data, not its framing), so the
+        two numbers in a disconnect record are comparable with the byte count an SDK tape keeps — body against body.
+        """
+        if writer.is_closing() or getattr(writer.transport, "is_closing", lambda: False)():
+            raise _ClientGone(tally)
+        try:
+            writer.write(data)
+        except (ConnectionError, OSError):
+            raise _ClientGone(tally) from None
+
+    async def _flush(self, writer: asyncio.StreamWriter, tally: _Tally) -> None:
+        try:
+            await writer.drain()
+        except (ConnectionError, OSError):
+            raise _ClientGone(tally) from None
+
     async def _relay_body(self, status: int, headers: list[tuple[str, str]], upstream_reader: asyncio.StreamReader,
-                          writer: asyncio.StreamWriter, call: Any, *, head: bytes = b"") -> tuple[bool, bool]:
+                          writer: asyncio.StreamWriter, call: Any, *, tally: _Tally,
+                          head: bytes = b"") -> tuple[bool, bool]:
         """Relay the body as it arrives, teeing each *data* chunk into the receiver. Returns True if it streamed."""
         declared = next((v for k, v in headers if k.lower() == "content-length"), None)
         chunked = any(k.lower() == "transfer-encoding" and "chunked" in v.lower() for k, v in headers)
@@ -592,18 +650,20 @@ class ProxyServer:
             remaining = int(declared)
             streamed = remaining > 0
             if remaining == 0:
-                writer.write(head)
-                await writer.drain()
+                self._to_client(writer, head, tally)
+                await self._flush(writer, tally)
             while remaining > 0:
                 data = await upstream_reader.read(min(READ_CHUNK, remaining))
                 if not data:
                     raise asyncio.IncompleteReadError(b"", remaining)
                 remaining -= len(data)
-                writer.write(head + data if head else data)
+                tally.from_upstream += len(data)
+                tally.to_client += len(data)
+                self._to_client(writer, head + data if head else data, tally)
                 head = b""
                 self.stats.bytes_to_client += len(data)
                 self._receive(call, data)
-                await writer.drain()
+                await self._flush(writer, tally)
             return streamed, True
         if chunked:
             first = True
@@ -618,12 +678,14 @@ class ProxyServer:
                         tail += line
                         if line in (CRLF, b"\n"):
                             break
-                    writer.write((head if first else b"") + bytes(tail))
-                    await writer.drain()
+                    self._to_client(writer, (head if first else b"") + bytes(tail), tally)
+                    await self._flush(writer, tally)
                     return True, True
                 data = await upstream_reader.readexactly(size)
                 await upstream_reader.readexactly(2)
-                writer.write((head if first else b"") + size_line + data + CRLF)
+                tally.from_upstream += len(data)
+                tally.to_client += len(data)
+                self._to_client(writer, (head if first else b"") + size_line + data + CRLF, tally)
                 head, first = b"", False
                 self.stats.bytes_to_client += len(data)
                 self._receive(call, data)
@@ -631,24 +693,26 @@ class ProxyServer:
                 # of 60-byte chunks would pay that once per chunk on a loopback path that never fills the buffer.
                 unwritten += len(data)
                 if unwritten >= WRITE_HIGH_WATER or writer.transport.get_write_buffer_size() > WRITE_HIGH_WATER:
-                    await writer.drain()
+                    await self._flush(writer, tally)
                     unwritten = 0
         if status in (204, 304):
-            writer.write(head)
-            await writer.drain()
+            self._to_client(writer, head, tally)
+            await self._flush(writer, tally)
             return False, True
         while True:
             data = await upstream_reader.read(READ_CHUNK)
             if not data:
                 if head:
-                    writer.write(head)
-                    await writer.drain()
+                    self._to_client(writer, head, tally)
+                    await self._flush(writer, tally)
                 return True, False          # read to EOF: there is no framing left to trust, so do not pool it
-            writer.write(head + data if head else data)
+            tally.from_upstream += len(data)
+            tally.to_client += len(data)
+            self._to_client(writer, head + data if head else data, tally)
             head = b""
             self.stats.bytes_to_client += len(data)
             self._receive(call, data)
-            await writer.drain()
+            await self._flush(writer, tally)
 
     async def _fail(self, writer: asyncio.StreamWriter, status: int, reason: str, keep: bool,
                     *, note: str | None = None) -> None:
