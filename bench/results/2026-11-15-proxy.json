@@ -1,0 +1,124 @@
+{
+  "added_latency_ms": {
+    "added": {
+      "max": 0.749,
+      "mean": 0.284,
+      "min": -0.129,
+      "n": 500,
+      "p50": 0.272,
+      "p95": 0.555,
+      "p99": 0.647
+    },
+    "direct": {
+      "max": 0.945,
+      "mean": 0.63,
+      "min": 0.483,
+      "n": 500,
+      "p50": 0.615,
+      "p95": 0.812,
+      "p99": 0.904
+    },
+    "proxied": {
+      "max": 1.412,
+      "mean": 0.915,
+      "min": 0.653,
+      "n": 500,
+      "p50": 0.876,
+      "p95": 1.198,
+      "p99": 1.291
+    }
+  },
+  "concurrent_streams": {
+    "bodies_identical": true,
+    "count": 200,
+    "errors": 0,
+    "wall_ms": 457.413
+  },
+  "first_byte_ms": {
+    "added": {
+      "max": 2.138,
+      "mean": 0.378,
+      "min": -3.505,
+      "n": 100,
+      "p50": 0.421,
+      "p95": 0.861,
+      "p99": 1.988
+    },
+    "direct": {
+      "max": 4.742,
+      "mean": 0.84,
+      "min": 0.521,
+      "n": 100,
+      "p50": 0.801,
+      "p95": 0.975,
+      "p99": 1.679
+    },
+    "proxied": {
+      "max": 2.973,
+      "mean": 1.218,
+      "min": 0.665,
+      "n": 100,
+      "p50": 1.227,
+      "p95": 1.643,
+      "p99": 2.556
+    }
+  },
+  "gate": {
+    "added_latency_ms": {
+      "budget_p50": 1.0,
+      "budget_p99": 5.0,
+      "n": 500,
+      "p50": 0.272,
+      "p99": 0.647,
+      "pass": true
+    },
+    "concurrent_streams": {
+      "budget": 200,
+      "count": 200,
+      "n": 200,
+      "pass": true
+    },
+    "first_byte_ms": {
+      "budget": 0.5,
+      "n": 100,
+      "p50": 0.421,
+      "pass": true
+    },
+    "rss": {
+      "budget_mib": 60.0,
+      "growth_mib": 0.258,
+      "n": 396,
+      "pass": true
+    }
+  },
+  "hardware": {
+    "cpu_count": 2,
+    "implementation": "CPython",
+    "machine": "x86_64",
+    "n": 500,
+    "os": "Linux-6.1.158+-x86_64-with-glibc2.36",
+    "pid": 12981,
+    "python": "3.11.2"
+  },
+  "measured_at": "2026-11-15T12:21:21Z",
+  "rss": {
+    "baseline_kib": 31020,
+    "growth_mib": 0.258,
+    "peak_kib": 31284,
+    "rate_hz": 50.0,
+    "requests": 396,
+    "seconds": 10.0
+  },
+  "stats": {
+    "bytes_to_client": 103680,
+    "bytes_to_upstream": 38440,
+    "per_route": {
+      "origin": 620
+    },
+    "record_errors": 0,
+    "refused": 0,
+    "requests": 620,
+    "streamed": 620,
+    "upstream_errors": 0
+  }
+}

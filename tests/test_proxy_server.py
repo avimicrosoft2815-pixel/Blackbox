@@ -37,11 +37,18 @@ JSON_BODY = json.dumps({"id": "chatcmpl-1", "choices": [{"message": {"content": 
 
 
 class Origin:
-    """A stdlib origin that records what arrived and answers one of two shapes."""
+    """A stdlib origin that serves requests in a loop on one connection, records what arrived, and can lie about it.
+
+    It speaks HTTP/1.1 with `keep-alive`, because that is what a real origin does and it is the only shape in which
+    upstream connection reuse (P3B-08's first-byte budget) can be observed. `hang_up_after_response` makes it advertise
+    keep-alive and then close anyway — the stale-pool case the proxy has to survive.
+    """
 
     def __init__(self) -> None:
         self.requests: list[dict[str, Any]] = []
         self.port = 0
+        self.connections = 0
+        self.hang_up_after_response = False
         self._server: asyncio.AbstractServer | None = None
 
     async def start(self) -> Origin:
@@ -55,27 +62,36 @@ class Origin:
             await self._server.wait_closed()
 
     async def _handle(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        self.connections += 1
         try:
-            line = (await reader.readuntil(b"\r\n")).rstrip(b"\r\n").decode()
-            method, target, _ = line.split(" ")
-            headers: list[tuple[str, str]] = []
             while True:
-                raw = await reader.readuntil(b"\r\n")
-                if raw in (b"\r\n", b"\n"):
-                    break
-                name, _, value = raw.rstrip(b"\r\n").decode().partition(":")
-                headers.append((name.strip(), value.strip()))
-            length = next((int(v) for k, v in headers if k.lower() == "content-length"), 0)
-            body = await reader.readexactly(length) if length else b""
-            self.requests.append({"method": method, "target": target,
-                                  "headers": dict((k.lower(), v) for k, v in headers), "body": body})
-            if "/sse" in target:
-                await self._sse(writer)
-            elif "/slow" in target:
-                await asyncio.sleep(0.15)
-                await self._plain(writer, 200, JSON_BODY, extra=[("x-blackbox-error", "leaked")])
-            else:
-                await self._plain(writer, 200, JSON_BODY, extra=[("x-blackbox-error", "leaked")])
+                try:
+                    line = (await reader.readuntil(b"\r\n")).rstrip(b"\r\n").decode()
+                except (asyncio.IncompleteReadError, ConnectionError):
+                    return
+                if not line:
+                    return
+                method, target, _version = line.split(" ")
+                headers: list[tuple[str, str]] = []
+                while True:
+                    raw = await reader.readuntil(b"\r\n")
+                    if raw in (b"\r\n", b"\n"):
+                        break
+                    name, _, value = raw.rstrip(b"\r\n").decode().partition(":")
+                    headers.append((name.strip(), value.strip()))
+                length = next((int(v) for k, v in headers if k.lower() == "content-length"), 0)
+                body = await reader.readexactly(length) if length else b""
+                self.requests.append({"method": method, "target": target,
+                                      "headers": dict((k.lower(), v) for k, v in headers), "body": body})
+                if "/sse" in target:
+                    await self._sse(writer)
+                elif "/slow" in target:
+                    await asyncio.sleep(0.15)
+                    await self._plain(writer, 200, JSON_BODY, extra=[("x-blackbox-error", "leaked")])
+                else:
+                    await self._plain(writer, 200, JSON_BODY, extra=[("x-blackbox-error", "leaked")])
+                if self.hang_up_after_response:
+                    return
         except (asyncio.IncompleteReadError, ConnectionError):
             pass
         finally:
@@ -210,7 +226,7 @@ def test_hop_by_hop_headers_and_ours_are_not_forwarded_in_either_direction():
         seen = box.origin.requests[-1]["headers"]
         for gone in ("proxy-connection", "te", "x-blackbox-run", "x-blackbox-upstream-hint"):
             assert gone not in seen, f"{gone} reached the upstream"
-        assert seen["connection"] == "close", "the proxy's own connection header, not the client's keep-alive"
+        assert seen["connection"] == "keep-alive", "the proxy's own policy, not the client's header passed through"
         assert seen["x-request-id"] == "keep-me"
         assert "x-blackbox-error" not in headers, "an x-blackbox-* header from upstream is not the client's business"
 
@@ -346,3 +362,30 @@ def test_the_query_string_survives_the_route(path: str):
         target = box.origin.requests[-1]["target"]
         assert target.startswith("/base/json")
         assert ("?" in target) == ("?" in path)
+
+
+def test_a_second_request_reuses_the_upstream_connection():
+    """P3B-08's first-byte budget is only reachable if the upstream handshake is paid once, not per call."""
+    box = Box()
+    with box:
+        assert box.proxy is not None
+        _get(box.proxy.port, "/p/json")
+        _get(box.proxy.port, "/p/json")
+        assert box.origin.connections == 1, f"the upstream saw {box.origin.connections} connections, not one"
+        assert box.proxy.pool.reused >= 1
+
+
+def test_a_pooled_connection_that_died_while_idle_is_retried_invisibly():
+    """The origin advertised keep-alive and then closed. The client must still get its 200, and the pool must say so."""
+    box = Box()
+    with box:
+        assert box.proxy is not None
+        status, _headers, body = _get(box.proxy.port, "/p/json")
+        assert status == 200 and body == JSON_BODY
+        box.origin.hang_up_after_response = True
+        _get(box.proxy.port, "/p/json")                       # pools a connection the origin is about to drop
+        time.sleep(0.05)
+        status, _headers, body = _get(box.proxy.port, "/p/json")
+        assert status == 200 and body == JSON_BODY, "a stale pooled connection must never reach the client"
+        assert box.proxy.pool.retries >= 1, "the retry is counted, not silent"
+        assert box.proxy.stats.requests == 3

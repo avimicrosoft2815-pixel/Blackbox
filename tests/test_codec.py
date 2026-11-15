@@ -149,8 +149,11 @@ def test_no_socket_import_anywhere_in_the_core():
 
     import _capture_policy
 
+    # The proxy (P3B-01) is the second declared exception: it *is* a listener, and `TCP_NODELAY` on its sockets is
+    # what keeps §15.1's first-byte budget reachable (D-032). The allowlist lives in `_capture_policy.py`.
     hits = [p.name for p in (Path(__file__).resolve().parents[1] / "src").rglob("*.py")
-            if "import socket" in p.read_text(encoding="utf-8") and not _capture_policy.is_exempt(p)]
+            if "import socket" in p.read_text(encoding="utf-8")
+            and not (_capture_policy.is_exempt(p) or _capture_policy.is_proxy(p))]
     assert not hits, f"the core must not import socket at all: {hits}"
 
 

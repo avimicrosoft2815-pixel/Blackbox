@@ -99,3 +99,23 @@ writing down: a reviewer reads the destination list without reading Python; a na
 `--upstream` override is an **error** rather than a missing route; and a route built from the table is still only
 reachable through the table (P3B-02's allowlist is unchanged — this is where the values come from, not where the
 permission comes from).
+
+## D-032a — upstream connections are pooled after all, because the bench disagreed with the argument
+
+*Date: 2026-11-16. Supersedes the last paragraph of D-032. Plan ref: §15.1 (first-byte passthrough ≤ 0.5 ms).*
+
+D-032 said upstream connections would be one-request connections, on the grounds that pooling is a correctness problem
+for "a benefit measured in microseconds". The bench measured it: with a fresh connection per request, first-byte
+passthrough was **0.67–0.82 ms** against a 0.5 ms budget, and `TCP_NODELAY` on both sockets did not move it — the cost
+is the handshake, not the scheduling. So the argument was wrong and the number was right.
+
+**What is pooled, exactly**: idle per-route connections (at most two per route, twenty seconds), released only after a
+response was read to its end — never after a truncated body, an early-close client, or an unterminated stream. A
+pooled connection is a guess about the far end, so the guess is never shown to the caller: if writing to it or reading
+its head fails, the exchange is **retried once on a fresh connection** before anything is written to the client, and
+`pool.retries` counts it. Two tests hold that: one proves reuse (the origin sees one connection for two requests), one
+proves the retry (the origin advertises keep-alive, drops the connection, and the client still gets its 200).
+
+**Consequences**: first byte 0.42 ms (in budget, n 100), added latency p50 0.27 ms / p99 0.65 ms (n 500), 200
+concurrent streams with byte-identical bodies. The rule "never write to the client before the upstream's head has been
+read" is what makes the retry invisible; it was already true, and it is now load-bearing.
