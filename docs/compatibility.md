@@ -87,3 +87,35 @@ stages die *inside* `emit` before `publish`, which is correct behaviour and must
 platform where the child cannot be relied on to reach the same instruction, and (b) `_child.py` dying during
 import on Windows. This is the next ticket, with the named tests as its acceptance: the same eight ids green in
 an annotation-free run.
+
+### Windows, run `43656494686` — the traceback, now that the harness stops swallowing it
+
+```
+FAILED tests/test_adoption.py::test_writer_reopen_adopts_the_orphan
+       BlackBoxError: BBX-E224: sealed segment does not match its footer [body does not match the footer]
+FAILED tests/test_keeper.py::test_keeper_exception_is_fail_open
+       BlackBoxError: BBX-E224: sealed segment does not match its footer [segment header checksum mismatch]
+FAILED tests/test_head_creation.py::test_unreadable_head_is_rebuilt_from_the_segments   assert 0 == 22
+FAILED tests/test_adoption.py::test_discover_order_is_stable                            assert None == 2
+FAILED tests/test_adoption.py::test_append_after_adoption_keeps_seq_dense               IndexError
+FAILED tests/test_keeper.py::test_keeper_and_app_thread_never_roll_twice                AssertionError
+FAILED tests/test_prealloc.py::test_sparse_detection                                    assert False is True
+FAILED tests/test_crash_points.py::test_s5_after_head_publish_the_commit_survives       frames: 0
+FAILED tests/test_crash_points.py::test_torn_frame_is_never_committed[S1]               frames: 0
+```
+
+The smoking gun is the pair of `BBX-E224` failures: on Windows a segment's **header checksum does not match
+what was written**, and a seal's body does not match its footer. Both are read-back mismatches of bytes the
+writer itself wrote, and both appear only after the header/seal path went through
+`platform.windows.pwrite` (`lseek` + `os.write`). The two candidate causes, in order:
+
+1. `os.write` on an fd opened with `os.open(..., os.O_RDWR)` is binary, but the *seal* and *header* writers in
+   `segments.py`/`seal.py` may still be using buffered `open(..., "wb")` literals somewhere on that path, and a
+   flush ordering difference between POSIX and Windows would surface exactly this way;
+2. `os.read` short-reads on Windows are common (pipe/console, and a cached file can return less than asked), and
+   `platform.windows.pread` handles that — but any caller that still calls `os.read` once would see a truncated
+   header and a CRC mismatch.
+
+That is the next ticket, with these nine ids as its acceptance list. `test_sparse_detection` is a different
+thing entirely: `st_blocks` does not exist on Windows, so the assertion is POSIX-only and needs a skip, not a
+fix.
