@@ -37,12 +37,13 @@ def _kinds(data_dir):
 
 
 def test_double_install_makes_one_writer_and_one_run_start(tmp_path):
+    base_runs = api._STATE.status()["runs_started"]
     first = api.install(data_dir=str(tmp_path))
     second = api.install(data_dir=str(tmp_path))
     assert first["enabled"] and second["enabled"]
     assert second["refs"] == 2
     assert second["writer_uuid"] == first["writer_uuid"], "a second install opened a second tape"
-    assert second["runs_started"] == 1, "RUN_START was written twice for one process"
+    assert second["runs_started"] == base_runs + 1, "RUN_START was written twice for one process"
     api.uninstall()
     assert api.enabled(), "the first uninstall of two must not close the tape"
     api.uninstall()

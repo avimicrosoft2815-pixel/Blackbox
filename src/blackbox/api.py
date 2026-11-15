@@ -300,10 +300,85 @@ agent = _decorator("agent")
 tool = _decorator("tool")
 retrieval = _decorator("retrieval")
 
-def step(fn: Any = None, *, name: str | None = None) -> Any:
-    """`@blackbox.step` or `@blackbox.step("parse")` — one step node per call (P3-02)."""
-    if isinstance(fn, str):                     # @step("parse")
-        return lambda f: _wrap("step", f, fn)
-    if fn is None:                              # @step(name="parse")
-        return lambda f: _wrap("step", f, name)
-    return _wrap("step", fn, name)              # @step
+
+# ── P3-03: context managers, marks, captures ────────────────────────────────
+
+
+@contextlib.contextmanager
+def _node(name: str, kind: str, **fields: Any) -> Any:
+    from blackbox.rec import context as node_ctx
+
+    if not enabled():
+        yield None
+        return
+    node = node_ctx.open_node(name, kind, **fields)
+    try:
+        yield node
+    except BaseException as exc:
+        node_ctx.close_node(node, "error", exc)
+        raise
+    node_ctx.close_node(node, "ok")
+
+
+def run(name: str = "run", **fields: Any) -> Any:
+    """`with blackbox.run("ingest"):` — the outermost node of a recorded unit of work (P3-03)."""
+    return _node(name, "run", **fields)
+
+
+class _NodeHandle:
+    """One node, usable as a context manager *and* as a decorator — `with step(...)` and `@step(...)`."""
+
+    def __init__(self, name: str, kind: str, fields: dict[str, Any]) -> None:
+        self.name = name
+        self.kind = kind
+        self.fields = fields
+        self._cm: Any = None
+
+    def __enter__(self) -> Any:
+        self._cm = _node(self.name, self.kind, **self.fields)
+        return self._cm.__enter__()
+
+    def __exit__(self, *exc: Any) -> Any:
+        return self._cm.__exit__(*exc)
+
+    def __call__(self, fn: Any = None, *, name: str | None = None) -> Any:
+        if fn is None:
+            return lambda f: _wrap(self.kind, f, name or self.name)
+        return _wrap(self.kind, fn, name or self.name)
+
+
+def step(name: Any = None, **fields: Any) -> Any:
+    """A step node: `with blackbox.step("fetch"):` or `@blackbox.step("fetch")` or `@blackbox.step` (P3-02/P3-03)."""
+    if callable(name):
+        return _wrap("step", name, None)
+    return _NodeHandle(str(name or "step"), "step", dict(fields))
+
+
+def capture(name: str = "capture", **fields: Any) -> Any:
+    """A node that exists to carry fields the reader will want beside it (P3-03)."""
+    return _node(name, "capture", **fields)
+
+
+def mark(name: str, **fields: Any) -> int:
+    from blackbox.rec import context as node_ctx
+
+    return node_ctx.mark(name, **fields)
+
+
+def handled_error(error: BaseException, **fields: Any) -> int:
+    from blackbox.rec import context as node_ctx
+
+    return node_ctx.handled_error(error, **fields)
+
+
+def current() -> Any:
+    from blackbox.rec import context as node_ctx
+
+    return node_ctx.current()
+
+
+def freeze(reason: str = "manual", **fields: Any) -> int:
+    """Ask for a snapshot of this run (P3-03/§10.5). The keeper does the work; the call only records the request."""
+    from blackbox.rec import context as node_ctx
+
+    return node_ctx.mark("freeze", reason=reason, **fields)
