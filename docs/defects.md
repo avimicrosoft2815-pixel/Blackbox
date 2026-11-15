@@ -280,3 +280,21 @@ plan's §10 shape, and it is append-only.
   ≠ `/v1/chat/completions`). The `OLLAMA_HOST` and `GOOGLE_GEMINI_BASE_URL` rows are labelled **unverified** in
   `docs/attach.md` instead of being quietly assumed right — `OLLAMA_HOST` is a `host:port` without a scheme in Ollama's
   own documentation, which this build does not produce.
+- **defect 40 — one wall-clock sample of a rebind, asserted on a shared runner, failed at 107.9 ms against 100.** Run
+  `43767898299` (docs-only commit `19d831e`) came back nine of ten: `py3.11 / macos-latest` failed
+  `tests/test_proxy_supervisor.py::test_the_watchdog_brings_a_dead_listener_back_without_being_asked` with
+  `assert ([107.91783399997712] and 107.91783399997712 <= 100.0)`. The other nine cells, including the two other macOS
+  cells, were green.
+  *Invariant*: the watchdog restores the listener **on the port the child was told**, inside the budget, without being
+  asked. None of those was violated: the listener came back on the same port, and the rebind was the watchdog's.
+  *Cause*: the assertion took `max(proxy.rebinds) <= REBIND_BUDGET_MS` from a **single** sample, and `rebind()` is
+  wall-clock time from entering the lock to the listener serving again — a quantity that includes whatever the shared
+  macOS arm64 runner does to a thread that has just been woken. The budget is a promise about a machine we control; a
+  one-sample wall clock on a runner is a measurement of the runner. Same family as defects 36, 37 and 38: an assertion
+  true of the quiet case and false of the honest one.
+  *Fix*: the test keeps the structural assertions (the watchdog is what restored service, and on the same port — now
+  asserted explicitly with `len(rebinds) == 1` before anything else happens) and takes the budget from the **median of
+  five** rebinds, printing all five samples in the failure message so the worst case stays visible instead of being
+  averaged away. A genuinely slow rebind still fails, on every sample; one scheduling pause no longer does.
+  *Test*: `test_the_watchdog_brings_a_dead_listener_back_without_being_asked`; green at `19d831e`+ locally and in the
+  re-run, and the number that a reader should quote is still the recorded median, not a rounding of the budget.
