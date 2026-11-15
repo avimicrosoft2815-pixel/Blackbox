@@ -144,6 +144,10 @@ routes = Routes([Route(name="openai", base="https://api.openai.com")], default="
 * **Passthrough is byte-exact**: what a client receives from a streamed response is sha256-identical to what the
   upstream sent, and is relayed still chunked. `Expect: 100-continue`, keep-alive, hop-by-hop headers and
   `x-blackbox-*` stripping are handled; upstream failures are `502`/`504` with `x-blackbox-error`.
+* **Measured** (§15.1, `bench/results/2026-11-15-proxy.json`): added latency p50 0.27 ms / p99 0.65 ms (n 500, paired
+  against the same request without the proxy); first-byte passthrough 0.42 ms (n 100, budget 0.5 ms); 200 concurrent
+  streams, no errors, every body identical; 0.3 MiB RSS growth at 50 req/s for 10 s. Upstream connections are pooled
+  per route and a pooled connection that turns out to be dead is retried once, invisibly (D-032a).
 * **Recording is a tap, and the tap can fail**: a sink that raises costs frames, never a request
   (`stats.record_errors` counts them).
 * **TLS**: `ssl.create_default_context()` upstream; a route built with `verify_tls=False` (the plan's
