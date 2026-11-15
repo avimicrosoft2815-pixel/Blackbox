@@ -1,7 +1,9 @@
-# BlackBox build status — 2026-11-15 — trunk `771f5ea` — gates: **G-Promise pass** (built and self-reviewed at `af908bc`, independently counter-signed at `fdb3875`; see `docs/gates/G-Promise.md`), G-Capture, G-Attach, G-Capsule, G-Sec, G-Release not yet opened
+# BlackBox build status — 2026-11-15 — trunk `e40fece` — gates: **G-Promise pass** (built and self-reviewed at `af908bc`, independently counter-signed at `fdb3875`; see `docs/gates/G-Promise.md`), G-Capture, G-Attach, G-Capsule, G-Sec, G-Release not yet opened
 
-**Branch** `arena/a781c68f-blackbox` · **base** `31241d6` · CI for trunk `280b7fe`: run `43693470163`, ten jobs, ten
-`success`. Four runs before it were red on one defect: `714554c` (`43693106857`), `1112881` (`43693172961`) and
+**Branch** `arena/a781c68f-blackbox` · **base** `31241d6` · CI for trunk `e40fece`: run `43693723611`, ten jobs, ten
+`success`; this STATUS commit is docs-only and its own run is pending (`tools/ci_status.py` is run before every
+`STOPPED` line, and the line says what it returned). The run before it, `280b7fe`, was also ten of ten
+(`43693470163`). Four runs before it were red on one defect: `714554c` (`43693106857`), `1112881` (`43693172961`) and
 `0f81445` (`43693216632`) failed `py3.11 / windows-latest` on a wall-clock assertion in a test of mine (2 × 40 ms
 asserted ≥ 80 ms; the cells measured 79, 78, 78 ms), fixed at `771f5ea` — and `99a5164`, between two of them, passed
 with the same test, which is what a flake looks like and why its green is luck rather than evidence. The run before
@@ -119,7 +121,8 @@ row in the same commit.
 
 ## What is next
 
-0. **Trunk `280b7fe` is green on all ten cells** (`43693470163`); `STATE.last_green_commit` is that commit. The three
+0. **Trunk `e40fece` is green on all ten cells** (`43693723611`, and `280b7fe` before it at `43693470163`);
+   `STATE.last_green_commit` is `e40fece`. The three
    red runs in this batch are one defect (21, a wall-clock assertion) and one of the four runs passed with it still
    in the tree — recorded that way rather than as "fixed, then green".
 1. **G-Promise is signed** (`docs/gates/G-Promise.md`, verdict pass, self-signed — see §Labelled) and `STATE.json`

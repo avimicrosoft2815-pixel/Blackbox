@@ -7,8 +7,8 @@
   ],
   "next_ticket": "P3-05c",
   "next_note": "Seam C (P3-05c) is next: openai/anthropic method patches against the mock provider. Seams A and B are green at 0f81445 (P3-05a/b) with the ordered preflight at 99a5164 (P3-05d); the 714554c red run is defect 21, fixed at 771f5ea. L3 (proxy, launcher, hooks, demo) is being written in parallel from the current trunk.",
-  "last_green_commit": "280b7fe",
-  "last_green_commit_note": "run 43693470163, ten jobs ten success. The three red runs before it are one defect (21): a wall-clock assertion in tests/test_mock_provider.py, fixed at 771f5ea; 99a5164 passed with the same test still in the tree, which is why the fix is a test change and not a re-run",
+  "last_green_commit": "e40fece",
+  "last_green_commit_note": "run 43693723611, ten jobs ten success (280b7fe before it, 43693470163). The three red runs before that are one defect (21), fixed at 771f5ea; 99a5164 passed with the same test still in the tree",
   "gates": {
     "G-A": "pass",
     "G-Promise": "pass",
