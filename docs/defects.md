@@ -227,3 +227,16 @@ plan's §10 shape, and it is append-only.
   under capture the child's own output never reaches the log. The first run with all four in place named the test and
   the frame (`selectors.py:468 in select`) from a run that previously said only that it had timed out.
   `tests/test_headers.py` is still seven tests; the count did not change because nothing was deleted to make it pass.
+- **defect 36 — a test compared a read count to an event count, and one cell out of ten disagreed.** `d6ab810`'s run
+  (`43743518320`) was nine of ten: `py3.13 / ubuntu-latest` failed on
+  `tests/test_seam_transport.py::test_a_truncated_stream_is_recorded_short_rather_than_completed` with *"the recorder
+  invented or dropped a chunk — `2 == ModelCall(...).chunks`, `4 == len(...)`"*, and the ten cells before and after it
+  were green. Nothing was invented and nothing was dropped: `call.chunks` counts the **reads the application made**, and
+  on that machine two SSE events arrived in one read, so the body's four `data:` frames had been delivered in two
+  chunks. The assertion had compared a property of the transport to a property of the payload, and no amount of care in
+  the seam could make the two agree. It is the same shape as C40's window flake — an assertion that is true of the
+  common scheduling and false of the honest one — and it was found the way this file has been catching them: the
+  watchdog and the single annotation named the test and the two numbers in one line, from a run that would otherwise
+  have said "exit 1". Fix: "short" is now measured against an **oracle** (the same request through an unseamed client,
+  untruncated: the truncated body must be strictly smaller and must lack `[DONE]`), and the chunk count is compared to
+  the reads that run's application actually made, which is the only relation the seam guarantees.

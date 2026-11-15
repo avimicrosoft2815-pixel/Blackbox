@@ -110,16 +110,30 @@ def test_an_abandoned_stream_records_only_what_was_read():
 
 def test_a_truncated_stream_is_recorded_short_rather_than_completed():
     """The provider closes the socket early. The client cannot tell that from a normal end-of-body — so the seam's
-    only honest job is to record the bytes that arrived and *not* invent the ones that did not."""
+    only honest job is to record the bytes that arrived and *not* invent the ones that did not.
+
+    "Short" is measured against an **oracle**, not against a count of `data:` frames: the same request made through an
+    unseamed client, untruncated, is the whole body, and the truncated run must be strictly smaller and must not
+    contain `[DONE]`. The earlier version of this test compared `call.chunks` to the number of SSE events it could
+    parse out of the body, which is a delivery-dependent number — one read can carry two events — and it failed on
+    exactly one cell of a run where the other nine were green (defect 36). Reads are compared to the reads the
+    application itself made, which is the only relation the seam guarantees.
+    """
+    with MockProvider(Scenario(chunks=10)) as provider, _client(provider.base_url) as bare:
+        whole = b"".join(_stream_all(bare))
+
     recorder = Recorder()
     with MockProvider(Scenario(chunks=10, truncate_after=3, delay_ms=5)) as provider, \
-            _client(provider.base_url, recorder) as client:
-        body = b"".join(_stream_all(client))
+            _client(provider.base_url, recorder) as client, \
+            client.stream("POST", "/v1/chat/completions", json=_payload()) as response:
+        observed = list(response.iter_bytes())
+    body = b"".join(observed)
 
     call = recorder.calls[0]
-    assert b"[DONE]" not in body
+    assert b"[DONE]" in whole and b"[DONE]" not in body, "the truncated run really did stop short"
+    assert len(body) < len(whole), "and it is short against the untruncated oracle, not against a frame count"
     assert call.bytes_received == len(body)
-    assert call.chunks == len(body.split(b"\n\n")) - 1, "the recorder invented or dropped a chunk"
+    assert call.chunks == len(observed), "the recorder counts the reads the application made"
     assert call.error is None, "a short body is not an error at this layer; the tape stays faithful"
 
 
