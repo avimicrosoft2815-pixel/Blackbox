@@ -124,8 +124,17 @@ def install(recorder: Receiver, *, hook_name: str = "response") -> SeamHandle:
         except Exception:
             return                                # fail-open: the application never sees a recorder error
 
+    # `AsyncClient` **awaits** its hooks (`await hook(response)`), so handing it the sync functions raises
+    # `TypeError: object NoneType can't be used in 'await' expression` on the first async call — the seam would have
+    # broken every async client it was installed on. Async wrappers, not the same functions.
+    async def on_request_async(request: Any) -> None:
+        on_request(request)
+
+    async def on_response_async(response: Any) -> None:
+        on_response(response)
+
     original_sync = _patch_init(httpx.Client, on_request, on_response, hook_name)
-    original_async = _patch_init(httpx.AsyncClient, on_request, on_response, hook_name)
+    original_async = _patch_init(httpx.AsyncClient, on_request_async, on_response_async, hook_name)
 
     def undo() -> None:
         starts.clear()

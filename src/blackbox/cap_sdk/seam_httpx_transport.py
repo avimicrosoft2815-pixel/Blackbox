@@ -69,10 +69,43 @@ class RecordingTransport:
         response.stream = wrap_stream(response.stream, self.recorder, call, int(response.status_code), started)
         return response
 
+    async def handle_async_request(self, request: Any) -> Any:
+        """The async twin of `handle_request`: same bookkeeping, same tee, awaited instead of iterated."""
+        started = time.perf_counter_ns()
+        body = getattr(request, "content", b"") or b""
+        call = self.recorder.open_call(request.url.host or "unknown", request.url.path or "/", body)
+        call.stream = True
+        try:
+            response = await self.inner.handle_async_request(request)
+        except Exception as exc:
+            self.recorder.close_call(call, error=f"{type(exc).__name__}: {exc}",
+                                     total_ms=(time.perf_counter_ns() - started) / 1_000_000)
+            raise
+        response.stream = wrap_stream(response.stream, self.recorder, call, int(response.status_code), started)
+        return response
+
+    async def aclose(self) -> None:
+        aclose_inner = getattr(self.inner, "aclose", None)
+        if aclose_inner is not None:
+            await aclose_inner()
+
     def close(self) -> None:
         inner_close = getattr(self.inner, "close", None)
         if inner_close is not None:
             inner_close()
+
+    async def __aenter__(self) -> Any:
+        aenter = getattr(self.inner, "__aenter__", None)
+        if aenter is not None:
+            await aenter()
+        return self
+
+    async def __aexit__(self, *exc: Any) -> Any:
+        aexit = getattr(self.inner, "__aexit__", None)
+        if aexit is not None:
+            return await aexit(*exc)
+        await self.aclose()
+        return None
 
     # `httpx.Client.__enter__` enters its transport, so a wrapper that is not a context manager breaks `with Client()`
     def __enter__(self) -> Any:
@@ -112,26 +145,47 @@ def install(recorder: Receiver, *, client: Any = None) -> SeamHandle:
         return SeamHandle(name=NAME, undo=undo_instance,
                           detail={"patched": "client._transport", "form": "instance"})
 
-    original_handle = _patch_transport_class(httpx.HTTPTransport, recorder)
+    # Two classes, not one: an async client builds an `AsyncHTTPTransport`, so patching only `HTTPTransport` records
+    # sync clients and silently misses every async one.
+    patched: list[tuple[Any, dict[str, Any]]] = []
+    for transport_class in (httpx.HTTPTransport, httpx.AsyncHTTPTransport):
+        patched.append((transport_class, _patch_transport_class(transport_class, recorder)))
 
     def undo_class() -> None:
-        _restore(httpx.HTTPTransport, "handle_request", original_handle)
+        for transport_class, originals in patched:
+            for attribute, original in originals.items():
+                _restore(transport_class, attribute, original)
 
-    return SeamHandle(name=NAME, undo=undo_class, detail={"patched": "httpx.HTTPTransport", "form": "class"})
+    return SeamHandle(name=NAME, undo=undo_class,
+                      detail={"patched": ["httpx.HTTPTransport", "httpx.AsyncHTTPTransport"], "form": "class"})
 
 
 def _restore(cls: Any, attribute: str, value: Any) -> None:
     setattr(cls, attribute, value)
 
 
-def _patch_transport_class(cls: Any, recorder: Receiver) -> Any:
-    original = cls.handle_request
+def _patch_transport_class(cls: Any, recorder: Receiver) -> dict[str, Any]:
+    """Patch both directions, because a client that is never used synchronously still has to be recorded."""
+    originals: dict[str, Any] = {}
+    if hasattr(cls, "handle_request"):
+        sync_original = cls.handle_request
 
-    def handle(self: Any, request: Any) -> Any:
-        return RecordingTransport(_Bound(original, self), recorder).handle_request(request)
+        def handle(self: Any, request: Any) -> Any:
+            return RecordingTransport(_Bound(sync_original, self), recorder).handle_request(request)
 
-    cls.handle_request = handle
-    return original
+        cls.handle_request = handle
+        originals["handle_request"] = sync_original
+    if hasattr(cls, "handle_async_request"):
+        async_original = cls.handle_async_request
+
+        async def handle_async(self: Any, request: Any) -> Any:
+            return await RecordingTransport(_AsyncBound(async_original, self), recorder).handle_async_request(request)
+
+        cls.handle_async_request = handle_async
+        originals["handle_async_request"] = async_original
+    if not originals:                                  # pragma: no cover - a transport with neither direction
+        raise SeamUnavailable("this transport exposes neither handle_request nor handle_async_request")
+    return originals
 
 
 class _Bound:
@@ -143,3 +197,14 @@ class _Bound:
 
     def handle_request(self, request: Any) -> Any:
         return self.fn(self.instance, request)
+
+
+class _AsyncBound:
+    """The same for `handle_async_request`, which the recorder awaits rather than calls."""
+
+    def __init__(self, fn: Any, instance: Any) -> None:
+        self.fn = fn
+        self.instance = instance
+
+    async def handle_async_request(self, request: Any) -> Any:
+        return await self.fn(self.instance, request)

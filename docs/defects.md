@@ -60,11 +60,16 @@ plan's §10 shape, and it is append-only.
     commit still has to be read for its CI verdict: it inherited the failure and would have been recorded as green
     by anyone who trusted "it only touched markdown".
 
-20. **found by writing `SUPPORTED.md`** → both seams implemented the async path (`AsyncClient` hooks, the async
+20. **found by writing `SUPPORTED.md`, closed by `tests/test_seam_async.py`** → both seams implemented the async path (`AsyncClient` hooks, the async
     tee) but **no test exercises it**: no async HTTP harness is installed here, so an async client is a claim, not
     evidence → recorded in `SUPPORTED.md` as a gap in that word rather than left to read as verified → the fix is a
-    test, so this entry stays open until `tests/test_seam_async.py` exists and runs (P3-14 / the `anyio` decision,
-    whichever lands first). Until then `SUPPORTED.md`'s async row says so, and no gate may cite the async path.
+    test, so this entry stayed open until `tests/test_seam_async.py` existed. It now exists (4 tests, `asyncio.run`,
+    stdlib) and it found **two real faults** rather than confirming an assumption: `AsyncClient` awaits its event
+    hooks, so the sync hook seam A installed raises `TypeError` on the first async call; and async clients build an
+    `AsyncHTTPTransport`, so seam B's class patch covered `HTTPTransport` and missed them entirely. Both fixed in the
+    same commit: async hook wrappers, both transport classes patched, and `wrap_stream` choosing the tee from the
+    stream. The lesson is the one this list keeps teaching — "implemented but untested" was hiding a broken path, not
+    a neutral gap.
 
 21. **CI runs `43693106857` at `714554c`, `43693172961` at `1112881` and `43693216632` at `0f81445`** → a test must fail for a reason that is wrong, not because a machine was
     busy → `test_inter_chunk_delay_is_real_time` asserted that two 40 ms gaps take **>= 80 ms**; the `py3.11 /

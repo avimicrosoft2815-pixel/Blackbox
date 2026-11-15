@@ -18,12 +18,13 @@ currently ends at B and a two-seam failure means *not capturing*, recorded rathe
 
 | seam | verified on | unverified |
 |---|---|---|
-| A | httpx 0.28.1 | httpx 0.27.x, 0.26.x, and every future version: the seam's capability depends on httpx firing response hooks before the body is read, which is a timing fact, not an API contract. `tests/test_seam_hooks.py` fails loudly if a version moves it, rather than writing zero-byte calls |
+| A | httpx 0.28.1 (sync and async) | httpx 0.27.x, 0.26.x, and every future version: the seam's capability depends on httpx firing response hooks before the body is read, which is a timing fact, not an API contract. `tests/test_seam_hooks.py` fails loudly if a version moves it, rather than writing zero-byte calls |
 | B | httpx 0.28.1 | anything that stops exposing `HTTPTransport.handle_request`, or a client whose transport is not reachable as `_transport`. `client=` install is the supported path; the class patch is the fallback |
 
-The async path (`handle_async_request`, `AsyncClient`) is implemented for both seams but **not exercised by a test
-here** — no async HTTP test harness is installed in this environment. That is a gap, not a claim; it is listed in
-`docs/defects.md`.
+The async path is **tested**: `tests/test_seam_async.py` runs both seams against `httpx.AsyncClient` under
+`asyncio.run` (stdlib), asserting chunk count, byte total and sha256 equality with an unseamed client. Writing those
+four tests found two faults that the code review had missed — `AsyncClient` *awaits* its hooks, and it builds an
+`AsyncHTTPTransport` — so the async row is now a claim with a test behind it rather than a caveat (defect 20).
 
 ## The mock provider (P3-13MP)
 

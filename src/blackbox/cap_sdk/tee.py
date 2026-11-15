@@ -13,8 +13,13 @@ Two properties are load-bearing and are why this is not just a generator:
   the call open; `close()` still records the chunks that arrived, because a partial call honestly labelled is worth
   more than a complete-looking one that is a guess.
 
-`httpx.SyncByteStream` is used as the base class because `httpx.Client` asserts on it, but the import happens inside
-`tee_stream_class()` — httpx is an optional integration and importing this module must not require it.
+**Two tee classes, chosen by the stream.** `httpx.AsyncClient` hands back an `AsyncByteStream`, and a sync wrapper
+around one is not merely untested — it fails the moment anything iterates it. So `wrap_stream` asks the stream which
+kind it is (`__aiter__` or not) and returns the matching tee. An earlier version had only the sync one and a seam that
+would have broken every async client it was installed on; the async test is why it is not still there (defect 20).
+
+`httpx.SyncByteStream`/`AsyncByteStream` are the base classes because `httpx.Client` asserts on them, but the imports
+happen inside the factories — httpx is an optional integration and importing this module must not require it.
 """
 from __future__ import annotations
 
@@ -84,6 +89,67 @@ def tee_stream_class() -> Any:
     return TeeStream
 
 
+_ASYNC_TEE_STREAM: Any = None
+
+
+def async_tee_stream_class() -> Any:
+    """`httpx.AsyncByteStream` subclass, built lazily for the same reason as the sync one."""
+    global _ASYNC_TEE_STREAM
+    if _ASYNC_TEE_STREAM is not None:
+        return _ASYNC_TEE_STREAM
+
+    import httpx
+
+    class AsyncTeeStream(httpx.AsyncByteStream):
+        def __init__(self, inner: Any, recorder: Receiver, call: ModelCall, status: int, started: int) -> None:
+            self.inner = inner
+            self.recorder = recorder
+            self.call = call
+            self.status = status
+            self.started = started
+            self.done = False
+
+        def _elapsed_ms(self) -> float:
+            return (time.perf_counter_ns() - self.started) / 1_000_000
+
+        async def __aiter__(self) -> Any:
+            iterator = self.inner.__aiter__()
+            while True:
+                try:
+                    chunk = await iterator.__anext__()
+                except StopAsyncIteration:
+                    break
+                except Exception as exc:
+                    self._finish(error=f"{type(exc).__name__}: {exc}")
+                    raise
+                if chunk:
+                    first_ms = self._elapsed_ms() if self.call.first_byte_ms is None else None
+                    self.recorder.receive(self.call, chunk, first_byte_ms=first_ms)
+                yield chunk
+            self._finish()
+
+        def _finish(self, error: str | None = None) -> None:
+            if self.done:
+                return
+            self.done = True
+            self.recorder.close_call(self.call, status=self.status, total_ms=self._elapsed_ms(), error=error)
+
+        async def aclose(self) -> None:
+            aclose_inner = getattr(self.inner, "aclose", None)
+            if aclose_inner is not None:
+                await aclose_inner()
+            self._finish()
+
+    _ASYNC_TEE_STREAM = AsyncTeeStream
+    return AsyncTeeStream
+
+
 def wrap_stream(stream: Any, recorder: Receiver, call: ModelCall, status: int, started: int) -> Any:
-    """Wrap `stream` so every chunk is recorded as it is yielded to the application."""
+    """Wrap `stream` so every chunk is recorded as it is yielded to the application.
+
+    The stream decides which tee: an async client's stream has `__aiter__`, and wrapping it in the sync tee would
+    break it rather than record it.
+    """
+    if hasattr(stream, "__aiter__"):
+        return async_tee_stream_class()(stream, recorder, call, status, started)
     return tee_stream_class()(stream, recorder, call, status, started)
