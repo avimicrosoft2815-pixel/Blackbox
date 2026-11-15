@@ -171,3 +171,15 @@ plan's §10 shape, and it is append-only.
   Fixed by moving the interim response before `_read_body`, which is the only order that cannot deadlock;
   `test_expect_100_continue_is_answered_before_the_body_is_read` is the test that would have caught it, written before
   the fix because the plan names `Expect: 100-continue` in P3B-01's acceptance.
+- **defect 33 — the pool retried a request that may already have been transmitted.** Found by a reviewer as a P0 on
+  D-032a, and it is the worst class of bug in this file: not a wrong number but a wrong *effect*. The stale-connection
+  path caught a dead upstream connection after the request had been written and answered it by **replaying the
+  request** on a fresh connection. For a `GET` that is harmless; for a `POST /v1/chat/completions` it is a second
+  charge, and for anything with a side effect on the far end it is a duplicate that no local record explains. Cause: the
+  code could not distinguish "the pooled connection was dead before we wrote" from "the request went out and the reply
+  never came", and treated both as retryable. Fix: probe pooled connections *before* writing (`at_eof`, `is_closing`,
+  `exception`) and discard them for free; after writing, retry only `GET`/`HEAD`/`OPTIONS`, and answer everything else
+  `502 upstream-closed-uncertain` with a body that says the request may have been applied, counted in `stats.uncertain`.
+  Test: the upstream records a POST and closes without responding —
+  `test_a_post_that_may_have_been_transmitted_is_never_sent_twice` asserts one POST arrived and a 502 came back; a
+  mutation check (POST made retryable again) shows the upstream receiving two, which is the bug reproduced.

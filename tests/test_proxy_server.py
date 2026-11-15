@@ -48,7 +48,8 @@ class Origin:
         self.requests: list[dict[str, Any]] = []
         self.port = 0
         self.connections = 0
-        self.hang_up_after_response = False
+        self.hang_up_after_response = False        # advertise keep-alive, then close: the stale-pool case
+        self.drop_responses = 0                    # record the request, close, answer nothing: the uncertain case
         self._server: asyncio.AbstractServer | None = None
 
     async def start(self) -> Origin:
@@ -83,6 +84,9 @@ class Origin:
                 body = await reader.readexactly(length) if length else b""
                 self.requests.append({"method": method, "target": target,
                                       "headers": dict((k.lower(), v) for k, v in headers), "body": body})
+                if self.drop_responses > 0:
+                    self.drop_responses -= 1
+                    return                      # recorded, then gone: exactly the outcome a proxy cannot undo
                 if "/sse" in target:
                     await self._sse(writer)
                 elif "/slow" in target:
@@ -375,8 +379,13 @@ def test_a_second_request_reuses_the_upstream_connection():
         assert box.proxy.pool.reused >= 1
 
 
-def test_a_pooled_connection_that_died_while_idle_is_retried_invisibly():
-    """The origin advertised keep-alive and then closed. The client must still get its 200, and the pool must say so."""
+def test_a_pooled_connection_that_died_while_idle_costs_the_client_nothing():
+    """The origin advertised keep-alive and then closed. The client must still get its 200, and the pool must say how.
+
+    Two outcomes are acceptable and one is not: the connection is discarded **before** the request is written (free),
+    or it is discovered dead afterwards and the GET is retried (safe, because a GET repeats without a side effect).
+    What must never happen is a second request the upstream actually received — `origin.requests` is asserted exactly.
+    """
     box = Box()
     with box:
         assert box.proxy is not None
@@ -385,7 +394,43 @@ def test_a_pooled_connection_that_died_while_idle_is_retried_invisibly():
         box.origin.hang_up_after_response = True
         _get(box.proxy.port, "/p/json")                       # pools a connection the origin is about to drop
         time.sleep(0.05)
+        before = len(box.origin.requests)
         status, _headers, body = _get(box.proxy.port, "/p/json")
         assert status == 200 and body == JSON_BODY, "a stale pooled connection must never reach the client"
-        assert box.proxy.pool.retries >= 1, "the retry is counted, not silent"
-        assert box.proxy.stats.requests == 3
+        assert box.proxy.pool.discarded + box.proxy.pool.retries >= 1, "the recovery is counted, not silent"
+        assert len(box.origin.requests) - before in (1, 2), "at most one retry, and only a GET may be retried"
+
+
+def test_a_post_that_may_have_been_transmitted_is_never_sent_twice():
+    """The P0 that this test exists for.
+
+    The upstream records the POST and closes without answering. Whether it acted on the request is unknowable; a proxy
+    that resends it can charge a card twice. So: exactly one request at the upstream, a `502` that says the outcome is
+    uncertain, and a counter that admits it happened.
+    """
+    box = Box()
+    with box:
+        assert box.proxy is not None
+        _get(box.proxy.port, "/p/json")                       # pool a connection first: the dangerous shape
+        box.origin.drop_responses = 1
+        status, headers, body = _post(box.proxy.port, "/p/json", b'{"side":"effect"}')
+        assert status == 502, f"an uncertain outcome must not look like a success: {status}"
+        assert headers[ERROR_HEADER] == "upstream-closed-uncertain"
+        assert b"may have been applied" in body, body
+        posts = [r for r in box.origin.requests if r["method"] == "POST"]
+        assert len(posts) == 1, f"the upstream received {len(posts)} POSTs; a retry here is a duplicated effect"
+        assert box.proxy.stats.uncertain == 1
+        assert box.proxy.pool.retries == 0, "a POST is never retried, whatever the pool thinks"
+
+
+def test_a_get_is_retried_once_when_its_response_never_arrives():
+    """The safe half of the same rule: repeating a GET cannot duplicate an effect, so the client keeps its 200."""
+    box = Box()
+    with box:
+        assert box.proxy is not None
+        _get(box.proxy.port, "/p/json")
+        box.origin.drop_responses = 1
+        status, _headers, body = _get(box.proxy.port, "/p/json")
+        assert status == 200 and body == JSON_BODY
+        assert box.proxy.pool.retries >= 1
+        assert box.proxy.stats.uncertain == 0
