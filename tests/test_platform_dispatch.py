@@ -8,9 +8,11 @@ walks `src/` and fails if any module outside `blackbox/platform/` imports a plat
 from __future__ import annotations
 
 import ast
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))      # this file must pass on its own, not only after another test set it
 SRC = ROOT / "src" / "blackbox"
 SHIMS = {"posix", "windows", "macos"}
 

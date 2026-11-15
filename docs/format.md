@@ -238,6 +238,24 @@ leaves the raw blob readable and a tmp file behind.
 Acquired with `O_CREAT|O_EXCL`. Stale iff the boot id differs, or the pid is gone, or the pid's process start
 time differs (PID reuse), or the file is older than 24 h with no frame progress. Never steal a live lease.
 
+## 8.1 Capsule `.bbx` v0 (P2-10)
+
+ZIP, STORED for raw segment bodies and DEFLATE for JSON, entries sorted with `manifest.json` **last**:
+
+| Entry | Content |
+|---|---|
+| `events/seg-000001.raw` | the segment's bytes, byte-identical to the tape |
+| `chain.json` | `{chain_root, per_segment}` — what a reader needs to walk across a retention hole |
+| `manifest.json` | identity, `run` block (status, `status_cause`, completeness, `truncated_tail`, `lost_from_seq`), `gaps`, `counts`, `integrity {alg, entries, root}`, `signature: null` |
+| `INTEGRITY.sha256` | `<sha256>  <name>` per entry except itself and `manifest.json`, sorted |
+
+`integrity.root = sha256(INTEGRITY.sha256)` — the manifest can therefore carry the root without hashing itself,
+while every data byte is still covered. Every entry's timestamp is `1980-01-01 00:00:00`, every mode is `0o644`,
+`create_system = 0`, so re-sealing the same inputs is **byte-identical** (the byte-identity `I6` needs). The file is
+written as `.<id>.partial` with `O_EXCL`, fsynced, `os.replace`d, then the directory is fsynced: a visible `.bbx`
+is a complete `.bbx`. Reading validates names (absolute, `..`, backslash, NUL), case-folded duplicates, sizes,
+entry-count and ratio **before** it trusts a single entry.
+
 ## 9. Conformance vectors
 
 `tests/conformance/vectors/*.bin` + `index.json`: a meta page, a head page, a 3-frame segment, a `.seal`, and the

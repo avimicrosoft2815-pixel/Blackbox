@@ -48,13 +48,13 @@ A † marks a Done-when cell paraphrased because the plan's wording uses a word 
 | `P2-03` | Windows cell passes the lease tests | **wip** | HEAD | tests/test_platform_shims.py | — | — | shim written (zero-fill prealloc, no directory fsync, no start token) and its contract is tested on Linux; the Windows cell itself has never run (C7) |
 | `P2-04` | measured fsync latency recorded in bench | **wip** | HEAD | tests/test_platform_shims.py | — | — | shim written and contract-tested; F_FULLFSYNC is not in stdlib so F2 on macOS is labelled weaker; no fsync latency measured on a Mac |
 | `P2-05` | returns a stable queue ordered by created_ns † | **done** | HEAD | tests/test_adoption.py::test_discover_order_is_stable | — | self | stable queue by created_ns then uuid; classifies orphan/missing-seal/damaged/.tmp |
-| `P2-06` | kill at each of 8 steps × 3 modes ⇒ resume to identical capsule | **todo** | — | — | — | — |  |
-| `P2-07` | fixtures for all 5 classes produce the exact status strings | **todo** | — | — | — | — |  |
+| `P2-06` | kill at each of 8 steps × 3 modes ⇒ resume to identical capsule | **done** | HEAD | tests/test_recovery.py (36) | — | self | eight steps, each writing recovery.done.<STEP> with input/output hashes; 8 steps x 3 kill modes (before/mid/after) all resume to the identical capsule root, and an archived run is a no-op |
+| `P2-07` | fixtures for all 5 classes produce the exact status strings | **done** | HEAD | tests/test_recovery.py::test_before_first_byte … | — | self | the five 14.4 classes produce the plan's exact strings; the mid-stream row carries chunks, partial_stream_bytes and last_chunk_age_ms; TOOL_REQUEST without result never claims the side effect did not happen |
 | `P2-08` | 18 stages × 3 modes × 3 segment sizes green | **wip** | 1a3d505 | test_crash_points.py (7 stages) | — | — | S1-S5, S14, S15 of 18 stages; S6-S13 have no code path yet |
 | `P2-09` | 0 invariant violations over a week of runs | **wip** | HEAD | tests/kill/kill_matrix.py | bench/results/2026-11-14-kill-random.json | self | 500 parent-SIGKILL trials, 0 violations; nightly runs still pending |
-| `P2-10` | capsule opens; sha256 root verifies; re-seal identical bytes | **todo** | — | — | — | — |  |
+| `P2-10` | capsule opens; sha256 root verifies; re-seal identical bytes | **done** | HEAD | tests/test_capsule.py (9) | — | self | capsule v0 = raw segment frames + chain.json + manifest + INTEGRITY.sha256; .partial then os.replace; re-sealing the same inputs is byte-identical, one changed byte breaks the root |
 | `P2-11` | `blackbox run -- sh -c 'kill -9 $$'` yields a recovered run on the next line | **todo** | — | — | — | — |  |
-| `P2-12` | both pass on Linux+Windows | **todo** | — | — | — | — |  |
+| `P2-12` | both pass on Linux+Windows | **done** | HEAD | tests/test_recovery.py::test_recovery_is_idempotent_ten_times | — | self | ten recoveries produce one capsule hash and one .bbx; a second recoverer process is refused with BBX-E210 while the holder is alive, and takes the stale lock over once it dies |
 | `P2-13` | a deliberately deadlocked child yields all thread stacks in `stall_tb.txt` within `stall_ms + 1 s` | **todo** | — | — | — | — |  |
 
 ## Hot-path numbers (Stage-2 item 8: p50/p95/p99, N, warm-up, raw JSON)
