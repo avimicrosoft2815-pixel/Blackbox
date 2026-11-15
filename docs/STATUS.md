@@ -36,7 +36,7 @@ with the ordered preflight are real and tested, as is seam C (SDK method patches
 provider pushed. The proxy's **core and routing** are real and tested (P3B-01/P3B-02: loopback listener, byte-exact
 passthrough, the route table as the egress allowlist); the launcher integration, the hooks, the viewer and the
 diagnosis workflow are not built yet.**
-Suite: **Total: 730 tests** — 729 pass here and 1 is skipped on POSIX by name
+Suite: **Total: 748 tests** — 747 pass here and 1 is skipped on POSIX by name
 (`test_an_open_view_blocks_the_unlink_only_on_windows`: POSIX permits unlinking a file another fd still holds, so
 the open-view case exists only on Windows). ruff 0.17.5 and mypy 2.4.1 (`strict = true`, nothing disabled):
 0 findings.

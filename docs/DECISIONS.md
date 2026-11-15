@@ -296,3 +296,51 @@ timed out now says `FAILED tests/test_headers.py::test_the_proxy_reads_the_run_i
 longer than 120 s at …/python3.12/selectors.py:468 in select`. That line is what turned defect 35 from a platform
 mystery into a shared-loop bug in one afternoon, and it is the reason the diagnostics were worth keeping after the test
 itself was fixed.
+## D-038 — a `LINK` is written beside the tape, and a link payload is read like the untrusted input it is
+
+*Date: 2026-11-14. Plan refs: §11.10, C14, C24, P3B-04 (second half).*
+
+§11.10 says the resolver runs **at recovery/seal time, not on the hot path**, and that a capsule lists links under
+`links[]`. This decision is about the two things that sentence leaves open: which artefacts get the record, and what a
+reader does with one it did not write.
+
+**Where it lands: beside the tape, never in it.** `recovery.py` opens with "nothing here mutates a tape", and that is
+not a stylistic preference — a segment's bytes are what a capsule's integrity root hashes, so a resolver that appended a
+`LINK` to the tape it was describing would be editing its own evidence, and the capsule would then attest to a tape that
+no longer exists. The records therefore go to the capsule as `links.json` (`rec/correlate.py: for_capsule`) and to
+stdout as the answer `blackbox link a b` prints. `links.frames_for()` exists anyway, because P3B-05's inbox and P4's
+viewer will own live tapes and may append a `LINK` to their own bytes — the difference is *whose* tape it is.
+
+**A capsule with no links carries an empty `links.json`.** "These tapes were looked at and nothing matched" and "this
+capsule never looked" are different facts, and a missing file states neither. The same rule as `summary` printing all
+three classes at zero.
+
+**Reading one back is a parse, not a `json.loads`.** A tape is input from whatever produced it. `links.parse` requires
+all seven fields, refuses an unknown class (the vocabulary is closed: three classes, and two spellings of one is how a
+vocabulary rots), refuses a self-link (a writer is not its own other vantage point), refuses confidence outside `[0, 1]`,
+and — the one that matters — refuses an **`inferred` link carrying confidence 1.0**, because the class exists precisely
+to say that nobody asserted the relation. It tolerates *extra* keys, since the format is append-only and a newer writer
+may add a field a reader has no business failing on. Everything it refuses raises `BBX-E155` ("invalid CBOR payload — a
+producer wrote a non-canonical or malformed payload"), which is the registry's existing code for exactly this: no new
+error code was invented, because the plan's appendix is closed and a code is never reused for a new meaning.
+
+**What a tape says about its own run.** The run id is `RUN_START`'s `run_id` when the tape has one, and failing that the
+single `linked_run` its `MODEL_REQUEST` frames carry — the proxy's case, which is told whose socket it is. Two *different*
+linked runs on one tape is not a run id: it is two runs' traffic through one proxy, so the view names neither, the exact
+class cannot apply, and the pair can only be linked by inference (with `why_not_exact` in the evidence) or declared.
+Guessing the most frequent one would have produced a confident link to the wrong run roughly half the time, which is the
+worst failure this module can have.
+
+**`blackbox link a b` records one assertion, in both directories.** The pair goes into `<data_dir>/links.declared.json`
+on *both* sides, because a declaration only one side remembers is one the other side's evidence contradicts. Recording
+is idempotent and order-free (`a,b` sorts), and the resolver de-duplicates pairs read from two directories — otherwise
+one human statement would render as two identical `declared` edges. The command refuses three cases rather than writing a
+link between unidentifiable things: a directory with no readable tape, a tape that names no run, and a directory naming
+more than one run.
+
+**Evidence.** `tests/test_link_records.py` (16): the kind is `19`, in the graph range, P2 and appended without moving a
+single published id; a payload round-trips and four kinds of damage are each refused by their own reason; two real tapes
+in one data directory resolve `exact` with the proxy on the left; a tape carrying two runs resolves only `inferred` and
+says why; the capsule carries `links.json` while the tape's segment bytes are identical before and after recovery and
+hold no `LINK` frame; an empty answer is still a file, byte-identical across two runs; and the command is idempotent,
+records in both directories, and leaves nothing behind when it refuses.

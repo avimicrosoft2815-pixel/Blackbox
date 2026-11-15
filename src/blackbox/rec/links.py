@@ -18,9 +18,13 @@ weaker guarantee than "a test would fail if someone added one".
 """
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
+
+from blackbox import constants as C
+from blackbox.codec import cbor
+from blackbox.errors import bbx
 
 EXACT = "exact"
 DECLARED = "declared"
@@ -157,3 +161,66 @@ def summary(links: Sequence[Link]) -> dict[str, int]:
     for link in links:
         counts[link.klass] = counts.get(link.klass, 0) + 1
     return counts
+
+
+# ── the record as it sits on a tape ─────────────────────────────────────────────
+# A `LINK` frame's payload is `Link.as_dict()`. Reading one back is not the same problem as writing it: the writer is
+# this module, the reader is whatever tape the user opened, and a tape is untrusted input like any other. So `parse`
+# checks every field that the resolver's invariants depend on and refuses rather than guessing — an `inferred` link
+# claiming confidence 1.0 is refused precisely because the whole class exists to say "nobody asserted this".
+PAYLOAD_KEYS = ("class", "left_writer", "right_writer", "left_run", "right_run", "confidence", "evidence")
+
+
+def parse(payload: Mapping[str, Any]) -> Link:
+    """Read one `LINK` payload. Unknown *extra* keys are tolerated (the format is append-only); bad ones are not."""
+    if not isinstance(payload, Mapping):
+        raise bbx("BBX-E155", f"a LINK payload must be a map, not {type(payload).__name__}")
+    missing = [k for k in PAYLOAD_KEYS if k not in payload]
+    if missing:
+        raise bbx("BBX-E155", f"a LINK payload is missing {', '.join(missing)}")
+    klass = payload["class"]
+    if klass not in CLASSES:
+        raise bbx("BBX-E155", f"unknown link class {klass!r}; the three classes are {', '.join(CLASSES)}")
+    left, right = payload["left_writer"], payload["right_writer"]
+    if not isinstance(left, str) or not isinstance(right, str) or not left or not right:
+        raise bbx("BBX-E155", "a LINK names two writers as non-empty strings")
+    if left == right:
+        raise bbx("BBX-E155", f"a LINK from {left} to itself is not a link")
+    confidence = payload["confidence"]
+    if isinstance(confidence, bool) or not isinstance(confidence, (int, float)):
+        raise bbx("BBX-E155", f"confidence {confidence!r} is not a number")
+    confidence = float(confidence)
+    if not 0.0 <= confidence <= 1.0:
+        raise bbx("BBX-E155", f"confidence {confidence} is outside [0, 1]")
+    if klass == INFERRED and confidence >= 1.0:
+        # The one place where a number is a claim: an inference is never presented as a fact (§11.10).
+        raise bbx("BBX-E155", "an inferred LINK cannot carry confidence 1.0 — nobody asserted it")
+    evidence = payload["evidence"]
+    if not isinstance(evidence, Mapping):
+        raise bbx("BBX-E155", f"evidence must be a map, not {type(evidence).__name__}")
+    for name, run in (("left_run", payload["left_run"]), ("right_run", payload["right_run"])):
+        if run is not None and not isinstance(run, str):
+            raise bbx("BBX-E155", f"{name} must be a string or null")
+    return Link(klass=klass, left_writer=left, right_writer=right,
+                left_run=payload["left_run"], right_run=payload["right_run"],
+                confidence=confidence, evidence=dict(evidence))
+
+
+def frames_for(records: Sequence[Link]) -> list[tuple[int, bytes]]:
+    """The `(kind, payload)` pairs a writer appends for these links — the writer's shape, not the reader's."""
+    return [(C.KIND_LINK, cbor.encode(record.as_dict())) for record in records]
+
+
+def from_frames(frames: Iterable[Mapping[str, Any]]) -> list[Link]:
+    """Every `LINK` on a scanned tape, in tape order. Other kinds are ignored; a malformed one is an error."""
+    out: list[Link] = []
+    for frame in frames:
+        if frame.get("kind") != C.KIND_LINK:
+            continue
+        payload = frame.get("payload") or b""
+        try:
+            body = cbor.decode_exact(payload)
+        except Exception as exc:
+            raise bbx("BBX-E155", f"LINK frame at seq {frame.get('seq')}: {exc}") from None
+        out.append(parse(body))
+    return out

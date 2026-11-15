@@ -6,7 +6,7 @@
     "bench/results/*.json"
   ],
   "next_ticket": "P3-11",
-  "next_note": "L3: P3B-04's header path and link resolver are in (D-036) — x-blackbox-run is injected only when BLACKBOX_PROXY=1, the proxy records it as linked_run and strips ours, and links resolve as exact/declared/inferred with evidence and a never-merge invariant. Remaining for P3B-04: LINK emission at seal and `blackbox link`. The 3.12-only hang that held the matrix red is fixed (defect 35, D-037): the header proxy test no longer hosts client, proxy and origin on one asyncio loop. Suite 730. Next: finish P3B-04, then P3B-05/06 hooks and inbox, P3B-09 docs/attach.md.",
+  "next_note": "L3: P3B-04's header path and link resolver are in (D-036) — x-blackbox-run is injected only when BLACKBOX_PROXY=1, the proxy records it as linked_run and strips ours, and links resolve as exact/declared/inferred with evidence and a never-merge invariant. Remaining for P3B-04: LINK emission at seal and `blackbox link`. The 3.12-only hang that held the matrix red is fixed (defect 35, D-037): the header proxy test no longer hosts client, proxy and origin on one asyncio loop. Suite 748. Next: finish P3B-04, then P3B-05/06 hooks and inbox, P3B-09 docs/attach.md.",
   "last_green_commit": "8a8b58b",
   "last_green_commit_note": "run 43743421915, ten jobs ten success — the whole 3 OS x 3 Python matrix, py3.12 included, for the first time since the proxy landed (7aa5105, 72fdc8a, 70420ed and a54dda0 were each red on the same three 3.12 cells, defect 35). PRs #2-#9 merged, origin/main e8cd2f6, so the nightly clock has started (C40: every commit names its own run).",
   "gates": {
