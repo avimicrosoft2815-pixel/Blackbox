@@ -39,6 +39,15 @@ def encode_header(*, writer_uuid: bytes, segment_no: int, start_seq: int, segmen
     return bytes(buf)
 
 
+def read_header(tape_dir: str, n: int) -> dict:
+    """Decode segment n's header from disk (raises OSError when the segment is gone or short)."""
+    with open(seg_path(tape_dir, n), "rb") as fh:
+        buf = fh.read(C.SEGMENT_HEADER_BYTES)
+    if len(buf) != C.SEGMENT_HEADER_BYTES:
+        raise OSError(f"segment {n}: short header ({len(buf)} B)")
+    return decode_header(buf)
+
+
 def decode_header(buf: bytes) -> dict:
     from blackbox.codec.crc32 import crc32
     if len(buf) < C.SEGMENT_HEADER_BYTES or buf[0:8] != C.MAGIC_SEG:

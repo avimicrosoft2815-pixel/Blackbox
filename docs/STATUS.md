@@ -1,6 +1,6 @@
 # STATUS — BlackBox v1.0 build
 
-**Branch** `arena/e10fc603-blackbox` · **base** `30c9433` · **HEAD** `1e518ca`+ (pushed after every ticket)
+**Branch** `arena/e10fc603-blackbox` · **base** `30c9433` · **HEAD** `8d77587`+ (pushed after every ticket)
 **trunk: mergeable** — every C12 check passes from a clean clone and the README says what exists.
 **product: pre-alpha — storage and recovery layer only; no SDK, proxy or viewer yet.**
 
@@ -49,10 +49,12 @@ mapped-file-cannot-be-deleted problem. Every number below was re-measured on the
 | Syscalls on the append path (C11) | `tests/test_no_syscall.py` | 100 000 appends ⇒ **exactly two `pwrite`s per batch** (segment data + 64 B head slot), nothing else |
 | Seal footer + chain link | `tests/test_tape.py` | green |
 | Platform shims (P2-03/P2-04, C20) | `tests/test_platform_shims.py` (21) | contract green on Linux; Windows start-time path exercised through a fake `kernel32`; `is_current` is computed, so exactly one shim claims the machine |
+| Retention + declared holes (`P1-09b`) | `tests/test_retention.py` (13), `tests/property/test_retention_random.py` (9) | **8 seeds × 60 randomized steps: 133 kills, 65 retention passes, 34 segments pruned, 0 violations of I1 or I9** (`bench/results/p1-09b-retention.json`) |
+| Chain walk across a hole (`P1-09b`, I9) | `tape.scanner.verify_chain` | per-segment `prev_chain` links + every `CHAIN` frame's `prev`; every declared hole's `prev` must be a value on that walk |
 | Lint + types (C6) | `make fmt` (ruff 0.17.5, mypy 2.4.1) | **0 findings** both |
 | Forbidden words (C12) | `tests/test_forbidden_words.py` | green over the tree **and** `git log` |
 
-Total: **175 tests**, all green.
+Total: **213 tests** — 212 pass here and 1 is skipped on POSIX by name (`test_an_open_view_blocks_the_unlink_only_on_windows`: POSIX permits unlinking a file another fd still holds, so the open-view case only exists on Windows). ruff and mypy: 0 findings.
 
 ## 2. §15.1 rows — ext4 is the gate column (C1); every row carries its verdict
 
@@ -103,7 +105,7 @@ Each correction is answered where a reviewer will look:
 | C17 | one final A/B by the plan's rule, then closed | **done** — ADR-005, `pwrite` adopted, every gate re-run on the new store |
 | C18 | show the RSS procedure | **done** — §2 + `-recovery.json`: `head_off`, bytes written, `VmRSS`/`RssAnon`/`RssFile`/`RssShmem` before and after, cgroup limit, and a second run at 39 % of a segment showing the delta is Python heap, not segment fill |
 | C19 | 500 *effective* trials; low-rate and kernel cells | **done** — readiness pipe, 0 `not_started`, 20 ev/s window cell, `kernel` cell, 50 trials per cell |
-| C20 | P2-03 `OpenProcess`+`GetProcessTimes`; P2-04 `F_FULLFSYNC`; P1-09b is mine to decide; F13 is P2-11; `P1-02b` before G-Promise; ship `tools/s17_control.sh`; keeper maxima stay; name the stall thread; report CI | **done except P1-02b and P1-09b** — both are queued below; the stall is measured in the app thread's own `emit` (the sync happens inside `publish`, which the app thread calls; the keeper's own publishes are not charged to an event) |
+| C20 | P2-03 `OpenProcess`+`GetProcessTimes`; P2-04 `F_FULLFSYNC`; P1-09b is mine to decide; F13 is P2-11; `P1-02b` before G-Promise; ship `tools/s17_control.sh`; keeper maxima stay; name the stall thread; report CI | **done except P1-02b** — both are queued below; the stall is measured in the app thread's own `emit` (the sync happens inside `publish`, which the app thread calls; the keeper's own publishes are not charged to an event) |
 | C7 | CI must actually run | **it ran: ubuntu and docs green, macOS and Windows red** — see §6 |
 | C21 | no mapping anywhere in `src/`; head written by `pwrite`, S4 as a torn-slot hook, two `pwrite`s per batch | **done** — §0, DV-010, `HeadFile`, `test_no_syscall` |
 | C22 | diagnose the red cells from the tree; `is_current`; `pwrite`/`pread` in every shim; `F_FULLFSYNC` claims derived from code | **done in code**; the cells are still red and the remaining cause is not readable from here |
@@ -126,6 +128,10 @@ Each correction is answered where a reviewer will look:
 10. **bench-found (C16)** → the gate number excluded its own CBOR encode, and `statistics.quantiles(method="exclusive")` produced a p90 *below* the p50 → clock starts at the dict, all percentiles from one sorted array → the row itself is the regression test (`verdict` is computed from those numbers).
 11. **Windows (C29)** → every `os.open` gave a text-mode CRT descriptor, so `0x0A` expanded to `0x0D 0x0A`, `0x0D 0x0A` collapsed back, and `0x1A` ended reads → `platform.open_fd` ORs `O_BINARY`, the dispatch test forbids bare `os.open`, and `test_positional_io_is_byte_exact_for_all_256_values` writes all 256 values and demands byte identity.
 12. **bench-found (C17)** → the `write()` arm issued one `pwrite` per event and allocated a slot object per event → batch buffer + plain ints → `profile_arms()` asserts the difference stays under 200 ns/event.
+13. **`P1-09b` random retain/kill, seed 0 step 38** → seqs 1–13 vanished with no `GAP` anywhere → a later retention pass had pruned the segment that held the *first* `GAP` → tombstone segments are pinned, and a merged `GAP` replaces them in the same pass → `test_gap_chain_link_matches_the_writer_chain` (two passes), `test_i1_and_i9_hold_under_random_retain_and_kill`.
+14. **`P1-09b` control case** → a whole leading segment deleted behind retention's back was invisible: the scan simply *began* at seq 30, so no hole was reported → the hole range now starts at `min(first recovered, first declared, tail_seq + 1)` → `test_a_retention_hole_is_declared_not_silently_missing`.
+15. **`P1-09b`** → the `GAP` range stopped one seq short of the deleted segment, because `SEG_END` is a committed frame that dies with its segment → the range includes it → `test_gap_is_committed_and_published_before_the_unlink` (asserts every declared `to` is inside the committed range at unlink time).
+16. **`P1-09b`** → `codec.cbor.decode` returns `(obj, pos)`, so the scanner's new `isinstance(body, dict)` check silently rejected every `GAP` → `decode_exact` plus `ScanResult.gaps_unreadable`, so an undecodable declaration is reported rather than swallowed.
 
 ## 5. F1–F13 — decided, one line each (C10)
 
@@ -137,7 +143,7 @@ to `P2-11`** (`blackbox run`), not P5 — corrected here and in `DECISIONS.md`.
 
 | Check | State |
 |---|---|
-| `make test` from a clean clone | green, ......................................... tests |
+| `make test` from a clean clone | green, `213 passed, 1 skipped` (5.9 s) |
 | `make kill` (500 trials, ext4) | 0 violations, 0 `not_started` |
 | `make bench` into `bench/results/` | green, both columns |
 | `make fuzz` | 100 000 iterations, 0 non-`CBORError` |
@@ -153,7 +159,7 @@ to `P2-11`** (`blackbox run`), not P5 — corrected here and in `DECISIONS.md`.
 
 | Ticket | State | Note |
 |---|---|---|
-| `P1-09b` retention + `GAP{RETENTION}` | **next, decided by me** | F2/F3 are mine to decide in that commit (`format.md` + `DEVIATIONS.md` together), not blocked |
+| `P1-09b` retention + `GAP{RETENTION}` | **done** | `tape/retention.py`; F2/F3 decided as D-016/D-017, tombstone pinning/merging as D-018, `GAP` payload frozen in `format.md` §4.1; acceptance = 8 seeds × 60 steps, 133 kills, 0 violations of I1/I9 |
 | `P1-13` seal verifier + compaction | **partial** | footer writer + verifier tested; `arch/` compaction not written |
 | `P1-14` / `P1-15` `store/blobs.py` | **pending** | blob write/read, compression queue |
 | `P1-16` small-model state machine | **done** | `tests/property/test_tape_model.py`; the retention ordering (`GAP` before unlink) is modelled now and is the spec `P1-09b` has to satisfy |
@@ -168,6 +174,6 @@ to `P2-11`** (`blackbox run`), not P5 — corrected here and in `DECISIONS.md`.
 
 ## 8. Next, in order
 
-1. `P1-16` small-model state machine over the stages the kill matrix already exercises.
-2. `P1-09b` retention, deciding F2/F3 in the same commit.
-3. `P1-14`/`P1-15` blobs → `P2-06/07/10/11/12/13` → `P1-02b` → **G-Promise on ext4** → STATUS.
+1. `P1-14` / `P1-15` — `store/blobs.py`: blob write/read and the compression queue (F2/F3 were decided in `P1-09b`, so nothing is deferred there).
+2. `P2-06` / `P2-07` / `P2-10`…`P2-13` (recovery and CLI surface) → `P1-02b` (mypy `type-arg` + `no-untyped-def`) → **G-Promise on ext4** → STATUS.
+3. `P1-13` compaction of sealed segments; `P2-09` nights start at merge.

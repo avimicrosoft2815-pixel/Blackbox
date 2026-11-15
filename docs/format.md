@@ -122,6 +122,32 @@ Kind registry (append-only): `1 SEG_END`, `2 CHAIN`, `3 INTERN`, `4 GAP`, `5 DEG
 `16 NODE_OPEN`, `17 NODE_CLOSE`, `18 EDGE`, `32 MODEL_REQUEST`, `33 MODEL_RESPONSE`, `34 MODEL_CHUNK`,
 `35 MODEL_ERROR`, `48 TOOL_REQUEST`, `49 TOOL_RESULT`, `80 RUN_START`, `81 RUN_END`, `96 EXCEPTION`, `112 MARK`.
 
+### 4.1 `GAP` frames — a declared hole, not a missing frame
+
+`GAP` (kind 4) is the only frame that is allowed to *shorten* the readable tape. Payload (canonical CBOR):
+`{"from": u64, "to": u64, "reason": ascii, "segments": [u32…], "prev": 32-byte chain value}`.
+
+* `from`/`to` are seq numbers, inclusive, and cover the **whole** pruned range including each deleted segment's
+  `SEG_END` frame (that frame dies with its segment; a `GAP` that stopped one seq short would be a hole nobody
+  announced).
+* `reason` is `RETENTION` today; the reader treats any committed `GAP` as a declaration and any seq that no
+  `GAP` covers as corruption (`MISSING`).
+* `prev` is the writer's chain value at the moment the `GAP` was committed, which makes the hole a *position in
+  the chain* rather than a break: `tape.scanner.verify_chain` walks the per-segment links (each segment header's
+  `prev_chain`, then every `CHAIN` frame's `prev`/`batch`) and requires every declared hole's `prev` to be a value
+  that walk passes through. A `GAP` pointing anywhere else is reported as a problem, not accepted.
+* Order is fixed: **commit `GAP` → publish → unlink `.seg` → unlink `.seal` → `fsync(dir)`**. A kill in the
+  middle leaves either a declared hole whose files still exist (harmless) or a deleted file whose `GAP` is
+  already committed (correct). It can never leave a deleted file with no declaration.
+* A segment that holds a `GAP` frame is a **tombstone segment** and is never pruned while it is the only copy of
+  the declaration. When retention deletes a contiguous pruned prefix, the new `GAP` covers the merged span and
+  the older tombstone segments are removed in the same pass, so tombstones do not accumulate.
+
+Scanner view: `ScanResult.gaps` lists the holes a reader sees, each `{"from", "to", "reason"}` with `reason` taken
+from the covering `GAP` (`RETENTION`) or `MISSING` when none covers it; `ScanResult.gaps_declared` lists the
+`GAP` frames themselves; `ScanResult.gaps_unreadable` records a `GAP` that does not decode — an unreadable
+declaration is *not* a licence to call a hole declared.
+
 ## 5. Segment file `<n>.seg` = 4096 B header ‖ body of frames
 
 | Offset | Size | Field |

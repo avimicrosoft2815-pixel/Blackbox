@@ -43,6 +43,11 @@ S: dict[str, tuple[str, str, str, str, str, str]] = {
               "self", "500 randomized kills recover exactly the committed prefix, 0 violations"),
     "P1-12": ("done", "55b4d42", "test_tape.py (implicit)", "—", "self", "gap marker yielded"),
     "P1-13": ("done", "260bfd0", "test_tape.py::test_seal_*", "—", "self", "F4 applied; re-seal idempotence todo"),
+    "P1-09b": ("done", "HEAD", "tests/test_retention.py (13), tests/property/test_retention_random.py (9)",
+               "bench/results/p1-09b-retention.json", "self",
+               "GAP{RETENTION} committed and published before every unlink; 8 seeds x 60 randomized steps, "
+               "133 kills, 65 retention passes, 34 segments pruned, 0 violations of I1 or I9; tombstone "
+               "segments are pinned and merged so a declared hole outlives the segment that announced it"),
     "P1-16": ("done", "HEAD", "tests/property/test_tape_model.py (6)",
               "bench/results/p1-16-counterexamples.json", "self",
               "exhaustive interleavings of append/publish/roll/retain up to 6 steps, 8-frame segments, "

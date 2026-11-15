@@ -395,6 +395,21 @@ class TapeWriter:
             self.window_max_ms = max(self.window_max_ms, window_ms)
             return False
 
+    @property
+    def chain_value(self) -> bytes:
+        """The current chain head, so a caller that writes a `GAP` can carry the link (F3/D-017)."""
+        return self._chain.value
+
+    def set_tail_seq(self, seq: int) -> None:
+        """Advance `tail_seq` (the oldest seq a reader may still expect) after retention deleted a range."""
+        with self._lock:
+            if not self.recording or self._slot is None:
+                return
+            if seq <= self._slot.tail_seq:
+                return
+            self._slot = self._slot.with_(tail_seq=seq)
+            self._publish()
+
     def window_ms(self) -> float:
         """Age of the oldest unpublished frame, in ms (C3 evidence)."""
         if not self._pending:

@@ -111,6 +111,17 @@ bare `os.open` outside the platform layer, and `test_positional_io_is_byte_exact
 256 byte values through `pwrite`/`pread` and demands byte identity — it fails on any OS whose `open_fd` forgets
 the flag.
 
+### Windows: retention and an open reader's view (P1-09b)
+
+Deleting a file another handle has open fails on Windows with a **sharing violation** (`WinError 32`), where POSIX
+lets the unlink succeed and leaves the reader with a valid fd. A reader holding an *old sealed* segment open is
+expected — the head's `tail_seq` has already moved past it — so `retention.unlink_with_retries` retries 5 times at
+10 ms and, if the file is still there, reports it as **`blocked`** with the attempt count in
+`apply(...)["blocked"]` and leaves it out of `deleted`. It never returns `None` and never claims a range was
+pruned. The `.seg` is unlinked before the `.seal` on both platforms, so no reader can see a seal whose segment is
+already gone. `test_an_open_view_blocks_the_unlink_only_on_windows` is the only test in the tree that is skipped on
+POSIX, and it is skipped by name for that reason.
+
 `test_sparse_detection` is skipped on Windows for a different reason and it is not a measurement gap: on NTFS,
 `SetEndOfFile` (what `os.ftruncate` becomes) **allocates** the clusters, and a file is sparse only after
 `FSCTL_SET_SPARSE`. The test's premise is false there, so `prealloc.is_sparse` documents that Windows returns
