@@ -1,8 +1,14 @@
-# G-Promise — 2026-11-14 — trunk af908bc — verdict: pass
+# G-Promise — 2026-11-14 — trunk fdb3875 — verdict: pass
 
-**Who signed this.** The plan requires a reviewer from a different model family or a fresh context, working from
-the plan, the diff and the *pushed* tree. This session had no second model available, so the review below was run
-by the builder in a **fresh clone of the pushed branch** (`/tmp/gp`, `git clone --branch
+**Two signatures.** Built and self-reviewed at `af908bc` (below, unchanged except where this commit corrects it);
+**independently re-run and counter-signed at `fdb3875`** by a different model family on a different machine. The
+counter-signature is at the end of this file, under *Counter-signature*. The earlier header named `af908bc`, whose
+own CI run (`43678767989`) was 9/10 — C40, in `docs/defects.md` — so the gate is re-signed at the newest commit whose
+run is 10/10.
+
+**Who signed the first pass.** The plan requires a reviewer from a different model family or a fresh context,
+working from the plan, the diff and the *pushed* tree. When this gate was first signed, no second model was
+available, so that pass was run by the builder in a **fresh clone of the pushed branch** (`/tmp/gp`, `git clone --branch
 arena/a781c68f-blackbox` at `af908bc`), from the gate rows in `AGENT_FINAL.md` §5.1 and §3 rather than from memory.
 That is a weaker check than the plan asks for, and it is labelled `requires humans` in `docs/STATUS.md` §Labelled
 rather than being counted as independent. Everything below is reproducible from the clone: the commands are named
@@ -76,3 +82,41 @@ with their output.
   no §15.1 number in this repository comes from a runner.
 - **P2-09 week of nightlies — `requires time`.** `schedule` runs only on the default branch; the clock starts at
   merge.
+
+## Commands to reproduce (for a counter-signing reviewer)
+
+```
+git clone --branch arena/a781c68f-blackbox https://github.com/avimicrosoft2815-pixel/Blackbox
+cd Blackbox && python3 -m venv .venv && .venv/bin/pip install -e . pytest hypothesis
+make test PY=.venv/bin/python                     # expect: 337 passed, 1 skipped (the named POSIX skip)
+PYTHONPATH=src .venv/bin/python tests/kill/kill_matrix.py --trials 100 --seed 20261115 --root /tmp/kb --filesystem ext4
+.venv/bin/python tools/bench_smoke.py              # expect: 9 keys within 10 % of ext4 baseline
+PYTHONPATH=src .venv/bin/python -m blackbox run -- sh -c 'kill -9 $$'
+.venv/bin/python tools/ci_status.py arena/a781c68f-blackbox
+```
+
+Nothing above writes outside the clone and `/tmp`. The §15.1 latency rows are **not** reproducible on different
+hardware; a counter-signature accepts them on the builder's JSON (which `tools/bench_smoke.py` ties to
+`docs/STATE.json`) and says so.
+
+## Counter-signature — independent reviewer, different model family, different machine
+
+Reviewer: an Arena agent of a different model family, relayed by the owner. Fresh clone of
+`arena/a781c68f-blackbox` at **`fdb3875`**; Linux x86_64, CPython **3.13.18**, ext4 (`/dev/root`); not the builder's
+machine.
+
+| Command | Result |
+|---|---|
+| `python -m pytest tests -q` | **337 passed, 1 skipped** (the named POSIX skip) |
+| `tests/kill/kill_matrix.py --trials 100 --seed 20261115 --root <ext4 dir> --filesystem ext4` | **100/100 effective trials, 0 violations, 0 `not_started`**, 10 cells × 10 (`process`/`kernel`, segment 64 KiB / 1 MiB, event 32–1 024 B, batch 0/4096), 32.1 s |
+| `tools/bench_smoke.py` | `9 keys within 10 % of ext4 baseline` |
+| `python -m blackbox run -- sh -c 'kill -9 $$'` | `exit 137 · signal 9 · recovered → capsules/c_….bbx (SEAL_INTERRUPTED)`, with the `recovery.done.*` markers in the run directory |
+| `tools/ci_status.py arena/a781c68f-blackbox` | `fdb3875 · success`, `c76f917 · success`, `372006f · success`, `7ba55b0 · success`, `a6f4faa · success`, **`af908bc · failure`**, `2c8e28f · success`, `a4455e6 · success` |
+| §15.1 latency/throughput rows | **not re-measured here** (different hardware); accepted on the builder's JSON, which the smoke check ties to STATE |
+
+**Verdict: pass — independently confirmed for the suite, the kill invariant, the launcher recovery and the smoke
+keys.** The reviewer also found C40 (the `af908bc` run was 9/10 while three documents called it green), which is
+fixed in the same commit as this signature: the flaky Windows cell, the per-OS statement of the group-commit window,
+the re-signature at `fdb3875`, and `STATE.last_green_commit`.
+
+Signed: *independent (Arena agent, different model family, owner-relayed)* — `fdb3875`, 2026-11-15.

@@ -1,11 +1,11 @@
 # BlackBox build status — 2026-11-14 — trunk `af908bc` — gates: **G-Promise pass** (self-signed; see §Labelled), G-Capture, G-Attach, G-Capsule, G-Sec, G-Release not yet opened
 
-**Branch** `arena/a781c68f-blackbox` · **base** `31241d6` · CI for `c76f917`: run `43679876901`, ten jobs, ten
-`success`. Green runs before it (`43679755477` at `372006f` for P3-01, `43679417991` at `a6f4faa` for G-Promise,
-`43678447134` at `4619b90`) belong to earlier commits; the STATUS commit this text lands in is docs-only and its run
-is the next one.
+**Branch** `arena/a781c68f-blackbox` · **base** `31241d6` · CI for `fdb3875`: run `43680002424`, ten jobs, ten
+`success`. **`af908bc` — the sha this gate was first signed at — has a failed run (`43678767989`, 9/10:
+`py3.13 / windows-latest`); that is C40, fixed here, and the gate is re-signed at `fdb3875`.** The commit this text
+lands in is documentation and tests; its run is the next one.
 **product: pre-alpha — storage, recovery, launcher and capsule layer only; no SDK, proxy or viewer yet.**
-Suite: **Total: 338 tests** — 337 pass here and 1 is skipped on POSIX by name
+Suite: **Total: 339 tests** — 338 pass here and 1 is skipped on POSIX by name
 (`test_an_open_view_blocks_the_unlink_only_on_windows`: POSIX permits unlinking a file another fd still holds, so
 the open-view case exists only on Windows). ruff 0.17.5 and mypy 2.4.1 (`strict = true`, nothing disabled):
 0 findings.
@@ -37,6 +37,7 @@ the open-view case exists only on Windows). ruff 0.17.5 and mypy 2.4.1 (`strict 
 | Budget: disk amplification ≤ 1.25× (2× hard fail) | §15.1 | 16 KiB group commit 1.231× (3 150 352 / 2 560 000) — `bench/results/2026-11-15-recovery.json` |
 | Budget: RSS ≤ 24 MiB above baseline | §15.1 | 1.56 MiB at 28.13 % of a segment — `bench/results/2026-11-15-recovery.json` |
 | Budget: 64 KiB `content=full` incl. blob write (C32) | §15.1 | p50 226.864 · p99 461.281 µs · 4 356.4 ev/s — `bench/results/2026-11-15-payload-blob.json` |
+| Group-commit window, per OS (C40) | §8.6, C3 | `tests/test_keeper.py::test_low_rate_event_is_published_within_the_window` starts its own window and `test_a_window_older_than_the_bound_publishes_inline` states the expired-window rule; the ≤ 5 ms row is measured on ext4/Linux only and the Windows bound (one 15.6 ms timer tick for a keeper-only drain, inline publish for arriving events) is stated in `docs/compatibility.md` and marked `not measured` |
 | **P3-01** SDK lifecycle: `install`/`uninstall`/`shutdown` | §10.2, P3-01 | `src/blackbox/api.py`, `tests/test_api_lifecycle.py` (6): double install ⇒ one writer UUID and one `RUN_START`; 16 threads install at once ⇒ one writer and `refs` 16; `uninstall()` during an in-flight append leaves the tape open and the frame lands; `BLACKBOX_DISABLED=1` creates no tape and `emit()` returns 0; an unwritable data dir leaves the app running with the reason recorded; `shutdown()` is idempotent and install works after it |
 | Lint, types, forbidden words, egress, stdlib-only | C6, C12, P0-14 | `make fmt` 0 findings, `mypy` strict 0 findings, `tests/test_forbidden_words.py`, `tests/test_no_egress.py`, `tests/test_stdlib_only.py` |
 | CI on three OSes × three Pythons + docs | C7 | run `43678447134` at `4619b90` — ten jobs, ten `success`; `docs/compatibility.md` holds the per-cell verdicts |
@@ -45,7 +46,7 @@ the open-view case exists only on Windows). ruff 0.17.5 and mypy 2.4.1 (`strict 
 
 | Item | Label (requires humans / requires time / not testable here / blocked) | Reason / fix attempts |
 |---|---|---|
-| **Independent gate review** | requires humans | Every row in `docs/reviews.md` and every gate file is signed `self`: same model, working from a fresh clone (`/tmp/gp` at `af908bc`), from the plan text and from the pushed tree. The plan wants a reviewer from a different model family; none was available in this session. Not counted as independent anywhere. |
+| **Independent gate review** | G-Promise: **independent review pass (owner-relayed)**; every other ticket row: requires humans | G-Promise was counter-signed by a different model family on a different machine (fresh clone of `fdb3875`, CPython 3.13.18, ext4): 337 passed / 1 skipped, 100/100 kill trials with 0 violations, smoke 9 keys, launcher recovery, and it was that reviewer who found C40. The signature and a copy-paste reproduce block are in `docs/gates/G-Promise.md`. **Ticket rows in `docs/reviews.md` stay `self`** until a second model is wired into the loop; none of them counts as independent. |
 | P2-09 week of nightlies | requires time | GitHub `schedule` runs only on the default branch; the clock starts at merge. |
 | 3-person stranger test | requires humans | Prepared to one command: `docs/onboarding.md` holds the setup line and three tasks; nobody outside this session has run it. |
 | Blinded diagnosis benchmark | requires humans | Prepared: `docs/benchmarks/diagnosis.md` holds the checklist and the capsule set is reproducible with `blackbox recover`. Needs a second and third person. |
@@ -65,7 +66,7 @@ One line per §15.1 row: fs · N · warm-up · p50 / p95 / p99 · raw JSON.
 - same row, keeper thread publishing · ext4 · N 200 000 · warm-up 20 000 · p50 11.044 · p95 20.6 · p99 54.527 µs · 73 471 ev/s · `bench/results/2026-11-14-writer-throughput.json`
 - kernel mode (`sync_ms=250`, 1 MiB) · ext4 · N 200 000 · p50 11.278 · p99 89.903 µs · 60 368 ev/s · sync stall max 2 866 µs over 28 syncs · `bench/results/2026-11-14-writer-throughput.json` (reported, not a gate row)
 - kernel mode, sync-dense (64 KiB) · ext4 · p50 11.387 · p99 81.232 µs · stall max 11 875 µs over 453 syncs · `bench/results/2026-11-14-writer-throughput.json` (reported)
-- group-commit window · ext4 · 1 ev/s 4.603 ms · 1 000 ev/s 4.999 ms · unbounded 3.572 ms (120.99 ev/commit) · `bench/results/2026-11-14-writer-throughput.json`
+- group-commit window · ext4 (Linux only; the Windows bound is stated, not measured — `docs/compatibility.md`) · 1 ev/s 4.603 ms · 1 000 ev/s 4.999 ms · unbounded 3.572 ms (120.99 ev/commit) · `bench/results/2026-11-14-writer-throughput.json`
 - recovery, 22 312-frame tape from 10 000 events · ext4 · n 30 rounds · min 231.59 · p50 236.83 · p95 248.36 · p99 250.78 ms → **106.1 ms/10 k** (p99 = max because n < 100) · `bench/results/2026-11-15-recovery.json` (`results.ext4.recovery`)
 - disk amplification, 16 KiB group commit · ext4 · N 10 000 events, 2 560 000 payload bytes · 1.231× (3 150 352 / 2 560 000) · `bench/results/2026-11-15-recovery.json` (`results.ext4.amplification_by_batch[batch_bytes=16384]`)
 - disk amplification, publish-per-event · ext4 · 1.843× (4 718 976 / 2 560 000) · `bench/results/2026-11-15-recovery.json` (`results.ext4.amplification`) — reported, above the 1.25× row, below the 2× hard fail
@@ -80,6 +81,9 @@ One line per §15.1 row: fs · N · warm-up · p50 / p95 / p99 · raw JSON.
 
 ## Deviations applied (DEVIATIONS.md) and held findings (F#)
 
+The defect list (seed → invariant → cause → fix → test) lives in `docs/defects.md` — eighteen entries, two of them
+added by C40: the Windows group-commit flake and the recovery row's mislabelled denominator (checked against the
+reviewer's hypothesis: the division was right, the sentence and the n=7 sample were not).
 Twelve deviations, all dated and argued in `docs/DEVIATIONS.md`: DV-005 (one checksum, CRC-32), DV-006/007 (S17
 degrades instead of raising, including the first segment), DV-008 (P2-03/P2-04 written with an honest
 `capabilities()`), DV-009/010 (ADR-005 store change; the head is no longer mapped), DV-011 (every OS call through
@@ -106,7 +110,8 @@ row in the same commit.
 3. **G-Capture** with the day-14 rule: an unmodified `openai`/`anthropic` script through seams A→B→C against the
    mock provider must keep its in-flight call across `kill -9` with correct `chunks_received`/`bytes_received`.
    Real-provider runs are `not testable here` (no keys) and the mock result is the gate, as the plan allows.
-4. **P3-01 is committed** (`api.py` lifecycle + `tests/test_api_lifecycle.py`). **Next ticket: P3-02** — the
-   `workflow/agent/tool/retrieval/step` decorators through `functools.wraps`, with a disabled path that costs ≤ 1 µs;
-   L3 work takes the rest of the turn.
+4. **C40 is committed** with the counter-signature: the flaky Windows cell no longer depends on wall-clock speed, the window row is
+   stated per OS, the gate is re-signed at `fdb3875`, and `STATE.last_green_commit` is `fdb3875`. **Next ticket:
+   P3-02** — the `workflow/agent/tool/retrieval/step` decorators through `functools.wraps`, with a disabled path
+   that costs ≤ 1 µs; L3 takes the rest of the turn.
 5. The 2 000-trial kill run starts in the background during L5–L8; it is not needed for L2/L3.
