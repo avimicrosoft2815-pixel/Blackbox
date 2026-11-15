@@ -111,8 +111,10 @@ row in the same commit.
 3. **G-Capture** with the day-14 rule: an unmodified `openai`/`anthropic` script through seams A→B→C against the
    mock provider must keep its in-flight call across `kill -9` with correct `chunks_received`/`bytes_received`.
    Real-provider runs are `not testable here` (no keys) and the mock result is the gate, as the plan allows.
-4. **C40 is committed** with the counter-signature: the flaky Windows cell no longer depends on wall-clock speed, the window row is
-   stated per OS, the gate is re-signed at `fdb3875`, and `STATE.last_green_commit` is `fdb3875`. **Next ticket:
-   P3-02** — the `workflow/agent/tool/retrieval/step` decorators through `functools.wraps`, with a disabled path
-   that costs ≤ 1 µs; L3 takes the rest of the turn.
+4. **C40 is committed** with the counter-signature: the flaky Windows cell no longer depends on wall-clock speed,
+   the window row is stated per OS, the gate is re-signed at `fdb3875`, and `STATE.last_green_commit` is `fdb3875`.
+5. **P3-02/P3-03/P3-04 are committed**: decorators, the contextvar node stack, `run`/`step`/`capture`/`mark`/
+   `handled_error`/`freeze`, 50-level nesting, the detached-root rule for threads and the async path. **Next ticket:
+   P3-05a** (seam A, httpx response hooks), then 05b/05c/05d against the mock provider — the day-14 rule needs seams
+   A→B→C before G-Capture can be attempted.
 5. The 2 000-trial kill run starts in the background during L5–L8; it is not needed for L2/L3.
