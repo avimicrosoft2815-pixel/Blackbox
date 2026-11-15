@@ -1,9 +1,11 @@
 # BlackBox build status — 2026-11-15 — trunk `771f5ea` — gates: **G-Promise pass** (built and self-reviewed at `af908bc`, independently counter-signed at `fdb3875`; see `docs/gates/G-Promise.md`), G-Capture, G-Attach, G-Capsule, G-Sec, G-Release not yet opened
 
-**Branch** `arena/a781c68f-blackbox` · **base** `31241d6` · CI for trunk `771f5ea`: PENDING — last completed run
-`43693106857` at `714554c` = **failure** (7/10, `py3.11 / windows-latest`), and the newest completed green run is
-`43692338730` at `e1ebc73`. Every red run is named rather than buried: `714554c` is defect 21, a wall-clock
-assertion in a test of mine (2 × 40 ms asserted ≥ 80 ms; the cell measured 79 ms), fixed at `771f5ea`; `af908bc`
+**Branch** `arena/a781c68f-blackbox` · **base** `31241d6` · CI for trunk `280b7fe`: run `43693470163`, ten jobs, ten
+`success`. Four runs before it were red on one defect: `714554c` (`43693106857`), `1112881` (`43693172961`) and
+`0f81445` (`43693216632`) failed `py3.11 / windows-latest` on a wall-clock assertion in a test of mine (2 × 40 ms
+asserted ≥ 80 ms; the cells measured 79, 78, 78 ms), fixed at `771f5ea` — and `99a5164`, between two of them, passed
+with the same test, which is what a flake looks like and why its green is luck rather than evidence. The run before
+this batch is `43692338730` at `e1ebc73`. Every other red run: `af908bc`
 (`43678767989`, 9/10) is C40 — the gate was re-signed at `fdb3875`; `15cb55c` (`43689004423`, 7/10) **and** `6d52088`
 (`43689012017`, 7/10) are the same defect — a fork-only multiprocessing test of mine failing on the three Windows
 cells, fixed at `d5e1bb6` (defect 19).
@@ -117,6 +119,9 @@ row in the same commit.
 
 ## What is next
 
+0. **Trunk `280b7fe` is green on all ten cells** (`43693470163`); `STATE.last_green_commit` is that commit. The three
+   red runs in this batch are one defect (21, a wall-clock assertion) and one of the four runs passed with it still
+   in the tree — recorded that way rather than as "fixed, then green".
 1. **G-Promise is signed** (`docs/gates/G-Promise.md`, verdict pass, self-signed — see §Labelled) and `STATE.json`
    carries `gates["G-Promise"] = "pass"`.
 2. **L2 ‖ L3 are running, not queued**: L2 has P3-01…P3-04 committed at `37d56df`, the mock provider at `714554c`
