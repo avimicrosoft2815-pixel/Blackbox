@@ -1,4 +1,18 @@
-# BlackBox build status — 2026-11-15 — trunk `e40fece` — gates: **G-Promise pass** (built and self-reviewed at `af908bc`, independently counter-signed at `fdb3875`; see `docs/gates/G-Promise.md`), G-Capture, G-Attach, G-Capsule, G-Sec, G-Release not yet opened
+# BlackBox build status — 2026-11-16 — trunk `846e01a` — gates: **G-Promise pass** (built and self-reviewed at `af908bc`, independently counter-signed at `fdb3875`; see `docs/gates/G-Promise.md`), G-Capture, G-Attach, G-Capsule, G-Sec, G-Release not yet opened
+
+**Branch** `arena/a781c68f-blackbox` · **base** `31241d6` · CI at `846e01a`: run `43697198262`, ten jobs, ten
+`success` — **the first all-OS green since `c7919f9`**. The three Windows cells had been red for four commits and the
+cause was mine: the Windows teardown fixture in `tests/conftest.py` called `getattr(obj, "_head", None)` on every
+object in `gc.get_objects()`, `anthropic` keeps its optional dependencies behind a `LazyProxy` that raises
+`MissingDependencyError` when the extra is absent, and the teardown error landed on nine innocent property tests once
+`capture-sdks` put the SDK in the environment (defect 25). Found through the check-run **annotations**, not the job
+log: GitHub redirects logs to a host this sandbox cannot reach, so `tools/ci_summary.py`'s `::error::` lines are the
+only readable failure trail — they now carry 600 characters instead of 200. Before that, `d075a32` (`43695573285`)
+and `4bb722d` (`43696068136`) were 7/10 on that same Windows defect and `67b5ae5` (`43696841639`) was 7/10 on a
+fail-open test of mine whose breakage did not break on Windows (defect 26, still open). The run before this gate work
+is `43695177370` at `27b82a3`, ten of ten. Older red runs keep their numbers and their verdicts — `af908bc`
+(`43678767989`, 9/10, C40), `15cb55c` and `6d52088` (7/10, a fork-only multiprocessing test) — because a later green
+tree is not a green commit.
 
 **Branch** `arena/a781c68f-blackbox` · **base** `31241d6` · CI for trunk `e40fece`: run `43693723611`, ten jobs, ten
 `success`; this STATUS commit is docs-only and its own run is pending (`tools/ci_status.py` is run before every
@@ -63,7 +77,7 @@ the open-view case exists only on Windows). ruff 0.17.5 and mypy 2.4.1 (`strict 
 | **The Windows teardown fixture touches nothing it did not identify** | defect 25 | `tests/_hygiene.py` + `tests/test_gc_hygiene.py` (3): the fixture finds a leaked writer by **exact type**, proved against an object that raises on any attribute access and a subclass that must not be mistaken for its parent; the SDK's real `LazyProxy` is instantiated to show the shape still raises. This is why three Windows cells were red from `c7919f9`: the old fixture called `getattr(obj, "_head")` on every live object, `anthropic` keeps optional dependencies behind a proxy that raises on load, and the resulting `ERROR` landed on nine innocent property tests |
 | Capture layer's network exception | P0-08, P0-13, D-020 | `tests/_capture_policy.py` + `tests/test_stdlib_only.py`, `tests/test_no_egress.py`, `tests/test_codec.py`: four named files are exempt and nothing outside `cap_sdk/` can be; `httpx` is allowed only **inside a function body**, so `import blackbox` works with httpx absent; the mock provider may bind loopback only and the wildcard-bind source check runs; `httpx==0.28.1` lives in its own `capture` extra, `[project].dependencies` is still empty |
 | Lint, types, forbidden words, egress, stdlib-only | C6, C12, P0-14 | `make fmt` 0 findings, `mypy` strict 0 findings, `tests/test_forbidden_words.py`, `tests/test_no_egress.py`, `tests/test_stdlib_only.py` |
-| CI on three OSes × three Pythons + docs | C7 | run `43689351726` at `59aef18` — ten jobs, ten `success`; `docs/compatibility.md` holds the per-cell verdicts and every historical red run |
+| CI on three OSes × three Pythons + docs | C7 | run `43697198262` at `846e01a` — ten jobs, ten `success`, Windows included; `docs/compatibility.md` holds the per-cell verdicts and every historical red run |
 
 ## Labelled
 
@@ -128,28 +142,26 @@ row in the same commit.
 
 ## What is next
 
-0. **Trunk `e40fece` is green on all ten cells** (`43693723611`, and `280b7fe` before it at `43693470163`);
-   `STATE.last_green_commit` is `e40fece`. The three
-   red runs in this batch are one defect (21, a wall-clock assertion) and one of the four runs passed with it still
-   in the tree — recorded that way rather than as "fixed, then green".
+0. **`846e01a` is green on all ten cells** (`43697198262`) — the first all-OS green since `c7919f9`, after four
+   commits of Windows red on defect 25 and one on defect 26. `STATE.last_green_commit` is `846e01a`.
 1. **G-Promise is signed** (`docs/gates/G-Promise.md`, verdict pass, self-signed — see §Labelled) and `STATE.json`
    carries `gates["G-Promise"] = "pass"`.
-2. **L2 ‖ L3 are running, not queued**: L2 has P3-01…P3-04 committed at `37d56df`, the mock provider at `714554c`
-   (P3-13MP) and seams A, B and the preflight at `1112881`/`0f81445`/`99a5164` (P3-05a/b/d). The next L2 ticket is
-   **G-Capture's remaining rows**, in this order: P3-11 (the redaction pipeline and the 60-secret corpus), P3-14
-   (identical application output and exceptions through the fail-open suite), the §15.1 capture measurements
-   (Disabled, content=off, content=hash, provider-call latency Δ p95 of a 700 ms streamed call, startup install cost)
-   and then a reviewer-signed `docs/gates/G-Capture.md`. The day-14 mechanism itself is green. L3 (the attach
-   lane: proxy, launcher integration, hooks, demo) starts from the current trunk, not from an older SHA.
-3. **G-Capture** with the day-14 rule: an unmodified `openai`/`anthropic` script through seams A→B→C against the
-   mock provider must keep its in-flight call across `kill -9` with correct `chunks_received`/`bytes_received`.
-   Real-provider runs are `not testable here` (no keys) and the mock result is the gate, as the plan allows.
-4. **C40 is committed** with the counter-signature: the flaky Windows cell no longer depends on wall-clock speed,
-   the window row is stated per OS, the gate is re-signed at `fdb3875`, and `STATE.last_green_commit` is `fdb3875`.
-5. **The capture seams are in, and the day-14 rule is one ticket away**: A and B both record every chunk and both
-   are compared byte-for-byte against an unmodified client; the preflight records which seam won and why the others
-   did not. What G-Capture still needs is the sink (P3-06) — until it exists the chunks live in a `Recorder`, not on
-   a tape, so nothing survives a `kill -9` yet. **Next ticket: P3-06.**
-6. The independent reviewer's loop is now the gate loop: a counter-signature at every gate, with the reproduce block
-   in `docs/gates/` and `docs/reviews.md` as the ledger. It found C40 on its first pass, which is the argument for it.
+2. **G-Capture is open, and its two mechanism rows are now green**: the day-14 rule (an unmodified `openai` script
+   killed mid-stream, recovered with counts that never exceed what the provider pushed) and P3-14 (a 100-call agent
+   identical with and without the recorder, under three real breakages). What remains, in order: **P3-11** (the
+   redaction pipeline and the 60-secret corpus, asserted absent from every sink), an **`anthropic` child** for the
+   zero-code-change row, the four unmeasured §15.1 rows (Disabled, content=off, content=hash, provider-call latency
+   Δ p95, startup install cost), then a reviewer's signature on `docs/gates/G-Capture.md`. **Next ticket: P3-11.**
+3. **Defect 26 is open and cannot be closed here**: on Windows, `install(data_dir=<a file>)` reported `enabled: True`
+   and let 100 calls run against a tape directory that cannot exist. Three questions are written down in
+   `docs/defects.md`; answering them needs a Windows host, which this sandbox does not have.
+4. **The capture seams each cover both client modules** (`httpx` and `httpx2`) — the published `openai` and
+   `anthropic` packages are built on `httpx2`, which is why seam A reported `installed` and captured nothing until
+   the day-14 test found it (defect 23, D-025). No seam, and no unit test of a seam, could have found it from the
+   inside.
+5. **L3 is untouched**: the attach lane (proxy, launcher integration, hooks, demo) has no commits yet and starts from
+   the current trunk, not from an older SHA.
+6. The independent reviewer's loop is the gate loop: a counter-signature at every gate, with the reproduce block in
+   `docs/gates/` and `docs/reviews.md` as the ledger. It found C40 on its first pass and defect 25 on this one, which
+   is the argument for it.
 7. The 2 000-trial kill run starts in the background during L5–L8; it is not needed for L2/L3.

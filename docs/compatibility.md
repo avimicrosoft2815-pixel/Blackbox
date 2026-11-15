@@ -67,23 +67,21 @@ Not yet applicable — no capture layer exists (phase P3). The declared matrix l
 Cell values are the **test** verdict only. No benchmark number in this repository comes from a CI runner: those
 rows stay `smoke only` on a runner and `not measured` for an OS that has not run the benchmark.
 
-Last update: run [`43679876901`](https://github.com/avimicrosoft2815-pixel/Blackbox/actions/runs/43679876901)
-(commit `c76f917`), and the run for the gate commit is named in `docs/gates/G-Promise.md`. The run before it,
-[`43678767989`](https://github.com/avimicrosoft2815-pixel/Blackbox/actions/runs/43678767989) at `af908bc`, was
-**9/10** — `py3.13 / windows-latest` failed on the group-commit window test described above; C40 fixed it, and the
-gate file is re-signed at a commit whose run is 10/10. Earlier: run [`43678447134`](https://github.com/avimicrosoft2815-pixel/Blackbox/actions/runs/43678447134)
-(commit `4619b90`) — **all ten cells green** (docs + `py3.11/3.12/3.13` × ubuntu/macOS/Windows), read back with the
-runs API: ten jobs, ten `success`. **This is the first green run of this branch**: the seven earlier runs
-(`fec6fed` … `ff30196`) all failed, and two distinct causes were found and fixed under C35/C36 — a depth-1 checkout
-made the ancestry tests fail by construction, and on macOS the sync counter watched `os.fdatasync`, which the shim
-never calls because it uses `fcntl(F_FULLFSYNC)`. This is the run that first carries the blob
-store, the retention randomizer, the recovery machine (24 real kill-resume trials) and the capsule v0.
+Last update: run `43697198262` at `846e01a` — **ten of ten, the first all-OS green since `c7919f9`**. The three
+Windows cells had been red for four commits on one defect (25): the Windows teardown fixture in `tests/conftest.py`
+probed every object in `gc.get_objects()` with `getattr(obj, "_head", None)`, and `anthropic` keeps its optional
+dependencies behind a `LazyProxy` whose `__getattr__` raises `MissingDependencyError` — so nine innocent property
+tests reported `ERROR … anthropic.lib._extras._common.MissingDependencyError`, on Windows only (the block returns
+early elsewhere), once `capture-sdks` put the SDK in the environment. It was found by reading the check-run
+**annotations**, because the job log is redirected to a host the build sandbox cannot reach. The next Windows red,
+at `67b5ae5`, was a fail-open test of mine whose breakage did not break there (defect 26, open). Before that:
+`43695177370` at `27b82a3`, ten of ten.
 
 | OS | 3.11 | 3.12 | 3.13 | Evidence |
 |---|---|---|---|---|
-| ubuntu-latest (Linux 6.x, x86-64) | **green** | **green** | **green** | run `43679876901` |
-| macos-latest (arm64 runner) | **green** | **green** | **green** | run `43679876901` — including the commit-boundary sync test that had failed in three macOS cells for six runs (C36) |
-| windows-latest | **green** | **green** | **green** | run `43679876901` — `os.replace` over an existing blob, `O_EXCL` tmp files, the sharing-violation retry and a second recoverer process all ran there |
+| ubuntu-latest (Linux 6.x, x86-64) | **green** | **green** | **green** | run `43697198262` |
+| macos-latest (arm64 runner) | **green** | **green** | **green** | run `43697198262` — including the commit-boundary sync test that had failed in three macOS cells for six runs (C36) |
+| windows-latest | **green** | **green** | **green** | run `43697198262` — the day-14 test skips there by design (no `SIGKILL`), the read-only-directory case skips (defects 25/26 are why), and everything else ran, `os.replace` over an existing blob, `O_EXCL` tmp files and the sharing-violation retry included |
 | docs job | green | — | — | same run |
 
 Cumulative effect on the OS gates, now that the cells are real:
