@@ -1,4 +1,4 @@
-# BlackBox build status — 2026-11-14 — trunk `af908bc` — gates: **G-Promise pass** (self-signed; see §Labelled), G-Capture, G-Attach, G-Capsule, G-Sec, G-Release not yet opened
+# BlackBox build status — 2026-11-14 — trunk `37d56df` — gates: **G-Promise pass** (built and self-reviewed at `af908bc`, independently counter-signed at `fdb3875`; see `docs/gates/G-Promise.md`), G-Capture, G-Attach, G-Capsule, G-Sec, G-Release not yet opened
 
 **Branch** `arena/a781c68f-blackbox` · **base** `31241d6` · CI for `37d56df`: run `43689197151`, ten jobs, ten
 `success`. Two red runs are named rather than buried: `af908bc` (`43678767989`, 9/10) is C40 — the gate was re-signed
@@ -119,5 +119,5 @@ row in the same commit.
    Windows cells are green on them (`43689197151`). **Next ticket: P3-05a** (seam A, httpx response hooks), then
    05b/05c/05d against the mock provider — the day-14 rule needs seams A→B→C before G-Capture can be attempted.
 6. The independent reviewer's loop is now the gate loop: a counter-signature at every gate, with the reproduce block
-   in `docs/gates/` and `docs/reviews.md` as the ledger.
-5. The 2 000-trial kill run starts in the background during L5–L8; it is not needed for L2/L3.
+   in `docs/gates/` and `docs/reviews.md` as the ledger. It found C40 on its first pass, which is the argument for it.
+7. The 2 000-trial kill run starts in the background during L5–L8; it is not needed for L2/L3.
