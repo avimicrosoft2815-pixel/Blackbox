@@ -1,8 +1,9 @@
 # BlackBox build status — 2026-11-16 — trunk `1c3db9d` — gates: **G-Promise pass** (built and self-reviewed at `af908bc`, independently counter-signed at `fdb3875`; see `docs/gates/G-Promise.md`), G-Capture, G-Attach, G-Capsule, G-Sec, G-Release not yet opened
 
-**Branch** `arena/4de12d5a-blackbox` · **base** `e8cd2f6` (the merge of PR #9) · CI at `8a8b58b`: run
-`43743421915`, ten jobs, ten `success` — the whole 3 OS × 3 Python matrix, **py3.12 included**, which no commit had
-managed since the proxy landed. `7aa5105` (`43727756275`), `72fdc8a` (`43741188969`), `70420ed` (`43741876100`) and
+**Branch** `arena/4de12d5a-blackbox` · **base** `e8cd2f6` (the merge of PR #9) · CI at `ac25b4a`: run
+`43744646557`, ten jobs, ten `success` (`e18ce61` `43744575973` and `8a8b58b` `43743421915` before it, ten of ten).
+`8a8b58b` was the first commit to take the whole 3 OS × 3 Python matrix green, **py3.12 included**, since the proxy
+landed. `7aa5105` (`43727756275`), `72fdc8a` (`43741188969`), `70420ed` (`43741876100`) and
 `a54dda0` (`43742600971`) were each red on their three 3.12 cells and green on the other seven, and the failure was a
 hang, not an assertion (defect 35, D-037): one `asyncio.run()` loop hosting the client, the proxy and the echo origin,
 which 3.12 parks in `select()` with nothing runnable. The test runs them on three threads now, and the CI that reports
