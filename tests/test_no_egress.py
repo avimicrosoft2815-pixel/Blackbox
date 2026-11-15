@@ -8,6 +8,7 @@ check below is what keeps the second one honest.
 from __future__ import annotations
 
 import ast
+import re
 from pathlib import Path
 
 import _capture_policy
@@ -20,6 +21,8 @@ BANNED = {
 }
 URL_MARKERS = ("http://", "https://", "ftp://")
 WILDCARD_BIND = ".".join(["0"] * 4)      # not written as a literal: this file forbids it (ruff S104)
+LOOPBACK_URLS = re.compile(r"https?://(127\.0\.0\.1|localhost|\[::1\])(:\d+)?")
+PROVIDER_URL = re.compile(r"https?://(?!127\.0\.0\.1|localhost|\[::1\])[A-Za-z0-9.-]+")
 
 
 def _files():
@@ -32,9 +35,14 @@ def _allowed_import(path: Path, name: str) -> bool:
     * the seam/tee files may import `httpx`, but only inside a function — that is what keeps it optional;
     * the mock provider may import `socket`/`http.server` at module scope, because it *is* a server, on loopback.
     """
+    root = name.split(".")[0]
+    if _capture_policy.is_proxy(path):
+        # `urllib.parse` is a parser; every other `urllib` submodule, and the root, stay banned below.
+        if name in _capture_policy.PROXY_DOTTED:
+            return True
+        return root in _capture_policy.PROXY_MODULES
     if not _capture_policy.is_exempt(path):
         return False
-    root = name.split(".")[0]
     if path.name == "mock_provider.py":
         return root in {"socket", "http", "httpx"}
     return root == "httpx" and root in _capture_policy.function_scoped_modules(path)
@@ -60,6 +68,7 @@ def test_forbidden_imports():
 def test_no_url_literals():
     hits = []
     for path in _files():
+        proxy_loopback = _capture_policy.is_proxy(path)
         loopback_ok = _capture_policy.is_exempt(path) and path.name == "mock_provider.py"
         for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
             if line.lstrip().startswith("#"):
@@ -67,6 +76,10 @@ def test_no_url_literals():
             if not any(m in line for m in URL_MARKERS):
                 continue
             if loopback_ok and "http://127.0.0.1" in line and "https://" not in line:
+                continue
+            # The proxy may name loopback (its base URL) and nothing else: a hardcoded provider URL inside
+            # `proxy/` would be a destination outside the configured table, which is the whole point of the table.
+            if proxy_loopback and LOOPBACK_URLS.search(line) and not PROVIDER_URL.search(line):
                 continue
             hits.append(f"{path.relative_to(ROOT)}:{lineno} {line.strip()[:80]}")
     assert not hits, "URL literal in the core:\n" + "\n".join(hits)
@@ -81,3 +94,25 @@ def test_the_mock_provider_can_only_bind_loopback():
     source = (SRC / "blackbox" / "cap_sdk" / "mock_provider.py").read_text(encoding="utf-8")
     assert WILDCARD_BIND not in source
     assert '("127.0.0.1", 0)' in source, "the mock provider must bind an ephemeral loopback port"
+
+
+def test_the_proxy_can_only_reach_its_configured_upstreams():
+    """P3B-02: the allowlist is the route table. `open_connection` has one call site in `proxy/server.py` and it is
+    handed `route.destination`; the destinations are therefore a *computable* set, and this is the assertion that the
+    server has no second source for a host."""
+    source = (SRC / "blackbox" / "proxy" / "server.py").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    calls = [node for node in ast.walk(tree)
+             if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+             and node.func.attr == "open_connection"]
+    assert len(calls) == 1, f"proxy/server.py opens {len(calls)} connections; exactly one is expected"
+    call = calls[0]
+    targets = [node for node in ast.walk(call) if isinstance(node, (ast.Name, ast.Attribute))]
+    assert any(getattr(node, "attr", getattr(node, "id", "")) == "destination" for node in targets), \
+        "the only outbound connection must be handed a route's destination, not a computed host"
+
+    from blackbox.proxy.routes import Routes
+
+    routes = Routes.from_specs(["openai=https://api.openai.com", "local=http://127.0.0.1:8000/v1@/local"],
+                               default="openai")
+    assert routes.destinations() == {("api.openai.com", 443), ("127.0.0.1", 8000)}

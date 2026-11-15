@@ -5,7 +5,7 @@ tape, recovery, capsule, replay, CLI. It cannot be true of the capture layer, wh
 people's* HTTP clients and to serve a loopback mock provider for tests. Rather than weaken those invariants to
 "almost always", the exception is a list, in one file, with the tests enforcing three things about it:
 
-1. **Nothing outside `cap_sdk/` may be exempt.** A new network-using module has to come here and add a line, and this
+1. **Nothing outside `cap_sdk/` and `proxy/` may be exempt.** A new network-using module has to come here and add a line, and this
    file is in the diff a reviewer reads.
 2. **`httpx` may only ever be imported inside a function.** That is what makes it an *optional* integration: the
    package imports, the suite passes and `pip install blackbox-recorder` stays stdlib-only when httpx is absent.
@@ -33,10 +33,30 @@ OPTIONAL_HTTP = (
 # Files allowed to `import socket` / `http.server`: the loopback fixture only.
 LOOPBACK = ("cap_sdk/mock_provider.py",)
 
+# The proxy (P3B-01/02) is a server *and* a client by design: it listens on loopback and connects to a configured
+# upstream. It is exempt for `asyncio` and `ssl` — and for nothing else — because its reachable destinations are
+# asserted to be exactly `Routes.destinations()`, in `tests/test_proxy_server.py` and `tests/test_no_egress.py`.
+PROXY = ("server.py", "routes.py", "__init__.py")
+PROXY_MODULES = frozenset({"asyncio", "ssl", "socket"})
+# `urllib.parse` splits a base URL; `urllib.request` would fetch one, and stays banned by `test_no_egress.py`.
+PROXY_DOTTED = frozenset({"urllib.parse"})
+
+
+def proxy_paths() -> set[Path]:
+    """The proxy package's files, which exist on disk."""
+    return {SRC / "blackbox" / "proxy" / name for name in PROXY if (SRC / "blackbox" / "proxy" / name).exists()}
+
 
 def exempt_paths() -> set[Path]:
     """Absolute paths of every exempt file that exists on disk."""
     return {SRC / "blackbox" / rel for rel in (*OPTIONAL_HTTP, *LOOPBACK) if (SRC / "blackbox" / rel).exists()}
+
+
+def is_proxy(path: Path) -> bool:
+    try:
+        return path.resolve() in {p.resolve() for p in proxy_paths()}
+    except OSError:                                    # pragma: no cover - a vanished file
+        return False
 
 
 def is_exempt(path: Path) -> bool:
