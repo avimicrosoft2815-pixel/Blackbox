@@ -188,9 +188,15 @@ def classify_nodes(frames: list[dict[str, Any]], *, now_wall_ns: int | None = No
             r.tool_results += 1
             last_kind[slot] = kind
 
+    # Slot 0 is the run itself, not a node (`node_count` says so in as many words). A model call made outside any
+    # explicit node lands there, and it used to be reported as an interrupted node wherever it appeared — so a run that
+    # ended normally, with its response fully recorded, was described as "the crash happened in the app's handling".
+    # A clean `RUN_END` is the launcher's word that the child exited: the call is then complete, and there is nothing
+    # interrupted to report. With no `RUN_END` the slot-0 call is the only evidence there is, and it stays.
+    run_ended = any(f["kind"] == C.KIND_RUN_END for f in frames)
     out: list[NodeRecord] = []
     for slot, r in sorted(nodes.items()):
-        if slot in closed:
+        if slot in closed or (slot == 0 and run_ended):
             continue
         seen = last_kind.get(slot)
         if seen == C.KIND_TOOL_REQUEST and r.tool_requests > 0:

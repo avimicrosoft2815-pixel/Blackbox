@@ -278,3 +278,38 @@ def test_a_kill_at_any_step_resumes_to_the_same_capsule(step: str, mode: str, tm
     assert resumed.capsule_root == clean, f"resume after a kill at {step}/{mode} produced a different capsule"
     marker = Path(resumed.run_dir) / f"recovery.done.{step}"
     assert marker.exists(), f"{step} was never completed on the resumed run"
+
+
+# ── slot 0 is the run, and a run that ended has nothing interrupted to report ───────────────────────────────────────
+def test_a_completed_call_outside_a_node_is_not_an_interrupted_node() -> None:
+    """The shape `blackbox run -- node app.js` leaves: the proxy records the call at slot 0 and the child exits 0.
+
+    Reported as `INTERRUPTED_AFTER_RESPONSE` — "response fully recorded; the crash happened in the app's handling" —
+    which is a claim about a crash that never happened, in the run that worked.
+    """
+    frames = [_frame(1, C.KIND_RUN_START, slot=0),
+              _frame(2, C.KIND_MODEL_REQUEST, slot=0),
+              _frame(3, C.KIND_MODEL_CHUNK, slot=0, payload=b"ok"),
+              _frame(4, C.KIND_MODEL_RESPONSE, slot=0),
+              _frame(5, C.KIND_RUN_END, slot=0)]
+    assert recovery.classify_nodes(frames) == []
+    assert recovery.node_count(frames) == 0, "and the counts agree with each other instead of saying 0 and 1"
+
+
+def test_a_call_outside_a_node_is_still_reported_when_the_run_never_ended() -> None:
+    """The other direction: without a `RUN_END` the slot-0 call is the only evidence of what was in flight."""
+    frames = [_frame(1, C.KIND_RUN_START, slot=0),
+              _frame(2, C.KIND_MODEL_REQUEST, slot=0),
+              _frame(3, C.KIND_MODEL_CHUNK, slot=0, payload=b"half", wall_ns=5)]
+    nodes = recovery.classify_nodes(frames, now_wall_ns=5)
+    assert [n.status for n in nodes] == ["INTERRUPTED_MID_STREAM"]
+    assert nodes[0].chunks == 1
+
+
+def test_a_clean_end_does_not_silence_a_real_node() -> None:
+    """Only slot 0 is exempt: an unclosed node of the app's own is still an interruption even when the run ended."""
+    frames = [_frame(1, C.KIND_RUN_START, slot=0),
+              _frame(2, C.KIND_NODE_OPEN, slot=1),
+              _frame(3, C.KIND_MODEL_REQUEST, slot=1),
+              _frame(4, C.KIND_RUN_END, slot=0)]
+    assert [n.status for n in recovery.classify_nodes(frames)] == ["INTERRUPTED_BEFORE_FIRST_BYTE"]

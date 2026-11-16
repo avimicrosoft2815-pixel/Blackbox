@@ -25,8 +25,11 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
+from blackbox import constants as C
+from blackbox.cap import format as cap
 from blackbox.proxy.routes import Route, Routes
 from blackbox.rec import launcher
+from blackbox.tape import frame as frame_mod
 
 posix = pytest.mark.skipif(os.name != "posix", reason="the launcher's process-level tests are POSIX-only")
 pytestmark = posix
@@ -179,3 +182,46 @@ def test_the_summary_line_says_the_proxy_ran(tmp_path, origin):
     text = log.read_text()
     assert f"proxy {result.proxy['url']}" in text
     assert "5 vars exported" in text, text
+
+
+def test_the_proxy_vantage_lands_on_the_launchers_tape(tmp_path, origin, capfd):
+    """A request that passes through the proxy must be *recorded*, not merely forwarded.
+
+    Without a receiver the listener relays bytes and writes nothing, so the capsule came back with `events: 5` — the
+    bootstrap frames and no request — while `proxy.stats.requests` said 1. The traffic was invisible in the artefact the
+    user would read, which is the one failure this recorder exists to prevent.
+    """
+    argv, _script = _child(tmp_path)
+    log = tmp_path / "log.txt"
+    env = {"PATH": os.environ.get("PATH", ""), "PYTHONPATH": str(ROOT / "src")}
+    with open(log, "w") as handle:
+        launcher.launch(argv, data_dir=str(tmp_path / "data"), out=handle, proxy=True,
+                        proxy_routes=_routes(origin), env=env)
+    assert _printed(capfd)["status"] == 200
+    kinds: set[str] = set()
+    for path in (tmp_path / "data" / "capsules").glob("*.bbx"):
+        raw = cap.read_capsule(str(path)).frames_of(1)
+        off = C.SEGMENT_HEADER_BYTES
+        while off < len(raw):
+            try:                                 # the segment is padded after the last frame; padding is not a frame
+                frame, off = frame_mod.decode(raw, off)
+            except Exception:
+                break
+            kinds.add(C.KIND_NAMES[frame["kind"]])
+    assert {"MODEL_REQUEST", "MODEL_CHUNK", "MODEL_RESPONSE"} <= kinds, sorted(kinds)
+
+
+def test_a_completed_proxied_call_is_not_reported_as_an_interrupted_node(tmp_path, origin, capfd):
+    """The counts a diagnosis reads: `nodes_interrupted` must not claim a crash that did not happen."""
+    argv, _script = _child(tmp_path)
+    log = tmp_path / "log.txt"
+    env = {"PATH": os.environ.get("PATH", ""), "PYTHONPATH": str(ROOT / "src")}
+    with open(log, "w") as handle:
+        launcher.launch(argv, data_dir=str(tmp_path / "data"), out=handle, proxy=True,
+                        proxy_routes=_routes(origin), env=env)
+    assert _printed(capfd)["status"] == 200
+    counts = [cap.read_capsule(str(p)).manifest["counts"]
+              for p in (tmp_path / "data" / "capsules").glob("*.bbx")]
+    recorded = [c for c in counts if c["events"] > 5]
+    assert recorded, "the tape with the request on it is the one these counts describe"
+    assert all(c["nodes_interrupted"] == 0 for c in counts), counts

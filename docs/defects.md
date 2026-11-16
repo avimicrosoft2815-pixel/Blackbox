@@ -395,3 +395,43 @@ plan's §10 shape, and it is append-only.
   repeats it (7 success, 3 macOS cancelled). The two fixes it needed are recorded above; the third one — the product's
   `cleanup_sdk` claiming a removal it had not checked — is covered by the same run, since
   `test_the_temp_dir_is_removed_even_when_the_child_is_killed` asserts `removed` against `os.path.exists`.
+
+- **defect 45 — the proxy forwarded the traffic and recorded none of it, so `blackbox run` produced a capsule with no
+  request in it.** `rec/launcher.py::_start_proxy` took a `receiver` and the CLI never passed one, so `ProxyServer`
+  ran with `receiver=None`: `_call_open`/`_call_chunk`/`_call_close` returned immediately and the listener was a
+  relay. Every `blackbox run -- python app.py` therefore recovered a capsule with `events: 5` (bootstrap frames only)
+  and `nodes: 0`, while `result.proxy["stats"]["requests"]` said `1` — the run's *only* model call was absent from the
+  artefact, and nothing in the summary line hinted at it. `tests/test_launcher_proxy.py` asserted the request reached
+  the upstream, which it did; no test asserted the request reached the *tape*. **Fix**: `launch()` builds the
+  receiver itself when the caller supplies none (`_default_proxy_receiver`, a `SinkRecorder(TapeSink(writer.emit))` on
+  the launcher's own writer — `TapeWriter.emit` is lock-guarded, so the proxy's loop thread and the launcher's
+  main thread share one frame chain safely), and `proxy_receiver` stays an override for tests that want their own
+  sink. **Tests**: `::test_the_proxy_vantage_lands_on_the_launchers_tape`. Found by running P3B-03's acceptance line
+  against real clients instead of trusting the flag, `bench/accept_p3b03.py`.
+
+- **defect 46 — a model call outside any node was reported as an interrupted node, in the run that worked.**
+  `rec/recovery.py::classify_nodes` created a node record for whatever slot a `MODEL_REQUEST` named, including slot 0,
+  and slot 0 is *the run itself* — `node_count` says so in as many words and skips it. So a run that ended normally,
+  with its response fully recorded, reported `nodes_interrupted: 1` and the detail *"response fully recorded; the crash
+  happened in the app's handling"*: a claim about a crash that never happened, in the diagnosis a user reads first.
+  The manifest said `nodes: 0` and `nodes_interrupted: 1` in the same breath. **Fix**: when the frames carry a
+  `RUN_END`, an unclosed slot-0 call is complete and is not reported; with no `RUN_END` the slot-0 call is the only
+  evidence of what was in flight and is still classified (mid-stream, before-first-byte), and an unclosed node *of the
+  app's own* is unaffected either way. **Tests**: `tests/test_recovery.py::test_a_completed_call_outside_a_node_is_not_an_interrupted_node`,
+  `::test_a_call_outside_a_node_is_still_reported_when_the_run_never_ended`, `::test_a_clean_end_does_not_silence_a_real_node`,
+  and `tests/test_launcher_proxy.py::test_a_completed_proxied_call_is_not_reported_as_an_interrupted_node`.
+
+- **defect 47 — two capsules of one run name two different run ids, and the link between them says otherwise.**
+  **Open.** `rec/recovery.py::Recovery.__init__` derives the run id from `(writer_uuid, meta.created_wall_ns)` and never
+  reads the tape's own `RUN_START`. The launcher's tape agrees with that derivation because the launcher *computed*
+  `BLACKBOX_RUN_ID` from `run_id_for()`, but a child tape that attached to the launcher's run (`RUN_START` with
+  `attached: true`) carries the launcher's id and gets a capsule whose manifest names the derived one instead. Measured
+  with `bench/accept_p3b03.py` (real `urllib` child, real loopback upstream): one `blackbox run`, two capsules,
+  `r_3fb2a3e364a6255f` and `r_f090ee72bdc2cbf6`, while both tapes' `RUN_START` payloads named the same id — and both
+  capsules' `links.json` describe the same pair as `exact` with `run_id` set to the *declared* id. So a capsule
+  contradicts its own tape and its sibling, and any consumer grouping capsules by `run.run_id` sees two runs where the
+  link says one. P3B-03's "one run with linked nodes" is **not** ticked on this evidence. The fix is not a one-liner:
+  the run id is also the run *directory* name and the capsule id (`"c_" + _hash(run_id)`), so two attached tapes sharing
+  a run id would collide on one capsule path unless capsule identity is derived from the writer too, and the
+  `recovery.done.<STEP>` resumability markers are keyed on it. That is a ticket, not a patch at the end of a session.
+

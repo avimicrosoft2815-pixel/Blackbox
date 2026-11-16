@@ -1,0 +1,179 @@
+{
+  "host": {
+    "node": "v22.22.3",
+    "platform": "Linux-6.1.158+-x86_64-with-glibc2.36",
+    "python": "3.11.2"
+  },
+  "question": "does `blackbox run -- node app.js` / `-- python app.py` yield one run with linked nodes?",
+  "results": [
+    {
+      "capsule_count": 2,
+      "capsules": [
+        {
+          "capsule": "c_381ff5d53086388b.bbx",
+          "counts": {
+            "bytes": 16777921,
+            "events": 5,
+            "nodes": 0,
+            "nodes_interrupted": 0,
+            "segments": 1
+          },
+          "frames": {
+            "CHAIN": 2,
+            "RUN_END": 1,
+            "RUN_START": 1,
+            "SEG_END": 1
+          },
+          "has_proxy_vantage": false,
+          "link_pairs": [
+            {
+              "class": "exact",
+              "left_run": "r_3fb2a3e364a6255f",
+              "right_run": "r_3fb2a3e364a6255f"
+            }
+          ],
+          "links": {
+            "declared": 0,
+            "exact": 1,
+            "inferred": 0
+          },
+          "root_ok": true,
+          "run_id": "r_f090ee72bdc2cbf6",
+          "run_status": "SEAL_INTERRUPTED"
+        },
+        {
+          "capsule": "c_b94efff3833c1769.bbx",
+          "counts": {
+            "bytes": 16777921,
+            "events": 11,
+            "nodes": 0,
+            "nodes_interrupted": 0,
+            "segments": 1
+          },
+          "frames": {
+            "CHAIN": 5,
+            "MODEL_CHUNK": 1,
+            "MODEL_REQUEST": 1,
+            "MODEL_RESPONSE": 1,
+            "RUN_END": 1,
+            "RUN_START": 1,
+            "SEG_END": 1
+          },
+          "has_proxy_vantage": true,
+          "link_pairs": [
+            {
+              "class": "exact",
+              "left_run": "r_3fb2a3e364a6255f",
+              "right_run": "r_3fb2a3e364a6255f"
+            }
+          ],
+          "links": {
+            "declared": 0,
+            "exact": 1,
+            "inferred": 0
+          },
+          "root_ok": true,
+          "run_id": "r_3fb2a3e364a6255f",
+          "run_status": "SEAL_INTERRUPTED"
+        }
+      ],
+      "client": "python",
+      "command": [
+        "/home/user/Blackbox/.venv/bin/python",
+        "client.py"
+      ],
+      "duration_ms": 539.3,
+      "every_root_ok": true,
+      "exit_code": 0,
+      "links": [
+        {
+          "class": "exact",
+          "left_run": "r_3fb2a3e364a6255f",
+          "right_run": "r_3fb2a3e364a6255f"
+        },
+        {
+          "class": "exact",
+          "left_run": "r_3fb2a3e364a6255f",
+          "right_run": "r_3fb2a3e364a6255f"
+        }
+      ],
+      "one_run_id_across_capsules": false,
+      "proxy_vantage_recorded": true,
+      "run_ids_seen": [
+        "r_3fb2a3e364a6255f",
+        "r_f090ee72bdc2cbf6"
+      ],
+      "stderr_tail": [
+        "blackbox: python child gets a temporary sitecustomize (/tmp/blackbox-sdk-chk0ibwg); removed when it exits",
+        "blackbox: run r_3fb2a3e364a6255f \u00b7 exit 0 \u00b7 proxy http://127.0.0.1:44431 (5 vars exported) \u00b7 sdk auto-import (sitecustomize) \u00b7 recovered r_3fb2a3e364a6255f \u2192 /tmp/bbx-accept-y1kg1uzd/data-python/capsules/c_b94efff3833c1769.bbx (SEAL_INTERRUPTED, root fdf9e89d3055) and 1 more tape (sdk)"
+      ],
+      "stdout": [
+        "python ok"
+      ]
+    },
+    {
+      "capsule_count": 1,
+      "capsules": [
+        {
+          "capsule": "c_9efa2e07efb28298.bbx",
+          "counts": {
+            "bytes": 16777523,
+            "events": 11,
+            "nodes": 0,
+            "nodes_interrupted": 0,
+            "segments": 1
+          },
+          "frames": {
+            "CHAIN": 5,
+            "MODEL_CHUNK": 1,
+            "MODEL_REQUEST": 1,
+            "MODEL_RESPONSE": 1,
+            "RUN_END": 1,
+            "RUN_START": 1,
+            "SEG_END": 1
+          },
+          "has_proxy_vantage": true,
+          "link_pairs": [],
+          "links": {
+            "declared": 0,
+            "exact": 0,
+            "inferred": 0
+          },
+          "root_ok": true,
+          "run_id": "r_d79a9680f8b991f6",
+          "run_status": "SEAL_INTERRUPTED"
+        }
+      ],
+      "client": "node",
+      "command": [
+        "/usr/local/bin/node",
+        "client.js"
+      ],
+      "duration_ms": 361.6,
+      "every_root_ok": true,
+      "exit_code": 0,
+      "links": [],
+      "one_run_id_across_capsules": true,
+      "proxy_vantage_recorded": true,
+      "run_ids_seen": [
+        "r_d79a9680f8b991f6"
+      ],
+      "stderr_tail": [
+        "blackbox: run r_d79a9680f8b991f6 \u00b7 exit 0 \u00b7 proxy http://127.0.0.1:36583 (5 vars exported) \u00b7 recovered r_d79a9680f8b991f6 \u2192 /tmp/bbx-accept-y1kg1uzd/data-node/capsules/c_9efa2e07efb28298.bbx (SEAL_INTERRUPTED, root 275c19f2a866)"
+      ],
+      "stdout": [
+        "node ok"
+      ]
+    }
+  ],
+  "ticket": "P3B-03",
+  "upstream": "http://127.0.0.1:35003",
+  "verdict": {
+    "both_clients_exit_zero": true,
+    "every_capsule_root_ok": true,
+    "node_available": true,
+    "one_run_id_across_capsules": false,
+    "proxy_vantage_recorded": true
+  },
+  "when": "2026-11-16T17:22:45Z"
+}

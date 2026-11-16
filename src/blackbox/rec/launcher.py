@@ -310,8 +310,14 @@ def launch(argv: list[str], *, data_dir: str | None = None, stall_ms: int = 5_00
     # ---- the proxy (P3B-03): started before the child, because the child's environment names its port ----------
     proxy_thread, proxy_plan = (None, None)
     if proxy:
-        proxy_thread, proxy_plan = _start_proxy(child_env, proxy_routes, proxy_port, proxy_receiver,
-                                                retry_transmitted=proxy_retry_transmitted, force=proxy_force)
+        # The proxy is a vantage of its own (D-037): its frames belong on the launcher's tape, which is the tape this
+        # process owns. Without a receiver the listener forwards traffic and records *nothing*, so `nodes` stayed at 0
+        # and a run through the CLI had no model request in any capsule — traffic that passed silently. The default is
+        # here rather than in the CLI so that every caller of `launch(proxy=True)` gets a recording proxy, and the
+        # explicit `proxy_receiver` stays an override for tests that want their own sink.
+        receiver = proxy_receiver if proxy_receiver is not None else _default_proxy_receiver(writer)
+        proxy_thread, proxy_plan = _start_proxy(child_env, proxy_routes, proxy_port, receiver,
+                                               retry_transmitted=proxy_retry_transmitted, force=proxy_force)
         child_env.update(proxy_plan.exports)
         child_env["BLACKBOX_PROXY_URL"] = proxy_thread.url
         # Forcing is never silent: every variable the flag took away is named, with the value it had, because the
@@ -587,6 +593,17 @@ def cleanup_sdk(record: dict[str, Any]) -> None:
     record["removed"] = not os.path.exists(site_dir)
     if not record["removed"]:
         record["cleanup_error"] = f"{site_dir} still exists after three attempts"
+
+
+def _default_proxy_receiver(writer: Any) -> Any:
+    """A sink that turns the proxy's seam events into frames on the launcher's tape.
+
+    `TapeWriter.emit` is lock-guarded, which matters because these calls arrive on the proxy's event-loop thread while
+    the launcher emits `RUN_START`/`RUN_END` from this one — two threads, one frame chain.
+    """
+    from blackbox.cap_sdk.sink import SinkRecorder, TapeSink
+
+    return SinkRecorder(TapeSink(writer.emit))
 
 
 def _start_proxy(env: dict[str, str], routes: Any = None, port: int = 0, receiver: Any = None,
