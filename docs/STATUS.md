@@ -44,16 +44,13 @@ with the ordered preflight are real and tested, as is seam C (SDK method patches
 provider pushed. The proxy's **core and routing** are real and tested (P3B-01/P3B-02: loopback listener, byte-exact
 passthrough, the route table as the egress allowlist); the launcher integration, the hooks, the viewer and the
 diagnosis workflow are not built yet.**
-Suite: **Total: 1012 tests** — 1011 pass here and 1 is skipped on POSIX by name
+Suite: **Total: 1015 tests** — 1014 pass here and 1 is skipped on POSIX by name
 (`test_an_open_view_blocks_the_unlink_only_on_windows`: POSIX permits unlinking a file another fd still holds, so
 the open-view case exists only on Windows). ruff 0.17.5 and mypy 2.4.1 (`strict = true`, nothing disabled):
 0 findings.
 
 **What `repair` does not guarantee, in one place.** The gate is documented at length in D-049/D-050 and in the P4-18
-row below; these are the three limits a reader should not have to go looking for. (1) **On Windows the symlink
-guarantee is check-then-write, not atomic.** `os.O_NOFOLLOW` does not exist there, so a swap that lands between the
-`islink` check and the open is not detected; on POSIX the descriptor flag closes that window. Closing it on Windows
-means opening by handle with `FILE_FLAG_OPEN_REPARSE_POINT`, which was not done. (2) **A process killed mid-apply
+row below; these are the three limits a reader should not have to go looking for. (1) **On Windows the symlink guarantee is check-then-write, not atomic.** `os.O_NOFOLLOW` does not exist there, so a swap that lands between the `islink` check and the open is not detected; on POSIX the descriptor flag closes that window, and closing it on Windows means opening by handle with `FILE_FLAG_OPEN_REPARSE_POINT`, which was not done. What *is* guaranteed there is that no read or write returns bytes through a link: `proposal.read_nofollow` checks before opening and `sha256_file` uses it, so the hash a reviewer approved and the bytes on disk are read by one rule (defect 50). (1b) **On Windows the backup directory is not 0700.** `os.chmod` there only toggles the read-only attribute and `os.stat` synthesises `0o777`, so a private directory is not expressible: `<repo>/.blackbox-repair` is as private as the repository's ACLs, `Applied.private_by_mode` is `False`, the manifest records that weaker fact and `repair apply` prints it (defect 51). On a filesystem that *has* POSIX modes and ignores `chmod`, the applier refuses rather than proceeding. (2) **A process killed mid-apply
 cannot roll back.** It had no chance to — what survives is `apply-manifest.json`, written before the first mutation and
 left in state `planned`, so the tree is auditable rather than silently unknown. (3) **`repair verify --test CMD`
 executes CMD** through the platform shell, in `--repo`, with your privileges; it is announced before it runs and

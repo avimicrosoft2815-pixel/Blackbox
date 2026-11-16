@@ -471,3 +471,40 @@ plan's §10 shape, and it is append-only.
   claimed as met: with no seam and no `NODE_OPEN`, both vantages report `nodes: 0` and the graphs have no nodes to link.
   Found by adding the SDK client to the acceptance harness rather than by reading the flag.
 
+- **defect 50 — `_read_nofollow` followed the link on the one platform where the flag is missing.** Run 43922055318
+  (HEAD `081fac5`) failed `test_reading_an_original_does_not_follow_a_link` on all three Windows cells with *DID NOT
+  RAISE*. The cause was not the test: `NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)` is `0` on Windows, so `os.open` followed
+  the link and the function returned the bytes on the other side — the one thing its name promises it will not do, and
+  the read `_prepare` uses for the originals it hashes for approval and copies into the backup. The POSIX cells cannot
+  see this, which is why it survived every run here. **Fix**: when the platform has no flag, refuse with an explicit
+  `islink` check before the open, raising the same `OSError` so callers do not branch. The remaining exposure is the
+  check-then-open window, which D-050 already records and which this does not close. The reader also moved to
+  `proposal.read_nofollow` and `sha256_file` now uses it, because the hash of the file that was approved and the hash
+  of the file about to be replaced were being taken by two different rules — the write path nofollow, the hash path
+  follow. **Tests**: `tests/test_repair_workflow.py::test_reading_an_original_does_not_follow_a_link` (asserts *which*
+  mechanism refused) and `::test_without_the_descriptor_flag_the_refusal_is_a_check`, which takes the flag away on any
+  platform and therefore runs the Windows path in CI's Linux cells too.
+
+- **defect 51 — the applier promised a private backup directory on a platform that cannot express one.** Same run, same
+  three cells: `test_the_backup_directory_is_inside_the_repository_and_private` failed on
+  `(os.stat(root).st_mode & 0o777) == 0o700`. The product was not lying by accident — `_backup_root` chmodded to `0700`
+  and did not re-check — but on Windows `os.chmod` only toggles the read-only attribute and `os.stat` synthesises
+  `0o666`/`0o777` from the ACL, so the directory the product called private was whatever the repository's ACLs make it.
+  That is a privacy claim the platform cannot support, and the honest answer is to stop making it rather than to relax
+  the test. **Fix**: `_private_dir()` enforces 0700 only where mode bits mean something, re-reads the mode after
+  `chmod` and **refuses** when a filesystem that has modes ignores the change — a place this feature cannot keep its
+  promise is not a place to put the user's source code. Where modes do not exist it returns `False`, which flows into
+  `Applied.private_by_mode`, a `backup` block in `apply-manifest.json` naming the weaker guarantee, and one line of
+  stderr from `repair apply`. `MODES_ARE_REAL` is the capability flag, and the Windows branch is exercised on POSIX by
+  clearing it. **Tests**: `::test_the_backup_directory_is_inside_the_repository_and_private` (platform-true),
+  `::test_a_platform_without_modes_says_so_instead_of_claiming_0700`,
+  `::test_a_filesystem_that_ignores_chmod_is_refused_rather_than_trusted`.
+
+- **defect 52 — the rollback test could not index its own snapshot on Windows.** Same run: `KeyError: 'src/b.py'`. This
+  one *is* a fixture, and the evidence is that the assertions before it passed: the apply failed, the message contained
+  `COULD NOT restore` and `app.py`, and `manual intervention required` was present — the rollback did what it promises.
+  `_snapshot` keyed its dictionary with `str(p.relative_to(root))`, which is `src\\b.py` on Windows, while the test
+  looked the file up as `src/b.py`. **Fix**: `.as_posix()` in the helper, so the comparison is about bytes and not about
+  a separator. Worth recording precisely because it looks like the two above: a Windows red cell is not evidence of a
+  product bug until the failure line says so.
+

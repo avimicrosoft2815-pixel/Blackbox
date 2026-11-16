@@ -813,3 +813,16 @@ for one pointing at a decoy *inside* the repository, where the escape check cann
 from opposite directions: check the path the user's files will actually be written through, not the path that has already
 been normalised.
 
+**Postscript — the two things Windows could not do, found by the first run that had Windows cells for this code.** Both
+were claims in this decision that the platform does not support. `O_NOFOLLOW` is absent there, so "descriptors never
+follow a link" was true of the write and false of the read: `os.open` followed the link and the function returned the
+bytes behind it (defect 50). The read now refuses explicitly when the flag is missing — still check-then-open, but a
+refusal rather than a silent success — and `sha256_file` uses the same reader, because a hash taken by a different rule
+from the write is not a guarantee about the same file. And `0700` is not expressible: `os.chmod` toggles the read-only
+attribute and `os.stat` synthesises `0o777` from the ACL, so the "private backup directory" was private only to the
+extent the repository is (defect 51). Rather than relax the test, the guarantee shrank to what is true:
+`_private_dir` enforces and **re-reads** the mode where modes exist — refusing on a filesystem that ignores `chmod` —
+and where they do not it reports `private_by_mode: false` through the result, the manifest and one line of stderr. A
+guarantee that is conditional on the platform has to say so at every point a user reads it, or the document is the lie
+rather than the code.
+

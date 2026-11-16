@@ -28,6 +28,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from blackbox.errors import BlackBoxError
+from blackbox.platform import current as platform
 
 SCHEMA = "blackbox.repair-proposal/1"
 MAX_CONTENT = 2 << 20            # 2 MiB per file: a repair, not a vendored dependency
@@ -114,10 +115,42 @@ def _read(path: str) -> bytes:
         return handle.read()
 
 
+#: `O_NOFOLLOW` is POSIX; on Windows the name is absent and the flag is 0 (D-050, defect 50).
+NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
+
+
+def read_nofollow(path: str) -> bytes:
+    """Read a regular file, refusing to follow a symlink at the final component.
+
+    The one reader every check in this package uses — `sha256_file` here, the originals and the read-back in `apply` —
+    because a hash taken through a link is a statement about a file the reviewer never saw.
+
+    The refusal is the platform's: `O_NOFOLLOW` makes the kernel do it at the open on POSIX; on Windows there is no
+    such flag, so it is a check immediately before the open, and a swap landing in between is not detected — the limit
+    D-050 records. Either way the function never returns the bytes on the other side of a link.
+
+    Content goes through `platform().open_fd`, because a text-mode descriptor on Windows would hand back `0x0A` where
+    the file holds `0x0D 0x0A`, and these bytes are what the backup and the comparison are made of.
+    """
+    if not NOFOLLOW and os.path.islink(path):
+        raise OSError(f"blackbox refuses to read {path}: it is a symbolic link and this platform has no O_NOFOLLOW")
+    fd = platform().open_fd(path, os.O_RDONLY | NOFOLLOW)
+    try:
+        chunks = []
+        while True:
+            block = os.read(fd, 1 << 20)
+            if not block:
+                break
+            chunks.append(block)
+        return b"".join(chunks)
+    finally:
+        os.close(fd)
+
+
 def sha256_file(path: str) -> str | None:
     if not os.path.exists(path):
         return None
-    return hashlib.sha256(_read(path)).hexdigest()
+    return hashlib.sha256(read_nofollow(path)).hexdigest()
 
 
 def _check_path(repo: str, raw: str) -> str:

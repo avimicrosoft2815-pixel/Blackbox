@@ -87,6 +87,11 @@ def _apply(args: argparse.Namespace) -> int:
     for path in result.written:
         print(f"wrote   {path}")
     print(f"originals saved in {result.backup_dir}")
+    if not result.private_by_mode:
+        # One line, on the platforms where it is true, because a backup directory that is *not* private is the kind of
+        # detail a user has to be told rather than discover.
+        print("blackbox repair: this platform has no POSIX file modes, so that directory is only as private as the "
+              "repository's ACLs — it is not 0700", file=sys.stderr)
     print("nothing was run: this change is unverified until you run `blackbox repair verify --test …`")
     return 0
 

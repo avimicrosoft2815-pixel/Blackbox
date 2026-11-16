@@ -36,11 +36,10 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from blackbox.platform import current as platform
-from blackbox.repair.proposal import Proposal, ProposalError, _check_path, _read, sha256_file
+from blackbox.repair.proposal import NOFOLLOW, Proposal, ProposalError, _check_path, _read, read_nofollow, sha256_file
 
-#: `O_NOFOLLOW` is POSIX; on Windows the name is absent and the flag is 0. The `islink` checks still run there, so the
-#: remaining exposure is a swap between the check and the open — recorded in D-050 rather than papered over.
-NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
+#: `NOFOLLOW` comes from `proposal` so the read path and the write path cannot disagree about it; on Windows it is 0,
+#: the `islink` checks are what refuse a link, and the remaining exposure is a swap between check and open (D-050).
 BACKUP_DIR = ".blackbox-repair"
 
 
@@ -49,36 +48,49 @@ class Applied:
     written: list[str] = field(default_factory=list)
     created: list[str] = field(default_factory=list)
     backup_dir: str | None = None
+    #: `True` when the backup directory's 0700 was enforced and checked; `False` on a platform without POSIX modes,
+    #: where the caller has to say so rather than let a reader assume the backups are private.
+    private_by_mode: bool = True
     restored: list[str] = field(default_factory=list)
     restore_failures: list[str] = field(default_factory=list)
     manifest: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {"written": self.written, "created": self.created, "backup_dir": self.backup_dir,
-                "restored": self.restored, "restore_failures": self.restore_failures, "manifest": self.manifest}
+                "private_by_mode": self.private_by_mode, "restored": self.restored,
+                "restore_failures": self.restore_failures, "manifest": self.manifest}
 
 
 def _sha_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def _read_nofollow(path: str) -> bytes:
-    """Read a regular file, refusing to follow a symlink at the final component.
+#: Whether `chmod` mode bits describe access on this platform. On Windows they do not: `os.chmod` can only toggle the
+#: read-only attribute, and `os.stat` synthesises `0o666`/`0o777` whatever the ACL actually says. A "0700 backup
+#: directory" is therefore not expressible there, and `apply()` reports which guarantee the caller got instead of
+#: asserting one that does not exist.
+MODES_ARE_REAL = os.name == "posix"
 
-    Through `platform().open_fd`, because content is what is being read: a descriptor in text mode would hand back
-    `0x0A` where the file holds `0x0D 0x0A`, and these are the bytes the backup and the hash comparison are made of.
-    """
-    fd = platform().open_fd(path, os.O_RDONLY | NOFOLLOW)
-    try:
-        chunks = []
-        while True:
-            block = os.read(fd, 1 << 20)
-            if not block:
-                break
-            chunks.append(block)
-        return b"".join(chunks)
-    finally:
-        os.close(fd)
+
+#: Whether `chmod` mode bits describe access on this platform. On Windows they do not: `os.chmod` can only toggle the
+#: read-only attribute, and `os.stat` synthesises `0o666`/`0o777` whatever the ACL actually says. A "0700 backup
+#: directory" is therefore not expressible there, and `apply()` reports which guarantee the caller got instead of
+#: asserting one that does not exist.
+MODES_ARE_REAL = os.name == "posix"
+
+
+#: Whether `chmod` mode bits describe access on this platform. On Windows they do not: `os.chmod` can only toggle the
+#: read-only attribute, and `os.stat` synthesises `0o666`/`0o777` whatever the ACL actually says. A "0700 backup
+#: directory" is therefore not expressible there, and `apply()` reports which guarantee the caller got instead of
+#: asserting one that does not exist.
+MODES_ARE_REAL = os.name == "posix"
+
+
+#: Whether `chmod` mode bits describe access on this platform. On Windows they do not: `os.chmod` can only toggle the
+#: read-only attribute, and `os.stat` synthesises `0o666`/`0o777` whatever the ACL actually says. A "0700 backup
+#: directory" is therefore not expressible there, and `apply()` reports which guarantee the caller got instead of
+#: asserting one that does not exist.
+MODES_ARE_REAL = os.name == "posix"
 
 
 def _assert_safe_target(path: str, *, repo_real: str) -> None:
@@ -180,7 +192,7 @@ def _prepare(proposal: Proposal) -> list[tuple[str, bytes | None, int, str]]:
             raise ProposalError(f"{change.path}: {exc}") from exc
         _assert_safe_target(absolute, repo_real=repo_real)
         if os.path.exists(absolute):
-            original = _read_nofollow(absolute)
+            original = read_nofollow(absolute)
             current = _sha_bytes(original)
             if change.is_new():
                 raise ProposalError(f"{change.path} exists now but the proposal said it was new")
@@ -197,19 +209,40 @@ def _prepare(proposal: Proposal) -> list[tuple[str, bytes | None, int, str]]:
     return prepared
 
 
-def _backup_root(repo_real: str) -> str:
-    """`<repo>/.blackbox-repair`, created 0700, refused if anything about it is a link."""
+def _private_dir(path: str, *, what: str) -> bool:
+    """Make `path` private if mode bits mean anything here, and say which of those two things happened.
+
+    Returns `True` when 0700 is enforced and verified, `False` when the platform has no POSIX modes to enforce. A
+    filesystem that *has* them and ignores `chmod` is neither of those: it is a place this feature cannot keep its
+    promise, so it refuses rather than proceeding quietly.
+    """
+    if not MODES_ARE_REAL:
+        return False
+    if os.stat(path).st_mode & 0o077:               # backups are the user's source code in plain text
+        os.chmod(path, 0o700)
+        if os.stat(path).st_mode & 0o077:
+            raise ProposalError(
+                f"{what} {path} cannot be made private (mode {oct(os.stat(path).st_mode & 0o777)} after chmod); "
+                f"refusing to write backups a group or other could read")
+    return True
+
+
+def _backup_root(repo_real: str) -> tuple[str, bool]:
+    """`<repo>/.blackbox-repair`, as private as this platform allows, and refused if anything about it is a link.
+
+    Returns `(root, private_by_mode)`. `private_by_mode` is `False` on Windows, where a directory's mode bits do not
+    describe access and the backup is only as private as the repository directory's ACLs — a fact the caller passes on
+    rather than a property this function pretends to have.
+    """
     root = os.path.join(repo_real, BACKUP_DIR)
     if os.path.islink(root):
         raise ProposalError(f"{root} is a symlink; refusing to write backups through it")
     if not os.path.isdir(root):
         os.makedirs(root, mode=0o700, exist_ok=True)
-    stat = os.stat(root)
-    if stat.st_mode & 0o077:                        # backups are the user's source code in plain text
-        os.chmod(root, 0o700)
+    private = _private_dir(root, what="the backup directory")
     if os.path.islink(root):                        # re-check after creating: `makedirs` follows an existing link
         raise ProposalError(f"{root} is a symlink; refusing to write backups through it")
-    return root
+    return root, private
 
 
 def apply(proposal: Proposal, *, approval: str) -> Applied:
@@ -221,13 +254,14 @@ def apply(proposal: Proposal, *, approval: str) -> Applied:
         raise ProposalError(detail + " — re-run `repair preview` and approve the token it prints")
     prepared = _prepare(proposal)
     repo_real = proposal.repo
-    backup_root = _backup_root(repo_real)
+    backup_root, private = _backup_root(repo_real)
     backup_dir = os.path.join(backup_root, f"backup-{time.strftime('%Y%m%dT%H%M%S')}-{proposal.token()[:8]}")
     if os.path.exists(backup_dir):
         raise ProposalError(f"{backup_dir} already exists; refusing to reuse a backup directory")
     os.makedirs(backup_dir, mode=0o700)
+    _private_dir(backup_dir, what="this backup")
 
-    result = Applied(backup_dir=backup_dir)
+    result = Applied(backup_dir=backup_dir, private_by_mode=private)
     manifest_path = os.path.join(backup_dir, "apply-manifest.json")
     result.manifest = manifest_path
     planned = [{"path": change.path, "approved_sha256": change.expected_sha256,
@@ -236,6 +270,9 @@ def apply(proposal: Proposal, *, approval: str) -> Applied:
     _atomic_write(manifest_path, json.dumps(
         {"schema": "blackbox.repair-apply/1", "token": proposal.token(), "repo": repo_real,
          "started_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "state": "planned",
+         "backup": {"dir": backup_dir, "private_by_mode": private,
+                    "note": "0700, verified" if private else
+                            "this platform has no POSIX modes: the directory is as private as the repository's ACLs"},
          "changes": planned}, indent=2).encode(), 0o600)
 
     applied_paths: list[str] = []
@@ -245,7 +282,7 @@ def apply(proposal: Proposal, *, approval: str) -> Applied:
             if original is not None:
                 copy = os.path.join(backup_dir, f"{index:02d}-{os.path.basename(change.path)}")
                 _atomic_write(copy, original, 0o600)
-                if _read_nofollow(copy) != original:
+                if read_nofollow(copy) != original:
                     raise ProposalError(f"the backup of {change.path} did not verify; nothing was written")
             # The last check before the write: the tree can have moved while the backups were being taken.
             _assert_safe_target(absolute, repo_real=repo_real)
@@ -253,7 +290,7 @@ def apply(proposal: Proposal, *, approval: str) -> Applied:
                 raise ProposalError(f"{change.path} changed while the apply was running; rolling back")
             _atomic_write(change.absolute if os.path.exists(change.absolute) else absolute,
                           change.content.encode("utf-8"), mode)
-            if _sha_bytes(_read_nofollow(absolute)) != new_sha:
+            if _sha_bytes(read_nofollow(absolute)) != new_sha:
                 raise ProposalError(f"{change.path} did not read back as written; rolling back")
             applied_paths.append(absolute)
             (result.created if change.is_new() else result.written).append(change.path)

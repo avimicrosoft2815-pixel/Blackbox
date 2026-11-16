@@ -28,6 +28,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 import blackbox.repair.apply as apply_mod
+import blackbox.repair.proposal as proposal_mod
 from blackbox.repair.apply import apply as apply_proposal
 from blackbox.repair.apply import verify
 from blackbox.repair.cli import main as repair_main
@@ -73,7 +74,9 @@ def _change(repo: Path, path: str, content: str, *, new: bool = False) -> dict:
 
 
 def _snapshot(root: Path) -> dict[str, str]:
-    return {str(p.relative_to(root)): (p.read_bytes().hex() if p.is_file() else "<dir>")
+    # `as_posix()`: with `str(...)` the keys were `src\\b.py` on Windows and every lookup by `src/b.py` raised KeyError,
+    # which is how the rollback test failed there while the rollback itself was fine.
+    return {p.relative_to(root).as_posix(): (p.read_bytes().hex() if p.is_file() else "<dir>")
             for p in sorted(root.rglob("*")) if ".blackbox-repair" not in str(p)}
 
 
@@ -366,14 +369,35 @@ def test_the_last_check_runs_immediately_before_each_write_not_only_at_load(tmp_
 
 
 def test_reading_an_original_does_not_follow_a_link(tmp_path):
-    """`_read_nofollow` is the mechanism behind the check, so it is tested on its own."""
+    """`_read_nofollow` is the mechanism behind the check, so it is tested on its own — and by *which* mechanism."""
     target = tmp_path / "real.txt"
     target.write_bytes(b"bytes\n")
     link = tmp_path / "link.txt"
     os.symlink(target, link)
-    assert apply_mod._read_nofollow(str(target)) == b"bytes\n"
-    with pytest.raises(OSError):
-        apply_mod._read_nofollow(str(link))
+    assert proposal_mod.read_nofollow(str(target)) == b"bytes\n"
+    with pytest.raises(OSError) as caught:
+        proposal_mod.read_nofollow(str(link))
+    if proposal_mod.NOFOLLOW:
+        assert "blackbox refuses" not in str(caught.value), "the kernel refused it at the open; the check is the fallback"
+    else:
+        assert "blackbox refuses" in str(caught.value)
+
+
+def test_without_the_descriptor_flag_the_refusal_is_a_check(tmp_path, monkeypatch):
+    """The Windows path, exercised anywhere: take the flag away and the function must still refuse the link.
+
+    It did not, until a Windows run asked: `NOFOLLOW` is 0 there, so `os.open` followed the link and `_read_nofollow`
+    returned the bytes on the other side — the one thing its name promises it will not do (defect 50).
+    """
+    monkeypatch.setattr(proposal_mod, "NOFOLLOW", 0)
+    target = tmp_path / "real.txt"
+    target.write_bytes(b"bytes\n")
+    link = tmp_path / "link.txt"
+    os.symlink(target, link)
+    assert proposal_mod.read_nofollow(str(target)) == b"bytes\n", "a regular file still reads"
+    with pytest.raises(OSError) as caught:
+        proposal_mod.read_nofollow(str(link))
+    assert "blackbox refuses" in str(caught.value)
 
 
 # ── backups: inside the repository, private, and verified before the write ───────────────────────────────────────
@@ -384,9 +408,47 @@ def test_the_backup_directory_is_inside_the_repository_and_private(tmp_path):
     result = apply_proposal(load(str(proposal_path), repo=str(repo)), approval=token)
     root = repo / ".blackbox-repair"
     assert result.backup_dir and result.backup_dir.startswith(str(root))
-    assert (os.stat(root).st_mode & 0o777) == 0o700, "backups are the user's source code in plain text"
-    assert (os.stat(result.backup_dir).st_mode & 0o777) == 0o700
+    if apply_mod.MODES_ARE_REAL:
+        assert (os.stat(root).st_mode & 0o777) == 0o700, "backups are the user's source code in plain text"
+        assert (os.stat(result.backup_dir).st_mode & 0o777) == 0o700
+        assert result.private_by_mode is True
+    else:
+        # Windows has no POSIX modes: `os.stat` synthesises 0o777 whatever the ACL says, so the product must not claim
+        # 0700 and must say which guarantee the caller actually got.
+        assert result.private_by_mode is False
     assert "RuntimeError" in (Path(result.backup_dir) / "00-app.py").read_text(encoding="utf-8")
+
+
+def test_a_platform_without_modes_says_so_instead_of_claiming_0700(tmp_path, monkeypatch, capsys):
+    """The Windows branch of the privacy guarantee, exercised on any platform.
+
+    The product cannot make a directory private without POSIX modes, so it records the weaker fact in the manifest and
+    prints it — instead of writing `0700` into a document while the directory is readable by anyone the repository is.
+    """
+    monkeypatch.setattr(apply_mod, "MODES_ARE_REAL", False)
+    repo = _repo(tmp_path)
+    proposal_path = _proposal(tmp_path, repo, [_change(repo, "src/app.py", "def handler():\n    return 1\n")])
+    proposal = load(str(proposal_path), repo=str(repo))
+    code = repair_main(["apply", str(proposal_path), "--repo", str(repo), "--approve", proposal.token()])
+    err = capsys.readouterr().err
+    assert code == 0
+    assert "only as private as the repository's ACLs" in err
+    manifest = json.loads(next(Path(repo, ".blackbox-repair").rglob("apply-manifest.json")).read_text())
+    assert manifest["backup"]["private_by_mode"] is False
+    assert "no POSIX modes" in manifest["backup"]["note"]
+
+
+def test_a_filesystem_that_ignores_chmod_is_refused_rather_than_trusted(tmp_path, monkeypatch):
+    """A directory it cannot make private is a place this feature must not put the user's source code."""
+    repo = _repo(tmp_path)
+    (repo / ".blackbox-repair").mkdir(mode=0o755)
+    monkeypatch.setattr(apply_mod, "MODES_ARE_REAL", True)
+    monkeypatch.setattr(apply_mod.os, "chmod", lambda *a, **k: None, raising=False)
+    proposal = load(str(_proposal(tmp_path, repo, [_change(repo, "src/app.py", "x = 1\n")])), repo=str(repo))
+    with pytest.raises(ProposalError) as caught:
+        apply_proposal(proposal, approval=proposal.token())
+    assert "cannot be made private" in str(caught.value)
+    assert (repo / "src" / "app.py").read_text(encoding="utf-8").startswith("def handler"), "nothing was written"
 
 
 def test_a_symlinked_backup_root_is_refused(tmp_path):
