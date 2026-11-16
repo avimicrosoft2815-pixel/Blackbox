@@ -266,6 +266,19 @@ def _calls_on_tape(data_dir: Path) -> list[dict]:
     return out
 
 
+def _run_starts(data_dir: Path) -> list[dict]:
+    """Every `RUN_START` payload in the data directory — the identity a tape declares for itself."""
+    from blackbox.codec import cbor
+
+    out: list[dict] = []
+    for tape in sorted((data_dir / "tape").iterdir()):
+        scan = scanner.scan(str(data_dir), tape.name)
+        for frame in scan.frames:
+            if frame["kind"] == C.KIND_RUN_START:
+                out.append(cbor.decode_exact(frame["payload"]))
+    return out
+
+
 def _graph_with_nodes(data_dir: Path) -> dict:
     graphs = [json.loads(path.read_text(encoding="utf-8")) for path in sorted((data_dir / "runs").glob("*/graph.json"))]
     with_nodes = [graph for graph in graphs if graph.get("nodes")]
@@ -316,3 +329,38 @@ def test_two_concurrent_calls_get_two_ids_and_two_graph_edges_each_naming_its_ow
     assert all(edge["nodes"]["to"] is None for edge in call_edges), "the proxy records calls, not the app's nodes"
     assert graph["edge_summary"]["call_level"] == 2 and graph["edge_summary"]["node_level"] == 0
     assert graph["edge_summary"]["node_join"] == "partial"
+
+
+def test_an_uninstrumented_child_leaves_no_node_and_no_call_edge(tmp_path, origin, capfd):
+    """Missing instrumentation is a *fact about the run*, not a gap to paper over (docs/node-edges.md).
+
+    The child here is plain `urllib`: no SDK, no seam, no `x-blackbox-call` on the wire. The proxy still records the
+    request — that is its job and its vantage — but it must record it with `call_id: null`, and the run's graph must
+    have no node and no call edge. A recorder that manufactured an id here would give the graph an edge whose other end
+    it had invented, which is the one thing D-052 forbids.
+    """
+    argv, _script = _child(tmp_path)
+    log = tmp_path / "log.txt"
+    env = {"PATH": os.environ.get("PATH", ""), "PYTHONPATH": str(ROOT / "src")}
+    with open(log, "w") as handle:
+        result = launcher.launch(argv, data_dir=str(tmp_path / "data"), out=handle,
+                                 proxy=True, proxy_routes=_routes(origin), env=env)
+    assert result.exit_code == 0, result.exit_code
+    calls = _calls_on_tape(tmp_path / "data")
+    assert len(calls) == 1, f"one request, one record: {calls}"
+    assert calls[0]["call_id"] is None, "an uninstrumented child was never given an id, so none may be recorded"
+    assert calls[0]["linked_run"] is None, "no header arrived, so the record must not claim a run it was not told"
+    # The record is still the run's own: the launcher's tape writes it, and that tape's `RUN_START` names the run.
+    starts = _run_starts(tmp_path / "data")
+    assert starts and {start["run_id"] for start in starts} == {result.run_id}, starts
+
+    graphs = [json.loads(path.read_text(encoding="utf-8"))
+              for path in sorted((tmp_path / "data" / "runs").glob("*/graph.json"))]
+    assert graphs, "the run left a graph"
+    for graph in graphs:
+        assert graph["nodes"] == [], "no instrumented writer opened a node, so the graph must list none"
+        # The run may still hold run-level links between its own tapes (the auto-imported interpreter writes one even
+        # when the app makes no model call). What must be absent is a *call* edge: there is no id to justify one.
+        assert [edge for edge in graph["edges"] if edge["level"] != "run"] == [], graph["edges"]
+        assert graph["edge_summary"]["call_level"] == 0
+        assert graph["edge_summary"]["node_level"] == 0
