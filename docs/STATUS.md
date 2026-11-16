@@ -49,6 +49,16 @@ Suite: **Total: 1012 tests** — 1011 pass here and 1 is skipped on POSIX by nam
 the open-view case exists only on Windows). ruff 0.17.5 and mypy 2.4.1 (`strict = true`, nothing disabled):
 0 findings.
 
+**What `repair` does not guarantee, in one place.** The gate is documented at length in D-049/D-050 and in the P4-18
+row below; these are the three limits a reader should not have to go looking for. (1) **On Windows the symlink
+guarantee is check-then-write, not atomic.** `os.O_NOFOLLOW` does not exist there, so a swap that lands between the
+`islink` check and the open is not detected; on POSIX the descriptor flag closes that window. Closing it on Windows
+means opening by handle with `FILE_FLAG_OPEN_REPARSE_POINT`, which was not done. (2) **A process killed mid-apply
+cannot roll back.** It had no chance to — what survives is `apply-manifest.json`, written before the first mutation and
+left in state `planned`, so the tree is auditable rather than silently unknown. (3) **`repair verify --test CMD`
+executes CMD** through the platform shell, in `--repo`, with your privileges; it is announced before it runs and
+nothing from a proposal is ever executed.
+
 ## Fulfilled (test exists, ran, passed / number measured)
 
 | Gate or budget row | Plan ref | Evidence (test path, results JSON, or CI run URL) |
