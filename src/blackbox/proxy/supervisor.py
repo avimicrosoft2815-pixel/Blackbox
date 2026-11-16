@@ -7,7 +7,8 @@ with its own loop. Two things follow from that, and both are the reason this fil
 * **The thread must be supervised, not merely started.** A listener that dies (a port taken by another process, a
   socket error nobody was watching) would leave a child pointed at a base URL that answers nothing, which is worse
   than no recorder at all: the application fails and it fails *because of us*. So the thread watches its listener and
-  rebinds, and the rebind's latency is a number the tests assert rather than a hope.
+  rebinds, and every watchdog-triggered recovery is recorded with its own latency and the tick that bounded its
+  detection — all samples, kept, because the gate is every sample and not a median.
 * **The variable plan is a pure function.** `OPENAI_BASE_URL` and friends may already be set — by the user, by a
   router, by a previous tool — and a recorder that overwrites them changes where the application's traffic goes. The
   rule is: export only what is unset, and **adopt** what is set as an upstream, because that value names a destination
@@ -47,6 +48,15 @@ BASE_URL_SUFFIX: dict[str, str] = {"OPENAI_BASE_URL": "/v1"}
 ENV_PROXY = cap_headers.ENV_PROXY
 REBIND_BUDGET_MS = 100.0
 START_TIMEOUT = 10.0
+# How often the watchdog looks. This is the *detection* floor of a recovery, so it is part of the promise a child
+# experiences: the plan budgets a rebind at <= 100 ms, and a 50 ms tick spends half of that budget before the rebind
+# starts. 10 ms costs one `Event.wait` per tick in the launcher's own process (the child never pays it) and leaves
+# 90 ms of the budget for the restart itself. Measured on this box: end-to-end 10.4-11.8 ms, rebind 0.5-3 ms
+# (`bench/results/2026-11-16-watchdog.json`).
+SUPERVISE_MS = 10.0
+# A rebind that keeps failing (the port was taken by somebody else and the fallback also fails) must not spin: the
+# interval doubles up to this ceiling, and the failure is recorded rather than killing the thread.
+MAX_SUPERVISE_BACKOFF_MS = 1000.0
 
 
 @dataclass
@@ -113,7 +123,7 @@ class ProxyThread:
     """A `ProxyServer` on its own loop in its own thread, with a watchdog that rebinds a dead listener."""
 
     def __init__(self, routes: Routes, *, receiver: Any = None, port: int = 0,
-                 supervise_ms: float = 50.0, retry_transmitted: bool = False) -> None:
+                 supervise_ms: float = SUPERVISE_MS, retry_transmitted: bool = False) -> None:
         self.routes = routes
         self.receiver = receiver
         self.retry_transmitted = retry_transmitted
@@ -126,7 +136,10 @@ class ProxyThread:
         self._ready = threading.Event()
         self._stopping = threading.Event()
         self._start_error: BaseException | None = None
-        self.rebinds: list[float] = []                     # milliseconds each rebind took
+        self.rebinds: list[float] = []                     # milliseconds each rebind took, manual and watchdog alike
+        self.recoveries: list[dict[str, Any]] = []         # one record per watchdog-triggered rebind
+        self.supervision_errors: list[dict[str, Any]] = []  # failed attempts; the watchdog retries instead of dying
+        self.checks = 0                                    # watchdog wakes that found the listener alive
         self.port_changed = False                          # set when a rebind could not keep the port the child was told
         self._lock = threading.Lock()
 
@@ -189,13 +202,60 @@ class ProxyThread:
         return self._server.stats if self._server is not None else None
 
     # -- supervision ---------------------------------------------------------------------------------------------
+    def _interval(self) -> float:
+        return max(self._supervise_ms, 1.0) / 1000.0
+
     def _supervise(self) -> None:
-        while not self._stopping.wait(self._supervise_ms / 1000.0):
+        """Look for a dead listener once per tick and repair it. This thread must outlive its own failures.
+
+        Every recovery is recorded with both halves of the latency, because they answer different questions and only
+        one of them is under the proxy's control:
+
+        * `rebind_ms`   — the restart itself, the number the plan budgets at `REBIND_BUDGET_MS`;
+        * `watchdog_ms` — from the moment this thread woke and saw the listener down to the moment service returned,
+                          which adds the health check and the scheduler's wake-up jitter.
+        * `tick_ms`     — the detection floor: a listener that dies one microsecond after a tick waits a whole tick
+                          before anybody looks. Recovery end-to-end therefore cannot be promised below the tick.
+        """
+        interval = self._interval()
+        while not self._stopping.wait(interval):
             if self._server is None or self._loop is None:
                 continue
             if self._server.is_serving:
+                self.checks += 1
                 continue
-            self.rebind()
+            woke = time.monotonic()
+            try:
+                rebind_ms = self.rebind()
+            except BaseException as exc:                    # a dead watchdog is a permanent outage
+                self.supervision_errors.append({
+                    "at": time.time(), "error": repr(exc), "backoff_ms": interval * 1000.0,
+                })
+                interval = min(max(interval * 2.0, self._interval()), MAX_SUPERVISE_BACKOFF_MS / 1000.0)
+                continue
+            interval = self._interval()
+            self.recoveries.append({
+                "tick_ms": self._supervise_ms,
+                "watchdog_ms": (time.monotonic() - woke) * 1000.0,
+                "rebind_ms": rebind_ms,
+                "port": self.port,
+                "port_changed": self.port_changed,
+            })
+
+    def watchdog_stats(self) -> dict[str, Any]:
+        """The supervision evidence, all samples kept. No medians: the gate is every sample."""
+        recoveries = list(self.recoveries)
+        return {
+            "tick_ms": self._supervise_ms,
+            "alive": self._watchdog is not None and self._watchdog.is_alive(),
+            "checks": self.checks,
+            "rebinds": len(self.rebinds),
+            "recoveries": recoveries,
+            "errors": list(self.supervision_errors),
+            "max_rebind_ms": max((r["rebind_ms"] for r in recoveries), default=None),
+            "max_watchdog_ms": max((r["watchdog_ms"] for r in recoveries), default=None),
+            "port_changed": self.port_changed,
+        }
 
     def rebind(self, timeout: float = START_TIMEOUT) -> float:
         """Replace a dead listener and return how many milliseconds it took. Supervision calls this."""
@@ -235,4 +295,14 @@ class ProxyThread:
         self.stop()
 
 
-__all__ = ["BASE_URL_SUFFIX", "BASE_URL_VARS", "ENV_PROXY", "REBIND_BUDGET_MS", "ExportPlan", "ProxyThread", "plan_exports"]
+__all__ = [
+    "BASE_URL_SUFFIX",
+    "BASE_URL_VARS",
+    "ENV_PROXY",
+    "MAX_SUPERVISE_BACKOFF_MS",
+    "REBIND_BUDGET_MS",
+    "SUPERVISE_MS",
+    "ExportPlan",
+    "ProxyThread",
+    "plan_exports",
+]

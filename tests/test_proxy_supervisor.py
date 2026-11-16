@@ -6,9 +6,12 @@ Two promises are tested here, and they are the two that make the proxy safe to h
   becomes a route — because the alternative is either a recorder that silently redirects traffic or a proxy that
   refuses to reach the destination the user named.
 * **A dead listener comes back inside the budget**, on the port the child was told, and the watchdog is what notices.
+  The budget is gated on watchdog-triggered samples only, every one of them, because a median over manual rebinds
+  measured a different operation and hid the outliers that matter.
 """
 from __future__ import annotations
 
+import asyncio
 import time
 
 from blackbox.proxy.routes import Route, Routes
@@ -72,37 +75,104 @@ def test_the_thread_listens_starts_and_stops_cleanly():
     assert proxy.server is None or not proxy.server.is_serving
 
 
-def test_a_rebind_keeps_the_port_the_child_was_told_and_lands_inside_the_budget():
+def test_a_rebind_keeps_the_port_the_child_was_told():
     with ProxyThread(_table()) as proxy:
         port = proxy.port
         elapsed = proxy.rebind()
         assert proxy.port == port, "the child was told this port; a rebind that changes it is a broken child"
-        assert elapsed <= REBIND_BUDGET_MS, f"rebind took {elapsed:.1f} ms, budget {REBIND_BUDGET_MS} ms"
         assert proxy.rebinds == [elapsed]
+        # The elapsed time is recorded here and published in `bench/results/2026-11-16-watchdog.json`, but it is not
+        # the gate: a manual rebind measures this runner's scheduler as much as it measures the proxy (defect 40 — a
+        # macOS arm64 cell once read 107.9 ms). The gate is the next test, where the sample is watchdog-triggered and
+        # every one of them counts.
+        assert elapsed >= 0.0
 
 
-def test_the_watchdog_brings_a_dead_listener_back_without_being_asked():
+WATCHDOG_SAMPLES = 10
+
+
+def _wait_for_restore(proxy: ProxyThread, dead, deadline: float) -> bool:
+    """True when service is back on a listener that is *not* the one we closed."""
+    while time.monotonic() < deadline:
+        current = proxy.server
+        if current is not None and current is not dead and current.is_serving:
+            return True
+        time.sleep(0.002)
+    return False
+
+
+def test_every_watchdog_recovery_stays_inside_the_budget_and_every_sample_is_kept():
+    """P3B-03's gate, measured the only way that means anything: real watchdog recoveries, every sample asserted.
+
+    The previous version of this test closed the listener once and then performed four *manual* rebinds, asserting the
+    median of five. That median was doing two kinds of harm: three of its five samples were of a different operation
+    than the one being promised, and taking a median is precisely how a 107.9 ms outlier disappears. Here each sample
+    comes from the watchdog itself, both halves of the latency are checked (`rebind_ms` for the restart, `watchdog_ms`
+    for wake-to-service), and one bad sample fails the test.
+    """
     with ProxyThread(_table(), supervise_ms=10.0) as proxy:
-        server = proxy.server
-        assert server is not None and proxy._loop is not None
         port = proxy.port
-        # close the listener behind the supervisor's back: exactly the failure it exists for
-        import asyncio
+        loop = proxy._loop
+        assert loop is not None
+        for index in range(WATCHDOG_SAMPLES):
+            server = proxy.server
+            assert server is not None and server.is_serving
+            # Close the listener behind the supervisor's back: exactly the failure it exists for.
+            asyncio.run_coroutine_threadsafe(server.close(), loop).result(5)
+            assert not server.is_serving
+            assert _wait_for_restore(proxy, server, time.monotonic() + 2.0), \
+                f"the watchdog did not restore service on recovery {index}"
+            assert proxy.port == port, "and it restored it on the same port"
+        evidence = proxy.watchdog_stats()
+        assert evidence["alive"], "the watchdog thread must survive the recoveries it performs"
+        assert evidence["errors"] == [], f"a recovery attempt failed: {evidence['errors']}"
+        assert len(evidence["recoveries"]) == WATCHDOG_SAMPLES, (
+            "one recovery record per death, and none of them manual: "
+            f"{len(evidence['recoveries'])} recorded for {WATCHDOG_SAMPLES} deaths")
+        assert proxy.rebinds == [r["rebind_ms"] for r in evidence["recoveries"]], \
+            "no rebind happened outside the watchdog, or a sample went missing"
+        for record in evidence["recoveries"]:
+            assert record["port"] == port and record["port_changed"] is False
+            assert record["rebind_ms"] <= REBIND_BUDGET_MS, (
+                f"watchdog rebind took {record['rebind_ms']:.1f} ms, budget {REBIND_BUDGET_MS} ms; "
+                f"all samples {proxy.rebinds}")
+            # Wake-to-service is what the child actually experiences; the tick is its lower bound.
+            assert record["watchdog_ms"] <= REBIND_BUDGET_MS, (
+                f"watchdog recovery took {record['watchdog_ms']:.1f} ms, budget {REBIND_BUDGET_MS} ms; "
+                f"all records {evidence['recoveries']}")
+        # Published as raw samples, not as a median: `python tools/bench_watchdog.py` regenerates the JSON.
+        print("watchdog recoveries (ms):", [round(r["rebind_ms"], 2) for r in evidence["recoveries"]],
+              "wake-to-service (ms):", [round(r["watchdog_ms"], 2) for r in evidence["recoveries"]])
 
-        asyncio.run_coroutine_threadsafe(server.close(), proxy._loop).result(5)
-        assert not server.is_serving
-        deadline = time.monotonic() + 2.0
-        while time.monotonic() < deadline and not proxy.server.is_serving:      # type: ignore[union-attr]
-            time.sleep(0.01)
-        assert proxy.server is not None and proxy.server.is_serving, "the watchdog did not restore service"
-        assert proxy.port == port, "and it restored it on the same port"
-        assert len(proxy.rebinds) == 1, "the rebind that restored service was the watchdog's, not a manual one"
-        # The budget is a promise to a child on a machine we control; one wall-clock sample on a shared runner is a
-        # measurement of the runner (defect 40 — a macOS arm64 cell read 107.9 ms against 100). Four more rebinds give a
-        # median, which a single scheduling pause cannot move, and the samples are printed so the worst case is visible
-        # rather than averaged away.
-        for _ in range(4):
-            proxy.rebind()
-        samples = list(proxy.rebinds)
-        median = sorted(samples)[len(samples) // 2]
-        assert median <= REBIND_BUDGET_MS, f"median rebind {median:.1f} ms over {REBIND_BUDGET_MS} ms; samples {samples}"
+
+def test_the_watchdog_retries_a_failed_rebind_instead_of_dying_with_it():
+    """A watchdog that exits on the first failure converts a recoverable listener into a permanent outage.
+
+    The full suite used to print `RuntimeError('the proxy could not rebind')` from the watchdog thread and carry on, so
+    this is not hypothetical: the thread was dying and nothing could bring the listener back afterwards.
+    """
+    with ProxyThread(_table(), supervise_ms=10.0) as proxy:
+        port = proxy.port
+        loop = proxy._loop
+        assert loop is not None
+        server = proxy.server
+        assert server is not None
+        real_restart = proxy._restart
+        attempts = {"count": 0}
+
+        def flaky(loop_, timeout):
+            attempts["count"] += 1
+            if attempts["count"] <= 2:
+                raise RuntimeError("the port went to somebody else")
+            return real_restart(loop_, timeout)
+
+        proxy._restart = flaky                                        # type: ignore[method-assign]
+        asyncio.run_coroutine_threadsafe(server.close(), loop).result(5)
+        assert _wait_for_restore(proxy, server, time.monotonic() + 5.0), \
+            "the watchdog gave up after a failed attempt instead of retrying"
+        evidence = proxy.watchdog_stats()
+        assert len(evidence["errors"]) == 2, f"failed attempts must be recorded, not swallowed: {evidence['errors']}"
+        assert all("the port went to somebody else" in e["error"] for e in evidence["errors"])
+        assert evidence["alive"]
+        assert proxy.port == port
+        assert len(evidence["recoveries"]) == 1 and evidence["recoveries"][0]["rebind_ms"] >= 0.0

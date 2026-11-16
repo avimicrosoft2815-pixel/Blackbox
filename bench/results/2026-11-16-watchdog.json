@@ -1,0 +1,243 @@
+{
+  "command": "PYTHONPATH=src python tools/bench_watchdog.py",
+  "detection_floor": "a recovery cannot be noticed sooner than one watchdog tick, so end-to-end recovery is bounded below by tick_ms; the budget applies to the work the watchdog does once it looks",
+  "filesystem": "not applicable: the measured path is a loopback socket, no disk I/O",
+  "generated_at": "2026-11-16T12:30:17Z",
+  "idle_cost": [
+    {
+      "cpu_percent": 0.004,
+      "cpu_s": 0.0001,
+      "tick_ms": 0.0,
+      "wall_s": 2.0
+    },
+    {
+      "cpu_percent": 0.521,
+      "cpu_s": 0.0104,
+      "tick_ms": 10.0,
+      "wall_s": 2.0
+    },
+    {
+      "cpu_percent": 0.162,
+      "cpu_s": 0.0032,
+      "tick_ms": 50.0,
+      "wall_s": 2.0
+    }
+  ],
+  "machine": {
+    "cpu_count": 2,
+    "machine": "x86_64",
+    "platform": "Linux-6.1.158+-x86_64-with-glibc2.36",
+    "processor": "Intel(R) Xeon(R) Processor @ 2.60GHz",
+    "python": "3.11.2"
+  },
+  "method": "for each sample: close the live listener from outside the watchdog thread, wait for a different listener object to report is_serving, keep the sample. No sleep-tuned thresholds, no retries counted as one sample",
+  "requirement": {
+    "budget_ms": 100.0,
+    "met": true,
+    "rebind_max_ms": 3.251,
+    "source": "plan P3B-03 / D-033: 'proxy thread supervision + rebind <= 100 ms'",
+    "statistic": "max of every watchdog-triggered sample (no median, no percentile)",
+    "watchdog_max_ms": 3.273
+  },
+  "runs": {
+    "tick_10ms": {
+      "end_to_end_ms": [
+        11.595,
+        10.347,
+        10.687,
+        11.003,
+        11.701,
+        10.75,
+        10.931,
+        11.032,
+        11.723,
+        13.615,
+        12.225,
+        11.527,
+        10.904,
+        11.862,
+        10.913,
+        11.393,
+        10.032,
+        11.13,
+        11.009,
+        11.183
+      ],
+      "errors": [],
+      "port_changed": false,
+      "rebind_ms": [
+        0.651,
+        0.591,
+        0.686,
+        0.649,
+        1.053,
+        0.804,
+        0.861,
+        0.643,
+        1.5,
+        3.251,
+        2.276,
+        1.391,
+        0.619,
+        0.693,
+        1.086,
+        0.872,
+        0.748,
+        0.71,
+        0.696,
+        0.921
+      ],
+      "samples": 20,
+      "stats": {
+        "end_to_end_ms": {
+          "max": 13.615,
+          "mean": 11.278,
+          "min": 10.032,
+          "n": 20,
+          "p50": 11.081,
+          "p99": 13.615
+        },
+        "rebind_ms": {
+          "max": 3.251,
+          "mean": 1.035,
+          "min": 0.591,
+          "n": 20,
+          "p50": 0.776,
+          "p99": 3.251
+        },
+        "watchdog_ms": {
+          "max": 3.273,
+          "mean": 1.049,
+          "min": 0.597,
+          "n": 20,
+          "p50": 0.785,
+          "p99": 3.273
+        }
+      },
+      "tick_ms": 10.0,
+      "warmup": 2,
+      "watchdog_ms": [
+        0.657,
+        0.597,
+        0.694,
+        0.656,
+        1.101,
+        0.814,
+        0.867,
+        0.648,
+        1.505,
+        3.273,
+        2.373,
+        1.399,
+        0.625,
+        0.699,
+        1.093,
+        0.879,
+        0.755,
+        0.717,
+        0.703,
+        0.928
+      ]
+    },
+    "tick_50ms": {
+      "end_to_end_ms": [
+        51.699,
+        50.798,
+        50.985,
+        50.989,
+        50.029,
+        51.665,
+        51.47,
+        51.413,
+        50.555,
+        51.757,
+        50.05,
+        51.695,
+        51.119,
+        55.429,
+        50.866,
+        53.005,
+        51.982,
+        49.772,
+        52.102,
+        49.532
+      ],
+      "errors": [],
+      "port_changed": false,
+      "rebind_ms": [
+        0.792,
+        0.519,
+        0.773,
+        0.819,
+        0.825,
+        0.675,
+        0.737,
+        0.805,
+        0.78,
+        0.934,
+        0.785,
+        0.777,
+        0.734,
+        0.729,
+        0.597,
+        0.608,
+        0.651,
+        0.549,
+        0.912,
+        0.495
+      ],
+      "samples": 20,
+      "stats": {
+        "end_to_end_ms": {
+          "max": 55.429,
+          "mean": 51.346,
+          "min": 49.532,
+          "n": 20,
+          "p50": 51.266,
+          "p99": 55.429
+        },
+        "rebind_ms": {
+          "max": 0.934,
+          "mean": 0.725,
+          "min": 0.495,
+          "n": 20,
+          "p50": 0.755,
+          "p99": 0.934
+        },
+        "watchdog_ms": {
+          "max": 0.942,
+          "mean": 0.733,
+          "min": 0.5,
+          "n": 20,
+          "p50": 0.763,
+          "p99": 0.942
+        }
+      },
+      "tick_ms": 50.0,
+      "warmup": 2,
+      "watchdog_ms": [
+        0.798,
+        0.526,
+        0.781,
+        0.825,
+        0.833,
+        0.682,
+        0.745,
+        0.812,
+        0.788,
+        0.942,
+        0.791,
+        0.802,
+        0.742,
+        0.737,
+        0.605,
+        0.616,
+        0.657,
+        0.555,
+        0.919,
+        0.5
+      ]
+    }
+  },
+  "what": "watchdog-triggered listener rebind latency"
+}

@@ -289,12 +289,38 @@ plan's §10 shape, and it is append-only.
   asked. None of those was violated: the listener came back on the same port, and the rebind was the watchdog's.
   *Cause*: the assertion took `max(proxy.rebinds) <= REBIND_BUDGET_MS` from a **single** sample, and `rebind()` is
   wall-clock time from entering the lock to the listener serving again — a quantity that includes whatever the shared
-  macOS arm64 runner does to a thread that has just been woken. The budget is a promise about a machine we control; a
-  one-sample wall clock on a runner is a measurement of the runner. Same family as defects 36, 37 and 38: an assertion
-  true of the quiet case and false of the honest one.
-  *Fix*: the test keeps the structural assertions (the watchdog is what restored service, and on the same port — now
-  asserted explicitly with `len(rebinds) == 1` before anything else happens) and takes the budget from the **median of
-  five** rebinds, printing all five samples in the failure message so the worst case stays visible instead of being
-  averaged away. A genuinely slow rebind still fails, on every sample; one scheduling pause no longer does.
-  *Test*: `test_the_watchdog_brings_a_dead_listener_back_without_being_asked`; green at `19d831e`+ locally and in the
-  re-run, and the number that a reader should quote is still the recorded median, not a rounding of the budget.
+  macOS arm64 runner does to a thread that has just been woken. Same family as defects 36, 37 and 38: an assertion
+  true of the quiet case and false of a quieter machine's opposite.
+  *First fix — rejected on review*: the test kept the structural assertions and took the budget from the **median of
+  five** rebinds, of which four were **manual** `proxy.rebind()` calls the test itself made. That was wrong twice
+  over: the median was computed mostly over a different operation than the one being promised, and a median is exactly
+  how a 107.9 ms outlier disappears. The plan's number is `proxy thread supervision + rebind ≤ 100 ms`; a statistic
+  that cannot fail on a slow supervision is not evidence of it. It also left the suite printing
+  `RuntimeError: the proxy could not rebind` from the watchdog thread (defect 41) while reporting green.
+  *Second fix (this one)*: supervision records what it did. `ProxyThread.recoveries` holds **one record per
+  watchdog-triggered rebind** — `rebind_ms` (the restart), `watchdog_ms` (wake → service), `tick_ms` (the detection
+  floor) and the port — and `watchdog_stats()` exposes them with `max_rebind_ms`/`max_watchdog_ms`. The test now kills
+  the listener ten times, asserts **every** watchdog sample against the budget (both halves), asserts that exactly ten
+  rebinds happened and that `proxy.rebinds` contains nothing but the watchdog's, and prints the raw samples. No median,
+  no percentile, no retry folded into one sample. The manual-rebind test keeps its structural assertions and no longer
+  claims the budget, because a manual rebind measures the runner's scheduler.
+  *Measured* (`bench/results/2026-11-16-watchdog.json`, this box, Linux 6.1.158 x86_64, py3.11.2, 40 watchdog
+  recoveries): rebind **max 1.13 ms**, wake-to-service **max 1.15 ms**, end-to-end from the kill **max 13.62 ms** at a
+  10 ms tick and 55.4 ms at a 50 ms tick. Two orders of magnitude inside the budget, and every sample is in the JSON.
+  *Test*: `tests/test_proxy_supervisor.py::test_every_watchdog_recovery_stays_inside_the_budget_and_every_sample_is_kept`.
+  The gate stays **unproven on macOS** until a CI cell runs this test there: the 107.9 ms sample says a shared macOS
+  runner can pause a thread for longer than the whole budget, and this build does not get to assume otherwise.
+- **defect 41 — the watchdog thread died on its own first failure, turning a recoverable listener into a permanent
+  outage.** The suite printed `RuntimeError('the proxy could not rebind')` from `blackbox-proxy-watchdog` as a
+  `PytestUnhandledThreadExceptionWarning` and still reported green: `_supervise()` called `self.rebind()` with no
+  handler, so any failure — the old port taken by somebody else *and* the fallback failing, a closed loop, a timeout
+  waiting for the new listener — ended the thread. Nothing restarts a dead watchdog, so every later death of the
+  listener was permanent, and the child would keep the base URL it was handed and get connection refusals for the rest
+  of the run. Invisible in tests because a *successful* rebind is what they exercised.
+  *Fix*: `_supervise()` catches `BaseException` per attempt, appends `{at, error, backoff_ms}` to
+  `supervision_errors`, doubles the interval up to `MAX_SUPERVISE_BACKOFF_MS` (1 s) so a permanently stolen port is not
+  a hot loop, resets it on success, and keeps watching. The failure is reported, never swallowed; the thread's death
+  is no longer the only signal that something went wrong.
+  *Test*: `tests/test_proxy_supervisor.py::test_the_watchdog_retries_a_failed_rebind_instead_of_dying_with_it` — the
+  first two attempts raise, the third succeeds, service returns on the same port, both failures are in
+  `supervision_errors`, and the thread is still alive.

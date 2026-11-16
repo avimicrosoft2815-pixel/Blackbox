@@ -174,7 +174,11 @@ routes = Routes([Route(name="openai", base="https://api.openai.com")], default="
 * **The variable plan** (`proxy/supervisor.py`) decides what the child sees: an unset base-URL variable is pointed at
   the proxy; a **set** one is left exactly as it is and becomes an upstream, so the recorder never moves traffic the
   user put somewhere on purpose. `ProxyThread` runs the listener on its own thread with a watchdog that rebinds a dead
-  listener **on the port the child was told**.
+  listener **on the port the child was told**, keeps trying with a backoff when an attempt fails instead of ending the
+  thread, and records every recovery it performs (`rebind_ms`, wake-to-service `watchdog_ms`, the tick that bounded
+  detection) — the 100 ms budget is gated on every one of those samples, not on a median (D-043, defects 40 and 41;
+  raw samples in `bench/results/2026-11-16-watchdog.json`). macOS is unproven for that gate: one CI sample there read
+  107.9 ms.
 * **`blackbox run` starts it for you** (P3B-03): the child sees `OPENAI_BASE_URL` / `ANTHROPIC_BASE_URL` /
   `OLLAMA_HOST` / `GOOGLE_GEMINI_BASE_URL` pointing at the proxy plus `BLACKBOX_PROXY=1`, unless the variable was
   already set — in which case it is left exactly as it was and its destination becomes a route. `--no-proxy` turns the

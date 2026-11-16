@@ -14,6 +14,32 @@ OUT = ROOT / "docs" / "progress.md"
 
 # ticket -> (status, commit, tests, measurement, reviewer, notes)
 S: dict[str, tuple[str, str, str, str, str, str]] = {
+    # L3/attach: states transcribed from docs/STATUS.md's evidence rows; test counts checked with
+    # `pytest <file> --collect-only` at the commit that wrote this. P3B-03 stays wip: its auto-import half is missing.
+    "P3B-01": ("done", "HEAD", "test_proxy_server.py (18)", "—", "self",
+               "loopback in, provider out, tee onto the tape; SSE sha256-identical, hop-by-hop headers dropped"),
+    "P3B-02": ("done", "HEAD", "test_proxy_routes.py (10), test_no_egress.py", "—", "self",
+               "the route table is the allowlist; longest prefix wins; one open_connection site, AST-asserted"),
+    "P3B-03": ("wip", "HEAD", "test_launcher_proxy.py (5), test_proxy_supervisor.py (9)",
+               "bench/results/2026-11-16-watchdog.json", "self",
+               "proxy thread, variable plan and launcher done; the rebind budget is gated on every watchdog-triggered "
+               "sample (D-043, defects 40/41; max 1.13 ms here, macOS unproven). Remaining: the .pth auto-import and "
+               "--no-sdk / --force-proxy / --no-hooks"),
+    "P3B-04": ("done", "HEAD", "test_headers.py (7), test_links.py (10), test_link_records.py (16)", "—", "self",
+               "x-blackbox-run only behind the proxy; exact/declared/inferred links, never merged"),
+    "P3B-05": ("done", "HEAD", "test_hook_inbox.py (20), test_hook_claude_code.py (13)", "—", "self",
+               "ten Claude Code events mapped; a prompt leaves a hash and a byte count, never its text"),
+    "P3B-06": ("wip", "HEAD", "test_hook_codex.py (26)", "—", "self",
+               "twelve events; an unknown schema is refused (BBX-E151) and the shape is labelled unverified because no "
+               "real Codex client has run it (D-041)"),
+    "P3B-07": ("wip", "HEAD", "test_hook_launcher.py (5), test_hook_inbox.py", "—", "self",
+               "three vantage points on one timeline; the inbox folds every 250 ms and once at exit. Remaining: the "
+               "bench-box cold-start row"),
+    "P3B-08": ("done", "HEAD", "tests/proxy (11), test_proxy_server.py (18)",
+               "bench/results/2026-11-15-proxy.json", "self",
+               "three disconnect classes; four §15.1 rows measured with each party in its own process"),
+    "P3B-09": ("done", "HEAD", "test_attach_doc.py (14), test_attach_sdks.py (7)", "docs/attach.md", "self",
+               "four rows verified by running the client at a named version and date; everything else says unverified"),
     "P0-01": ("done", "2a1b37f", "test_packaging.py (5)", "—", "self", "amendment recorded in plan row"),
     "P0-02": ("todo", "—", "—", "—", "—", "workflow exists; no CI run in this environment"),
     "P0-03": ("todo", "—", "—", "—", "—", "workflow exists; no scheduled run here"),
