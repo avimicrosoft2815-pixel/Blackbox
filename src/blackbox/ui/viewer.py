@@ -60,7 +60,9 @@ def view(path: str, out: str | None = None) -> dict[str, Any]:
     if Path(path).is_dir() and out is None:
         destination = Path(path) / "viewer.html"
     destination.parent.mkdir(parents=True, exist_ok=True)
-    destination.write_text(html, encoding="utf-8")
+    # Bytes, not `write_text`: text mode translates `\n` to `\r\n` on Windows, and this file is an evidence artifact
+    # whose whole point is that it is the same page everywhere it is opened.
+    destination.write_bytes(html.encode("utf-8"))
     tapes = document.get("tapes") or [document["viewer"]]
     return {"out": str(destination), "bytes": len(html.encode("utf-8")),
             "run_id": (document.get("run") or {}).get("run_id"),

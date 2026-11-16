@@ -345,3 +345,24 @@ plan's §10 shape, and it is append-only.
   generator and regenerated, never in the file it generates.
   *Test*: the consistency test above, plus a regenerated `docs/progress.md` in this commit whose diff is the P4 rows and
   the restored P3B rows and nothing else.
+
+- **defect 43 — two of the new launcher tests were POSIX-only and failed all three Windows cells.** Run `43880930567`
+  on `66830f2`: `py3.11`, `py3.12` and `py3.13 / windows-latest` each failed
+  `test_the_temp_dir_is_removed_even_when_the_child_is_killed` (exit 1, expected 137) and
+  `test_a_shell_child_is_given_no_pythonpath_at_all` (`FileNotFoundError: [WinError 2]`). The other seven cells passed
+  (one macOS cell and three Ubuntu cells green; two macOS cells cancelled with no runner).
+  *Cause*, two of them, and only one is the test's: (a) the kill script used `signal.SIGKILL`, which **does not exist on
+  Windows** — merely accessing it raises `AttributeError`, so the child exited 1 and the `137` expectation was a POSIX
+  convention asserted everywhere; (b) `/bin/sh` does not exist on Windows. (c) A third problem was in the **product**:
+  `cleanup_sdk()` set `removed: True` after `shutil.rmtree(..., ignore_errors=True)` without checking, so on a Windows
+  host where the directory is briefly locked the record would have claimed a cleanup that did not happen.
+  *Fix*: the kill script picks `SIGKILL` where it exists and `SIGTERM` otherwise, and the expected code follows the
+  platform (`137` on POSIX, the platform's own status on Windows); the shell child is `cmd /c echo [%PYTHONPATH%]` on
+  Windows and `/bin/sh -c printf` on POSIX, with the same assertion; `cleanup_sdk()` retries three times and reports
+  `removed` from `os.path.exists`, with `cleanup_error` naming the path when it survives.
+  *A fourth bug, found while making the decision testable*: `_is_python_command`'s regex ended in `[a-z]*`, so
+  `pythonista` matched — the launcher would have shipped a `sitecustomize` to a text editor and reported `sdk: enabled`.
+  The pattern is now `python(\d+(\.\d+)*)?w?`, plus `py.exe`/`pyw.exe` on Windows only when the name resolves.
+  *Tests*: `tests/test_launcher_attach.py` (20), including `test_the_python_command_test_itself_is_platform_neutral`,
+  which is the test that caught the fourth bug. Verified on Linux; the Windows cells are the evidence and are quoted
+  from CI, not from here.

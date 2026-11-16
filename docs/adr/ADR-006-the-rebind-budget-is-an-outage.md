@@ -122,3 +122,20 @@ Written down because a budget with unstated preconditions is a claim, not a meas
 5. **A rebind that loses the port is a different failure** and is counted separately (`port_moved`): zero in both
    columns, but a port stolen between the close and the bind would move a child's traffic, and that is a bug whatever the
    latency.
+
+## 7. First CI data point outside this container (2026-11-16)
+
+Run `43880930567` on `66830f2` ran the whole suite, so §6's first limitation got an answer — a partial one, and it is
+recorded as partial:
+
+| cell | result |
+|---|---|
+| `py3.11 / macos-latest` | **pass** — the suite, including `test_every_watchdog_rebind_lands_inside_the_budget_not_the_median_of_them`, which asserts **every** watchdog sample of 8 breaks against `REBIND_BUDGET_MS` |
+| `py3.12 / macos-latest`, `py3.13 / macos-latest` | **cancelled with no runner assigned and no step run** — no evidence either way |
+| ubuntu 3.11/3.12/3.13 | pass |
+| windows 3.11/3.12/3.13 | failed, on two of the *new launcher tests*, not on this row (defect 43) |
+
+So the bound is no longer a Linux-only claim: one macOS arm64 cell passes the per-sample assertion that this ADR's
+§1 defines. What it still is **not**: a distribution. The test prints its eight samples only when it fails, so a pass
+says "every sample was under 100 ms on that runner", not "the worst sample was 21 ms there". The macOS numbers quoted
+in §3 remain Linux numbers, and this table says which cell produced which claim — no more.

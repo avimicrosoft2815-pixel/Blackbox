@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import sys
 import tempfile
 from pathlib import Path
@@ -68,6 +69,32 @@ def _sdk_dirs() -> set[str]:
     return {str(p) for p in Path(root).glob("blackbox-sdk-*")}
 
 
+# A child that dies as hard as the platform allows. Windows has no `SIGKILL` (accessing it is an `AttributeError`,
+# which is what turned this test into a failure with exit 1 on all three Windows cells), so the signal is chosen by the
+# platform and the *expectation* follows it: POSIX reports 128+n, Windows has no such convention and the launcher
+# reports the status the platform gave it.
+KILL_SELF = """
+import os, signal
+
+os.kill(os.getpid(), getattr(signal, "SIGKILL", signal.SIGTERM))
+"""
+
+
+def _kill_exit_code() -> int:
+    return 137 if os.name == "posix" else 1
+
+
+def _shell_child(tmp_path: Path) -> tuple[list[str], Path]:
+    """A non-Python command that reports its own `PYTHONPATH` to a file, on either platform."""
+    out = tmp_path / "pp.txt"
+    if os.name == "posix":
+        script = 'printf "%s" "${PYTHONPATH-unset}" > "$1"'
+        return ["/bin/sh", "-c", script, "sh", str(out)], out
+    # `%PYTHONPATH%` left unset is echoed literally by cmd.exe, which is exactly what a test for "no injection" wants:
+    # the marker the launcher would have added must not appear either way.
+    return ["cmd", "/c", f'echo [%PYTHONPATH%]> "{out}"'], out
+
+
 # ── the auto-import ────────────────────────────────────────────────────────────────────────────────────────────────
 def test_sitecustomize_installs_the_capture_layer_without_the_application_importing_anything(tmp_path):
     """The whole point: the child's code says nothing about blackbox and is recorded anyway."""
@@ -106,14 +133,19 @@ def test_nothing_of_the_auto_import_survives_the_run(tmp_path):
 
 
 def test_the_temp_dir_is_removed_even_when_the_child_is_killed(tmp_path):
-    """A `kill -9` child is the case that leaves litter in a naive implementation."""
+    """A child killed with no chance to run a handler is the case that leaves litter in a naive implementation.
+
+    The exit code is asserted as the platform defines it — 137 on POSIX (`128 + SIGKILL`), the platform's own status
+    on Windows, which has no such convention. Asserting 137 everywhere is what made this test fail on all three
+    Windows cells; the property under test (the directory is gone) is the same on both.
+    """
     data_dir = tmp_path / "data"
     before = _sdk_dirs()
-    script = "import os, signal; os.kill(os.getpid(), signal.SIGKILL)"
     with open(tmp_path / "out.txt", "w", encoding="utf-8") as out:
-        result = launcher.launch([sys.executable, "-c", script], data_dir=str(data_dir), out=out, proxy=False)
-    assert result.exit_code == 137
-    assert result.sdk["removed"] is True
+        result = launcher.launch([sys.executable, "-c", KILL_SELF], data_dir=str(data_dir), out=out, proxy=False)
+    assert result.exit_code == _kill_exit_code(), f"exit {result.exit_code} (os.name={os.name})"
+    assert result.exit_code != 0, "a killed child must not report success"
+    assert result.sdk["removed"] is True, result.sdk.get("cleanup_error")
     assert not Path(result.sdk["site_dir"]).exists()
     assert _sdk_dirs() == before
 
@@ -154,16 +186,30 @@ def test_no_sdk_leaves_the_child_exactly_as_it_found_it(tmp_path):
 
 
 def test_a_shell_child_is_given_no_pythonpath_at_all(tmp_path):
-    """A `.pth` is a file only Python reads; exporting it to a shell is noise and a lie about what happened."""
+    """A `sitecustomize` is a file only Python reads; exporting it to a shell is noise and a lie about what happened.
+
+    `/bin/sh` does not exist on Windows (`FileNotFoundError: [WinError 2]`, which is what this test reported there),
+    so the non-Python command is chosen per platform while the assertion stays the same.
+    """
     data_dir = tmp_path / "data"
-    script = "printf '%s' \"${PYTHONPATH-unset}\" > \"$1\""
+    command, report = _shell_child(tmp_path)
     with open(tmp_path / "out.txt", "w", encoding="utf-8") as out:
-        result = launcher.launch(["/bin/sh", "-c", script, "sh", str(tmp_path / "pp.txt")],
-                                 data_dir=str(data_dir), out=out, proxy=False, env=_env())
+        result = launcher.launch(command, data_dir=str(data_dir), out=out, proxy=False, env=_env())
     assert result.sdk["enabled"] is False
     assert result.sdk["is_python"] is False
     assert result.sdk["reason"] == "not a Python command"
-    assert "blackbox-sdk-" not in (tmp_path / "pp.txt").read_text()
+    assert "blackbox-sdk-" not in report.read_text()
+
+
+def test_the_python_command_test_itself_is_platform_neutral():
+    """`_is_python_command` is the decision behind both branches above, so it is tested without a child at all."""
+    for python_like in (sys.executable, "python", "python3", "python3.13", "pythonw", "PYTHON.EXE"):
+        assert launcher._is_python_command([python_like])[0] is True, python_like
+    for other in ("node", "bash", "sh", "cmd", "blackbox", "pythonista", "python-runner", "/usr/bin/env"):
+        assert launcher._is_python_command([other])[0] is False, other
+    # `py.exe` is Windows' launcher and is a Python command *only* where it resolves; this asserts the rule without
+    # pretending a POSIX box has one.
+    assert launcher._is_python_command(["py"])[0] is (os.name == "nt" and bool(shutil.which("py")))
 
 
 # ── one run, several tapes, linked ─────────────────────────────────────────────────────────────────────────────────

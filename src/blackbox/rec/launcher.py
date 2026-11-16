@@ -411,22 +411,32 @@ def launch(argv: list[str], *, data_dir: str | None = None, stall_ms: int = 5_00
     return result
 
 
-_PYTHON_NAME = re.compile(r"^python(\d+(\.\d+)*)?([a-z]*)?$")
+#: `python`, `python3`, `python3.11`, `pythonw` — and nothing else. The first draft ended in `[a-z]*`, which also
+#: accepted `pythonista` (a text editor): the launcher would have put a `sitecustomize` on a stranger's `PYTHONPATH` and
+#: reported `sdk: enabled` for a child that never reads it. `test_the_python_command_test_itself_is_platform_neutral`
+#: is what caught it.
+_PYTHON_NAME = re.compile(r"^python(\d+(\.\d+)*)?w?$")
+#: Windows' launcher, `py.exe` / `pyw.exe`. It is a Python command in the sense that matters — the child is a Python
+#: interpreter — but only when the name actually resolves on this machine, never as a bare string.
+_PY_LAUNCHER = re.compile(r"^pyw?$")
 
 
 def _is_python_command(argv: list[str]) -> tuple[bool, str]:
     """Is this child a Python interpreter, and why? No guessing from a shebang: the *resolved* name is the fact.
 
-    `argv[0]` is looked up through `PATH` exactly as `Popen` will look it up, then compared by base name — `python`,
-    `python3`, `python3.11`, a virtualenv's `python`, a `pythonw`. A `.py` file is not a Python command in this sense
-    (it may well be run by something else); the interpreter is.
+    `argv[0]` is looked up through `PATH` exactly as `Popen` will look it up, then compared by base name. A `.py` file
+    is not a Python command in this sense (it may well be run by something else); the interpreter is.
     """
     name = argv[0] if argv else ""
     resolved = shutil.which(name) or name
     base = os.path.basename(resolved).lower()
     if base.endswith(".exe"):
         base = base[:-4]
-    return (bool(_PYTHON_NAME.match(base)), resolved)
+    if _PYTHON_NAME.match(base):
+        return True, resolved
+    if _PY_LAUNCHER.match(base) and os.name == "nt" and shutil.which(name):
+        return True, resolved
+    return False, resolved
 
 
 def _package_root() -> str | None:
@@ -556,13 +566,27 @@ def _install_sdk(env: dict[str, str], argv: list[str], out: IO[str] | None) -> d
 
 
 def cleanup_sdk(record: dict[str, Any]) -> None:
-    """Remove the temporary site dir. Idempotent, quiet, and never raises into an exit path."""
+    """Remove the temporary site dir. Idempotent, quiet, and never raises into an exit path.
+
+    `removed` reports what **happened**, not what was attempted. On Windows a directory that has just been written by
+    another process can stay locked for a moment (the child's `__pycache__`, a virus scanner, a handle closing), so a
+    single `rmtree(ignore_errors=True)` can leave the directory behind while the record says it is gone — which is the
+    one thing a record of a cleanup must not do. Three attempts with a short pause, then the truth either way.
+    """
     site_dir = record.get("site_dir")
-    if site_dir:
+    if not site_dir:
+        return
+    for attempt in range(3):
         shutil.rmtree(site_dir, ignore_errors=True)
-        # `site_dir` is kept in the record on purpose: "where it was, and that it is gone" is checkable afterwards,
-        # while nulling it would leave a test only the launcher's word that a directory ever existed.
-        record["removed"] = True
+        if not os.path.exists(site_dir):
+            break
+        if attempt < 2:
+            time.sleep(0.05 * (attempt + 1))
+    # `site_dir` is kept in the record on purpose: "where it was, and whether it is gone" is checkable afterwards,
+    # while nulling it would leave a test only the launcher's word that a directory ever existed.
+    record["removed"] = not os.path.exists(site_dir)
+    if not record["removed"]:
+        record["cleanup_error"] = f"{site_dir} still exists after three attempts"
 
 
 def _start_proxy(env: dict[str, str], routes: Any = None, port: int = 0, receiver: Any = None,
