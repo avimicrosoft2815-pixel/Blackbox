@@ -143,7 +143,9 @@ in §3 remain Linux numbers, and this table says which cell produced which claim
 ## 8. What the matrix says now (2026-11-16, runs 43888826452 and 43889007689)
 
 The Windows cells are green for the first time: `py3.11`, `py3.12` and `py3.13 / windows-latest` all pass the whole
-suite, which includes this ADR's `test_every_watchdog_rebind_lands_inside_the_budget_not_the_median_of_them`. So the
+suite, which includes this ADR's `test_every_watchdog_rebind_lands_inside_the_budget_not_the_median_of_them`. Each of
+those runs still *concludes* failure — the three macOS jobs were cancelled without a runner and GitHub counts that as a
+failure — so "Windows is green" is a statement about seven jobs, not about a green run. So the
 per-sample assertion (§1) now holds on two operating systems and three interpreters each, not one kernel.
 
 What that still does not buy, stated plainly because §6 asked for it:
