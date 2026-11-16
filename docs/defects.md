@@ -390,3 +390,8 @@ plan's §10 shape, and it is append-only.
   `tests/test_recovery.py::test_a_tool_node_that_never_closed_is_interrupted_in_tool`,
   `::test_a_closed_tool_node_is_not_interrupted`, and `tests/test_ui_viewer.py::test_a_tool_node_counts_as_a_tool_call_in_the_page`.
   Found by the diagnosis ticket's own fixtures, which is the point of writing evidence readers against real frames.
+
+- **defect 43 is closed (2026-11-16, run 43888826452).** All three Windows cells pass on `724f1b4`, and `283554f`
+  repeats it (7 success, 3 macOS cancelled). The two fixes it needed are recorded above; the third one — the product's
+  `cleanup_sdk` claiming a removal it had not checked — is covered by the same run, since
+  `test_the_temp_dir_is_removed_even_when_the_child_is_killed` asserts `removed` against `os.path.exists`.

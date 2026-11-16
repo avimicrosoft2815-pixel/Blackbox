@@ -139,3 +139,21 @@ So the bound is no longer a Linux-only claim: one macOS arm64 cell passes the pe
 §1 defines. What it still is **not**: a distribution. The test prints its eight samples only when it fails, so a pass
 says "every sample was under 100 ms on that runner", not "the worst sample was 21 ms there". The macOS numbers quoted
 in §3 remain Linux numbers, and this table says which cell produced which claim — no more.
+
+## 8. What the matrix says now (2026-11-16, runs 43888826452 and 43889007689)
+
+The Windows cells are green for the first time: `py3.11`, `py3.12` and `py3.13 / windows-latest` all pass the whole
+suite, which includes this ADR's `test_every_watchdog_rebind_lands_inside_the_budget_not_the_median_of_them`. So the
+per-sample assertion (§1) now holds on two operating systems and three interpreters each, not one kernel.
+
+What that still does not buy, stated plainly because §6 asked for it:
+
+* **the macOS cells did not run.** All three were cancelled with no runner assigned and no step executed. The macOS
+  evidence is still the single `py3.11` pass in run 43880930567. Three green Windows cells do not repair that gap, and
+  this ADR will not claim "macOS/Windows green" from a run where the macOS jobs never started.
+* **a pass is a bound, not a distribution.** The test prints its eight samples only when it fails, so a green cell says
+  "every sample was under 100 ms on that runner", not what the slowest one was. The numbers in §3 remain Linux numbers.
+* **the scheduling assumption is unchanged.** A hosted runner that can stall a thread for longer than the budget would
+  fail this test rather than hide the failure — that is the point of asserting every sample — but "it failed" on a
+  shared CI runner would still need to be read as a fact about that runner, not about a user's machine. §6's first
+  limitation (one machine, one container) is now weaker; the rest stand.
