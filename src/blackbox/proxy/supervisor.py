@@ -154,6 +154,11 @@ class ProxyThread:
         self._stopping = threading.Event()
         self._start_error: BaseException | None = None
         self.rebinds: list[float] = []                     # milliseconds each rebind took
+        # How late each watchdog tick woke, in milliseconds: `interval - tick`. A rebind cannot start before the
+        # watchdog notices, so a starved thread (a loaded CI runner, a stopped-the-world GC pause) spends the budget
+        # before a line of our code runs. Recording it is how a red row distinguishes "our rebind was slow" from "the
+        # thread did not get the CPU" instead of guessing (defect 58).
+        self.wake_late_ms: list[float] = []
         self.port_changed = False                          # set when a rebind could not keep the port the child was told
         self._lock = threading.Lock()
 
@@ -217,7 +222,14 @@ class ProxyThread:
 
     # -- supervision ---------------------------------------------------------------------------------------------
     def _supervise(self) -> None:
-        while not self._stopping.wait(self._supervise_ms / 1000.0):
+        tick = self._supervise_ms / 1000.0
+        previous = time.monotonic()
+        while not self._stopping.wait(tick):
+            now = time.monotonic()
+            late = max(0.0, (now - previous - tick) * 1000.0)
+            if len(self.wake_late_ms) < 4096:
+                self.wake_late_ms.append(late)
+            previous = now
             if self._server is None or self._loop is None:
                 continue
             if self._server.is_serving:

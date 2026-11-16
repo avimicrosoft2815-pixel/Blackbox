@@ -637,3 +637,24 @@ plan's §10 shape, and it is append-only.
   is JSON and asserts the id and fingerprint arrive, and `::test_two_calls_with_no_ids_are_not_matched_by_fingerprint_or_time`
   asserts two id-less, fingerprint-less calls are **not** linked. Measured after the fix: two concurrent calls →
   `2` ids, `2` call edges, `node_join: partial`, `call_level: 2` in `edge_summary` (before: `0` and `0`).
+
+- **defect 58 — the first macOS cell that actually ran failed the watchdog budget by 4.7 ms, and the message could not
+  say whose 4.7 ms they were.** Run `43973451998` (`823d08a`) is the first run in this branch's history where a macOS
+  runner was *acquired*: `py3.12 / macos-latest` executed (11 steps, not the `steps: 0` cancellation of the earlier
+  runs) and failed
+  `tests/test_proxy_supervisor.py::test_every_watchdog_rebind_lands_inside_the_budget_not_the_median_of_them` with
+  `worst watchdog outage 104.7 ms over the 100.0 ms budget; outages [96.5, 76.7, 29.4, 100.7, 44.2, 14.4, 104.7, 22.1]
+  ms, rebinds [1.49, 1.55, 1.52, 1.5, 1.11, 1.57, 1.18, 1.34] ms`. Two of eight samples are near the whole budget and
+  **every rebind took between 1.1 and 1.6 ms**, so the product's own work is two orders of magnitude inside the budget
+  and the outage is detection: a watchdog tick that woke 80–100 ms late on a shared, capacity-constrained arm64 runner
+  (GitHub's own annotation on that job says "Due to capacity constraints, jobs targeting macOS arm64 runners may
+  experience longer queue times"). The failure message could not distinguish that from a slow rebind, which is the part
+  worth fixing first: a row that reports one number for two different things invites the answer defect 40 got (quote a
+  median until it is green). **Fix (measurement, not a relaxed gate)**: `ProxyThread.wake_late_ms` records how late each
+  watchdog tick woke, and the failure message now prints the worst lateness over the number of ticks, beside the
+  outages and the rebinds. **The assertion is unchanged** — 100 ms, every sample — so the gate stays red on this commit
+  and macOS stays unmeasured for the *product's* latency until a run on a runner that is not starved passes it. The
+  open question, for the owner, is whether §11.8's promise is "a rebind is repaired within 100 ms" (which the rebinds
+  column already shows, by 60x) or "the *outage* is under 100 ms on any machine", which no sleeping thread can promise
+  and which would need detection that does not depend on being scheduled — an event-driven watch on the listener's
+  socket rather than a 20 ms tick. Both readings are written down here rather than resolved by editing the test.

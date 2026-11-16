@@ -153,6 +153,11 @@ def test_every_watchdog_rebind_lands_inside_the_budget_not_the_median_of_them():
         assert len(proxy.rebinds) == len(samples), "each break must have been repaired by exactly one watchdog rebind"
     outages = [s["outage_ms"] for s in samples]
     worst = max(outages)
+    # A red row has to say *which* half of the outage was ours: the rebind, or a watchdog thread the machine did not
+    # schedule. `wake_late_ms` is the supervisor's own record of how late its ticks woke (defect 58), so a starved
+    # runner is named as such in the failure message instead of being argued about afterwards.
+    lateness = getattr(proxy, "wake_late_ms", [])
     assert worst <= REBIND_BUDGET_MS, (
         f"worst watchdog outage {worst:.1f} ms over the {REBIND_BUDGET_MS} ms budget; "
-        f"outages {[round(o, 1) for o in outages]} ms, rebinds {[round(s['rebind_ms'], 2) for s in samples]} ms")
+        f"outages {[round(o, 1) for o in outages]} ms, rebinds {[round(s['rebind_ms'], 2) for s in samples]} ms, "
+        f"worst watchdog tick lateness {max(lateness, default=0.0):.1f} ms over {len(lateness)} ticks")
