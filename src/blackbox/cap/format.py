@@ -49,6 +49,9 @@ CHAIN_NAME = "chain.json"
 # §11.10: the cross-vantage links, with their class, evidence and confidence. Written at seal time by the resolver,
 # never appended to a tape (see rec/correlate.py).
 LINKS_NAME = "links.json"
+# D-053/§13.1: the graph the run had — nodes and the edges the links justify. A *derived* part: it is recomputed from
+# the raw segments (plus `links.json`) by `cap.derived`, declared in `manifest.derived_parts[]`, and drift is BBX-E412.
+GRAPH_NAME = "graph.json"
 FIXED_DATE = (1980, 1, 1, 0, 0, 0)
 FIXED_MODE = 0o644 << 16
 MAX_ENTRIES = 5_000

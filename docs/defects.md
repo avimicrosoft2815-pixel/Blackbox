@@ -567,17 +567,36 @@ plan's §10 shape, and it is append-only.
   the `sdk-nodes` case now has `graph_nodes: 1` next to `counts.nodes: 1`.
 
 - **defect 55 — `graph.json` carries no edges, so "linked nodes" cannot be read from the graph the ticket names.**
-  **Open, deliberately.** `step_graphed` writes `"edges": []` unconditionally; the cross-vantage relation exists only in
-  `links.json`, where the acceptance harness measures `exact` pairs joining the two capsules of a run
-  (`bench/results/2026-11-16-p3b03-acceptance.json`: every two-capsule case has them, the single-capsule `node` case has
-  nothing to link to). Plan §11.10 and §13.2 describe `linked_exact` edges joining nodes recorded by different vantage
-  points, and §graph lists "nodes, edges, CSR adjacency" — so P3B-03's sentence "one run with linked nodes" is met as
-  *one run, one run id, exact links between the vantages* and not as *an edge in the graph*. This is recorded rather
-  than fixed because the fix is a design decision, not a repair: which ids edges join (a per-tape node slot does not identify a node on
-  its own, since every tape numbers its nodes from 1), what direction and confidence an `exact` edge carries, and where a proxy-vantage call that has
-  no node slot (slot 0 is the run itself) attaches. Those choices belong in a decision record before code, and this
-  entry exists so the ticket cannot be ticked by quietly reading `links.json` as if it were the graph. The harness
-  reports the fact as `verdict.graph_has_cross_vantage_edges: false` instead of omitting it.
+  **Narrowed 2026-11-16 by D-053; still open, and the residual is one sentence.** `step_graphed` used to write
+  `"edges": []` unconditionally, and the cross-vantage relation lived only in `links.json`. D-052 then wrote the edges
+  it could *justify* — run and tape level — and refused the node-level claim for want of a per-call identifier. D-053
+  supplies that identifier: the seam mints `x-blackbox-call` per outbound request, records it as `call_id` on its own
+  `MODEL_REQUEST`, and the proxy reads the header, records the same id on its own frame, and strips it before the
+  upstream; `rec/links.py::resolve_calls` matches records by that id alone, and `rec/recovery.py::graph_edges` writes
+  them as `level: "call"` edges whose `evidence` says `same call id` / `carried_by: x-blackbox-call`. The graph is now
+  a declared capsule part, so what it says can be re-derived from the raw frames and checked (`blackbox capsule
+  verify`, `BBX-E412`). Measured with real clients in
+  `bench/results/2026-11-16-p3b03-acceptance.json`: `run_level_edges_recorded: 10`, call-level edges present in both
+  the `sdk` and `sdk-nodes` cases, `edges_naming_a_node: 2` — the two call edges in the capsule that recorded a node
+  name the slot the call ran in (`nodes.from: 1`) — and `node_level_edges_recorded: 0`.
+
+  **What is still missing, and why it is not a bug to patch but a decision to take.** Every one of those call edges is
+  `node_join: "partial"`: the proxy's vantage records no node, because slot 0 on its tape is the run itself and D-052
+  rule 2 forbids inventing one for a proxied call. So no edge joins two *nodes*, and `CallLink.level` — which returns
+  `node` only when both ends name a slot — has no real-client witness, only the synthetic one in
+  `tests/test_call_links.py`. Closing that needs a node identity both vantages can write: the seam knows which node it
+  is inside, so the wire can carry it (`x-blackbox-node`, the plan's own header name) and the proxy can record what it
+  was told instead of a slot it guessed. That is defect 55's remainder, and it is a decision record first.
+
+  **Evidence for the fix, named so a reader can check it**: `tests/test_call_links.py::test_two_concurrent_calls_stay_two_links_each_with_its_own_node`
+  and `::test_a_node_to_node_edge_appears_only_when_both_sides_have_a_node` (the resolver: the second is the branch with
+  no real-client witness, and it says so), `tests/test_launcher_proxy.py::test_two_concurrent_calls_get_two_ids_and_two_graph_edges_each_naming_its_own_node`
+  (a real proxied child, two concurrent calls, two ids, two edges naming the slot each call ran in) and
+  `::test_the_call_id_lands_on_both_tapes_and_never_reaches_the_upstream`,
+  `tests/test_recovery.py` (the merge into `edges`, the `call_level`/`ambiguous` counters),
+  `tests/test_capsule_graph.py` (the part is inside the capsule, its hash matches, an edited graph is reported and not
+  repaired, an old capsule verifies as `absent`). `tests/test_capture_failopen.py` pins the interface half: a receiver
+  written before the new `call_id` hint keeps recording instead of failing quietly.
 
 - **defect 56 — two repair tests gave `verify` a POSIX command and read the shell's refusal as the product's.** Run
   `43931027526` (`e007259`, the first run with defects 50–52 fixed): the three Windows cells failed
@@ -601,3 +620,20 @@ plan's §10 shape, and it is append-only.
   too — so the two tests were the only Windows failure on the branch and are now not. The macOS jobs in both runs were
   `cancelled` with `steps: 0` (*"The job was not acquired by Runner of type hosted"*), i.e. runner capacity, not a test
   result; that is why those runs are red at all, and macOS stays unmeasured.
+
+- **defect 57 — the resolver decoded the tape's model frames as CBOR, so the call-link fields it was written to read did
+  not exist.** Found while measuring D-053, by a probe that ran two concurrent calls through a real proxy and got *no*
+  call links back: not an ambiguous link, none at all. `correlate._payload()` called `cbor.decode_exact()` on every
+  frame payload, and a `MODEL_REQUEST` payload is **JSON** (§4.0, D-030) — so the decode raised
+  `CBORError: text string too large` for every model frame, the except branch returned `{}`, and every field read off it
+  (`call_id`, `request_fp`, `linked_run`) came back `None`/absent. That is the shape of a quiet failure this project has
+  a name for: the code said "looked and found nothing" while it had never looked. Two consequences, both real: the new
+  call links could never appear on a real run (the first measurement would have been a false zero), and
+  `links.resolve`'s fingerprint path compared two empty strings, which match each other — so two unrelated calls with
+  no fingerprints were one `inferred` link away from being joined by the *absence* of evidence. **Fix**: `_payload()`
+  tries CBOR and falls back to `json.loads` (the same order `rec/recovery.py` uses for the same reason), and
+  `links.resolve` refuses to compare an empty fingerprint before comparing any. **Tests**:
+  `tests/test_call_links.py::test_the_resolver_reads_json_model_request_payloads` builds a tape whose `MODEL_REQUEST`
+  is JSON and asserts the id and fingerprint arrive, and `::test_two_calls_with_no_ids_are_not_matched_by_fingerprint_or_time`
+  asserts two id-less, fingerprint-less calls are **not** linked. Measured after the fix: two concurrent calls →
+  `2` ids, `2` call edges, `node_join: partial`, `call_level: 2` in `edge_summary` (before: `0` and `0`).

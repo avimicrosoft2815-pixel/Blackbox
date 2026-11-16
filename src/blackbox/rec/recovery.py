@@ -20,6 +20,7 @@ replaces is its own state.
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import json
 import os
 import re
@@ -294,10 +295,11 @@ NODE_JOIN_REASON = ("no per-call identifier is recorded on both sides: `node_slo
 def graph_edges(links_document: bytes, writer_uuid: str) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """`graph.json`'s `edges`, derived from the exact `links.json` bytes the capsule is about to carry (D-052).
 
-    Each `LINK` record joins two *tapes*; it does not identify which node on one tape corresponds to which node on the
-    other, and nothing in the tape format records a call id on both sides. So every edge states its own level and names
-    `null` for the nodes, with `node_join: "unknown"` and the reason — a reader sees the gap instead of an absence, and
-    no arrow is drawn between two nodes on the strength of being the only candidates.
+    Two kinds of record go in. A `LINK` joins two *tapes* (one run, or one pair of tapes) and names no node. A
+    `call_link` joins two records of *one call*, matched by the id both sides wrote (D-053), so it names the call and,
+    where that tape recorded the call inside a node, that node's slot. A node-to-node edge appears only when both ends
+    recorded the call inside a node — an `exact` tape link never produces one, and neither does an ambiguous id, which
+    is written down with its candidate count instead of being resolved by picking the first pair.
     """
     if not links_document.strip():
         records: list[dict[str, Any]] = []
@@ -310,6 +312,14 @@ def graph_edges(links_document: bytes, writer_uuid: str) -> tuple[list[dict[str,
             unreadable = not isinstance(parsed, dict)
         except Exception:
             records, unreadable = [], True
+    call_records: list[dict[str, Any]] = []
+    if links_document.strip():
+        try:
+            parsed_for_calls = json.loads(links_document.decode("utf-8"))
+            raw_calls = parsed_for_calls.get("call_links") if isinstance(parsed_for_calls, dict) else None
+            call_records = [r for r in raw_calls if isinstance(r, dict)] if isinstance(raw_calls, list) else []
+        except Exception:
+            call_records = []
     edges: list[dict[str, Any]] = []
     for record in records:
         left = str(record.get("left_writer") or "")
@@ -330,10 +340,42 @@ def graph_edges(links_document: bytes, writer_uuid: str) -> tuple[list[dict[str,
             "confidence": record.get("confidence"),
             "evidence": dict(record.get("evidence") or {}),
         })
-    summary: dict[str, Any] = {"total": len(edges),
-                               "run_level": sum(1 for e in edges if e["level"] == "run"),
-                               "tape_level": sum(1 for e in edges if e["level"] == "tape"),
-                               "node_level": 0, "node_join": "unknown", "node_join_reason": NODE_JOIN_REASON}
+    for record in call_records:
+        left = str(record.get("left_writer") or "")
+        right = str(record.get("right_writer") or "")
+        mine = left == writer_uuid and right != writer_uuid
+        left_node = record.get("left_node")
+        right_node = record.get("right_node")
+        ambiguous = bool(record.get("ambiguous"))
+        my_node, their_node = (left_node, right_node) if mine else (right_node, left_node)
+        level = "call" if ambiguous or not (my_node and their_node) else "node"
+        edges.append({
+            "class": "exact",
+            "level": level,
+            "from": {"writer": left if mine else right, "run_id": record.get("left_run") if mine else record.get("right_run"),
+                     "call_id": record.get("call_id"), "node": None if ambiguous else my_node},
+            "to": {"writer": right if mine else left, "run_id": record.get("right_run") if mine else record.get("left_run"),
+                   "call_id": record.get("call_id"), "node": None if ambiguous else their_node},
+            "nodes": {"from": None if ambiguous else my_node, "to": None if ambiguous else their_node},
+            "node_join": "ambiguous" if ambiguous else "exact",
+            # the number of candidate pairings, because "ambiguous" without a count is a shrug
+            "candidates": int(record.get("candidates") or 1),
+            "confidence": 1.0,
+            "evidence": dict(record.get("evidence") or {"rule": "same call id"}),
+        })
+    named = [e for e in edges if (e["nodes"]["from"] or e["nodes"]["to"])]
+    node_level = sum(1 for e in edges if e["level"] == "node")
+    node_join = "exact" if node_level else ("partial" if named else "unknown")
+    reason = NODE_JOIN_REASON if not named else (
+        "the call is inside a node on one tape only: the proxy vantage records calls, not the app's nodes")
+    summary: dict[str, Any] = {
+        "total": len(edges),
+        "run_level": sum(1 for e in edges if e["level"] == "run"),
+        "tape_level": sum(1 for e in edges if e["level"] == "tape"),
+        "call_level": sum(1 for e in edges if e["level"] == "call"),
+        "node_level": node_level,
+        "ambiguous": sum(1 for e in edges if e["node_join"] == "ambiguous"),
+        "node_join": node_join, "node_join_reason": reason}
     if unreadable:
         summary["links_unreadable"] = True
     return edges, summary
@@ -341,8 +383,8 @@ def graph_edges(links_document: bytes, writer_uuid: str) -> tuple[list[dict[str,
 
 def empty_edge_summary() -> dict[str, Any]:
     """The summary a graph carries before seal: no links have been resolved yet, and it says why the count is zero."""
-    return {"total": 0, "run_level": 0, "tape_level": 0, "node_level": 0, "node_join": "unknown",
-            "node_join_reason": NODE_JOIN_REASON}
+    return {"total": 0, "run_level": 0, "tape_level": 0, "call_level": 0, "node_level": 0, "ambiguous": 0,
+            "node_join": "unknown", "node_join_reason": NODE_JOIN_REASON}
 
 
 def _payload(raw: bytes) -> dict[str, Any]:
@@ -658,6 +700,7 @@ class Recovery:
             "gaps": scan.gaps,
             "counts": {"events": scan.frame_count, "nodes": node_count(scan.frames),
                        "nodes_interrupted": len(self.result.node_statuses), "segments": len(entries)},
+            "derived_parts": [],
         }
         chain: dict[str, object] = {"chain_root": None, "per_segment": {}}
         for f in scan.frames:
@@ -678,6 +721,14 @@ class Recovery:
         # D-052: the graph's edges come from *these* bytes, in this step, so the graph and the capsule's `links.json`
         # cannot disagree. Written before the capsule, because the capsule is the thing that must not change afterwards.
         self._write_graph_edges(entries[cap.LINKS_NAME])
+        # D-053, §13.1: the graph ships *inside* the capsule, and as a declared derived part — the bytes the user opens
+        # are the bytes `cap.derived` can recompute from the segments, so an edited graph is a detected one (BBX-E412).
+        graph_bytes = self._graph_bytes()
+        if graph_bytes is not None:
+            entries[cap.GRAPH_NAME] = graph_bytes
+            manifest["derived_parts"] = [{"name": cap.GRAPH_NAME,
+                                          "sha256": hashlib.sha256(graph_bytes).hexdigest(),
+                                          "generator": "blackbox 0.1.0.dev0"}]
         input_hash = _hash(*(f"{k}:{blake2b(v).hex()}" for k, v in sorted(entries.items())))
         if self._skip("SEALED", input_hash):
             existing = cap.read_capsule(self.capsule_path)
@@ -692,6 +743,15 @@ class Recovery:
         self.result.capsule_root = str(out["root"])
         self._die("SEALED.after")
         return self.result.capsule_root
+
+    def _graph_bytes(self) -> bytes | None:
+        """This run's `graph.json` as it sits on disk — the same bytes the capsule entry carries."""
+        path = os.path.join(self.run_dir, "graph.json")
+        try:
+            with open(path, "rb") as fh:
+                return fh.read()
+        except OSError:
+            return None
 
     def _write_graph_edges(self, links_document: bytes) -> None:
         """Add `edges`/`edge_summary` to this run's `graph.json`. Best-effort: a graph that cannot be read keeps `[]`."""

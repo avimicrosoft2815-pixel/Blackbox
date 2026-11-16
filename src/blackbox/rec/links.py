@@ -49,6 +49,7 @@ class CallView:
     fingerprint: str
     run_id: str | None = None
     node_slot: int | None = None
+    call_id: str | None = None      # the id both sides wrote for this one request (D-053), when there is one
 
 
 @dataclass(frozen=True)
@@ -134,7 +135,9 @@ def resolve(*, proxy: RunView, others: Sequence[RunView], window_ns: int = DEFAU
         best: tuple[int, CallView, CallView] | None = None
         for mine in proxy.calls:
             for theirs in other.calls:
-                if mine.fingerprint != theirs.fingerprint:
+                # An empty fingerprint means *not fingerprinted*, never "the same as another empty one" (defect 57):
+                # two unreadable payloads used to compare equal here, which made every pair a candidate.
+                if not mine.fingerprint or mine.fingerprint != theirs.fingerprint:
                     continue
                 delta = mine.wall_ns - theirs.wall_ns
                 if abs(delta) > window_ns:
@@ -153,6 +156,80 @@ def resolve(*, proxy: RunView, others: Sequence[RunView], window_ns: int = DEFAU
                                     "proxy_call_wall_ns": mine.wall_ns, "other_call_wall_ns": theirs.wall_ns,
                                     "why_not_exact": "neither tape names the other's run id"}))
     return links
+
+
+@dataclass(frozen=True)
+class CallLink:
+    """One call recorded by two vantage points, identified by the id both sides wrote (D-053).
+
+    This is the only relation here that names a *call* rather than a tape, and it is exact by construction: the SDK puts
+    the id on the request and on its own `MODEL_REQUEST`, the proxy reads the header and writes the same id. What it
+    still does not prove is a *node*-to-node correspondence — which node a call was inside is a fact each tape holds for
+    itself — so the endpoints record a node slot where that tape had one and `None` where it did not.
+
+    `ambiguous` is not decoration: two records with one id on either side make the pairing a guess, and a guess is the
+    one thing this file exists to avoid. Then no node is named and the count of candidates is written down.
+    """
+
+    left_writer: str
+    right_writer: str
+    call_id: str
+    left_run: str | None
+    right_run: str | None
+    left_node: int | None
+    right_node: int | None
+    ambiguous: bool = False
+    candidates: int = 1
+
+    def as_dict(self) -> dict[str, Any]:
+        return {"call_id": self.call_id, "left_writer": self.left_writer, "right_writer": self.right_writer,
+                "left_run": self.left_run, "right_run": self.right_run,
+                "left_node": self.left_node, "right_node": self.right_node,
+                "ambiguous": self.ambiguous, "candidates": self.candidates,
+                "evidence": {"rule": "same call id", "carried_by": "x-blackbox-call"}}
+
+    @property
+    def level(self) -> str:
+        """`node` only when both ends recorded the call inside a node; `call` when at least one did not."""
+        return "node" if (self.left_node and self.right_node and not self.ambiguous) else "call"
+
+
+def resolve_calls(left: RunView, right: RunView) -> list[CallLink]:
+    """The calls both tapes recorded, matched by their own id. Nothing is matched by fingerprint or by time here.
+
+    A call id is written by the process that made the request; an id present on only one side means the other side was
+    not told (no proxy in front, or a seam that does not own the request headers), and that is an absence, not a link.
+    """
+    def by_id(view: RunView) -> dict[str, list[CallView]]:
+        grouped: dict[str, list[CallView]] = {}
+        for call in view.calls:
+            if call.call_id:
+                grouped.setdefault(call.call_id, []).append(call)
+        return grouped
+
+    mine, theirs = by_id(left), by_id(right)
+    out: list[CallLink] = []
+    for call_id in sorted(set(mine) & set(theirs)):
+        lefts, rights = mine[call_id], theirs[call_id]
+        candidates = len(lefts) * len(rights)
+        if candidates > 1:
+            out.append(CallLink(left_writer=left.writer_uuid, right_writer=right.writer_uuid, call_id=call_id,
+                                left_run=left.run_id, right_run=right.run_id, left_node=None, right_node=None,
+                                ambiguous=True, candidates=candidates))
+            continue
+        left_call, right_call = lefts[0], rights[0]
+        out.append(CallLink(left_writer=left.writer_uuid, right_writer=right.writer_uuid, call_id=call_id,
+                            left_run=left_call.run_id or left.run_id, right_run=right_call.run_id or right.run_id,
+                            left_node=left_call.node_slot or None, right_node=right_call.node_slot or None))
+    return out
+
+
+def call_summary(records: Sequence[CallLink]) -> dict[str, int]:
+    """Counts per level plus the ambiguous count, all always present so a zero is visible."""
+    return {"total": len(records),
+            "node_level": sum(1 for record in records if record.level == "node"),
+            "call_level": sum(1 for record in records if record.level == "call"),
+            "ambiguous": sum(1 for record in records if record.ambiguous)}
 
 
 def summary(links: Sequence[Link]) -> dict[str, int]:

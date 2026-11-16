@@ -143,18 +143,43 @@ it knows:
 
 | field | values |
 |---|---|
-| `class` | `exact`, `declared`, `inferred` (the `LINK` class it came from) |
-| `level` | `run` (both ends name a run), `tape` (one end names none), `node` (**not written in this build**) |
-| `from` / `to` | `{writer, run_id, node}` — `node` is `null` unless `level` is `node` |
+| `class` | `exact`, `declared`, `inferred` (the `LINK` class it came from) for run-level edges; `exact` and nothing else for a call edge, which has one kind of evidence |
+| `level` | `run` (both ends name a run), `tape` (one end names none), `call` (both ends recorded one call id, D-053), `node` (**not written in this build**) |
+| `from` / `to` | `{writer, run_id, node}` — `node` is `null` unless the record's frames sit inside a node's span; a call edge carries `call_id` on the side that wrote it |
 | `nodes` | `{from, to}`, `null` on both sides when no node is justified |
-| `node_join` | `unknown` (with `node_join_reason`), later `exact` / `ambiguous` once a per-call id exists |
-| `confidence`, `evidence` | copied from the `LINK` record |
+| `node_join` | `unknown` (with `node_join_reason`), `exact` (both sides name a node), `partial` (exactly one does — every real call edge measured so far), `ambiguous` (a side's slot is not decidable, with `candidates`) |
+| `confidence`, `evidence` | copied from the `LINK` record; a call edge carries `{"rule": "same call id", "carried_by": "x-blackbox-call"}` |
 
 An `exact` link proves two tapes are one run; it does not prove that a node on one tape corresponds to a node on the
-other, so no edge names a node today and none is invented for a proxied call without a slot. `edge_summary` counts the
-levels (`total`, `run_level`, `tape_level`, `node_level`, `node_join`) and carries the same reason, so the absence of
-node-level edges is visible rather than silent. Readers that predate this change see the keys they already knew and
-ignore the two new ones.
+other, so no run-level edge names a node and none is invented for a proxied call without a slot. A **call edge** is
+stronger and still not a node edge: the same `x-blackbox-call` value on two records means those two records are one
+call, and the edge says `level: "call"`. `edge_summary` counts the levels (`total`, `run_level`, `tape_level`,
+`call_level`, `node_level`, `node_join`) and carries the same reason, and it counts `ambiguous` joins separately, so the
+absence of node-level edges and the presence of undecidable ones are both visible rather than silent. Readers that
+predate this change see the keys they already knew and ignore the new ones.
+
+#### `links.json` — `links` and `call_links` (additive in 1.1, D-053)
+
+The capsule carries the resolver's output as `links.json`: `{links: [...], summary, call_links: [...],
+call_summary}`. `links`/`summary` are unchanged (run-level records, §11.10); `call_links` holds one record per call id
+two writers both recorded — `{call_id, left_writer, right_writer, left_run, right_run, left_node, right_node,
+ambiguous, candidates, evidence: {"rule": "same call id", "carried_by": "x-blackbox-call"}}` — and `call_summary`
+counts them (`total`, `node_level`, `call_level`, `ambiguous`). A record is `node_level` only when both sides recorded
+the call inside a node and the pairing is not ambiguous; `ambiguous` means an id appeared more than once on a side, and
+then neither node is named and `candidates` says how many pairings were refused. A reader that predates the two new keys
+ignores them, and a capsule written before D-053 simply has none: "no call ids were recorded" is not "no calls were
+linked", and the two are separate keys so the difference survives.
+
+#### `x-blackbox-run` and `x-blackbox-call` — what each proves
+
+Both headers are injected by the seam only when the launcher said a proxy is in front (`BLACKBOX_PROXY=1`), and the
+proxy strips every `x-blackbox-*` header before the upstream. `x-blackbox-run: <run>` is a claim about a **run**: the
+proxy records it as `linked_run`, and the resolver's `exact` link says two tapes belong to one run. `x-blackbox-call:
+<16 hex>` is a claim about a **call**: minted per outbound request, recorded by the seam as `call_id` and by the proxy as
+`call_id` on its own `MODEL_REQUEST` frame. An app with no proxy in front sends neither, records `call_id: null`, and
+loses nothing — there is no second vantage to join. A `MODEL_REQUEST` frame that carries a `call_id` while its writer
+is the only writer with that value is a call with one vantage, which is what an unproxied-but-minted id would look
+like; the seam does not mint one in that case, so the shape cannot arise.
 
 ### 4.0 Model-frame payloads (JSON, not CBOR)
 
@@ -181,6 +206,10 @@ SSE or JSON in practice). The summary keys a reader may rely on:
 | `bytes_received` | bytes the application received, unchanged by redaction or by the sink |
 | `partial` | the stream ended without reaching the end of the response (cancel, timeout, dropped socket) |
 | `redaction` | `{mode, counts: {kind: n}, bytes_in, bytes_out, window, failures}` — **counts, never content** |
+
+The identity keys a `MODEL_REQUEST` carries are additive: `linked_run` (the `x-blackbox-run` value the proxy read off
+the request, §11.10) and, since D-053, `call_id` — the `x-blackbox-call` value, written by the seam that minted it and
+by the proxy that read it, `null` when there was no proxy to tell.
 
 `chunks_raw` and `chunks_stored` are separate numbers because redaction merges and drops segments; a reader that has
 one must not infer the other (D-029). A `redaction.failures` above zero means the redactor raised and its input was
@@ -326,6 +355,8 @@ ZIP, STORED for raw segment bodies and DEFLATE for JSON, entries sorted with `ma
 | `chain.json` | `{chain_root, per_segment}` — what a reader needs to walk across a retention hole |
 | `manifest.json` | identity, `run` block (status, `status_cause`, completeness, `truncated_tail`, `lost_from_seq`), `gaps`, `counts`, `integrity {alg, entries, root}`, `signature: null` |
 | `INTEGRITY.sha256` | `<sha256>  <name>` per entry except itself and `manifest.json`, sorted |
+| `graph.json` | the run's nodes and edges, byte-identical to the run directory's copy (D-052, entry since D-053) |
+| `links.json` | the resolved `LINK` records and, since D-053, the `call_links` |
 
 `integrity.root = sha256(INTEGRITY.sha256)` — the manifest can therefore carry the root without hashing itself,
 while every data byte is still covered. Every entry's timestamp is `1980-01-01 00:00:00`, every mode is `0o644`,
@@ -333,6 +364,13 @@ while every data byte is still covered. Every entry's timestamp is `1980-01-01 0
 written as `.<id>.partial` with `O_EXCL`, fsynced, `os.replace`d, then the directory is fsynced: a visible `.bbx`
 is a complete `.bbx`. Reading validates names (absolute, `..`, backslash, NUL), case-folded duplicates, sizes,
 entry-count and ratio **before** it trusts a single entry.
+
+**Derived parts.** `graph.json` (and, later, the other derived artefacts) is listed in `manifest.derived_parts[]` as
+`{name, sha256, generator}` — the hash of the exact bytes written into the capsule. `blackbox capsule verify <capsule>`
+recomputes each declared part from the capsule's own `events/*.raw` and compares the hash, the node count and the edge
+count (`cap/derived.py`, `COMPARED`); a mismatch is `BBX-E412` and exits 1, an unreadable capsule exits 2, and a
+capsule that declares no derived parts verifies as `absent` and exits 0. Verification never rewrites anything: a
+capsule whose graph has drifted is reported, not repaired, and the raw frames it was derived from are untouched.
 
 ## 9. Conformance vectors
 

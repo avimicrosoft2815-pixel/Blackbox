@@ -904,3 +904,65 @@ edge that a per-call id justifies. What this decision buys is that the gap is no
 acceptance harness (`graph_edges_run_level`, `graph_edges_node_level`), and covered by tests for the three cases that
 would tempt a guesser: several nodes in one run, a proxied call with no node, and two links whose nodes could be paired
 in more than one way.
+
+## D-053 — a call that crosses a vantage carries its own id, and the capsule can prove its graph (2026-11-16, P3B-03/defect 55)
+
+D-052 left defect 55 open with one named precondition: node-level edges wait for "a call id written by the seam and
+read back by the proxy — a new frame field, i.e. its own decision". This is that decision, and it is deliberately
+narrower than "node-level edges": what it adds is **per-call identity on the wire**, an edge class that uses it, and
+a way to check that the graph in a capsule is the graph the tape produces. It does not manufacture a node where the
+proxy records none (D-052 rule 2 still holds), so what it makes possible is a *call-level* edge between two vantages,
+named on one side, and it says `partial` rather than `exact` when only one end has a slot.
+
+**The wire.** `headers.py` gains `x-blackbox-call`, minted per outbound request by seam A (`secrets.token_hex(8)`) and
+injected beside `x-blackbox-run` under the same gate: only when the launcher said a proxy is in front
+(`inject_call` returns `False` otherwise, and the seam then records no id at all rather than an id nobody will read).
+The proxy parses it, records it as `call_id` on **its own** `MODEL_REQUEST` frame, and strips every `x-blackbox-*`
+header before the upstream — asserted against a mock origin that saw neither header. An id that never leaves the
+process (no proxy) is `null`, not a fresh one: `null` means "this call has no second vantage", which a reader can tell
+apart from "the id was lost".
+
+**The frame.** `ModelCall.call_id` and the `MODEL_REQUEST` payload key `call_id` are additive. `Receiver.open_call`
+gains a keyword-only `call_id` hint, and the reason is the one already written on that method: a sink writes the
+request frame *inside* `open_call`, so a hint delivered afterwards would leave a durable frame saying `null` for a call
+that had an id. That is a change to an implementable interface, so `FailOpenReceiver` asks the callee's signature once
+and withholds the keyword from a receiver written before this record: such a receiver keeps recording (its frames say
+`call_id: null`) instead of raising `TypeError` into a failure counter while its capture silently stops. Two tests pin
+both halves — `tests/test_capture_failopen.py::test_a_receiver_written_before_d053_still_records_its_calls` and
+`::test_a_receiver_that_does_take_the_hint_is_given_it`.
+
+**The edge.** `rec/links.py` resolves call pairs by id (`resolve_calls`), and `rec/correlate.py` emits them side by
+side with the run-level links as `call_links` + `call_summary` in `links.json`; `rec/recovery.py` turns them into
+`graph.json` edges:
+
+| field | values |
+|---|---|
+| `class` | `exact` — the same call id, nothing else |
+| `level` | `call` |
+| `nodes` | `{from, to}`; a side names a slot only when the call's frames actually sit inside that node's span |
+| `node_join` | `exact` when both sides name a node, `partial` when exactly one does, `ambiguous` when a side's slot is not decidable, `unknown` when neither does |
+| `candidates` | the slots a side could have meant, when the join is ambiguous |
+| `evidence` | `{"rule": "same call id", "carried_by": "x-blackbox-call"}` |
+
+`empty_edge_summary()` gains `call_level` and `ambiguous` so a run with no call edges and a run whose joins were
+ambiguous are different rows. **A run-level `exact` link is never promoted to `call`**, and a call id never produces a
+`level: "node"` edge: an id the proxy read is evidence that two *records* are one call, not that a node of one tape is
+a node of the other, and in this build the proxy's vantage has no node slot to name (slot 0 is the run itself).
+
+**The capsule.** `graph.json` becomes a capsule entry and a declared derived part:
+`manifest.derived_parts[] = [{name: "graph.json", sha256, generator}]`, with the hash over the exact bytes written into
+the capsule. `cap/derived.py` recomputes the graph from the capsule's own raw segments (`recompute`), compares the
+declared and actual hashes plus the node and edge counts (`verify`, `COMPARED`), and never repairs anything;
+`blackbox capsule verify <capsule> [--json]` reports it: exit 0 when every declared part matches, exit 1 with
+`BBX-E412` and the drifted fields when one does not, exit 2 when the capsule cannot be read. A capsule written before
+this record declares no derived parts, verifies with `absent`, and is not rewritten — the readers that predate the key
+ignore it, and no old capsule is invalidated by a new one existing.
+
+**What this does not do, stated so the ticket is not ticked by it.** P3B-03's sentence is "one run with linked
+**nodes**". After this record the acceptance report (`bench/results/2026-11-16-p3b03-acceptance.json`) reads
+`run_level_edges_recorded: 10`, `node_level_edges_recorded: 0`, `edges_naming_a_node: 2`: the call edges exist, they
+name the slot the call ran in on the seam's side, and the other end is `null` because that writer recorded no node.
+`node_join` is therefore `partial` in every real case measured, and the `exact` branch has no real-client witness yet.
+Defect 55 stays open with the residual narrowed to exactly that: a node identity both vantages can write (the SDK knows
+its slot; the proxy would have to be told it on the wire) is the next decision, and until it exists no test may call
+these edges node-level.

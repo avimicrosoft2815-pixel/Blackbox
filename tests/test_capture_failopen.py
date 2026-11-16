@@ -262,3 +262,72 @@ def test_a_stub_receiver_without_attributes_does_not_confuse_the_wrapper():
     guarded.close_call(call, status=200)
     assert guarded.failures == []
     assert not inspect.iscoroutinefunction(guarded.receive)
+
+
+def test_a_receiver_written_before_d053_still_records_its_calls():
+    """D-053 gave `Receiver.open_call` a `call_id` hint. A receiver that predates it must keep recording.
+
+    The alternative was to hand every receiver the new keyword and let `TypeError` be counted as a recorder failure:
+    honest about the count, dishonest about the capture — such a receiver would record nothing at all while this
+    wrapper reported nothing worse than "degraded". The wrapper therefore asks the signature once and withholds the
+    hint from a receiver that cannot take it. What that receiver writes is `call_id: null`, which is the truth.
+    """
+    class Old(Receiver):
+        def __init__(self) -> None:
+            self.calls: list[ModelCall] = []
+
+        def open_call(self, provider: str, path: str, request: Any, *, model: str | None = None,
+                      stream: bool = False, partial: bool = False,
+                      linked_run: str | None = None) -> ModelCall:
+            call = ModelCall(provider=provider, path=path, model=model, stream=stream, partial=partial,
+                             linked_run=linked_run)
+            self.calls.append(call)
+            return call
+
+        def receive(self, call: ModelCall, chunk: bytes, *, first_byte_ms: float | None = None) -> None:
+            call.chunks += 1
+
+        def close_call(self, call: ModelCall, *, status: int = 0, total_ms: float | None = None,
+                       error: str | None = None) -> None:
+            call.status = status
+
+    inner = Old()
+    guarded = FailOpenReceiver(inner)
+    call = guarded.open_call("p", "/v1/chat/completions", b"{}", call_id="abc123")
+    guarded.receive(call, b"x")
+    guarded.close_call(call, status=200)
+
+    assert guarded.failures == [] and guarded.failure_count == 0
+    assert len(inner.calls) == 1 and inner.calls[0] is call
+    assert call.chunks == 1 and call.status == 200
+    assert call.call_id is None, "an old receiver has no way to record an id, and must not be given a guess"
+
+
+def test_a_receiver_that_does_take_the_hint_is_given_it():
+    """The other half: a current receiver sees the id, so the frame it writes can carry it."""
+    class Current(Receiver):
+        def __init__(self) -> None:
+            self.seen: list[ModelCall] = []
+
+        def open_call(self, provider: str, path: str, request: Any, *, model: str | None = None,
+                      stream: bool = False, partial: bool = False, linked_run: str | None = None,
+                      call_id: str | None = None) -> ModelCall:
+            call = ModelCall(provider=provider, path=path, stream=stream, partial=partial,
+                             linked_run=linked_run, call_id=call_id)
+            self.seen.append(call)
+            return call
+
+        def receive(self, call: ModelCall, chunk: bytes, *, first_byte_ms: float | None = None) -> None:
+            return None
+
+        def close_call(self, call: ModelCall, *, status: int = 0, total_ms: float | None = None,
+                       error: str | None = None) -> None:
+            return None
+
+    inner = Current()
+    guarded = FailOpenReceiver(inner)
+    call = guarded.open_call("p", "/v1/chat/completions", b"{}", call_id="abc123", linked_run="r-1")
+
+    assert guarded.failures == [] and guarded._carries_call_id is True
+    assert call is inner.seen[0]
+    assert (call.call_id, call.linked_run) == ("abc123", "r-1")

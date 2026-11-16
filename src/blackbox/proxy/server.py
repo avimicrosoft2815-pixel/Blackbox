@@ -738,13 +738,16 @@ class ProxyServer:
         # `x-blackbox-run` is the one header the proxy *reads*: it names the run this call belongs to, which is how an
         # exact link is made across a process boundary. It is stripped before the upstream like every other ours.
         linked_run, _node = cap_headers.parse(request.header(cap_headers.HEADER))
+        # D-053: the per-call id the SDK sent, recorded on the proxy's own frame for the same request. Both sides then
+        # carry one id for one call, which is the only thing that can justify a node-to-call edge.
+        call_id = cap_headers.parse_call(request.header(cap_headers.CALL_HEADER))
         try:
             return self.receiver.open_call(
                 provider=route.name, path=target_path + (f"?{query}" if query else ""),
                 request={"method": request.method, "path": target_path,
                          "headers": {k.lower(): v for k, v in request.headers if not is_ours(k)},
                          "body_sha256": hashlib.sha256(body or b"").hexdigest()},
-                stream=stream, partial=True, linked_run=linked_run)
+                stream=stream, partial=True, linked_run=linked_run, call_id=call_id)
         except Exception:
             self.stats.record_errors += 1
             return None
