@@ -181,6 +181,13 @@ S: dict[str, tuple[str, str, str, str, str, str]] = {
               "not started, and not to be folded into P4-17: an applier needs its own approval gate (path restriction, "
               "change detection against the reviewed bytes, rollback) before it may write anything. Until then the "
               "brief is a document a human applies, and the product says so in its own text"),
+    "P4-19": ("done", "HEAD", "tests/test_interruption_lab.py (18)",
+              "bench/results/2026-11-16-interruption-lab.json", "self",
+              "six real children, one per interruption class, killed with a real signal and recovered for real: every "
+              "one leaves a capsule whose integrity root verifies, the statuses and findings are identical across three "
+              "repeats, the mid-stream row is `likely` with chunk evidence and its alternatives, the killed tool row is "
+              "`cannot-tell` with 'the side effect may have happened', and the clean row has no interruption finding. "
+              "The artifact says in its own `limits` block that these are labels and counts, not measurements"),
     "P4-11": ("done", "HEAD", "tests/test_ui_server.py (13)", "—", "self",
               "`blackbox serve <capsule|dir>` publishes the same inlined page on 127.0.0.1 over an ephemeral port at a "
               "per-process secret path, then stops after the first successful fetch. The bind is a literal and the "

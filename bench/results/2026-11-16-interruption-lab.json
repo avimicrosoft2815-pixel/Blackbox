@@ -1,0 +1,658 @@
+{
+  "hardware": {
+    "cpu_count": 2,
+    "implementation": "CPython",
+    "machine": "x86_64",
+    "os": "Linux-6.1.158+-x86_64-with-glibc2.36",
+    "pid": 88944,
+    "python": "3.11.2",
+    "repeats": 3,
+    "topology": "one child process per run, killed with a real signal; recovery and diagnosis in the parent, so the tape crosses a process boundary in both directions"
+  },
+  "limits": [
+    "these are counts and labels, not measurements: nothing here is a latency, a throughput or a cost",
+    "one machine, one kernel; the kill lands at the point the scenario names on POSIX, and on Windows the child's SIGTERM fallback is TerminateProcess \u2014 a different signal model would show as a different node status",
+    "the six classes are the ones \u00a714.4 names; a real-world interruption can combine them (a torn tail plus a cut stream), which this lab does not synthesise",
+    "the diagnosis is read-only: this artifact cannot show that a fix works, only that the evidence supports the labels it prints"
+  ],
+  "measured_at": "2026-11-16T16:35:32Z",
+  "rows": {
+    "after-response": [
+      {
+        "brief_has_unknowns": true,
+        "brief_names_no_location": true,
+        "capsule": true,
+        "capsule_bytes": 67020,
+        "capsule_id": "c_a84b5f6046de76b6",
+        "child_exit": -9,
+        "content_mode": "full",
+        "findings": [
+          {
+            "alternatives": 3,
+            "confidence": "medium",
+            "id": "no-run-end",
+            "verdict": "likely"
+          }
+        ],
+        "frames": 12,
+        "node_statuses": {
+          "1": "INTERRUPTED_BEFORE_FIRST_BYTE",
+          "2": "INTERRUPTED_AFTER_RESPONSE"
+        },
+        "reached_run_end": false,
+        "root_ok": true,
+        "scenario": "after-response"
+      },
+      {
+        "brief_has_unknowns": true,
+        "brief_names_no_location": true,
+        "capsule": true,
+        "capsule_bytes": 67191,
+        "capsule_id": "c_aa7daf6a82805d49",
+        "child_exit": -9,
+        "content_mode": "full",
+        "findings": [
+          {
+            "alternatives": 3,
+            "confidence": "medium",
+            "id": "no-run-end",
+            "verdict": "likely"
+          }
+        ],
+        "frames": 12,
+        "node_statuses": {
+          "1": "INTERRUPTED_BEFORE_FIRST_BYTE",
+          "2": "INTERRUPTED_AFTER_RESPONSE"
+        },
+        "reached_run_end": false,
+        "root_ok": true,
+        "scenario": "after-response"
+      },
+      {
+        "brief_has_unknowns": true,
+        "brief_names_no_location": true,
+        "capsule": true,
+        "capsule_bytes": 67225,
+        "capsule_id": "c_e27937bd3200327f",
+        "child_exit": -9,
+        "content_mode": "full",
+        "findings": [
+          {
+            "alternatives": 3,
+            "confidence": "medium",
+            "id": "no-run-end",
+            "verdict": "likely"
+          }
+        ],
+        "frames": 12,
+        "node_statuses": {
+          "1": "INTERRUPTED_BEFORE_FIRST_BYTE",
+          "2": "INTERRUPTED_AFTER_RESPONSE"
+        },
+        "reached_run_end": false,
+        "root_ok": true,
+        "scenario": "after-response"
+      }
+    ],
+    "before-first-byte": [
+      {
+        "brief_has_unknowns": true,
+        "brief_names_no_location": true,
+        "capsule": true,
+        "capsule_bytes": 67016,
+        "capsule_id": "c_5120ead17093e725",
+        "child_exit": -9,
+        "content_mode": "full",
+        "findings": [
+          {
+            "alternatives": 2,
+            "confidence": "medium",
+            "id": "no-first-byte-2",
+            "verdict": "likely"
+          },
+          {
+            "alternatives": 3,
+            "confidence": "medium",
+            "id": "no-run-end",
+            "verdict": "likely"
+          }
+        ],
+        "frames": 8,
+        "node_statuses": {
+          "1": "INTERRUPTED_BEFORE_FIRST_BYTE",
+          "2": "INTERRUPTED_BEFORE_FIRST_BYTE"
+        },
+        "reached_run_end": false,
+        "root_ok": true,
+        "scenario": "before-first-byte"
+      },
+      {
+        "brief_has_unknowns": true,
+        "brief_names_no_location": true,
+        "capsule": true,
+        "capsule_bytes": 67190,
+        "capsule_id": "c_c1da87aefe34f209",
+        "child_exit": -9,
+        "content_mode": "full",
+        "findings": [
+          {
+            "alternatives": 2,
+            "confidence": "medium",
+            "id": "no-first-byte-2",
+            "verdict": "likely"
+          },
+          {
+            "alternatives": 3,
+            "confidence": "medium",
+            "id": "no-run-end",
+            "verdict": "likely"
+          }
+        ],
+        "frames": 8,
+        "node_statuses": {
+          "1": "INTERRUPTED_BEFORE_FIRST_BYTE",
+          "2": "INTERRUPTED_BEFORE_FIRST_BYTE"
+        },
+        "reached_run_end": false,
+        "root_ok": true,
+        "scenario": "before-first-byte"
+      },
+      {
+        "brief_has_unknowns": true,
+        "brief_names_no_location": true,
+        "capsule": true,
+        "capsule_bytes": 67225,
+        "capsule_id": "c_84e8c5add4c7db7e",
+        "child_exit": -9,
+        "content_mode": "full",
+        "findings": [
+          {
+            "alternatives": 2,
+            "confidence": "medium",
+            "id": "no-first-byte-2",
+            "verdict": "likely"
+          },
+          {
+            "alternatives": 3,
+            "confidence": "medium",
+            "id": "no-run-end",
+            "verdict": "likely"
+          }
+        ],
+        "frames": 8,
+        "node_statuses": {
+          "1": "INTERRUPTED_BEFORE_FIRST_BYTE",
+          "2": "INTERRUPTED_BEFORE_FIRST_BYTE"
+        },
+        "reached_run_end": false,
+        "root_ok": true,
+        "scenario": "before-first-byte"
+      }
+    ],
+    "clean": [
+      {
+        "brief_has_unknowns": true,
+        "brief_names_no_location": true,
+        "capsule": true,
+        "capsule_bytes": 67029,
+        "capsule_id": "c_c2e7e00fa3b7d543",
+        "child_exit": 0,
+        "content_mode": "full",
+        "findings": [
+          {
+            "alternatives": 2,
+            "confidence": "high",
+            "id": "several-run-ids",
+            "verdict": "observed"
+          }
+        ],
+        "frames": 17,
+        "node_statuses": {},
+        "reached_run_end": true,
+        "root_ok": true,
+        "scenario": "clean"
+      },
+      {
+        "brief_has_unknowns": true,
+        "brief_names_no_location": true,
+        "capsule": true,
+        "capsule_bytes": 67196,
+        "capsule_id": "c_3bd0e661f8da02ab",
+        "child_exit": 0,
+        "content_mode": "full",
+        "findings": [
+          {
+            "alternatives": 2,
+            "confidence": "high",
+            "id": "several-run-ids",
+            "verdict": "observed"
+          }
+        ],
+        "frames": 17,
+        "node_statuses": {},
+        "reached_run_end": true,
+        "root_ok": true,
+        "scenario": "clean"
+      },
+      {
+        "brief_has_unknowns": true,
+        "brief_names_no_location": true,
+        "capsule": true,
+        "capsule_bytes": 67228,
+        "capsule_id": "c_98ecc1ee3df3d8d8",
+        "child_exit": 0,
+        "content_mode": "full",
+        "findings": [
+          {
+            "alternatives": 2,
+            "confidence": "high",
+            "id": "several-run-ids",
+            "verdict": "observed"
+          }
+        ],
+        "frames": 17,
+        "node_statuses": {},
+        "reached_run_end": true,
+        "root_ok": true,
+        "scenario": "clean"
+      }
+    ],
+    "in-tool": [
+      {
+        "brief_has_unknowns": true,
+        "brief_names_no_location": true,
+        "capsule": true,
+        "capsule_bytes": 67015,
+        "capsule_id": "c_632b15271ba9d859",
+        "child_exit": -9,
+        "content_mode": "full",
+        "findings": [
+          {
+            "alternatives": 3,
+            "confidence": "medium",
+            "id": "no-run-end",
+            "verdict": "likely"
+          },
+          {
+            "alternatives": 3,
+            "confidence": "low",
+            "id": "tool-outcome-unknown-3",
+            "verdict": "cannot-tell"
+          }
+        ],
+        "frames": 10,
+        "node_statuses": {
+          "1": "INTERRUPTED_BEFORE_FIRST_BYTE",
+          "3": "INTERRUPTED_IN_TOOL"
+        },
+        "reached_run_end": false,
+        "root_ok": true,
+        "scenario": "in-tool"
+      },
+      {
+        "brief_has_unknowns": true,
+        "brief_names_no_location": true,
+        "capsule": true,
+        "capsule_bytes": 67189,
+        "capsule_id": "c_8858909d847ed58f",
+        "child_exit": -9,
+        "content_mode": "full",
+        "findings": [
+          {
+            "alternatives": 3,
+            "confidence": "medium",
+            "id": "no-run-end",
+            "verdict": "likely"
+          },
+          {
+            "alternatives": 3,
+            "confidence": "low",
+            "id": "tool-outcome-unknown-3",
+            "verdict": "cannot-tell"
+          }
+        ],
+        "frames": 10,
+        "node_statuses": {
+          "1": "INTERRUPTED_BEFORE_FIRST_BYTE",
+          "3": "INTERRUPTED_IN_TOOL"
+        },
+        "reached_run_end": false,
+        "root_ok": true,
+        "scenario": "in-tool"
+      },
+      {
+        "brief_has_unknowns": true,
+        "brief_names_no_location": true,
+        "capsule": true,
+        "capsule_bytes": 67223,
+        "capsule_id": "c_0bd19859cd37a836",
+        "child_exit": -9,
+        "content_mode": "full",
+        "findings": [
+          {
+            "alternatives": 3,
+            "confidence": "medium",
+            "id": "no-run-end",
+            "verdict": "likely"
+          },
+          {
+            "alternatives": 3,
+            "confidence": "low",
+            "id": "tool-outcome-unknown-3",
+            "verdict": "cannot-tell"
+          }
+        ],
+        "frames": 10,
+        "node_statuses": {
+          "1": "INTERRUPTED_BEFORE_FIRST_BYTE",
+          "3": "INTERRUPTED_IN_TOOL"
+        },
+        "reached_run_end": false,
+        "root_ok": true,
+        "scenario": "in-tool"
+      }
+    ],
+    "mid-stream": [
+      {
+        "brief_has_unknowns": true,
+        "brief_names_no_location": true,
+        "capsule": true,
+        "capsule_bytes": 67018,
+        "capsule_id": "c_24a7e4c01b30d695",
+        "child_exit": -9,
+        "content_mode": "full",
+        "findings": [
+          {
+            "alternatives": 4,
+            "confidence": "medium",
+            "id": "interrupted-stream-2",
+            "verdict": "likely"
+          },
+          {
+            "alternatives": 3,
+            "confidence": "medium",
+            "id": "no-run-end",
+            "verdict": "likely"
+          }
+        ],
+        "frames": 12,
+        "node_statuses": {
+          "1": "INTERRUPTED_BEFORE_FIRST_BYTE",
+          "2": "INTERRUPTED_MID_STREAM"
+        },
+        "reached_run_end": false,
+        "root_ok": true,
+        "scenario": "mid-stream"
+      },
+      {
+        "brief_has_unknowns": true,
+        "brief_names_no_location": true,
+        "capsule": true,
+        "capsule_bytes": 67191,
+        "capsule_id": "c_3c0406d3f8846fbb",
+        "child_exit": -9,
+        "content_mode": "full",
+        "findings": [
+          {
+            "alternatives": 4,
+            "confidence": "medium",
+            "id": "interrupted-stream-2",
+            "verdict": "likely"
+          },
+          {
+            "alternatives": 3,
+            "confidence": "medium",
+            "id": "no-run-end",
+            "verdict": "likely"
+          }
+        ],
+        "frames": 12,
+        "node_statuses": {
+          "1": "INTERRUPTED_BEFORE_FIRST_BYTE",
+          "2": "INTERRUPTED_MID_STREAM"
+        },
+        "reached_run_end": false,
+        "root_ok": true,
+        "scenario": "mid-stream"
+      },
+      {
+        "brief_has_unknowns": true,
+        "brief_names_no_location": true,
+        "capsule": true,
+        "capsule_bytes": 67223,
+        "capsule_id": "c_a8c17b854a230d78",
+        "child_exit": -9,
+        "content_mode": "full",
+        "findings": [
+          {
+            "alternatives": 4,
+            "confidence": "medium",
+            "id": "interrupted-stream-2",
+            "verdict": "likely"
+          },
+          {
+            "alternatives": 3,
+            "confidence": "medium",
+            "id": "no-run-end",
+            "verdict": "likely"
+          }
+        ],
+        "frames": 12,
+        "node_statuses": {
+          "1": "INTERRUPTED_BEFORE_FIRST_BYTE",
+          "2": "INTERRUPTED_MID_STREAM"
+        },
+        "reached_run_end": false,
+        "root_ok": true,
+        "scenario": "mid-stream"
+      }
+    ],
+    "provider-error": [
+      {
+        "brief_has_unknowns": true,
+        "brief_names_no_location": true,
+        "capsule": true,
+        "capsule_bytes": 67017,
+        "capsule_id": "c_68ca2bc9b42214ce",
+        "child_exit": -9,
+        "content_mode": "full",
+        "findings": [
+          {
+            "alternatives": 0,
+            "confidence": "high",
+            "id": "provider-error-2",
+            "verdict": "observed"
+          },
+          {
+            "alternatives": 3,
+            "confidence": "medium",
+            "id": "no-run-end",
+            "verdict": "likely"
+          }
+        ],
+        "frames": 10,
+        "node_statuses": {
+          "1": "INTERRUPTED_BEFORE_FIRST_BYTE",
+          "2": "INTERRUPTED_AFTER_RESPONSE"
+        },
+        "reached_run_end": false,
+        "root_ok": true,
+        "scenario": "provider-error"
+      },
+      {
+        "brief_has_unknowns": true,
+        "brief_names_no_location": true,
+        "capsule": true,
+        "capsule_bytes": 67195,
+        "capsule_id": "c_13758b7e20178ab0",
+        "child_exit": -9,
+        "content_mode": "full",
+        "findings": [
+          {
+            "alternatives": 0,
+            "confidence": "high",
+            "id": "provider-error-2",
+            "verdict": "observed"
+          },
+          {
+            "alternatives": 3,
+            "confidence": "medium",
+            "id": "no-run-end",
+            "verdict": "likely"
+          }
+        ],
+        "frames": 10,
+        "node_statuses": {
+          "1": "INTERRUPTED_BEFORE_FIRST_BYTE",
+          "2": "INTERRUPTED_AFTER_RESPONSE"
+        },
+        "reached_run_end": false,
+        "root_ok": true,
+        "scenario": "provider-error"
+      },
+      {
+        "brief_has_unknowns": true,
+        "brief_names_no_location": true,
+        "capsule": true,
+        "capsule_bytes": 67230,
+        "capsule_id": "c_567fc1b24e00af1c",
+        "child_exit": -9,
+        "content_mode": "full",
+        "findings": [
+          {
+            "alternatives": 0,
+            "confidence": "high",
+            "id": "provider-error-2",
+            "verdict": "observed"
+          },
+          {
+            "alternatives": 3,
+            "confidence": "medium",
+            "id": "no-run-end",
+            "verdict": "likely"
+          }
+        ],
+        "frames": 10,
+        "node_statuses": {
+          "1": "INTERRUPTED_BEFORE_FIRST_BYTE",
+          "2": "INTERRUPTED_AFTER_RESPONSE"
+        },
+        "reached_run_end": false,
+        "root_ok": true,
+        "scenario": "provider-error"
+      }
+    ]
+  },
+  "summary": {
+    "after-response": {
+      "all_roots_ok": true,
+      "capsules_built": 3,
+      "child_exits": [
+        -9
+      ],
+      "runs": 3,
+      "stable_findings": [
+        "no-run-end"
+      ],
+      "stable_node_statuses": [
+        "INTERRUPTED_AFTER_RESPONSE",
+        "INTERRUPTED_BEFORE_FIRST_BYTE"
+      ],
+      "verdicts_seen": [
+        "likely"
+      ]
+    },
+    "before-first-byte": {
+      "all_roots_ok": true,
+      "capsules_built": 3,
+      "child_exits": [
+        -9
+      ],
+      "runs": 3,
+      "stable_findings": [
+        "no-first-byte-2",
+        "no-run-end"
+      ],
+      "stable_node_statuses": [
+        "INTERRUPTED_BEFORE_FIRST_BYTE"
+      ],
+      "verdicts_seen": [
+        "likely"
+      ]
+    },
+    "clean": {
+      "all_roots_ok": true,
+      "capsules_built": 3,
+      "child_exits": [
+        0
+      ],
+      "runs": 3,
+      "stable_findings": [
+        "several-run-ids"
+      ],
+      "stable_node_statuses": [],
+      "verdicts_seen": [
+        "observed"
+      ]
+    },
+    "in-tool": {
+      "all_roots_ok": true,
+      "capsules_built": 3,
+      "child_exits": [
+        -9
+      ],
+      "runs": 3,
+      "stable_findings": [
+        "no-run-end",
+        "tool-outcome-unknown-3"
+      ],
+      "stable_node_statuses": [
+        "INTERRUPTED_BEFORE_FIRST_BYTE",
+        "INTERRUPTED_IN_TOOL"
+      ],
+      "verdicts_seen": [
+        "cannot-tell",
+        "likely"
+      ]
+    },
+    "mid-stream": {
+      "all_roots_ok": true,
+      "capsules_built": 3,
+      "child_exits": [
+        -9
+      ],
+      "runs": 3,
+      "stable_findings": [
+        "interrupted-stream-2",
+        "no-run-end"
+      ],
+      "stable_node_statuses": [
+        "INTERRUPTED_BEFORE_FIRST_BYTE",
+        "INTERRUPTED_MID_STREAM"
+      ],
+      "verdicts_seen": [
+        "likely"
+      ]
+    },
+    "provider-error": {
+      "all_roots_ok": true,
+      "capsules_built": 3,
+      "child_exits": [
+        -9
+      ],
+      "runs": 3,
+      "stable_findings": [
+        "no-run-end",
+        "provider-error-2"
+      ],
+      "stable_node_statuses": [
+        "INTERRUPTED_AFTER_RESPONSE",
+        "INTERRUPTED_BEFORE_FIRST_BYTE"
+      ],
+      "verdicts_seen": [
+        "likely",
+        "observed"
+      ]
+    }
+  }
+}
