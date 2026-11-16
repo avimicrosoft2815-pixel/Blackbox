@@ -185,10 +185,10 @@ def document_for_capsule(path: str, *, role: str = "", writer: str = "") -> dict
     except Exception:
         links = {"links": [], "summary": {"declared": 0, "exact": 0, "inferred": 0}}
     run = manifest.get("run") or {}
-    # The identity the page shows is the one the tape *names*, when it names one: a capsule's own `run.run_id` is
-    # derived from the writer (`Recovery.run_id`), which is what makes two tapes of one run keep separate capsule files.
-    # A reader who ran `blackbox run` was given the named id, so that is the id the page must show — with the derived
-    # one kept beside it as `capsule_run_id`, because that is what the capsule file is called.
+    # The identity the page shows is the one the tape *names*, when it names one. A tape that names no run gets an id
+    # derived from its writer, and that id is also kept beside this one as `capsule_run_id`. For a tape that attached
+    # to a run — the case `blackbox run` produces — the capsule names that run too (defect 47), so the two agree; they
+    # diverge only for a standalone recording, which is the case the second field exists for.
     start_body = next((_payload(f) for f in decoded if f["kind"] == C.KIND_RUN_START), {})
     named_run = start_body.get("run_id")
     # What kind of tape this is, said by the tape: the SDK marks its own boundary, the hook folder names its vantage,

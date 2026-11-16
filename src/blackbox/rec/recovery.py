@@ -22,6 +22,7 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import re
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -253,6 +254,28 @@ def run_status(frames: list[dict[str, Any]], *, sealed: bool) -> tuple[str, str 
     return ("recovered", "PROCESS_DEATH")
 
 
+#: A run id is `r_` and lowercase alphanumerics. Both conventions in the tree match (`r_` + 16 hex from
+#: `run_id_for`, `r_` + 26 base32 from `codec.ids.new_run_id`); a bare writer uuid, which an unattached SDK tape puts
+#: in its `RUN_START`, does not. Accepting only what looks like a run id keeps the capsule inside the format rules.
+_RUN_ID_RE = re.compile(r"^r_[0-9a-z]{8,40}$")
+
+
+def _declared_run_id(tape_dir: str) -> str | None:
+    """The run id the tape's own `RUN_START` names, if it names one that is well-formed. Never raises."""
+    try:
+        from blackbox.tape import reader
+
+        for frame in reader.iter_frames(tape_dir, 1):
+            if frame["kind"] != C.KIND_RUN_START:
+                continue
+            payload = cbor.decode_exact(frame["payload"])
+            declared = payload.get("run_id") if isinstance(payload, dict) else None
+            return declared if isinstance(declared, str) and _RUN_ID_RE.match(declared) else None
+    except Exception:                                  # a damaged first segment is DISCOVERED's problem, not this one
+        return None
+    return None
+
+
 # ── the state machine ───────────────────────────────────────────────────────
 @dataclass
 class RecoveryResult:
@@ -284,10 +307,26 @@ class Recovery:
         self.tape_dir = os.path.join(data_dir, "tape", writer_uuid_hex)
         self.now_ns = time.time_ns() if now_ns is None else now_ns
         meta = self._read_meta()
-        # Stable identity: the tape says who it is, so a resumed recovery lands in the same run directory.
-        self.run_id = "r_" + _hash(writer_uuid_hex, meta.get("created_wall_ns", 0))[:16]
-        self.run_dir = os.path.join(data_dir, "runs", self.run_id)
-        self.capsule_id = "c_" + _hash(self.run_id)[:16]
+        # Two identities, and conflating them was defect 47.
+        #
+        # `tape_key` is *this tape's* work-directory name, derived from the writer and the tape's creation time: stable
+        # across recoveries, and — the part that matters — never shared, because everything in a run directory belongs
+        # to one tape (`index.sqlite`, `scan.json`, `graph.json`, `cost.json`, the `recovery.done.*` markers). Two
+        # tapes that pointed at one directory would overwrite each other's state, which is a worse bug than the one
+        # this fixes.
+        #
+        # `run_id` is the run the tape says it belongs to: the `RUN_START` payload the tape itself wrote. A child tape
+        # attached to a launcher's run declares the launcher's id, so the two capsules name one run and the link that
+        # joins them says the same thing the manifests do. A tape that names no run (or names something that is not a
+        # run id at all — an unattached SDK tape writes its writer uuid there) falls back to `tape_key`, which is
+        # exactly what a standalone recording is.
+        self.tape_key = "r_" + _hash(writer_uuid_hex, meta.get("created_wall_ns", 0))[:16]
+        self.declared_run_id = _declared_run_id(self.tape_dir)
+        self.run_id = self.declared_run_id or self.tape_key
+        self.run_dir = os.path.join(data_dir, "runs", self.tape_key)
+        # The capsule is per *tape*, not per run: two tapes of one run are two capsules (that is what the link is
+        # for), so the id has to distinguish them or the second seal would replace the first.
+        self.capsule_id = "c_" + _hash(self.run_id, writer_uuid_hex)[:16]
         self.capsule_path = os.path.join(data_dir, "capsules", f"{self.capsule_id}.bbx")
         self.result = RecoveryResult(run_id=self.run_id, run_dir=self.run_dir)
         self._scan: scanner.ScanResult | None = None

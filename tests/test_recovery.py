@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import os
+import pathlib
 import shutil
 import subprocess
 import sys
@@ -313,3 +314,96 @@ def test_a_clean_end_does_not_silence_a_real_node() -> None:
               _frame(3, C.KIND_MODEL_REQUEST, slot=1),
               _frame(4, C.KIND_RUN_END, slot=0)]
     assert [n.status for n in recovery.classify_nodes(frames)] == ["INTERRUPTED_BEFORE_FIRST_BYTE"]
+
+
+# ── defect 47: one run, two tapes, two capsules that agree about the run ────────────────────────────────────────────
+def _declaring_tape(tmp_path: Path, declared: str | None) -> str:
+    """A tape whose `RUN_START` names `declared` (or names nothing), closed cleanly."""
+    from blackbox.codec import cbor
+
+    w = TapeWriter(str(tmp_path / "data"), segment_bytes=C.MIN_SEGMENT_BYTES)
+    w.batch_bytes = 0
+    w.batch_ms = 0.0
+    w.open()
+    try:
+        payload = {"argv": None, "pid": None}
+        if declared is not None:
+            payload["run_id"] = declared
+        w.append(C.KIND_RUN_START, cbor.encode(payload), priority=0)
+        w.append(C.KIND_MODEL_REQUEST, b'{"m":"model"}', priority=0)
+        w.append(C.KIND_RUN_END, b"{}", priority=0)
+        w.publish()
+        return w.writer_uuid.hex()
+    finally:
+        w.close()
+
+
+def _sealed(tmp_path: Path, writer_uuid_hex: str) -> dict:
+    data_dir = str(tmp_path / "data")
+    recovery.recover(data_dir, writer_uuid_hex)
+    record = json.loads((pathlib.Path(data_dir) / "runs").glob("*/recovery.json").__iter__().__next__().read_text())
+    return record
+
+
+def test_two_tapes_of_one_run_share_the_run_id_and_keep_separate_capsules(tmp_path: Path) -> None:
+    """The launcher's tape publishes a run id; the child's tape attaches to it. Both capsules must name that run.
+
+    Before this, each capsule named a run id derived from its own writer uuid, so one `blackbox run` produced two
+    capsules that a consumer grouping by `run.run_id` read as two runs — while the link between them, resolved from the
+    tapes' `RUN_START`, said `exact` for one run. The capsule contradicted its own tape and its sibling.
+    """
+    from blackbox.cap import format as cap
+
+    data_dir = pathlib.Path(tmp_path / "data")
+    launcher_uuid = _declaring_tape(tmp_path, None)                 # names nothing: falls back to its own id
+    recovery.recover(str(data_dir), launcher_uuid)
+    launcher_cap = cap.read_capsule(str(next(data_dir.glob("capsules/*.bbx"))))
+    run_id = launcher_cap.manifest["run"]["run_id"]
+    assert run_id.startswith("r_")
+
+    child_uuid = _declaring_tape(tmp_path, run_id)                 # declares the launcher's run
+    recovery.recover(str(data_dir), child_uuid)
+
+    capsules = [cap.read_capsule(str(p)) for p in sorted(data_dir.glob("capsules/*.bbx"))]
+    assert len(capsules) == 2, "two tapes are two capsules; the second must never replace the first"
+    assert {c.manifest["run"]["run_id"] for c in capsules} == {run_id}
+    assert len({c.manifest["capsule_id"] for c in capsules}) == 2
+    assert all(c.root_ok for c in capsules)
+    for capsule in capsules:
+        assert capsule.manifest["capsule_id"].startswith("c_")
+        assert len(capsule.manifest["capsule_id"]) == 18, "c_ and sixteen hex characters, as the format says"
+
+
+def test_a_tape_that_names_no_run_keeps_its_own_id(tmp_path: Path) -> None:
+    from blackbox.cap import format as cap
+
+    uuid_hex = _declaring_tape(tmp_path, None)
+    result = recovery.recover(str(tmp_path / "data"), uuid_hex).to_dict()
+    capsule = cap.read_capsule(result["capsule_path"])
+    assert capsule.manifest["run"]["run_id"] == result["run_id"] == recovery.run_id_for(str(tmp_path / "data"), uuid_hex)
+
+
+def test_a_declaration_that_is_not_a_run_id_is_ignored(tmp_path: Path) -> None:
+    """An unattached SDK tape writes its writer uuid into `RUN_START`; that is not a run id and must not become one."""
+    from blackbox.cap import format as cap
+
+    uuid_hex = _declaring_tape(tmp_path, "0" * 32)
+    result = recovery.recover(str(tmp_path / "data"), uuid_hex).to_dict()
+    capsule = cap.read_capsule(result["capsule_path"])
+    assert capsule.manifest["run"]["run_id"] == recovery.run_id_for(str(tmp_path / "data"), uuid_hex)
+    assert "0" * 32 not in capsule.manifest["run"]["run_id"]
+
+
+def test_the_capsule_id_changes_with_the_writer_not_only_the_run(tmp_path: Path) -> None:
+    """Capsule identity has to be per tape. Two tapes on one run id must not resolve to one path."""
+    from blackbox.cap import format as cap
+
+    data_dir = pathlib.Path(tmp_path / "data")
+    first_uuid = _declaring_tape(tmp_path, None)
+    recovery.recover(str(data_dir), first_uuid)
+    first = cap.read_capsule(str(next(data_dir.glob("capsules/*.bbx")))).manifest["run"]["run_id"]
+    second_uuid = _declaring_tape(tmp_path, first)
+    recovery.recover(str(data_dir), second_uuid)
+    paths = sorted(data_dir.glob("capsules/*.bbx"))
+    assert len(paths) == 2
+    assert paths[0].name != paths[1].name

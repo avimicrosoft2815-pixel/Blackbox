@@ -280,6 +280,10 @@ def test_one_run_is_one_set_of_linked_tapes_not_one_tape(tmp_path):
     assert set(capsules) == {"launcher", "sdk"}, f"expected the launcher's tape and the child's, got {set(capsules)}"
 
     launcher_cap, sdk_cap = capsules["launcher"], capsules["sdk"]
+    # defect 47: the capsules must agree with each other *and* with the link, which is resolved from the tapes'
+    # `RUN_START`. A child tape that attached declares the launcher's run, so its capsule names that run too.
+    assert {entry["manifest"]["run"]["run_id"] for entry in capsules.values()} == {result.run_id}
+    assert launcher_cap["manifest"]["capsule_id"] != sdk_cap["manifest"]["capsule_id"], "one run, two tapes, two capsules"
     # the child's tape is where the nodes are, which is why recovering only the launcher's tape lost the work
     assert sdk_cap["manifest"]["counts"]["nodes"] == 1
     assert sdk_cap["manifest"]["counts"]["events"] > launcher_cap["manifest"]["counts"]["events"]

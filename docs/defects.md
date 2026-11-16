@@ -434,6 +434,18 @@ plan's §10 shape, and it is append-only.
   the run id is also the run *directory* name and the capsule id (`"c_" + _hash(run_id)`), so two attached tapes sharing
   a run id would collide on one capsule path unless capsule identity is derived from the writer too, and the
   `recovery.done.<STEP>` resumability markers are keyed on it. That is a ticket, not a patch at the end of a session.
+  **Closed 2026-11-16**: the two identities were separated instead of merged. A tape now has a `tape_key` (derived from
+  its writer and creation time) that names its *work directory*, where every file belongs to that tape alone — nothing is
+  shared, so nothing can be overwritten; and a `run_id` that is the run its own `RUN_START` declares, falling back to
+  `tape_key` when the tape names nothing (or names something that is not a run id, like the writer uuid an unattached SDK
+  tape writes). The capsule is per *tape* — `c_` + hash(run id, writer) — so two tapes of one run are two capsules and
+  the second seal cannot replace the first, while both manifests and both links now name one run. Verified end to end
+  with real clients (`bench/accept_p3b03.py`, `bench/results/2026-11-16-p3b03-acceptance.json`): `python` (urllib),
+  `node` 22.22.3 and a real `openai` 3.51.0 client each exit 0 with every capsule root intact and one run id across the
+  capsules. Tests: `tests/test_recovery.py::test_two_tapes_of_one_run_share_the_run_id_and_keep_separate_capsules`,
+  `::test_a_tape_that_names_no_run_keeps_its_own_id`, `::test_a_declaration_that_is_not_a_run_id_is_ignored`,
+  `::test_the_capsule_id_changes_with_the_writer_not_only_the_run`, and the assertion added to
+  `tests/test_launcher_attach.py::test_one_run_is_one_set_of_linked_tapes_not_one_tape`.
 
 - **defect 48 — the repair tests hashed `\n` and wrote `\r\n`, so the applier's own guard failed them on Windows.**
   Run 43916957036 (5663879) fixed the symlink-root refusal and the Windows cells still failed, on
@@ -446,4 +458,16 @@ plan's §10 shape, and it is append-only.
   tree snapshot compares hex bytes rather than text, so a CRLF difference can no longer hide inside `read_text`'s
   translation on either side. This is the third defect in this family (C29, D-050, and now the tests): text mode on
   Windows is not a detail of this feature, it is a way for a byte-exact guarantee to be silently untrue.
+
+- **defect 49 — the auto-import makes a tape and installs no seam, so an unmodified SDK script records nothing itself.**
+  **Open.** `cap_sdk/autoimport.py::activate()` calls `api.install()`, which opens the child's tape and writes
+  `RUN_START`/`RUN_END` — and nothing else. The three capture seams are installed by `cap_sdk/preflight.py::choose()`,
+  and **no module in `src/` calls `choose()`**: the seams are exercised by tests and by the day-14 lab, which wires them
+  by hand (`SinkRecorder(TapeSink(api.emit))`). Measured under `blackbox run`: a child using the real `openai` 3.51.0
+  client, with the banner saying `sdk auto-import (sitecustomize)` and `BLACKBOX_VERBOSE=1` saying
+  `blackbox sdk: installed`, leaves a capsule with `{RUN_START, CHAIN, RUN_END, SEG_END}` and **no `MODEL_*` frame**.
+  The call is still recorded — by the proxy's vantage, on the launcher's tape — so nothing is lost, but the child's own
+  vantage is empty and the summary line implies otherwise. This is why P3B-03's "one run with linked nodes" is not
+  claimed as met: with no seam and no `NODE_OPEN`, both vantages report `nodes: 0` and the graphs have no nodes to link.
+  Found by adding the SDK client to the acceptance harness rather than by reading the flag.
 

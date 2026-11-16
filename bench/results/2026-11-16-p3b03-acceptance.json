@@ -1,6 +1,7 @@
 {
   "host": {
     "node": "v22.22.3",
+    "openai": "3.51.0",
     "platform": "Linux-6.1.158+-x86_64-with-glibc2.36",
     "python": "3.11.2"
   },
@@ -10,7 +11,7 @@
       "capsule_count": 2,
       "capsules": [
         {
-          "capsule": "c_381ff5d53086388b.bbx",
+          "capsule": "c_2998def6d256393c.bbx",
           "counts": {
             "bytes": 16777921,
             "events": 5,
@@ -28,8 +29,8 @@
           "link_pairs": [
             {
               "class": "exact",
-              "left_run": "r_3fb2a3e364a6255f",
-              "right_run": "r_3fb2a3e364a6255f"
+              "left_run": "r_d9706d05d1f5b16e",
+              "right_run": "r_d9706d05d1f5b16e"
             }
           ],
           "links": {
@@ -38,11 +39,11 @@
             "inferred": 0
           },
           "root_ok": true,
-          "run_id": "r_f090ee72bdc2cbf6",
+          "run_id": "r_d9706d05d1f5b16e",
           "run_status": "SEAL_INTERRUPTED"
         },
         {
-          "capsule": "c_b94efff3833c1769.bbx",
+          "capsule": "c_34b6f6275781e478.bbx",
           "counts": {
             "bytes": 16777921,
             "events": 11,
@@ -63,8 +64,8 @@
           "link_pairs": [
             {
               "class": "exact",
-              "left_run": "r_3fb2a3e364a6255f",
-              "right_run": "r_3fb2a3e364a6255f"
+              "left_run": "r_d9706d05d1f5b16e",
+              "right_run": "r_d9706d05d1f5b16e"
             }
           ],
           "links": {
@@ -73,7 +74,7 @@
             "inferred": 0
           },
           "root_ok": true,
-          "run_id": "r_3fb2a3e364a6255f",
+          "run_id": "r_d9706d05d1f5b16e",
           "run_status": "SEAL_INTERRUPTED"
         }
       ],
@@ -82,30 +83,29 @@
         "/home/user/Blackbox/.venv/bin/python",
         "client.py"
       ],
-      "duration_ms": 539.3,
+      "duration_ms": 570.0,
       "every_root_ok": true,
       "exit_code": 0,
       "links": [
         {
           "class": "exact",
-          "left_run": "r_3fb2a3e364a6255f",
-          "right_run": "r_3fb2a3e364a6255f"
+          "left_run": "r_d9706d05d1f5b16e",
+          "right_run": "r_d9706d05d1f5b16e"
         },
         {
           "class": "exact",
-          "left_run": "r_3fb2a3e364a6255f",
-          "right_run": "r_3fb2a3e364a6255f"
+          "left_run": "r_d9706d05d1f5b16e",
+          "right_run": "r_d9706d05d1f5b16e"
         }
       ],
-      "one_run_id_across_capsules": false,
+      "one_run_id_across_capsules": true,
       "proxy_vantage_recorded": true,
       "run_ids_seen": [
-        "r_3fb2a3e364a6255f",
-        "r_f090ee72bdc2cbf6"
+        "r_d9706d05d1f5b16e"
       ],
       "stderr_tail": [
-        "blackbox: python child gets a temporary sitecustomize (/tmp/blackbox-sdk-chk0ibwg); removed when it exits",
-        "blackbox: run r_3fb2a3e364a6255f \u00b7 exit 0 \u00b7 proxy http://127.0.0.1:44431 (5 vars exported) \u00b7 sdk auto-import (sitecustomize) \u00b7 recovered r_3fb2a3e364a6255f \u2192 /tmp/bbx-accept-y1kg1uzd/data-python/capsules/c_b94efff3833c1769.bbx (SEAL_INTERRUPTED, root fdf9e89d3055) and 1 more tape (sdk)"
+        "blackbox: python child gets a temporary sitecustomize (/tmp/blackbox-sdk-vnhf3rfz); removed when it exits",
+        "blackbox: run r_d9706d05d1f5b16e \u00b7 exit 0 \u00b7 proxy http://127.0.0.1:37189 (5 vars exported) \u00b7 sdk auto-import (sitecustomize) \u00b7 recovered r_d9706d05d1f5b16e \u2192 /tmp/bbx-accept-hagufn0c/data-python/capsules/c_34b6f6275781e478.bbx (SEAL_INTERRUPTED, root e83dadb01406) and 1 more tape (sdk)"
       ],
       "stdout": [
         "python ok"
@@ -115,7 +115,7 @@
       "capsule_count": 1,
       "capsules": [
         {
-          "capsule": "c_9efa2e07efb28298.bbx",
+          "capsule": "c_d023c5b21799f797.bbx",
           "counts": {
             "bytes": 16777523,
             "events": 11,
@@ -140,7 +140,7 @@
             "inferred": 0
           },
           "root_ok": true,
-          "run_id": "r_d79a9680f8b991f6",
+          "run_id": "r_87587c7c12f1e733",
           "run_status": "SEAL_INTERRUPTED"
         }
       ],
@@ -149,31 +149,135 @@
         "/usr/local/bin/node",
         "client.js"
       ],
-      "duration_ms": 361.6,
+      "duration_ms": 348.5,
       "every_root_ok": true,
       "exit_code": 0,
       "links": [],
       "one_run_id_across_capsules": true,
       "proxy_vantage_recorded": true,
       "run_ids_seen": [
-        "r_d79a9680f8b991f6"
+        "r_87587c7c12f1e733"
       ],
       "stderr_tail": [
-        "blackbox: run r_d79a9680f8b991f6 \u00b7 exit 0 \u00b7 proxy http://127.0.0.1:36583 (5 vars exported) \u00b7 recovered r_d79a9680f8b991f6 \u2192 /tmp/bbx-accept-y1kg1uzd/data-node/capsules/c_9efa2e07efb28298.bbx (SEAL_INTERRUPTED, root 275c19f2a866)"
+        "blackbox: run r_87587c7c12f1e733 \u00b7 exit 0 \u00b7 proxy http://127.0.0.1:34113 (5 vars exported) \u00b7 recovered r_87587c7c12f1e733 \u2192 /tmp/bbx-accept-hagufn0c/data-node/capsules/c_d023c5b21799f797.bbx (SEAL_INTERRUPTED, root dada71b33ab6)"
       ],
       "stdout": [
         "node ok"
       ]
+    },
+    {
+      "capsule_count": 2,
+      "capsules": [
+        {
+          "capsule": "c_013ef3b4ad2c8874.bbx",
+          "counts": {
+            "bytes": 16777921,
+            "events": 5,
+            "nodes": 0,
+            "nodes_interrupted": 0,
+            "segments": 1
+          },
+          "frames": {
+            "CHAIN": 2,
+            "RUN_END": 1,
+            "RUN_START": 1,
+            "SEG_END": 1
+          },
+          "has_proxy_vantage": false,
+          "link_pairs": [
+            {
+              "class": "exact",
+              "left_run": "r_d0a60425d8e45cf8",
+              "right_run": "r_d0a60425d8e45cf8"
+            }
+          ],
+          "links": {
+            "declared": 0,
+            "exact": 1,
+            "inferred": 0
+          },
+          "root_ok": true,
+          "run_id": "r_d0a60425d8e45cf8",
+          "run_status": "SEAL_INTERRUPTED"
+        },
+        {
+          "capsule": "c_90a256c6a8212d15.bbx",
+          "counts": {
+            "bytes": 16777921,
+            "events": 11,
+            "nodes": 0,
+            "nodes_interrupted": 0,
+            "segments": 1
+          },
+          "frames": {
+            "CHAIN": 5,
+            "MODEL_CHUNK": 1,
+            "MODEL_REQUEST": 1,
+            "MODEL_RESPONSE": 1,
+            "RUN_END": 1,
+            "RUN_START": 1,
+            "SEG_END": 1
+          },
+          "has_proxy_vantage": true,
+          "link_pairs": [
+            {
+              "class": "exact",
+              "left_run": "r_d0a60425d8e45cf8",
+              "right_run": "r_d0a60425d8e45cf8"
+            }
+          ],
+          "links": {
+            "declared": 0,
+            "exact": 1,
+            "inferred": 0
+          },
+          "root_ok": true,
+          "run_id": "r_d0a60425d8e45cf8",
+          "run_status": "SEAL_INTERRUPTED"
+        }
+      ],
+      "client": "sdk",
+      "command": [
+        "/home/user/Blackbox/.venv/bin/python",
+        "sdk_client.py"
+      ],
+      "duration_ms": 1086.3,
+      "every_root_ok": true,
+      "exit_code": 0,
+      "links": [
+        {
+          "class": "exact",
+          "left_run": "r_d0a60425d8e45cf8",
+          "right_run": "r_d0a60425d8e45cf8"
+        },
+        {
+          "class": "exact",
+          "left_run": "r_d0a60425d8e45cf8",
+          "right_run": "r_d0a60425d8e45cf8"
+        }
+      ],
+      "one_run_id_across_capsules": true,
+      "proxy_vantage_recorded": true,
+      "run_ids_seen": [
+        "r_d0a60425d8e45cf8"
+      ],
+      "stderr_tail": [
+        "blackbox: python child gets a temporary sitecustomize (/tmp/blackbox-sdk-4yrnoc4p); removed when it exits",
+        "blackbox: run r_d0a60425d8e45cf8 \u00b7 exit 0 \u00b7 proxy http://127.0.0.1:38361 (5 vars exported) \u00b7 sdk auto-import (sitecustomize) \u00b7 recovered r_d0a60425d8e45cf8 \u2192 /tmp/bbx-accept-hagufn0c/data-sdk/capsules/c_90a256c6a8212d15.bbx (SEAL_INTERRUPTED, root 3422a1217872) and 1 more tape (sdk)"
+      ],
+      "stdout": [
+        "sdk ok"
+      ]
     }
   ],
   "ticket": "P3B-03",
-  "upstream": "http://127.0.0.1:35003",
+  "upstream": "http://127.0.0.1:43321",
   "verdict": {
     "both_clients_exit_zero": true,
     "every_capsule_root_ok": true,
     "node_available": true,
-    "one_run_id_across_capsules": false,
+    "one_run_id_across_capsules": true,
     "proxy_vantage_recorded": true
   },
-  "when": "2026-11-16T17:22:45Z"
+  "when": "2026-11-16T17:39:56Z"
 }

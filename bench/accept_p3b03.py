@@ -54,6 +54,15 @@ with urllib.request.urlopen(req) as r:
     print("python", json.loads(r.read())["choices"][0]["message"]["content"])
 '''
 
+SDK_CLIENT = '''\
+import openai
+
+client = openai.OpenAI()
+reply = client.chat.completions.create(model="gpt-4o-mini",
+                                       messages=[{"role": "user", "content": "hi"}])
+print("sdk", reply.choices[0].message.content)
+'''
+
 NODE_CLIENT = '''\
 const http = require('http');
 const base = new URL(process.env.OPENAI_BASE_URL);
@@ -114,6 +123,24 @@ def frame_kinds(raw: bytes) -> dict[str, int]:
     return counts
 
 
+def _has_openai() -> bool:
+    """An SDK case only runs where the SDK is installed; if it is, the artefact says which version produced it."""
+    try:
+        import openai  # noqa: F401
+    except Exception:
+        return False
+    return True
+
+
+def _openai_version() -> str | None:
+    try:
+        import openai
+
+        return getattr(openai, "__version__", None)
+    except Exception:
+        return None
+
+
 def inspect(data_dir: Path) -> list[dict]:
     """Every capsule the run left, read the way a user's diagnosis would read it."""
     out = []
@@ -142,11 +169,15 @@ def inspect(data_dir: Path) -> list[dict]:
     return out
 
 
+CLIENTS = {"python": PY_CLIENT, "node": NODE_CLIENT, "sdk": SDK_CLIENT}
+
+
 def run_client(work: Path, data: Path, upstream: str, name: str, cmd: list[str], client: Path) -> dict:
-    client.write_text(PY_CLIENT if name == "python" else NODE_CLIENT, encoding="utf-8")
+    client.write_text(CLIENTS[name], encoding="utf-8")
     argv = [sys.executable, "-m", "blackbox", "run", "--data-dir", str(data),
             "--upstream", f"openai={upstream}@/openai", "--", *cmd]
-    env = dict(os.environ, PYTHONPATH=str(ROOT / "src"))
+    # The SDK needs *a* key to build a client at all; the origin never checks it, and this is a loopback run.
+    env = dict(os.environ, PYTHONPATH=str(ROOT / "src"), OPENAI_API_KEY=os.environ.get("OPENAI_API_KEY", "sk-accept-local"))
     started = time.monotonic()
     proc = subprocess.run(argv, cwd=str(work), env=env, capture_output=True, text=True, timeout=180)
     capsules = inspect(data)
@@ -181,6 +212,8 @@ def main(argv: list[str] | None = None) -> int:
         cases = [("python", [sys.executable, "client.py"], work / "client.py")]
         if node:
             cases.append(("node", [node, "client.js"], work / "client.js"))
+        if _has_openai():
+            cases.append(("sdk", [sys.executable, "sdk_client.py"], work / "sdk_client.py"))
         for name, cmd, client in cases:
             data = work / f"data-{name}"
             results.append(run_client(work, data, upstream_url, name, cmd, client))
@@ -192,7 +225,8 @@ def main(argv: list[str] | None = None) -> int:
         "ticket": "P3B-03",
         "question": "does `blackbox run -- node app.js` / `-- python app.py` yield one run with linked nodes?",
         "when": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        "host": {"platform": platform.platform(), "python": platform.python_version(), "node": node_version},
+        "host": {"platform": platform.platform(), "python": platform.python_version(), "node": node_version,
+                 "openai": _openai_version()},
         "upstream": upstream_url,
         "results": results,
         "verdict": {

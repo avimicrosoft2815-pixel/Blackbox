@@ -237,8 +237,11 @@ def test_the_timeline_shows_the_tape_with_the_work_not_the_boundary(run_dir):
     assert next(event["kind_name"] for event in document["events"]) == "RUN_START"
     assert document["nodes"], "the child's node should be in the document the page opens on"
     assert document["run"]["run_id"] and document["run"]["capsule_run_id"]
-    assert document["run"]["run_id"] != document["run"]["capsule_run_id"], \
-        "the named run and the per-capsule id are different things and the page shows both"
+    # These used to differ, and the difference was defect 47: the capsule named a run id derived from its writer
+    # uuid while the tape's own `RUN_START` named the launcher's. A child tape that attached to a run now names that
+    # run in its capsule, so the two agree — the field stays because a capsule whose tape names nothing still has an
+    # id of its own, and the page has to show whichever one it has.
+    assert document["run"]["run_id"] == document["run"]["capsule_run_id"]
 
 
 def test_a_directory_that_holds_no_capsule_is_an_error_not_an_empty_view(tmp_path):
