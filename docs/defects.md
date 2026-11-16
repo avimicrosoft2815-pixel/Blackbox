@@ -658,3 +658,12 @@ plan's §10 shape, and it is append-only.
   column already shows, by 60x) or "the *outage* is under 100 ms on any machine", which no sleeping thread can promise
   and which would need detection that does not depend on being scheduled — an event-driven watch on the listener's
   socket rather than a 20 ms tick. Both readings are written down here rather than resolved by editing the test.
+  **Second measurement, which is the one that settles what the first one meant** (run `43977497614` at `37f5fbf`): all
+  ten jobs were scheduled, **both the `py3.11` and the `py3.13` macOS cells passed**, and only `py3.12 / macos-latest`
+  failed — with `outages [75.5, 29.4, 33.3, 113.5, 65.9, 91.6, 17.6, 18.7] ms`, `rebinds [1.27, 1.08, 1.23, 0.46, 1.78,
+  1.25, 0.64, 0.76] ms` and, from the field this fix added, **`worst watchdog tick lateness 113.2 ms over 13 ticks`**.
+  The outage and the lateness are the same number to within 0.3 ms: the watchdog thread did not run for 113 ms, and the
+  rebind it then did took 1.78 ms. So macOS is measured now, twice, on two different commits; the product's own rebind
+  there is 0.5–1.8 ms, and the only red assertion on the branch is a wall-clock bound on a thread the runner stopped
+  scheduling. That is also why this entry is open: the bound may be the right one to keep and the test may need to
+  measure the machine's share separately, and that choice belongs to the owner, not to a green build.
