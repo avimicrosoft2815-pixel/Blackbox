@@ -595,6 +595,9 @@ plan's §10 shape, and it is append-only.
   single-quoted form on POSIX — and `::test_the_verify_command_is_quoted_for_the_platform_shell` pins both forms by
   patching `os.name`, so the POSIX-only form cannot come back. **Uncertainty, stated**: the job log for this run is not
   reachable from this sandbox (GitHub redirects it to a blob host), so the cause above is read from the exit code, the
-  command text and cmd's quoting rules — the check that settles it is the next Windows run, where these two tests must
-  pass and the `$ echo` line in the output must show the double-quoted form. macOS was **cancelled, not run**, on this
-  workflow (the failing Windows cells end it), so it stays unmeasured.
+  command text and cmd's quoting rules. **Closed 2026-11-16 by a controlled pair, which is the check that settles it**:
+  `f3fd801` (the same tree without the fix, run `43935414757`) failed **exactly** those two tests on all three Windows
+  cells, and `7d55ba1` (run `43935889831`) has all three Windows cells **green** with every other executed job green
+  too — so the two tests were the only Windows failure on the branch and are now not. The macOS jobs in both runs were
+  `cancelled` with `steps: 0` (*"The job was not acquired by Runner of type hosted"*), i.e. runner capacity, not a test
+  result; that is why those runs are red at all, and macOS stays unmeasured.
