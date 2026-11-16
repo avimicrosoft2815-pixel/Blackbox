@@ -600,3 +600,73 @@ def test_a_rollback_puts_the_exact_original_bytes_back(tmp_path, monkeypatch):
     with pytest.raises(ProposalError):
         apply_proposal(proposal, approval=proposal.token())
     assert (repo / "src" / "app.py").read_bytes() == original
+
+
+# ── the root's ancestors are not the proposal's business (the Windows/macOS temp directory) ───────────────────────
+def test_a_repository_reached_through_a_symlinked_ancestor_is_still_usable(tmp_path):
+    """The refusal is about links *inside* the repository, not about where the repository happens to live.
+
+    macOS reports every temp path as `/private/var/...` because `/tmp` is a symlink, and the Windows temp directory
+    sits behind a junction. An earlier version walked the absolute prefix looking for links, so it refused every
+    proposal on both platforms while protecting nothing: the user named that root. Found by a Windows CI run on the
+    P4-18 gate, not by these tests — they ran on a POSIX temp dir that happens to be link-free.
+    """
+    real_repo = _repo(tmp_path)
+    via_link = tmp_path / "reachable"
+    via_link.symlink_to(real_repo, target_is_directory=True)
+    proposal = load(str(_proposal(tmp_path, via_link, [_change(via_link, "src/app.py", "def handler():\n    return 1\n")])),
+                    repo=str(via_link))
+
+    applied = apply_proposal(proposal, approval=proposal.token())
+
+    assert applied.written, "a repository behind a link is still a repository the user asked to repair"
+    assert (real_repo / "src" / "app.py").read_text(encoding="utf-8") == "def handler():\n    return 1\n"
+
+
+def test_a_symlink_inside_the_repository_is_still_refused_when_the_root_is_reached_by_one(tmp_path):
+    """The exemption above must not weaken the rule it sits beside."""
+    real_repo = _repo(tmp_path)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    (elsewhere / "app.py").write_text("stolen = True\n", encoding="utf-8")
+    (real_repo / "src" / "app.py").unlink()
+    (real_repo / "src" / "app.py").symlink_to(elsewhere / "app.py")
+    via_link = tmp_path / "reachable"
+    via_link.symlink_to(real_repo, target_is_directory=True)
+
+    with pytest.raises(ProposalError, match="symlink"):
+        load(str(_proposal(tmp_path, via_link, [{"path": "src/app.py", "expected_sha256": None, "content": "x = 1\n"}])),
+             repo=str(via_link))
+    assert (elsewhere / "app.py").read_text(encoding="utf-8") == "stolen = True\n"
+
+
+def test_an_intermediate_directory_swapped_mid_apply_is_caught(tmp_path, monkeypatch):
+    """Checking only the file and its immediate parent misses a swap one level up, which redirects the write the same.
+
+    The link below points at a directory *inside* the repository, so the resolved-path check still passes and the
+    component walk is the only thing standing between the apply and a file the reviewer never named.
+    """
+    repo = _repo(tmp_path)
+    (repo / "src" / "deep").mkdir()
+    (repo / "src" / "deep" / "app.py").write_text("v = 1\n", encoding="utf-8")
+    decoy = repo / "decoy"
+    decoy.mkdir()
+    (decoy / "app.py").write_text("v = 1\n", encoding="utf-8")
+    change = {"path": "src/deep/app.py", "expected_sha256": _sha("v = 1\n"), "content": "v = 2\n"}
+    proposal = load(str(_proposal(tmp_path, repo, [change])), repo=str(repo))
+    real_assert, calls = apply_mod._assert_safe_target, {"n": 0}
+
+    def swap_then_check(path, *, repo_real):
+        calls["n"] += 1
+        if calls["n"] == 2:                      # call 1 is _prepare; call 2 is immediately before the write
+            (repo / "src" / "deep").rename(tmp_path / "deep-moved")
+            (repo / "src" / "deep").symlink_to(decoy, target_is_directory=True)
+        return real_assert(path, repo_real=repo_real)
+
+    monkeypatch.setattr(apply_mod, "_assert_safe_target", swap_then_check)
+    with pytest.raises(ProposalError) as caught:
+        apply_proposal(proposal, approval=proposal.token())
+    message = str(caught.value)
+    assert "became a symlink" in message and "deep" in message, message
+    assert (decoy / "app.py").read_text(encoding="utf-8") == "v = 1\n", "nothing was written through the link"
+    assert (tmp_path / "deep-moved" / "app.py").read_text(encoding="utf-8") == "v = 1\n"

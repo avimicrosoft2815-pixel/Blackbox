@@ -800,3 +800,16 @@ which are never written through, and `_read_nofollow` reads content. (c) A best-
 failure: it loses the information about which other files are still wrong, which is the only thing the user needs.
 (d) Storing backups outside the repo as the default: cheaper to write, and it makes the one artifact a rollback depends
 on the least durable thing in the system.
+
+**Postscript — the same mistake, one level out, found by CI.** The symlink check above originally walked the *absolute*
+path looking for links, which refuses every repository whose own ancestors contain one: `/tmp` is a symlink on macOS, and
+the Windows temp directory sits behind a junction. Three repair tests failed on Windows with "involves a symlink at
+`C:\Users\runneradmin\AppData\Local\Temp\...`" — the refusal was correct about the platform and wrong about the
+proposal, since the user named that root themselves. The check now stops at the repository root and inspects only the
+proposal's own relative components. Doing that surfaced a second gap in the same function: the parent's symlink check
+resolved the parent with `realpath` before testing it, so a directory swapped for a link one level up was invisible —
+`realpath` erases exactly the link being looked for. The walk is lexical now, and a test swaps an intermediate directory
+for one pointing at a decoy *inside* the repository, where the escape check cannot help. Both fixes are the same lesson
+from opposite directions: check the path the user's files will actually be written through, not the path that has already
+been normalised.
+

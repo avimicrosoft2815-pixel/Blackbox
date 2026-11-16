@@ -88,9 +88,19 @@ def _assert_safe_target(path: str, *, repo_real: str) -> None:
         raise ProposalError(f"{path} resolves outside {repo_real} at write time")
     if os.path.islink(path):
         raise ProposalError(f"{path} became a symlink after it was approved; refusing to write through it")
+    # Every directory between the root and the file, not only the immediate parent: a swap one level up redirects the
+    # write just as effectively. `relpath` is taken against the resolved root, so the root's own ancestors are excluded
+    # for the same reason `_check_path` excludes them — they are the platform's temp directory, not the proposal's.
     parent = os.path.dirname(path) or "."
-    if os.path.islink(parent):
-        raise ProposalError(f"{parent} became a symlink after it was approved; refusing to write through it")
+    rel_parent = os.path.relpath(parent, repo_real)         # lexical on purpose: `realpath` would erase the link
+    if rel_parent == ".." or rel_parent.startswith(".." + os.sep):
+        raise ProposalError(f"{path} resolves outside {repo_real} at write time")
+    if rel_parent != ".":
+        walked = repo_real
+        for part in rel_parent.split(os.sep):
+            walked = os.path.join(walked, part)
+            if os.path.islink(walked):
+                raise ProposalError(f"{walked} became a symlink after it was approved; refusing to write through it")
     if not os.path.isdir(os.path.realpath(parent)):
         raise ProposalError(f"{parent} is no longer a directory")
 

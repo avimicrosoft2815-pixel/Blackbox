@@ -121,7 +121,12 @@ def sha256_file(path: str) -> str | None:
 
 
 def _check_path(repo: str, raw: str) -> str:
-    """Return the resolved path, or refuse. Every branch here is a way a proposal could escape the repository."""
+    """Return the resolved path, or refuse. Every branch here is a way a proposal could escape the repository.
+
+    The checks stop at the repository root: the root's *own* ancestors are not the proposal's business. `/tmp` is a
+    symlink on macOS and the Windows temp directory sits behind a junction, so an absolute-prefix walk refuses every
+    proposal on both platforms while protecting nothing the user did not already choose by naming that root.
+    """
     if not raw or "\x00" in raw:
         raise ProposalError(f"a change has an empty or unprintable path: {raw!r}")
     normalised = raw.replace("\\", "/")
@@ -134,12 +139,12 @@ def _check_path(repo: str, raw: str) -> str:
     repo_real = os.path.realpath(repo)
     if real != repo_real and not real.startswith(repo_real + os.sep):
         raise ProposalError(f"{raw!r} resolves to {real}, outside {repo_real}")
-    # A symlink anywhere — the file itself or a parent — means the bytes would land somewhere the reviewer did not see.
-    probe = target
-    while probe and os.path.realpath(probe) != probe and os.path.exists(probe):
-        raise ProposalError(f"{raw!r} involves a symlink at {probe}; refusing to write through it")
-    if os.path.islink(target) or any(os.path.islink(os.path.join(repo, *normalised.split("/")[:i]))
-                                     for i in range(1, len(normalised.split("/")))):
+    # A symlink *inside* the repository — the file itself or a directory between the root and it — means the bytes
+    # would land somewhere the reviewer did not see, so each component of the proposal's own relative path is checked.
+    # The join is deliberately against the path the user gave, not `real`: `realpath` has already erased the link, so
+    # testing it would test nothing.
+    parts = normalised.split("/")
+    if os.path.islink(target) or any(os.path.islink(os.path.join(repo, *parts[:i])) for i in range(1, len(parts))):
         raise ProposalError(f"{raw!r} is, or is under, a symlink; refusing to write through it")
     parent = os.path.dirname(real)
     if not os.path.isdir(parent):
