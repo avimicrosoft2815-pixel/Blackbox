@@ -150,9 +150,12 @@ def test_an_edited_line_is_reported_with_its_number_and_the_capsule_is_untouched
     path, manifest = _capsule(tmp_path)
     capsule = cap.read_capsule(str(path))
     lines = capsule.entry(cap.EVENTS_NAME).decode("utf-8").splitlines()
-    edited = json.loads(lines[2])
+    # Find the line rather than counting to it: the frame order includes the chain's own frames, and a hard-coded
+    # index is a test that passes on one platform and edits a NODE_OPEN on another (this test did, in CI).
+    index = next(i for i, text in enumerate(lines) if json.loads(text)["kind"] == "MODEL_REQUEST")
+    edited = json.loads(lines[index])
     edited["attributes"]["bbx.model.call_id"] = "not-the-id-that-was-recorded"
-    lines[2] = json.dumps(edited, sort_keys=True, separators=(",", ":"))
+    lines[index] = json.dumps(edited, sort_keys=True, separators=(",", ":"))
     entries = {name: blob for name, blob in capsule.entries.items() if name not in
                (cap.MANIFEST_NAME, cap.INTEGRITY_NAME)}
     entries[cap.EVENTS_NAME] = ("\n".join(lines) + "\n").encode()
@@ -164,8 +167,8 @@ def test_an_edited_line_is_reported_with_its_number_and_the_capsule_is_untouched
     events_drift = [drift for drift in report["drift"] if drift["part"] == cap.EVENTS_NAME]
     assert events_drift, report["drift"]
     fields = {drift["field"] for drift in events_drift}
-    assert "sha256" in fields and "line 3" in fields, fields
-    line_drift = next(drift for drift in events_drift if drift["field"] == "line 3")
+    assert "sha256" in fields and f"line {index + 1}" in fields, fields
+    line_drift = next(drift for drift in events_drift if drift["field"] == f"line {index + 1}")
     assert "not-the-id-that-was-recorded" in line_drift["stored"]
     assert "c0ffee" in line_drift["recomputed"]
     assert cap.read_capsule(str(tampered)).entry(cap.EVENTS_NAME) == entries[cap.EVENTS_NAME], \
