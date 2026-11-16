@@ -73,6 +73,22 @@ def _change(repo: Path, path: str, content: str, *, new: bool = False) -> dict:
     return {"path": path, "expected_sha256": expected, "content": content}
 
 
+def _shell_echo(marker: Path, text: str, *, append: bool = False) -> str:
+    """A command that writes one line into `marker` under *the platform shell* `verify` actually uses.
+
+    Defect 56: these three tests passed `echo ... > '<path>'`, which is POSIX quoting. `verify` runs the command through
+    `subprocess.run(..., shell=True)`, i.e. `cmd.exe /c` on Windows, and cmd does not strip single quotes — the redirect
+    target becomes a name beginning with `'` and containing `:`, which Windows rejects ("The filename, directory name,
+    or volume label syntax is incorrect"). The command exited non-zero, `verify` reported `FAIL` and returned 3, and the
+    test read that as the product failing to run the command. The product was right; the command was not portable. The
+    quoting is chosen per platform here, so what is tested is that `verify` executes the command it was given.
+    """
+    arrow = ">>" if append else ">"
+    if os.name == "nt":
+        return f'echo {text}{arrow} "{marker}"'          # no space before the redirect: cmd would write it into the file
+    return f"echo {text} {arrow} '{marker}'"
+
+
 def _snapshot(root: Path) -> dict[str, str]:
     # `as_posix()`: with `str(...)` the keys were `src\\b.py` on Windows and every lookup by `src/b.py` raised KeyError,
     # which is how the rollback test failed there while the rollback itself was fine.
@@ -592,13 +608,13 @@ def test_verify_reports_that_it_executes_the_command_it_was_given(tmp_path, caps
     repo = _repo(tmp_path)
     proposal = _proposal(tmp_path, repo, [_change(repo, "src/app.py", "def handler():\n    return 1\n")])
     marker = tmp_path / "executed.txt"
-    code = repair_main(["verify", str(proposal), "--repo", str(repo), "--test", f"echo ran > '{marker}'"])
+    code = repair_main(["verify", str(proposal), "--repo", str(repo), "--test", _shell_echo(marker, "ran")])
     out = capsys.readouterr().out
     assert code == 0
     assert marker.exists(), "--test executes the command; that is the feature, and the report now says so"
     assert "through the platform shell" in out
     assert "these commands ran in this process" in out
-    report = verify([f"echo again >> '{marker}'"], cwd=str(repo))
+    report = verify([_shell_echo(marker, "again", append=True)], cwd=str(repo))
     assert report["executes"] is True and report["ran"][0]["shell"] is True
     assert report["ran"][0]["cwd"] == str(repo)
     assert len(marker.read_text(encoding="utf-8").splitlines()) == 2
@@ -609,7 +625,7 @@ def test_the_banner_comes_before_anything_runs(tmp_path, capsys):
     repo = _repo(tmp_path)
     proposal = _proposal(tmp_path, repo, [_change(repo, "src/app.py", "def handler():\n    return 1\n")])
     marker = tmp_path / "ordered.txt"
-    code = repair_main(["verify", str(proposal), "--repo", str(repo), "--test", f"echo run >> '{marker}'"])
+    code = repair_main(["verify", str(proposal), "--repo", str(repo), "--test", _shell_echo(marker, "run", append=True)])
     out = capsys.readouterr().out
     assert code == 0
     banner = out.index("Executing 1 command(s)")
@@ -617,6 +633,21 @@ def test_the_banner_comes_before_anything_runs(tmp_path, capsys):
     assert banner < result, "the warning about execution has to precede the execution"
     assert "$ echo run" in out
     assert "These run with your privileges" in out
+
+
+def test_the_verify_command_is_quoted_for_the_platform_shell(monkeypatch):
+    """Both forms, pinned: `>` with no space and double quotes on Windows, `>` and single quotes on POSIX.
+
+    Only a Windows runner can prove `cmd.exe` accepts the first one; what this test can do on any platform is stop the
+    POSIX-only form coming back, which is what made the two tests above fail there (defect 56).
+    """
+    marker = Path("a dir") / "executed.txt"
+    monkeypatch.setattr(os, "name", "nt")
+    assert _shell_echo(marker, "ran") == f'echo ran> "{marker}"'
+    assert _shell_echo(marker, "again", append=True) == f'echo again>> "{marker}"'
+    monkeypatch.setattr(os, "name", "posix")
+    assert _shell_echo(marker, "ran") == f"echo ran > '{marker}'"
+    assert _shell_echo(marker, "again", append=True) == f"echo again >> '{marker}'"
 
 
 def test_the_help_text_says_that_verify_executes_the_command(capsys):

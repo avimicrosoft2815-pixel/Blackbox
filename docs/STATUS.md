@@ -49,7 +49,7 @@ table as the egress allowlist); the launcher integration (P3B-03), the hook adap
 (P4-18), the viewer (P4-11) and the diagnosis workflow (P4-17) are built and tested row by row below. What is **not**
 built is named there rather than implied: the graph's cross-vantage edges (defect 55), so "linked nodes" is still
 `links.json` and not an edge in `graph.json`.**
-Suite: **Total: 1021 tests** — 1020 pass here and 1 is skipped on POSIX by name
+Suite: **Total: 1022 tests** — 1021 pass here and 1 is skipped on POSIX by name
 (`test_an_open_view_blocks_the_unlink_only_on_windows`: POSIX permits unlinking a file another fd still holds, so
 the open-view case exists only on Windows). ruff 0.17.5 and mypy 2.4.1 (`strict = true`, nothing disabled):
 0 findings.

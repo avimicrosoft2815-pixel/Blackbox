@@ -578,3 +578,23 @@ plan's §10 shape, and it is append-only.
   no node slot (slot 0 is the run itself) attaches. Those choices belong in a decision record before code, and this
   entry exists so the ticket cannot be ticked by quietly reading `links.json` as if it were the graph. The harness
   reports the fact as `verdict.graph_has_cross_vantage_edges: false` instead of omitting it.
+
+- **defect 56 — two repair tests gave `verify` a POSIX command and read the shell's refusal as the product's.** Run
+  `43931027526` (`e007259`, the first run with defects 50–52 fixed): the three Windows cells failed
+  `tests/test_repair_workflow.py::test_verify_reports_that_it_executes_the_command_it_was_given` and
+  `::test_the_banner_comes_before_anything_runs` with `assert 3 == 0`, and nothing else. Exit 3 from `repair verify`
+  means one sentence: *the command you gave me exited non-zero* (`return 0 if report["verified"] else 3`), and the
+  command was `echo ran > '<tmp>/executed.txt'`. `verify_change` runs it with `subprocess.run(..., shell=True)`, which is
+  `cmd.exe /c` on Windows, and cmd does not strip single quotes: the redirect target became a token beginning with `'`
+  and containing `:` — a name Windows rejects (*"The filename, directory name, or volume label syntax is incorrect"*),
+  so `echo` failed and the product reported `FAIL exit 1` exactly as it should. **The product was right and the fixture
+  was writing a command for a different shell**; the failure is the same family as C29/defect 48 (text mode) and
+  defects 50–52, one level out: a test that pins behaviour by asking a platform to do something only another platform
+  does. **Fix**: `_shell_echo()` builds the command for the shell that will run it — `echo ran> "<path>"` and
+  `echo run>> "<path>"` on Windows (no space before the redirect, or cmd writes it into the file), the old
+  single-quoted form on POSIX — and `::test_the_verify_command_is_quoted_for_the_platform_shell` pins both forms by
+  patching `os.name`, so the POSIX-only form cannot come back. **Uncertainty, stated**: the job log for this run is not
+  reachable from this sandbox (GitHub redirects it to a blob host), so the cause above is read from the exit code, the
+  command text and cmd's quoting rules — the check that settles it is the next Windows run, where these two tests must
+  pass and the `$ echo` line in the output must show the double-quoted form. macOS was **cancelled, not run**, on this
+  workflow (the failing Windows cells end it), so it stays unmeasured.
