@@ -31,7 +31,7 @@ from typing import IO, Any
 
 from blackbox import constants as C
 from blackbox.codec import cbor
-from blackbox.rec import discover, recovery
+from blackbox.rec import autostart, correlate, discover, recovery
 from blackbox.tape import head as head_mod
 from blackbox.tape import segments
 from blackbox.tape.keeper import Keeper
@@ -60,6 +60,7 @@ class RunResult:
     recovery_error: str | None = None
     proxy: dict[str, Any] = field(default_factory=dict)      # P3B-03: url, port, exports, adopted, rebinds
     hooks: dict[str, Any] = field(default_factory=dict)      # P3B-07: inbox, tape, events, frames, quarantined
+    attach: dict[str, Any] = field(default_factory=dict)     # P3B-03: sdk startup reports, and every recovered vantage
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -68,6 +69,7 @@ class RunResult:
             "stalled": self.stalled, "stall_ms": self.stall_ms, "stall_last_seq": self.stall_last_seq,
             "stall": self.stall_path, "stall_tb": self.dump_path, "writer_uuid": self.writer_uuid,
             "recovered": self.recovered, "recovery_error": self.recovery_error,
+            "attach": self.attach,
         }
 
 
@@ -269,7 +271,8 @@ def launch(argv: list[str], *, data_dir: str | None = None, stall_ms: int = 5_00
            env: dict[str, str] | None = None, out: IO[str] | None = None, recover: bool = True,
            run_id: str | None = None, proxy: bool = False, proxy_routes: Any = None,
            proxy_port: int = 0, proxy_receiver: Any = None,
-           proxy_retry_transmitted: bool = False) -> RunResult:
+           proxy_retry_transmitted: bool = False, proxy_force: bool = False,
+           sdk: bool = True, hooks: bool = True) -> RunResult:
     """Run `argv` under the recorder, watch for a stall, then recover the tape that the child left behind."""
     if not argv:
         raise ValueError("launch() needs a command")
@@ -285,31 +288,43 @@ def launch(argv: list[str], *, data_dir: str | None = None, stall_ms: int = 5_00
     run_id = run_id or recovery.run_id_for(data_dir, writer.writer_uuid.hex())
     child_env["BLACKBOX_RUN_ID"] = run_id
     child_env["BLACKBOX_HOME"] = data_dir
+    # §11.9 step 1 names `BLACKBOX_DATA_DIR`; this build grew up on `BLACKBOX_HOME`. Both are set, with the same
+    # value, so a child written against either spelling finds the run (D-044).
+    child_env["BLACKBOX_DATA_DIR"] = data_dir
     child_env["BLACKBOX_STALL_MS"] = str(stall_ms)
     # A hook runs in the child's environment, so this is what tells `blackbox ingest` where *this* run's inbox is —
     # and therefore which tape the events will be folded into (P3B-07).
-    child_env["BLACKBOX_INBOX"] = os.path.join(data_dir, "inbox")
+    if hooks:
+        child_env["BLACKBOX_INBOX"] = os.path.join(data_dir, "inbox")
     # ---- the proxy (P3B-03): started before the child, because the child's environment names its port ----------
     proxy_thread, proxy_plan = (None, None)
     if proxy:
         proxy_thread, proxy_plan = _start_proxy(child_env, proxy_routes, proxy_port, proxy_receiver,
-                                                retry_transmitted=proxy_retry_transmitted)
+                                                retry_transmitted=proxy_retry_transmitted, force=proxy_force)
         child_env.update(proxy_plan.exports)
         child_env["BLACKBOX_PROXY_URL"] = proxy_thread.url
 
+    # ---- the Python auto-import (P3B-03): the child's interpreter installs the SDK seam without the child knowing --
+    startup: autostart.Startup | None = None
+    if sdk and autostart.looks_like_python(argv):
+        startup = autostart.arm(child_env, data_dir=data_dir)          # removed again when the child is gone
     writer.emit(C.KIND_RUN_START, cbor.encode({"run_id": run_id, "argv": list(argv), "pid": None,
                                                "stall_ms": stall_ms}))
     writer.flush()
     started = time.monotonic()
     # no shell: argv is the caller's list, and nothing here is built from a string
-    folder = _InboxFolder(data_dir, run_id, out)
-    folder.start()
+    folder = _InboxFolder(data_dir, run_id, out) if hooks else None
+    if folder is not None:
+        folder.start()
     try:
         child = subprocess.Popen(argv, env=child_env)  # noqa: S603
     except BaseException:                      # a command that does not exist must not leave a listener behind
         if proxy_thread is not None:
             proxy_thread.stop()
-        folder.close()
+        if folder is not None:
+            folder.close()
+        if startup is not None:
+            startup.close()
         keeper.stop()
         writer.close()
         raise
@@ -320,6 +335,8 @@ def launch(argv: list[str], *, data_dir: str | None = None, stall_ms: int = 5_00
     finally:
         watch.stop()
         result.duration_s = time.monotonic() - started
+        if startup is not None:
+            startup.close()                    # the child is gone; the shim directory has no further use
     if raw < 0:                                            # killed by signal: 128 + n, the shell's convention
         result.signaled = -raw
         result.exit_code = 128 - raw
@@ -333,6 +350,7 @@ def launch(argv: list[str], *, data_dir: str | None = None, stall_ms: int = 5_00
                 "port": proxy_thread.port,
                 "exports": dict(sorted(proxy_plan.exports.items())),
                 "adopted": dict(sorted(proxy_plan.adopted.items())),
+                "overridden": dict(sorted(proxy_plan.overridden.items())),
                 "rebinds": list(proxy_thread.rebinds),
                 "retry_transmitted": proxy_thread.retry_transmitted,
                 "port_changed": proxy_thread.port_changed,
@@ -341,8 +359,9 @@ def launch(argv: list[str], *, data_dir: str | None = None, stall_ms: int = 5_00
         finally:
             proxy_thread.stop()
     try:
-        folder.close()                       # the last hook events of a session belong inside the run
-        result.hooks = folder.summary()
+        if folder is not None:
+            folder.close()                   # the last hook events of a session belong inside the run
+            result.hooks = folder.summary()
         writer.emit(C.KIND_RUN_END, cbor.encode({"run_id": run_id, "exit_code": result.exit_code,
                                                  "signaled": result.signaled, "stalled": watch.stalled,
                                                  "duration_ms": int(result.duration_s * 1000)}))
@@ -355,21 +374,34 @@ def launch(argv: list[str], *, data_dir: str | None = None, stall_ms: int = 5_00
     result.stall_path = watch.stall_path
     result.dump_path = watch.dump_path
     result.writer_uuid = writer.writer_uuid.hex()
+    reports = autostart.read_reports(data_dir)
+    result.attach = {"sdk": {"armed": startup is not None,
+                             "reason": None if startup is not None else
+                             ("--no-sdk" if not sdk else "not a Python command"),
+                             "reports": reports["startup"], "errors": reports["errors"]},
+                     "vantages": []}
+    if startup is not None:
+        result.attach["sdk"]["directory"] = startup.directory
     if recover:
         try:
-            rec = recovery.recover(data_dir, writer.writer_uuid.hex())
-            result.recovered = {"run_id": rec.run_id, "capsule_path": rec.capsule_path,
-                                "capsule_root": rec.capsule_root, "run_status": rec.run_status,
-                                "state": rec.state, "steps": rec.steps_run}
-        except Exception as exc:                           # recovery is a report, never an exit-code change
-            result.recovery_error = f"{type(exc).__name__}: {exc}"
+            result.attach["vantages"] = _recover_vantages(data_dir, writer.writer_uuid.hex(), run_id)
+        except Exception as exc:                           # a vantage table is a report, never an exit-code change
+            result.attach["recovery_error"] = f"{type(exc).__name__}: {exc}"
+        own = next((row for row in result.attach["vantages"] if row.get("writer_uuid") == writer.writer_uuid.hex()),
+                   None)
+        if own is not None and "error" not in own:
+            result.recovered = {"run_id": own["run_id"], "capsule_path": own["capsule_path"],
+                                "capsule_root": own["capsule_root"], "run_status": own["run_status"],
+                                "state": own.get("state"), "steps": own.get("steps")}
+        elif own is not None:
+            result.recovery_error = own["error"]
     if out:
         print(_summary_line(result), file=out)
     return result
 
 
 def _start_proxy(env: dict[str, str], routes: Any = None, port: int = 0, receiver: Any = None,
-                 *, retry_transmitted: bool = False) -> tuple[Any, Any]:
+                 *, retry_transmitted: bool = False, force: bool = False) -> tuple[Any, Any]:
     """Build the table from the plan, start the listener, and return it with the plan that names its port (P3B-03).
 
     The plan is made **before** the listener exists because the table depends on it (a base URL the user already set
@@ -379,12 +411,58 @@ def _start_proxy(env: dict[str, str], routes: Any = None, port: int = 0, receive
     from blackbox.proxy.supervisor import BASE_URL_VARS, ProxyThread, plan_exports
 
     wanted = tuple(name for _var, name in BASE_URL_VARS)
-    plan = plan_exports(env)
+    plan = plan_exports(env, force=force)
     table = routes or Routes.provider_defaults(names=wanted, default=plan.default_route or "openai")
     if plan.routes:
         table = table.extended(plan.routes, default=table.default or plan.default_route)
     thread = ProxyThread(table, receiver=receiver, port=port, retry_transmitted=retry_transmitted).start()
-    return thread, plan_exports(env, thread.url)
+    return thread, plan_exports(env, thread.url, force=force)
+
+
+def _recover_vantages(data_dir: str, own_uuid: str, run_id: str) -> list[dict[str, Any]]:
+    """Recover every tape of this run — the SDK, proxy and hook vantages — children first, the launcher's last.
+
+    §11.9 step 6 asks for "immediate recovery of every tape of this run", and P3B-03's done-when for "tape discovery
+    for all three vantages at exit". The order is not cosmetic: a capsule's `links.json` is resolved when that capsule
+    is sealed (D-038), so the launcher's own capsule — sealed last — can name the SDK and hook tapes it shares a run
+    id with. Sealing the launcher first would produce a run whose own capsule links to nothing.
+
+    A tape in the same data directory that belongs to **another** run is left alone and reported as skipped: a
+    recorder may not swallow a neighbour's evidence. Failures are rows, not exceptions — the exit code was decided
+    before this ran.
+    """
+    try:
+        views = {view.writer_uuid: view for view in correlate.views(data_dir)}
+    except Exception:                                  # a scan that fails means "no vantage names", not "no tapes"
+        views = {}
+    try:
+        entries = discover.discover(data_dir)
+    except Exception:
+        return []
+    children = [entry for entry in entries if entry.writer_uuid != own_uuid]
+    mine = [entry for entry in entries if entry.writer_uuid == own_uuid]
+    rows: list[dict[str, Any]] = []
+    for entry in sorted(children, key=lambda e: (e.created_wall_ns, e.writer_uuid)) + mine:
+        view = views.get(entry.writer_uuid)
+        row: dict[str, Any] = {
+            "writer_uuid": entry.writer_uuid,
+            "vantage": view.vantage if view is not None else "unknown",
+            "run_id": view.run_id if view is not None else None,
+            "role": "launcher" if entry.writer_uuid == own_uuid else "child",
+        }
+        if entry.writer_uuid != own_uuid and (view is None or view.run_id != run_id):
+            row["skipped"] = "another run's tape"
+            rows.append(row)
+            continue
+        try:
+            rec = recovery.recover(data_dir, entry.writer_uuid)
+        except Exception as exc:
+            row["error"] = f"{type(exc).__name__}: {exc}"
+        else:
+            row.update({"capsule_path": rec.capsule_path, "capsule_root": rec.capsule_root,
+                        "run_status": rec.run_status, "state": rec.state, "steps": rec.steps_run})
+        rows.append(row)
+    return rows
 
 
 def _summary_line(result: RunResult) -> str:
@@ -392,6 +470,20 @@ def _summary_line(result: RunResult) -> str:
     if result.proxy:
         bits.append(f"proxy {result.proxy['url']} ({len(result.proxy['exports'])} vars exported"
                     + (f", {len(result.proxy['adopted'])} adopted" if result.proxy["adopted"] else "") + ")")
+    sdk = (result.attach or {}).get("sdk") or {}
+    if sdk.get("armed"):
+        seams = [report.get("seam") for report in sdk.get("reports") or []]
+        captured = [seam for seam in seams if seam]
+        if captured:
+            bits.append(f"sdk {', '.join(sorted(set(captured)))}")
+        elif sdk.get("errors"):
+            bits.append(f"sdk failed ({len(sdk['errors'])} startup error(s), see {autostart.ATTACH_DIRNAME}/)")
+        else:
+            bits.append("sdk armed, no HTTP client imported")
+    vantages = [row for row in (result.attach or {}).get("vantages") or [] if "skipped" not in row]
+    if len(vantages) > 1:
+        bits.append("vantages " + ", ".join(f"{row.get('vantage')} ({row.get('role')})"
+                                            for row in sorted(vantages, key=lambda r: str(r.get("role")))))
     if result.hooks and result.hooks.get("tape"):
         bits.append(f"hooks {result.hooks['events']} events ({result.hooks['frames']} frames) → tape "
                     f"{str(result.hooks['tape'])[:8]}"
@@ -426,6 +518,14 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--data-dir", default=None)
     ap.add_argument("--no-recover", action="store_true")
     ap.add_argument("--no-proxy", action="store_true", help="do not start the loopback proxy (P3B-03)")
+    ap.add_argument("--force-proxy", action="store_true",
+                    help="point every base-URL variable at the proxy even where you already set it; the values it "
+                         "replaced are printed and recorded, because moving your traffic silently is not an option")
+    ap.add_argument("--no-sdk", action="store_true",
+                    help="do not arm the child's Python auto-import; a child that imports no recorder is a child "
+                         "with no SDK vantage, and the run says so instead of looking complete")
+    ap.add_argument("--no-hooks", action="store_true",
+                    help="record no hook vantage for this run: the inbox path is not exported and no folder runs")
     ap.add_argument("--proxy-port", type=int, default=0)
     ap.add_argument("--proxy-retry-transmitted", action="store_true",
                     help="retry GET/HEAD/OPTIONS once when the upstream dies after the request was sent; some "
@@ -447,7 +547,8 @@ def main(argv: list[str]) -> int:
         routes = Routes.from_specs(args.upstream, unverified=tuple(args.insecure_upstream), default=None)
     result = launch(cmd, data_dir=args.data_dir, stall_ms=args.stall_ms, out=sys.stderr,
                     recover=not args.no_recover, proxy=not args.no_proxy, proxy_routes=routes,
-                    proxy_port=args.proxy_port, proxy_retry_transmitted=args.proxy_retry_transmitted)
+                    proxy_port=args.proxy_port, proxy_retry_transmitted=args.proxy_retry_transmitted,
+                    proxy_force=args.force_proxy, sdk=not args.no_sdk, hooks=not args.no_hooks)
     return result.exit_code
 
 

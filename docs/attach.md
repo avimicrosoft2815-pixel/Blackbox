@@ -67,6 +67,22 @@ The four verified rows are the four this sandbox can run: the two Python SDKs it
 rows below them are the ones a stranger will ask about first, and every one of them is a question this repository has
 not answered. That is what the word means.
 
+## 2a. No code change at all, for a Python program
+
+`blackbox run` also arms the child's interpreter, so a program that never imports this package still gets the SDK
+seam. A temporary `sitecustomize.py` goes first on the child's `PYTHONPATH`; it waits for `httpx`/`httpx2` to be
+imported and only then installs the winning seam (D-044). The shim directory is removed when the child exits.
+
+| surface | mechanism | verified on | verdict |
+|---|---|---|---|
+| a Python program that speaks HTTP through `httpx` / `httpx2` | temp `sitecustomize.py` + `PYTHONPATH` | `tests/test_autostart.py` (11), Python 3.11.2, Linux, 2026-11-16 — a child containing no import of ours produced `MODEL_REQUEST`…`MODEL_RESPONSE` on a vantage-1 tape, and the run recovered it beside its own | **verified** (loopback origin) |
+| the same, on Windows | as above | — | **unverified** — the shim is standard CPython, but the tests that spawn children are POSIX-only and nothing here has run it on Windows |
+| a client that speaks neither `httpx` nor `httpx2` (`requests`, `urllib3`, a native SDK) | not armed | — | **unverified** for the auto-import; the proxy and the hook adapters are the vantages that see those, and `attach/startup-<pid>.json` says the child imported no client library rather than leaving a silent gap |
+
+The plan names a `.pth` file for this. A `.pth` is only executed from a directory `site` scans, so on `PYTHONPATH` it
+does nothing — measured, not assumed, by the first test in `tests/test_autostart.py` — and the alternative would be
+writing into your site-packages. That is why the mechanism above is a `sitecustomize` (D-044).
+
 ## 3. Coding agents through their own hooks
 
 Hooks are the third vantage: they see the agent's turns and tool calls, not its HTTP. They are installed by

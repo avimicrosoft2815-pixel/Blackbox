@@ -184,6 +184,14 @@ routes = Routes([Route(name="openai", base="https://api.openai.com")], default="
   already set — in which case it is left exactly as it was and its destination becomes a route. `--no-proxy` turns the
   listener off, `--upstream NAME=URL[@/prefix]` adds or replaces a route, `--insecure-upstream NAME` skips verification
   for one, `--proxy-port` pins the port. The provider base URLs themselves live in `proxy/upstreams.json` (D-034).
+* **A Python child is recorded without touching its code** (P3B-03, D-044): a temporary `sitecustomize.py` on its
+  `PYTHONPATH` waits for `httpx`/`httpx2` to be imported and installs the winning seam, so `import openai` is enough.
+  A child that imports no client library says so in `attach/startup-<pid>.json` and the summary says "sdk armed, no
+  HTTP client imported" — an absence with a reason, never a silence. `--no-sdk` arms nothing (and the run reports
+  that), `--force-proxy` points the variables at the proxy even where you set them and prints what it replaced, and
+  `--no-hooks` records no hook vantage. At exit every tape of the run is recovered into its own capsule, the children's
+  before the launcher's. **Windows is untested for the shim** and the Codex adapter's schema is unverified (D-041):
+  both are labelled, not claimed.
 * **A coding agent's hooks are a first-class vantage point (P3B-05, P3B-07).** `blackbox hook install --claude-code
   [--project|--user|--settings <path>]` adds a marked block to the `hooks` object of Claude Code's settings, and
   `hook remove` gives the file back **byte-identically** when nothing else touched it — if you edited your settings while

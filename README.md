@@ -1,10 +1,11 @@
 # BlackBox
 
-**pre-alpha: storage and recovery layer only; no SDK, proxy or viewer yet**
+**alpha: capture, recovery and capsules work; there is no viewer yet**
 
-A local-first flight recorder for programs that call a model over HTTP. This repository currently contains the
-storage primitives the rest of the product is built on: a rolling segment tape, a two-slot head, a hash chain,
-segment seals and a recovery scanner — with the crash behaviour tested, not asserted.
+A local-first flight recorder for programs that call a model over HTTP. It records a program's model calls — through a
+loopback proxy, the SDK's own HTTP client, or a coding agent's hooks — into a rolling segment tape with a hash chain
+and seals, and recovers a verifiable capsule when the process dies. Nothing leaves the machine: the tape is the product
+and there is no telemetry.
 
 - **What is green, pending or not testable here:** [`docs/STATUS.md`](docs/STATUS.md)
 - **What is guaranteed, per failure class:** [`docs/guarantees.md`](docs/guarantees.md)
@@ -19,7 +20,12 @@ blackbox 0.1.0.dev0 (format v2)
 ```
 
 ```console
-$ make test     # 157 tests: codec, framing, tape, adoption, crash points, ENOSPC, keeper, forbidden words
+$ blackbox run -- python app.py     # proxy + SDK seam + hooks, one run, recovered at exit
+$ blackbox run -- node app.js       # the same, through the proxy and the hook adapters
+$ blackbox hook install --claude-code   # an agent's hook events become tape frames of their own vantage
+$ blackbox link <a> <b>             # declare that two tapes describe one run
+
+$ make test     # 854 tests: codec, framing, tape, crash points, ENOSPC, proxy, seams, hooks, capsules
 $ make kill     # 500 randomized parent-SIGKILL trials, then a recovery scan of every tape
 $ make bench    # per-stage microbench into bench/results/ (ext4 gate column + labelled tmpfs column)
 $ make fuzz     # 100k random CBOR buffers; nothing but CBORError may escape
@@ -31,8 +37,10 @@ or `paranoid` and is measured separately. **Nothing here is a claim about power 
 
 ## What this is not yet
 
-No capture API, no proxy, no viewer, no CLI beyond `--version`/`status`, no database, no retention, no capsules.
-Every one of those is a phase in the plan, and `docs/STATUS.md` says which phase is done.
+**No viewer** (the timeline UI does not exist yet), no `doctor`/`verify`/`ls`/`capsule`/`recover` commands, no
+index/graph/replay, retention and the writer lease are implemented but not yet wired into a run, and the Codex hook
+schema is unverified against a real client. Every one of those is a phase in the plan; `docs/STATUS.md` says which
+phase is done and `docs/progress.md` is the ticket-by-ticket ledger.
 
 ## Licence
 

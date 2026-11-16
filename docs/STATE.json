@@ -5,8 +5,8 @@
     "docs/STATUS.md",
     "bench/results/*.json"
   ],
-  "next_ticket": "P3B-03",
-  "next_note": "L3, the last gap in attach: the proxy thread, the variable plan and `blackbox run` are done, and the rebind budget is now gated on every watchdog-triggered sample instead of a median over manual rebinds (D-043, defects 40/41: rebind max 1.13 ms, wake-to-service max 1.15 ms, 40 samples, `bench/results/2026-11-16-watchdog.json`; macOS still unproven for that gate). Next: P3B-03's remaining half \u2014 the Python auto-import `.pth` written into the child's site dir with cleanup, and `--no-sdk` / `--force-proxy` / `--no-hooks` on `blackbox run` \u2014 then a `doctor`/preflight that calls no provider and opens no listener, the support matrix, the adapter conformance suite, and the viewer.",
+  "next_ticket": "P4-05",
+  "next_note": "L3 is closed: P3B-03's last piece landed \u2014 a temporary `sitecustomize.py` (not the plan's `.pth`, which `site` does not execute on PYTHONPATH; D-044) waits for `httpx`/`httpx2`, installs the winning seam in a child that never imports us, and every tape of the run is recovered at exit, children before the launcher; `--no-sdk` / `--force-proxy` / `--no-hooks` are wired and tested. Next, P4-05's command surface, starting where the directive's \u00a74 starts: `blackbox doctor` \u2014 a preflight that reads versions, sizes and leases and opens no listener and calls no provider, with `--json` and `--assert-offline` \u2014 then the support matrix, the adapter conformance suite, and the viewer (P4-10). P3B-06 (Codex schema unverified) and P3B-07 (cold-start row) stay open and are not blocking. Suite 854.",
   "last_green_commit": "c3782a2",
   "last_green_commit_note": "run 43769259576 on c3782a2 (PR #15 merged): ten jobs, ten success. The scheduled nightly 43806528123 (event `schedule`, main c3782a2) ran green with both jobs, kill-matrix and cbor-fuzz \u2014 the first run on the plan's own clock. ff85b59's run 43768293790 was also ten of ten, but the rebind budget it ticked was a median of five taken mostly over manual rebinds (defect 40): that evidence is withdrawn here and replaced by a per-sample gate whose CI result on this branch is not in yet.",
   "gates": {
@@ -117,13 +117,13 @@
       "done": [
         "P3B-01",
         "P3B-02",
+        "P3B-03",
         "P3B-04",
         "P3B-05",
         "P3B-08",
         "P3B-09"
       ],
       "wip": [
-        "P3B-03",
         "P3B-06",
         "P3B-07"
       ],

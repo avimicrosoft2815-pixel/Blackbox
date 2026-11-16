@@ -20,11 +20,13 @@ S: dict[str, tuple[str, str, str, str, str, str]] = {
                "loopback in, provider out, tee onto the tape; SSE sha256-identical, hop-by-hop headers dropped"),
     "P3B-02": ("done", "HEAD", "test_proxy_routes.py (10), test_no_egress.py", "—", "self",
                "the route table is the allowlist; longest prefix wins; one open_connection site, AST-asserted"),
-    "P3B-03": ("wip", "HEAD", "test_launcher_proxy.py (5), test_proxy_supervisor.py (9)",
+    "P3B-03": ("done", "HEAD", "test_launcher_proxy.py (5), test_proxy_supervisor.py (9), test_autostart.py (11)",
                "bench/results/2026-11-16-watchdog.json", "self",
-               "proxy thread, variable plan and launcher done; the rebind budget is gated on every watchdog-triggered "
-               "sample (D-043, defects 40/41; max 1.13 ms here, macOS unproven). Remaining: the .pth auto-import and "
-               "--no-sdk / --force-proxy / --no-hooks"),
+               "proxy thread + variable plan + launcher; the rebind budget is gated on every watchdog-triggered sample "
+               "(D-043, defects 40/41; max 1.13 ms here, macOS unproven); the Python auto-import is a temp "
+               "sitecustomize that waits for httpx rather than the plan's .pth, which site does not execute on "
+               "PYTHONPATH (D-044); --no-sdk / --force-proxy / --no-hooks behave as documented; every tape of the run "
+               "is recovered, children before the launcher. Windows untested for the shim"),
     "P3B-04": ("done", "HEAD", "test_headers.py (7), test_links.py (10), test_link_records.py (16)", "—", "self",
                "x-blackbox-run only behind the proxy; exact/declared/inferred links, never merged"),
     "P3B-05": ("done", "HEAD", "test_hook_inbox.py (20), test_hook_claude_code.py (13)", "—", "self",

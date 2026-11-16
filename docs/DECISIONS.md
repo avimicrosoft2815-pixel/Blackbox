@@ -539,3 +539,56 @@ instead of a median. A reader can now tell a slow rebind from a busy runner with
 **unproven for this gate** until a CI cell runs it there; the honest reading of the 107.9 ms sample is that a shared
 runner can pause a thread longer than the entire budget, so the guarantee is a property of a machine we control and the
 distribution is what we publish about machines we do not.
+
+## D-044 — the auto-import is a `sitecustomize` in a temp directory, and it waits for `httpx` instead of importing us
+
+*Date: 2026-11-16. Plan refs: §11.9 steps 1, 4 and 6; P3B-03. Follows D-033 and D-043.*
+
+**The plan's sentence** is "prepends an auto-import (`.pth` in a temp site dir / `PYTHONPATH`, the `opentelemetry-
+instrument` technique) so `install()` runs without code changes; `--no-sdk` disables". The intent is exact and it is
+what the tests assert: a child that never imports this package still gets a seam. The *mechanism* in the sentence is
+not one mechanism but two, and only one of them works.
+
+**A `.pth` on `PYTHONPATH` is not executed.** `.pth` files are processed by `site` for the directories it scans —
+site-packages and friends — not for `PYTHONPATH` entries. Measured on CPython 3.11.2 with a directory holding both a
+`.pth` (whose line writes to stderr) and a `sitecustomize.py` on `PYTHONPATH`, running `python -c pass`: the
+`sitecustomize` ran, the `.pth` did not. So "`.pth` in a temp site dir" means writing into the user's **site-packages**
+— a package manager's directory, needing write access, leaving residue if the launcher is killed, and mutating an
+environment we were asked only to observe. Refused. The temp-directory `sitecustomize.py` does the same job, is what
+`site` actually imports, and is removed when the child exits (`tests/test_autostart.py` re-measures the `.pth` claim on
+every run, so this decision has an expiry date rather than a memory).
+
+**It waits for the client library; it does not import us at startup.** The shim imports nothing of this package. It
+installs a `sys.meta_path` finder for `httpx`/`httpx2` and an `atexit` reporter: when the client library finishes
+importing, the finder fires and only then opens a tape and runs the preflight. Measured: importing
+`blackbox.rec.autostart` costs ~23 ms (mostly `dataclasses`/`typing`) and a tape + seam install costs ~35 ms, which
+would be charged to every Python child — including the ones that never speak to a provider. With the deferred trigger
+an armed child that imports no client library pays a `meta_path` entry and an `atexit` registration; a test asserts the
+child's own `sys.modules` holds nothing of ours at startup.
+
+**Silence is not allowed to look like success.** If no client library is imported, the `atexit` reporter writes
+`attach/startup-<pid>.json` saying exactly that, and `blackbox run` prints "sdk armed, no HTTP client imported" instead
+of nothing. A child whose startup failed before this package was importable gets `attach/startup-error-<pid>.json` from
+the shim, written without printing into the application's stdout — a recorder that changes what an application prints
+is a recorder nobody keeps.
+
+**A shadowed `sitecustomize` is imported by us.** Ours is first on `sys.path` because we put it there, so a
+`sitecustomize` the user already had would never run. `bootstrap()` takes itself off `sys.path`, imports the next
+`sitecustomize`, and restores the path; that module's exception is *not* caught, because it would have happened anyway.
+
+**Every vantage is recovered, children first.** §11.9 step 6 asks for "immediate recovery of every tape of this run".
+The launcher now discovers the tapes in its data directory, recovers the ones whose `RUN_START` names this run id
+(leaving a neighbour run's tape alone and saying so), and finally its own — last, because a capsule's `links.json` is
+resolved when that capsule is sealed (D-038), so sealing the launcher first would produce a run whose own capsule links
+to nothing. The child's tape carries the launcher's `run_id` in its `RUN_START`, which is what makes the SDK vantage
+link to the proxy and hook tapes as `exact` rather than as a coincidence of timestamps (D-036).
+
+**Two flags are statements, not conveniences.** `--no-sdk` leaves no shim and the run says `armed: false, reason:
+--no-sdk` instead of reporting a complete capture. `--force-proxy` points every base-URL variable at the proxy **even
+where the user set it**, so it records what it replaced in `plan.overridden` and prints it — that is the only
+difference between a decision and a recorder moving somebody's traffic (D-033). `--no-hooks` exports no inbox path and
+runs no folder, so a run has no hook vantage and its summary does not pretend to have one.
+
+**Not done, and not claimed**: the launcher does not yet auto-install a hook adapter for a recognised agent (§11.9 step
+3) — `blackbox hook install` stays explicit — and the Codex adapter's schema remains unverified against a real client
+(D-041). Windows is untested for the shim: the tests that spawn children are POSIX-only, and `compatibility.md` says so.

@@ -66,6 +66,7 @@ class ExportPlan:
     exports: dict[str, str] = field(default_factory=dict)        # filled by `with_url()`, once the port exists
     point: dict[str, str] = field(default_factory=dict)          # variable → the route it should be pointed at
     adopted: dict[str, str] = field(default_factory=dict)        # variable → the upstream it already named
+    overridden: dict[str, str] = field(default_factory=dict)     # variable → the value `force` took away from it
     routes: list[Route] = field(default_factory=list)
     default_route: str | None = None
 
@@ -79,21 +80,30 @@ class ExportPlan:
     def as_dict(self) -> dict[str, Any]:
         return {"exports": dict(sorted(self.exports.items())), "point": dict(sorted(self.point.items())),
                 "adopted": dict(sorted(self.adopted.items())),
+                "overridden": dict(sorted(self.overridden.items())),
                 "upstreams": [route.name for route in self.routes], "default_route": self.default_route}
 
 
-def plan_exports(env: dict[str, str], proxy_url: str | None = None) -> ExportPlan:
+def plan_exports(env: dict[str, str], proxy_url: str | None = None, *, force: bool = False) -> ExportPlan:
     """Union the child's variables with the proxy's routes, without ever overwriting the child's own value.
 
     Called with no `proxy_url` it decides *what to point where* (`plan.point`), which is what the launcher needs
     before it can start a listener; `plan.with_url(url)` fills in the values afterwards. Called with a URL it does
     both, which is what the tests and any caller that already has a port want.
+
+    `force` is `blackbox run --force-proxy`: point every variable at the proxy **even where the user already pointed
+    it somewhere else**. That is a deliberate exception to the one rule this function exists for, so it is a named
+    argument, it records what it took away in `plan.overridden`, and the launcher prints that list — an overwrite a
+    reader can see is a decision; one they cannot is a recorder moving somebody's traffic (D-033).
     """
     plan = ExportPlan()
     adopted: list[Route] = []
     for var, name in BASE_URL_VARS:
         value = (env.get(var) or "").strip()
-        if value:
+        if value and force:
+            plan.point[var] = name
+            plan.overridden[var] = value
+        elif value:
             plan.adopted[var] = value
             if _host_of(value) is not None:
                 adopted.append(Route(name=f"{name}-own", base=value, prefix=f"/{name}"))
