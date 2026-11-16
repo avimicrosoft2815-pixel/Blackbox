@@ -541,3 +541,106 @@ with api.run("call-the-model"):
     second = json.loads((tmp_path / "seam.json").read_text(encoding="utf-8"))
     assert second["seam"] == "httpx-hooks", second
     assert second["statuses"] == ["already-installed"], second
+
+
+# ── D-052: what the graph's edges know, measured on real clients rather than on fixtures ──────────────────────────
+TWO_NODES_CHILD = """
+import asyncio
+import httpx
+from blackbox import api
+
+PAYLOAD = {"model": "mock-1", "messages": [{"role": "user", "content": "hi"}]}
+
+
+async def one(name):
+    async with httpx.AsyncClient(timeout=10) as client:
+        with api.run(name):
+            response = await client.post(BASE + "/chat/completions", json=PAYLOAD)
+            print("CHILD", name, response.status_code)
+
+
+async def main():
+    await asyncio.gather(one("first"), one("second"))
+
+
+asyncio.run(main())
+"""
+
+NODE_HTTP_CHILD = """
+const https = require('http');
+const base = new URL(process.env.OPENAI_BASE_URL);
+const body = JSON.stringify({model: 'mock-1', messages: [{role: 'user', content: 'hi'}]});
+const req = https.request({host: base.hostname, port: base.port,
+  path: base.pathname.replace(/\\/$/, '') + '/chat/completions', method: 'POST',
+  headers: {'content-type': 'application/json', 'content-length': Buffer.byteLength(body)}}, res => {
+  let data = '';
+  res.on('data', chunk => data += chunk);
+  res.on('end', () => console.log('NODE', res.statusCode));
+});
+req.end(body);
+"""
+
+
+def _graphs(data_dir) -> list[dict]:
+    out = []
+    for path in sorted((data_dir / "runs").glob("*/graph.json")):
+        out.append(json.loads(path.read_text(encoding="utf-8")))
+    return out
+
+
+def _graph_of_the_tape_with_nodes(data_dir) -> dict:
+    graphs = [graph for graph in _graphs(data_dir) if graph.get("nodes")]
+    assert len(graphs) == 1, [graph.get("nodes") for graph in _graphs(data_dir)]
+    return graphs[0]
+
+
+def test_a_real_child_with_two_concurrent_nodes_gets_run_level_edges_and_no_node_edges(tmp_path):
+    """The case a guesser would pair: two nodes, each with a model call, on two tapes of one run.
+
+    Measured on a real child under the launcher with the proxy ON, so there are two tapes and a real `exact` link. The
+    graph must list both nodes and still name neither on an edge: an `exact` link says the *run* is one run, and a slot
+    is not a call id (D-052).
+    """
+    from blackbox.cap_sdk.mock_provider import MockProvider, Scenario
+
+    script = tmp_path / "two_nodes.py"
+    data_dir = tmp_path / "data"
+    with MockProvider(Scenario(chunks=2, delay_ms=0)) as provider:
+        script.write_text(f"BASE = {provider.openai_base_url()!r}\n" + TWO_NODES_CHILD, encoding="utf-8")
+        with open(tmp_path / "out.txt", "w", encoding="utf-8") as out:
+            result = launcher.launch([sys.executable, str(script)], data_dir=str(data_dir), out=out,
+                                     env={**os.environ, "PYTHONPATH": str(SRC)})
+    assert result.exit_code == 0, result.exit_code
+    graph = _graph_of_the_tape_with_nodes(data_dir)
+    assert [node["status"] for node in graph["nodes"]] == ["closed", "closed"], graph["nodes"]
+    assert graph["edge_summary"]["total"] >= 1, "the two tapes of this run are linked, so the graph must say how"
+    assert graph["edge_summary"]["node_level"] == 0
+    for edge in graph["edges"]:
+        assert edge["level"] == "run", edge
+        assert edge["nodes"] == {"from": None, "to": None}, edge
+        assert edge["node_join"] == "unknown"
+    # the link the capsule carries is the same relation the graph describes: exact, at run level
+    capsule = next(cap.read_capsule(str(path)) for path in sorted((data_dir / "capsules").glob("*.bbx"))
+                   if json.loads(cap.read_capsule(str(path)).entry("links.json"))["links"])
+    assert json.loads(capsule.entry("links.json"))["summary"]["exact"] >= 1
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="a Node client cannot be run without node on PATH")
+def test_a_real_node_child_leaves_a_readable_graph_and_no_invented_nodes(tmp_path):
+    """Node is captured by the proxy only, so its tape has no app node — and the graph must not grow one to look full."""
+    from blackbox.cap_sdk.mock_provider import MockProvider, Scenario
+
+    script = tmp_path / "client.js"
+    data_dir = tmp_path / "data"
+    with MockProvider(Scenario(chunks=2, delay_ms=0)) as provider:
+        script.write_text(NODE_HTTP_CHILD, encoding="utf-8")
+        with open(tmp_path / "out.txt", "w", encoding="utf-8") as out:
+            result = launcher.launch([shutil.which("node") or "node", str(script)], data_dir=str(data_dir), out=out,
+                                     env={**os.environ, "OPENAI_BASE_URL": provider.openai_base_url()})
+    assert result.exit_code == 0, result.exit_code
+    graphs = _graphs(data_dir)
+    assert graphs, "the run has to have produced a graph"
+    for graph in graphs:
+        assert graph["nodes"] == [], graph["nodes"]
+        assert graph["edge_summary"]["node_level"] == 0
+        assert all(edge["nodes"] == {"from": None, "to": None} for edge in graph["edges"])

@@ -286,6 +286,65 @@ def graph_nodes(frames: list[dict[str, Any]], *, interrupted: list[NodeRecord] |
     return [nodes[slot] for slot in sorted(nodes)]
 
 
+#: Why no edge in this build names a node. Kept as one constant so the graph, the tests and D-052 cannot drift apart.
+NODE_JOIN_REASON = ("no per-call identifier is recorded on both sides: `node_slot` numbers nodes inside one tape and "
+                    "the injected header carries only <run>/<node>, so two calls from one node are indistinguishable")
+
+
+def graph_edges(links_document: bytes, writer_uuid: str) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """`graph.json`'s `edges`, derived from the exact `links.json` bytes the capsule is about to carry (D-052).
+
+    Each `LINK` record joins two *tapes*; it does not identify which node on one tape corresponds to which node on the
+    other, and nothing in the tape format records a call id on both sides. So every edge states its own level and names
+    `null` for the nodes, with `node_join: "unknown"` and the reason — a reader sees the gap instead of an absence, and
+    no arrow is drawn between two nodes on the strength of being the only candidates.
+    """
+    if not links_document.strip():
+        records: list[dict[str, Any]] = []
+        unreadable = False
+    else:
+        try:
+            parsed = json.loads(links_document.decode("utf-8"))
+            raw_records = parsed.get("links") if isinstance(parsed, dict) else None
+            records = [r for r in raw_records if isinstance(r, dict)] if isinstance(raw_records, list) else []
+            unreadable = not isinstance(parsed, dict)
+        except Exception:
+            records, unreadable = [], True
+    edges: list[dict[str, Any]] = []
+    for record in records:
+        left = str(record.get("left_writer") or "")
+        right = str(record.get("right_writer") or "")
+        left_run = record.get("left_run")
+        right_run = record.get("right_run")
+        mine = left == writer_uuid and right != writer_uuid
+        my_run, their_run = (left_run, right_run) if mine else (right_run, left_run)
+        edges.append({
+            "class": record.get("class"),
+            # "run" when both ends name a run (the link says they are one run); "tape" when one of them does not.
+            "level": "run" if (my_run and their_run) else "tape",
+            "from": {"writer": left if mine else right, "run_id": my_run, "node": None},
+            "to": {"writer": right if mine else left, "run_id": their_run, "node": None},
+            "nodes": {"from": None, "to": None},
+            "node_join": "unknown",
+            "node_join_reason": NODE_JOIN_REASON,
+            "confidence": record.get("confidence"),
+            "evidence": dict(record.get("evidence") or {}),
+        })
+    summary: dict[str, Any] = {"total": len(edges),
+                               "run_level": sum(1 for e in edges if e["level"] == "run"),
+                               "tape_level": sum(1 for e in edges if e["level"] == "tape"),
+                               "node_level": 0, "node_join": "unknown", "node_join_reason": NODE_JOIN_REASON}
+    if unreadable:
+        summary["links_unreadable"] = True
+    return edges, summary
+
+
+def empty_edge_summary() -> dict[str, Any]:
+    """The summary a graph carries before seal: no links have been resolved yet, and it says why the count is zero."""
+    return {"total": 0, "run_level": 0, "tape_level": 0, "node_level": 0, "node_join": "unknown",
+            "node_join_reason": NODE_JOIN_REASON}
+
+
 def _payload(raw: bytes) -> dict[str, Any]:
     """A frame payload as a dict, or an empty dict when it will not decode: a graph entry is not worth an exception."""
     if not raw:
@@ -537,7 +596,7 @@ class Recovery:
                  "frames": scan.frame_count, "gaps": scan.gaps,
                  "nodes": graph_nodes(scan.frames, interrupted=nodes),
                  "run_status": status, "status_cause": cause,
-                 "open_nodes": sum(1 for n in nodes), "edges": []}
+                 "open_nodes": sum(1 for n in nodes), "edges": [], "edge_summary": empty_edge_summary()}
         payload = json.dumps(graph, sort_keys=True).encode()
         out = os.path.join(self.run_dir, "graph.json")
         input_hash = _hash(self.writer_uuid_hex, scan.frame_count, scan.last_seq, len(scan.gaps))
@@ -616,6 +675,9 @@ class Recovery:
         # evidence. Written into the capsule, never into the tape — the tape's bytes are the evidence this entry's
         # siblings hash, so a resolver that appended to it would be editing what it was describing (D-038).
         entries[cap.LINKS_NAME] = correlate.for_capsule(self.data_dir, self.writer_uuid_hex)
+        # D-052: the graph's edges come from *these* bytes, in this step, so the graph and the capsule's `links.json`
+        # cannot disagree. Written before the capsule, because the capsule is the thing that must not change afterwards.
+        self._write_graph_edges(entries[cap.LINKS_NAME])
         input_hash = _hash(*(f"{k}:{blake2b(v).hex()}" for k, v in sorted(entries.items())))
         if self._skip("SEALED", input_hash):
             existing = cap.read_capsule(self.capsule_path)
@@ -630,6 +692,21 @@ class Recovery:
         self.result.capsule_root = str(out["root"])
         self._die("SEALED.after")
         return self.result.capsule_root
+
+    def _write_graph_edges(self, links_document: bytes) -> None:
+        """Add `edges`/`edge_summary` to this run's `graph.json`. Best-effort: a graph that cannot be read keeps `[]`."""
+        path = os.path.join(self.run_dir, "graph.json")
+        try:
+            with open(path, encoding="utf-8") as fh:
+                graph = json.load(fh)
+        except (OSError, ValueError):
+            return
+        if not isinstance(graph, dict):
+            return
+        edges, summary = graph_edges(links_document, self.writer_uuid_hex)
+        graph["edges"] = edges
+        graph["edge_summary"] = summary
+        _write_atomic(path, json.dumps(graph, sort_keys=True).encode("utf-8") + b"\n")
 
     def step_indexed(self) -> str:
         self._enter("INDEXED")

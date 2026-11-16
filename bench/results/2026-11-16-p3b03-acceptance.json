@@ -11,7 +11,7 @@
       "capsule_count": 2,
       "capsules": [
         {
-          "capsule": "c_989d0ecd1fa82a8e.bbx",
+          "capsule": "c_590bba0c5cfbe12b.bbx",
           "counts": {
             "bytes": 16777921,
             "events": 11,
@@ -32,8 +32,8 @@
           "link_pairs": [
             {
               "class": "exact",
-              "left_run": "r_0473cf88c2ccde0f",
-              "right_run": "r_0473cf88c2ccde0f"
+              "left_run": "r_281e19aa8ba28e2b",
+              "right_run": "r_281e19aa8ba28e2b"
             }
           ],
           "links": {
@@ -43,11 +43,11 @@
           },
           "nodes": 0,
           "root_ok": true,
-          "run_id": "r_0473cf88c2ccde0f",
+          "run_id": "r_281e19aa8ba28e2b",
           "run_status": "recovered"
         },
         {
-          "capsule": "c_9b4cdfefc76b1da9.bbx",
+          "capsule": "c_aafb0368950925d7.bbx",
           "counts": {
             "bytes": 16777921,
             "events": 5,
@@ -65,8 +65,8 @@
           "link_pairs": [
             {
               "class": "exact",
-              "left_run": "r_0473cf88c2ccde0f",
-              "right_run": "r_0473cf88c2ccde0f"
+              "left_run": "r_281e19aa8ba28e2b",
+              "right_run": "r_281e19aa8ba28e2b"
             }
           ],
           "links": {
@@ -76,7 +76,7 @@
           },
           "nodes": 0,
           "root_ok": true,
-          "run_id": "r_0473cf88c2ccde0f",
+          "run_id": "r_281e19aa8ba28e2b",
           "run_status": "recovered"
         }
       ],
@@ -85,63 +85,73 @@
         "/home/user/Blackbox/.venv/bin/python",
         "client.py"
       ],
-      "duration_ms": 680.4,
+      "duration_ms": 726.4,
       "every_root_ok": true,
       "exact_pairs": [
         {
           "class": "exact",
-          "left_run": "r_0473cf88c2ccde0f",
-          "right_run": "r_0473cf88c2ccde0f"
+          "left_run": "r_281e19aa8ba28e2b",
+          "right_run": "r_281e19aa8ba28e2b"
         },
         {
           "class": "exact",
-          "left_run": "r_0473cf88c2ccde0f",
-          "right_run": "r_0473cf88c2ccde0f"
+          "left_run": "r_281e19aa8ba28e2b",
+          "right_run": "r_281e19aa8ba28e2b"
         }
       ],
       "exit_code": 0,
       "graphs": [
         {
-          "graph_edges": 0,
+          "edge_levels": [
+            "run"
+          ],
+          "edge_nodes_named": 0,
+          "graph_edges": 1,
           "graph_nodes": 0,
+          "node_level_edges": 0,
           "node_slots": [],
           "node_statuses": [],
           "open_nodes": 0,
-          "run_dir": "r_0473cf88c2ccde0f",
-          "run_id": "r_0473cf88c2ccde0f",
-          "writer_uuid": "297eebb7065a5a0cba1d7ef4e993bb0a"
+          "run_dir": "r_281e19aa8ba28e2b",
+          "run_id": "r_281e19aa8ba28e2b",
+          "writer_uuid": "20b4d7957980c6a718e4e7c97b951c1c"
         },
         {
-          "graph_edges": 0,
+          "edge_levels": [
+            "run"
+          ],
+          "edge_nodes_named": 0,
+          "graph_edges": 1,
           "graph_nodes": 0,
+          "node_level_edges": 0,
           "node_slots": [],
           "node_statuses": [],
           "open_nodes": 0,
-          "run_dir": "r_92e33d6a6985eb83",
-          "run_id": "r_0473cf88c2ccde0f",
-          "writer_uuid": "a0d886d2c714abee5d38376bdd937963"
+          "run_dir": "r_42e40f3fb33258b1",
+          "run_id": "r_281e19aa8ba28e2b",
+          "writer_uuid": "b07a84be2d006fad87501c10e3b4ef16"
         }
       ],
       "links": [
         {
           "class": "exact",
-          "left_run": "r_0473cf88c2ccde0f",
-          "right_run": "r_0473cf88c2ccde0f"
+          "left_run": "r_281e19aa8ba28e2b",
+          "right_run": "r_281e19aa8ba28e2b"
         },
         {
           "class": "exact",
-          "left_run": "r_0473cf88c2ccde0f",
-          "right_run": "r_0473cf88c2ccde0f"
+          "left_run": "r_281e19aa8ba28e2b",
+          "right_run": "r_281e19aa8ba28e2b"
         }
       ],
       "one_run_id_across_capsules": true,
       "proxy_vantage_recorded": true,
       "run_ids_seen": [
-        "r_0473cf88c2ccde0f"
+        "r_281e19aa8ba28e2b"
       ],
       "stderr_tail": [
-        "blackbox: python child gets a temporary sitecustomize (/tmp/blackbox-sdk-vetf3upd); removed when it exits",
-        "blackbox: run r_0473cf88c2ccde0f \u00b7 exit 0 \u00b7 proxy http://127.0.0.1:33937 (5 vars exported) \u00b7 sdk auto-import (sitecustomize) \u00b7 recovered r_0473cf88c2ccde0f \u2192 /tmp/bbx-accept-ezhj324e/data-python/capsules/c_989d0ecd1fa82a8e.bbx (recovered, root 87803e63c018) and 1 more tape (sdk)"
+        "blackbox: python child gets a temporary sitecustomize (/tmp/blackbox-sdk-qb0d1nfe); removed when it exits",
+        "blackbox: run r_281e19aa8ba28e2b \u00b7 exit 0 \u00b7 proxy http://127.0.0.1:38497 (5 vars exported) \u00b7 sdk auto-import (sitecustomize) \u00b7 recovered r_281e19aa8ba28e2b \u2192 /tmp/bbx-accept-oyxrw1t8/data-python/capsules/c_590bba0c5cfbe12b.bbx (recovered, root 969cdb59e12d) and 1 more tape (sdk)"
       ],
       "stdout": [
         "python ok"
@@ -152,7 +162,7 @@
       "capsule_count": 1,
       "capsules": [
         {
-          "capsule": "c_32198b668bbf481f.bbx",
+          "capsule": "c_900aac4eac75da44.bbx",
           "counts": {
             "bytes": 16777523,
             "events": 11,
@@ -178,7 +188,7 @@
           },
           "nodes": 0,
           "root_ok": true,
-          "run_id": "r_a0ae751a7f7ca67c",
+          "run_id": "r_7300611db5e0428e",
           "run_status": "recovered"
         }
       ],
@@ -187,30 +197,33 @@
         "/usr/local/bin/node",
         "client.js"
       ],
-      "duration_ms": 344.1,
+      "duration_ms": 396.9,
       "every_root_ok": true,
       "exact_pairs": [],
       "exit_code": 0,
       "graphs": [
         {
+          "edge_levels": [],
+          "edge_nodes_named": 0,
           "graph_edges": 0,
           "graph_nodes": 0,
+          "node_level_edges": 0,
           "node_slots": [],
           "node_statuses": [],
           "open_nodes": 0,
-          "run_dir": "r_a0ae751a7f7ca67c",
-          "run_id": "r_a0ae751a7f7ca67c",
-          "writer_uuid": "bed479d33025626f2f4c75d886235363"
+          "run_dir": "r_7300611db5e0428e",
+          "run_id": "r_7300611db5e0428e",
+          "writer_uuid": "03c6a3e965691e5f91253b7a4e314fa5"
         }
       ],
       "links": [],
       "one_run_id_across_capsules": true,
       "proxy_vantage_recorded": true,
       "run_ids_seen": [
-        "r_a0ae751a7f7ca67c"
+        "r_7300611db5e0428e"
       ],
       "stderr_tail": [
-        "blackbox: run r_a0ae751a7f7ca67c \u00b7 exit 0 \u00b7 proxy http://127.0.0.1:34981 (5 vars exported) \u00b7 recovered r_a0ae751a7f7ca67c \u2192 /tmp/bbx-accept-ezhj324e/data-node/capsules/c_32198b668bbf481f.bbx (recovered, root a508095031bb)"
+        "blackbox: run r_7300611db5e0428e \u00b7 exit 0 \u00b7 proxy http://127.0.0.1:45155 (5 vars exported) \u00b7 recovered r_7300611db5e0428e \u2192 /tmp/bbx-accept-oyxrw1t8/data-node/capsules/c_900aac4eac75da44.bbx (recovered, root fc3600e41e1f)"
       ],
       "stdout": [
         "node ok"
@@ -221,7 +234,7 @@
       "capsule_count": 2,
       "capsules": [
         {
-          "capsule": "c_4e3bb4404e84fb0f.bbx",
+          "capsule": "c_2e98bc6a795c2a8a.bbx",
           "counts": {
             "bytes": 16777921,
             "events": 11,
@@ -242,8 +255,8 @@
           "link_pairs": [
             {
               "class": "exact",
-              "left_run": "r_7daf17a60a01f973",
-              "right_run": "r_7daf17a60a01f973"
+              "left_run": "r_007e7497ff759162",
+              "right_run": "r_007e7497ff759162"
             }
           ],
           "links": {
@@ -253,11 +266,11 @@
           },
           "nodes": 0,
           "root_ok": true,
-          "run_id": "r_7daf17a60a01f973",
+          "run_id": "r_007e7497ff759162",
           "run_status": "recovered"
         },
         {
-          "capsule": "c_f3c1289ee870dc49.bbx",
+          "capsule": "c_891c0b35b8e3f695.bbx",
           "counts": {
             "bytes": 16777921,
             "events": 11,
@@ -278,8 +291,8 @@
           "link_pairs": [
             {
               "class": "exact",
-              "left_run": "r_7daf17a60a01f973",
-              "right_run": "r_7daf17a60a01f973"
+              "left_run": "r_007e7497ff759162",
+              "right_run": "r_007e7497ff759162"
             }
           ],
           "links": {
@@ -289,7 +302,7 @@
           },
           "nodes": 0,
           "root_ok": true,
-          "run_id": "r_7daf17a60a01f973",
+          "run_id": "r_007e7497ff759162",
           "run_status": "recovered"
         }
       ],
@@ -298,63 +311,73 @@
         "/home/user/Blackbox/.venv/bin/python",
         "sdk_client.py"
       ],
-      "duration_ms": 1189.0,
+      "duration_ms": 1303.6,
       "every_root_ok": true,
       "exact_pairs": [
         {
           "class": "exact",
-          "left_run": "r_7daf17a60a01f973",
-          "right_run": "r_7daf17a60a01f973"
+          "left_run": "r_007e7497ff759162",
+          "right_run": "r_007e7497ff759162"
         },
         {
           "class": "exact",
-          "left_run": "r_7daf17a60a01f973",
-          "right_run": "r_7daf17a60a01f973"
+          "left_run": "r_007e7497ff759162",
+          "right_run": "r_007e7497ff759162"
         }
       ],
       "exit_code": 0,
       "graphs": [
         {
-          "graph_edges": 0,
+          "edge_levels": [
+            "run"
+          ],
+          "edge_nodes_named": 0,
+          "graph_edges": 1,
           "graph_nodes": 0,
+          "node_level_edges": 0,
           "node_slots": [],
           "node_statuses": [],
           "open_nodes": 0,
-          "run_dir": "r_4f6491da740fb8e9",
-          "run_id": "r_7daf17a60a01f973",
-          "writer_uuid": "fdb15907ac25ad9eb73c05bd2a06fd28"
+          "run_dir": "r_007e7497ff759162",
+          "run_id": "r_007e7497ff759162",
+          "writer_uuid": "b7eaa27863df6c4e61c5a31149b868e0"
         },
         {
-          "graph_edges": 0,
+          "edge_levels": [
+            "run"
+          ],
+          "edge_nodes_named": 0,
+          "graph_edges": 1,
           "graph_nodes": 0,
+          "node_level_edges": 0,
           "node_slots": [],
           "node_statuses": [],
           "open_nodes": 0,
-          "run_dir": "r_7daf17a60a01f973",
-          "run_id": "r_7daf17a60a01f973",
-          "writer_uuid": "eee18a6a97f559fa1426063fdf1e307c"
+          "run_dir": "r_f1aaf02a93f2c20c",
+          "run_id": "r_007e7497ff759162",
+          "writer_uuid": "765a53224d2ff54b009415f853043166"
         }
       ],
       "links": [
         {
           "class": "exact",
-          "left_run": "r_7daf17a60a01f973",
-          "right_run": "r_7daf17a60a01f973"
+          "left_run": "r_007e7497ff759162",
+          "right_run": "r_007e7497ff759162"
         },
         {
           "class": "exact",
-          "left_run": "r_7daf17a60a01f973",
-          "right_run": "r_7daf17a60a01f973"
+          "left_run": "r_007e7497ff759162",
+          "right_run": "r_007e7497ff759162"
         }
       ],
       "one_run_id_across_capsules": true,
       "proxy_vantage_recorded": true,
       "run_ids_seen": [
-        "r_7daf17a60a01f973"
+        "r_007e7497ff759162"
       ],
       "stderr_tail": [
-        "blackbox: python child gets a temporary sitecustomize (/tmp/blackbox-sdk-hd0gzf_j); removed when it exits",
-        "blackbox: run r_7daf17a60a01f973 \u00b7 exit 0 \u00b7 proxy http://127.0.0.1:40973 (5 vars exported) \u00b7 sdk auto-import (sitecustomize) \u00b7 recovered r_7daf17a60a01f973 \u2192 /tmp/bbx-accept-ezhj324e/data-sdk/capsules/c_f3c1289ee870dc49.bbx (recovered, root 216f2efaff18) and 1 more tape (sdk)"
+        "blackbox: python child gets a temporary sitecustomize (/tmp/blackbox-sdk-q5n1owlo); removed when it exits",
+        "blackbox: run r_007e7497ff759162 \u00b7 exit 0 \u00b7 proxy http://127.0.0.1:33381 (5 vars exported) \u00b7 sdk auto-import (sitecustomize) \u00b7 recovered r_007e7497ff759162 \u2192 /tmp/bbx-accept-oyxrw1t8/data-sdk/capsules/c_2e98bc6a795c2a8a.bbx (recovered, root 59a61941ce63) and 1 more tape (sdk)"
       ],
       "stdout": [
         "sdk ok"
@@ -365,7 +388,43 @@
       "capsule_count": 2,
       "capsules": [
         {
-          "capsule": "c_0cfd3da878605f14.bbx",
+          "capsule": "c_3e7ef39b6f541192.bbx",
+          "counts": {
+            "bytes": 16777921,
+            "events": 11,
+            "nodes": 0,
+            "nodes_interrupted": 0,
+            "segments": 1
+          },
+          "frames": {
+            "CHAIN": 5,
+            "MODEL_CHUNK": 1,
+            "MODEL_REQUEST": 1,
+            "MODEL_RESPONSE": 1,
+            "RUN_END": 1,
+            "RUN_START": 1,
+            "SEG_END": 1
+          },
+          "has_proxy_vantage": true,
+          "link_pairs": [
+            {
+              "class": "exact",
+              "left_run": "r_4fff79d371196e59",
+              "right_run": "r_4fff79d371196e59"
+            }
+          ],
+          "links": {
+            "declared": 0,
+            "exact": 1,
+            "inferred": 0
+          },
+          "nodes": 0,
+          "root_ok": true,
+          "run_id": "r_4fff79d371196e59",
+          "run_status": "recovered"
+        },
+        {
+          "capsule": "c_c7047a575e4159c3.bbx",
           "counts": {
             "bytes": 16777921,
             "events": 14,
@@ -388,8 +447,8 @@
           "link_pairs": [
             {
               "class": "exact",
-              "left_run": "r_7a2516c33be44ae3",
-              "right_run": "r_7a2516c33be44ae3"
+              "left_run": "r_4fff79d371196e59",
+              "right_run": "r_4fff79d371196e59"
             }
           ],
           "links": {
@@ -399,43 +458,7 @@
           },
           "nodes": 1,
           "root_ok": true,
-          "run_id": "r_7a2516c33be44ae3",
-          "run_status": "recovered"
-        },
-        {
-          "capsule": "c_4e24a46bb8f38cc8.bbx",
-          "counts": {
-            "bytes": 16777921,
-            "events": 11,
-            "nodes": 0,
-            "nodes_interrupted": 0,
-            "segments": 1
-          },
-          "frames": {
-            "CHAIN": 5,
-            "MODEL_CHUNK": 1,
-            "MODEL_REQUEST": 1,
-            "MODEL_RESPONSE": 1,
-            "RUN_END": 1,
-            "RUN_START": 1,
-            "SEG_END": 1
-          },
-          "has_proxy_vantage": true,
-          "link_pairs": [
-            {
-              "class": "exact",
-              "left_run": "r_7a2516c33be44ae3",
-              "right_run": "r_7a2516c33be44ae3"
-            }
-          ],
-          "links": {
-            "declared": 0,
-            "exact": 1,
-            "inferred": 0
-          },
-          "nodes": 0,
-          "root_ok": true,
-          "run_id": "r_7a2516c33be44ae3",
+          "run_id": "r_4fff79d371196e59",
           "run_status": "recovered"
         }
       ],
@@ -444,67 +467,77 @@
         "/home/user/Blackbox/.venv/bin/python",
         "sdk_node_client.py"
       ],
-      "duration_ms": 1142.7,
+      "duration_ms": 1378.1,
       "every_root_ok": true,
       "exact_pairs": [
         {
           "class": "exact",
-          "left_run": "r_7a2516c33be44ae3",
-          "right_run": "r_7a2516c33be44ae3"
+          "left_run": "r_4fff79d371196e59",
+          "right_run": "r_4fff79d371196e59"
         },
         {
           "class": "exact",
-          "left_run": "r_7a2516c33be44ae3",
-          "right_run": "r_7a2516c33be44ae3"
+          "left_run": "r_4fff79d371196e59",
+          "right_run": "r_4fff79d371196e59"
         }
       ],
       "exit_code": 0,
       "graphs": [
         {
-          "graph_edges": 0,
+          "edge_levels": [
+            "run"
+          ],
+          "edge_nodes_named": 0,
+          "graph_edges": 1,
+          "graph_nodes": 0,
+          "node_level_edges": 0,
+          "node_slots": [],
+          "node_statuses": [],
+          "open_nodes": 0,
+          "run_dir": "r_4fff79d371196e59",
+          "run_id": "r_4fff79d371196e59",
+          "writer_uuid": "c67d801b84ce47ae5c5544040b035460"
+        },
+        {
+          "edge_levels": [
+            "run"
+          ],
+          "edge_nodes_named": 0,
+          "graph_edges": 1,
           "graph_nodes": 1,
+          "node_level_edges": 0,
           "node_slots": [
-            null
+            1
           ],
           "node_statuses": [
             "closed"
           ],
           "open_nodes": 0,
-          "run_dir": "r_26b102b451fee9e6",
-          "run_id": "r_7a2516c33be44ae3",
-          "writer_uuid": "4c3d4968b151f4d4ae2860ea79177dff"
-        },
-        {
-          "graph_edges": 0,
-          "graph_nodes": 0,
-          "node_slots": [],
-          "node_statuses": [],
-          "open_nodes": 0,
-          "run_dir": "r_7a2516c33be44ae3",
-          "run_id": "r_7a2516c33be44ae3",
-          "writer_uuid": "55729e4d466419ea1540bb8144dbe302"
+          "run_dir": "r_a1d0b046e548ff4a",
+          "run_id": "r_4fff79d371196e59",
+          "writer_uuid": "5ff14bec745a91fa68f49d90c6e89eff"
         }
       ],
       "links": [
         {
           "class": "exact",
-          "left_run": "r_7a2516c33be44ae3",
-          "right_run": "r_7a2516c33be44ae3"
+          "left_run": "r_4fff79d371196e59",
+          "right_run": "r_4fff79d371196e59"
         },
         {
           "class": "exact",
-          "left_run": "r_7a2516c33be44ae3",
-          "right_run": "r_7a2516c33be44ae3"
+          "left_run": "r_4fff79d371196e59",
+          "right_run": "r_4fff79d371196e59"
         }
       ],
       "one_run_id_across_capsules": true,
       "proxy_vantage_recorded": true,
       "run_ids_seen": [
-        "r_7a2516c33be44ae3"
+        "r_4fff79d371196e59"
       ],
       "stderr_tail": [
-        "blackbox: python child gets a temporary sitecustomize (/tmp/blackbox-sdk-lhd73i3u); removed when it exits",
-        "blackbox: run r_7a2516c33be44ae3 \u00b7 exit 0 \u00b7 proxy http://127.0.0.1:41125 (5 vars exported) \u00b7 sdk auto-import (sitecustomize) \u00b7 recovered r_7a2516c33be44ae3 \u2192 /tmp/bbx-accept-ezhj324e/data-sdk-nodes/capsules/c_4e24a46bb8f38cc8.bbx (recovered, root b08f43719a7b) and 1 more tape (sdk)"
+        "blackbox: python child gets a temporary sitecustomize (/tmp/blackbox-sdk-7pks2yok); removed when it exits",
+        "blackbox: run r_4fff79d371196e59 \u00b7 exit 0 \u00b7 proxy http://127.0.0.1:38117 (5 vars exported) \u00b7 sdk auto-import (sitecustomize) \u00b7 recovered r_4fff79d371196e59 \u2192 /tmp/bbx-accept-oyxrw1t8/data-sdk-nodes/capsules/c_3e7ef39b6f541192.bbx (recovered, root 7c66f6fb7f96) and 1 more tape (sdk)"
       ],
       "stdout": [
         "sdk-nodes ok"
@@ -513,7 +546,7 @@
     }
   ],
   "ticket": "P3B-03",
-  "upstream": "http://127.0.0.1:34885",
+  "upstream": "http://127.0.0.1:37337",
   "verdict": {
     "app_nodes_are_in_the_graph": {
       "node": 0,
@@ -523,12 +556,14 @@
     },
     "both_clients_exit_zero": true,
     "clean_runs_are_not_reported_as_interrupted": true,
+    "edges_naming_a_node": 0,
     "every_capsule_root_ok": true,
     "exact_links_join_every_run_with_two_capsules": true,
-    "graph_has_cross_vantage_edges": false,
     "node_available": true,
+    "node_level_edges_recorded": 0,
     "one_run_id_across_capsules": true,
-    "proxy_vantage_recorded": true
+    "proxy_vantage_recorded": true,
+    "run_level_edges_recorded": 6
   },
-  "when": "2026-11-16T18:51:47Z"
+  "when": "2026-11-16T20:54:27Z"
 }

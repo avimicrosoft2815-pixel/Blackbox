@@ -131,6 +131,31 @@ recovery/seal time, never on the hot path. Nothing in this build appends a `LINK
 the resolved records as `links.json` (see `rec/correlate.py`), because appending to a tape to describe it would edit the
 evidence the capsule hashes.
 
+#### `graph.json` — nodes and edges (additive in 1.1, D-052)
+
+`graph.json` lives in the run directory (`runs/<tape_key>/graph.json`) and is JSON: `writer_uuid`, `run_id`, `frames`,
+`gaps`, `nodes`, `open_nodes`, `run_status`, `status_cause`, `edges`, `edge_summary`. Every node the tape opened appears
+in `nodes` (`node_slot`, `name`, `kind`, `parent`, `opened_ns`, `status`, and the `outcome`/`duration_us` its `NODE_CLOSE`
+carried); `status` is `closed`, the §14.4 interrupted class, or `unclosed` when the close is not in the scan.
+
+`edges` is derived at seal time from the **same bytes** the capsule receives as `links.json`, and each edge states what
+it knows:
+
+| field | values |
+|---|---|
+| `class` | `exact`, `declared`, `inferred` (the `LINK` class it came from) |
+| `level` | `run` (both ends name a run), `tape` (one end names none), `node` (**not written in this build**) |
+| `from` / `to` | `{writer, run_id, node}` — `node` is `null` unless `level` is `node` |
+| `nodes` | `{from, to}`, `null` on both sides when no node is justified |
+| `node_join` | `unknown` (with `node_join_reason`), later `exact` / `ambiguous` once a per-call id exists |
+| `confidence`, `evidence` | copied from the `LINK` record |
+
+An `exact` link proves two tapes are one run; it does not prove that a node on one tape corresponds to a node on the
+other, so no edge names a node today and none is invented for a proxied call without a slot. `edge_summary` counts the
+levels (`total`, `run_level`, `tape_level`, `node_level`, `node_join`) and carries the same reason, so the absence of
+node-level edges is visible rather than silent. Readers that predate this change see the keys they already knew and
+ignore the two new ones.
+
 ### 4.0 Model-frame payloads (JSON, not CBOR)
 
 `MODEL_REQUEST` (32), `MODEL_CHUNK` (34), `MODEL_RESPONSE` (33) and `MODEL_ERROR` (35) carry canonical JSON in their

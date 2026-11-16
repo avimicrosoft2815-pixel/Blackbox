@@ -196,11 +196,16 @@ def graphs(data_dir: Path) -> list[dict]:
             out.append({"run_dir": path.parent.name, "error": f"{type(exc).__name__}: {exc}"})
             continue
         nodes = graph.get("nodes") or []
+        edges = graph.get("edges") or []
         out.append({"run_dir": path.parent.name, "writer_uuid": graph.get("writer_uuid"),
-                    "run_id": graph.get("run_id"), "graph_nodes": len(nodes), "graph_edges": len(graph.get("edges") or []),
+                    "run_id": graph.get("run_id"), "graph_nodes": len(nodes), "graph_edges": len(edges),
+                    "edge_levels": sorted({str(edge.get("level")) for edge in edges}),
+                    "node_level_edges": sum(1 for edge in edges if edge.get("level") == "node"),
+                    "edge_nodes_named": sum(1 for edge in edges
+                                            if (edge.get("nodes") or {}).get("from") or (edge.get("nodes") or {}).get("to")),
                     "open_nodes": graph.get("open_nodes"),
                     "node_statuses": sorted({str(n.get("status")) for n in nodes}),
-                    "node_slots": sorted({n.get("slot") for n in nodes})})
+                    "node_slots": sorted({n.get("node_slot") for n in nodes})})
     return out
 
 
@@ -287,10 +292,12 @@ def main(argv: list[str] | None = None) -> int:
             # Nodes come from the app's own labels (`api.run`), so the instrumented case is the one that can answer
             # this; an unmodified client records a model call and no node, which is the product's design, not a miss.
             "app_nodes_are_in_the_graph": {r["client"]: r["total_nodes"] for r in results},
-            # The half that is still open, reported rather than omitted: `graph.json`'s `edges` is always empty, so the
-            # cross-vantage relation lives in `links.json` and not in the graph the ticket's sentence names (defect 55).
-            "graph_has_cross_vantage_edges": all(
-                g.get("graph_edges", 0) for r in results for g in r["graphs"] if g.get("graph_nodes")),
+            # D-052: the graph carries the link it can justify, at run level, and names no nodes. The ticket asks for
+            # linked *nodes*, so `node_level_edges` is the number that decides whether it can be ticked — and it is
+            # reported as a count, not as a missing key (defect 55 stays open until it is not zero).
+            "run_level_edges_recorded": sum(g.get("graph_edges", 0) for r in results for g in r["graphs"]),
+            "node_level_edges_recorded": sum(g.get("node_level_edges", 0) for r in results for g in r["graphs"]),
+            "edges_naming_a_node": sum(g.get("edge_nodes_named", 0) for r in results for g in r["graphs"]),
             "node_available": node is not None,
         },
     }

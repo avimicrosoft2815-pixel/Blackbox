@@ -854,3 +854,53 @@ existing lifecycle instead of installing — and `release()` only undoes the sea
 the product's private bookkeeping and no third party registers with it. A general "attach to someone else's seam"
 protocol is deliberately not built here; the invariant only has to hold for the two parties that exist. Proven by
 `tests/test_launcher_attach.py`'s three capture tests, red with `install_capture()` disabled.
+
+---
+
+## D-052 — an edge says what it actually knows: run-level by default, node-level only with per-call evidence (2026-11-16, P3B-03/defect 55)
+
+`graph.json` has written `edges: []` since P3-06, while the cross-vantage relation lived in `links.json`. The ticket's
+sentence is "one run with linked nodes", and the plan (§13.1, §11.10) describes `linked_exact`/`linked_declared`/
+`linked_inferred` edges joining nodes recorded by different vantage points. The temptation is to turn each `LINK` record
+into a node-to-node edge and call the sentence met. That would be a lie with a precise shape: **a run-level `exact` link
+says two tapes belong to one run; it says nothing about which node on one tape corresponds to which node on the other.**
+Two nodes with model calls, one on each tape, are the normal case of a run — mapping them to each other because they are
+the only candidates is guessing with extra steps, and it is exactly the class of claim (§14.4) that this product refuses
+to make elsewhere.
+
+So the edge carries its own level, and the default is the weaker true statement:
+
+| field | meaning |
+|---|---|
+| `level: "run"` | both ends name a run and the link's class says they are the same run (`exact`, or `declared` by the user) |
+| `level: "tape"` | at least one end names no run; the link joins two tapes, not two runs |
+| `level: "node"` | **not written in this build** — it requires a per-call identifier recorded on *both* sides |
+| `nodes: {from: null, to: null}` | no node is named, because none is justified |
+| `node_join: "unknown"` | with `node_join_reason`, so a reader sees the gap rather than an absence |
+
+Rules this fixes, in the order they matter:
+
+1. **A slot is not an id.** `node_slot` numbers nodes inside one tape; every tape numbers from 1. Even the header the SDK
+   injects carries `<run>/<node>`, and the proxy records only the run half (`linked_run`). Two concurrent calls from one
+   node would share every one of those fields, so a node-level edge built from them would be ambiguous exactly when it
+   matters most. Node-level edges therefore wait for a call id written by the seam and read back by the proxy — a new
+   frame field, i.e. its own decision, not a by-product of this one.
+2. **No invented nodes.** A proxied call with no node slot (slot 0 is the run itself) is not attached to an app node, and
+   no synthetic node is created to give an edge an end. An edge with no node says `null`.
+3. **Ambiguity is recorded, not resolved.** If a future per-call id matches more than one candidate on either side, the
+   edge stays at run level and carries `node_join: "ambiguous"`; it never picks one.
+4. **The graph and the capsule cannot disagree.** Edges are derived at seal time from the *same bytes* that go into the
+   capsule as `links.json`, in the same step, and written to `graph.json` before the capsule is written. There is no
+   second resolver and no second pass that could see a different set of tapes.
+5. **Additive only.** `graph.json` gains `edges` (with the fields above) and `edge_summary`; nothing is renamed, and a
+   capsule written before this change reads exactly as it did (`edges` was `[]`). `graph.json` is still not a capsule
+   entry: the plan's `derived_parts[]` + `capsule verify` recomputation (BBX-E412) is the contract for derived parts, and
+   adding an entry without that machinery would put an unverified artefact inside the hashed container. That is the next
+   ticket, named here so this decision does not imply it happened.
+
+Consequence, stated plainly: **P3B-03 is not ticked.** Its sentence asks for linked *nodes*; this record produces linked
+*runs* and says so in the artefact. Defect 55 stays open until a run exists whose `graph.json` carries a `level: "node"`
+edge that a per-call id justifies. What this decision buys is that the gap is now visible in the graph, measured in the
+acceptance harness (`graph_edges_run_level`, `graph_edges_node_level`), and covered by tests for the three cases that
+would tempt a guesser: several nodes in one run, a proxied call with no node, and two links whose nodes could be paired
+in more than one way.

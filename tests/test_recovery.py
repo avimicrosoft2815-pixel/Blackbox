@@ -168,6 +168,76 @@ def test_the_capsule_of_a_clean_run_does_not_call_itself_interrupted(tmp_path) -
     assert capsule.exists()
 
 
+# ── D-052: an edge says what it knows, and a slot is not an id ─────────────────────────────────────────────────
+def _links_document(*records: dict) -> bytes:
+    return json.dumps({"version": 1, "window_ns": 0, "links": list(records),
+                       "summary": {"exact": len(records)}}).encode("utf-8")
+
+
+def _exact_record(*, left: str = "a" * 32, right: str = "b" * 32, run: str = "r_0123456789abcdef") -> dict:
+    return {"class": "exact", "left_writer": left, "right_writer": right, "left_run": run, "right_run": run,
+            "confidence": 1.0, "evidence": {"header": "x-blackbox-run"}}
+
+
+def test_an_edge_that_only_knows_the_run_says_so_and_names_no_nodes() -> None:
+    """The heart of D-052: an `exact` link proves the two tapes are one run, not that two nodes are one call."""
+    edges, summary = recovery.graph_edges(_links_document(_exact_record()), "b" * 32)
+    assert len(edges) == 1
+    edge = edges[0]
+    assert edge["level"] == "run" and edge["class"] == "exact"
+    assert edge["nodes"] == {"from": None, "to": None}, edge
+    assert edge["node_join"] == "unknown" and "per-call identifier" in edge["node_join_reason"]
+    # `from` is the tape whose graph this is, whichever side of the record it appeared on
+    assert edge["from"]["writer"] == "b" * 32 and edge["to"]["writer"] == "a" * 32
+    assert summary == {**recovery.empty_edge_summary(), "total": 1, "run_level": 1}, summary
+
+
+def test_two_links_between_tapes_with_two_nodes_each_still_produce_no_node_edges() -> None:
+    """The tempting case: two nodes on each side and two links. Pairing them would be a guess, so nothing is paired."""
+    from blackbox.codec import cbor
+
+    frames = [_frame(1, C.KIND_NODE_OPEN, slot=1, payload=cbor.encode({"name": "first", "kind": "run"})),
+              _frame(2, C.KIND_MODEL_REQUEST, slot=1),
+              _frame(3, C.KIND_NODE_OPEN, slot=2, payload=cbor.encode({"name": "second", "kind": "run"})),
+              _frame(4, C.KIND_MODEL_REQUEST, slot=2)]
+    graph = recovery.graph_nodes(frames, interrupted=recovery.classify_nodes(frames))
+    assert len(graph) == 2, "the fixture has to offer two candidate nodes, or it does not test ambiguity"
+    document = _links_document(_exact_record(), _exact_record(left="a" * 32, right="c" * 32))
+    edges, summary = recovery.graph_edges(document, "a" * 32)
+    assert summary["node_level"] == 0
+    assert all(edge["nodes"] == {"from": None, "to": None} for edge in edges)
+    assert len(edges) == 2
+
+
+def test_a_proxied_call_with_no_node_slot_is_not_attached_to_a_node_and_no_node_is_invented() -> None:
+    """Slot 0 is the run itself. An edge for that call names no node, and the graph grows no synthetic one."""
+    from blackbox.codec import cbor
+
+    frames = [_frame(1, C.KIND_NODE_OPEN, slot=1, payload=cbor.encode({"name": "app", "kind": "run"})),
+              _frame(2, C.KIND_NODE_CLOSE, slot=1, payload=cbor.encode({"name": "app", "outcome": "ok"})),
+              _frame(3, C.KIND_MODEL_REQUEST, slot=0)]
+    graph = recovery.graph_nodes(frames, interrupted=recovery.classify_nodes(frames))
+    assert [n["node_slot"] for n in graph] == [1], "slot 0 must not appear as a node"
+    edges, summary = recovery.graph_edges(_links_document(_exact_record()), "a" * 32)
+    assert edges[0]["nodes"] == {"from": None, "to": None}
+    assert summary["node_level"] == 0 and summary["total"] == 1
+
+
+def test_a_link_whose_side_names_no_run_is_a_tape_level_edge() -> None:
+    record = {**_exact_record(), "right_run": None, "class": "inferred"}
+    edges, summary = recovery.graph_edges(_links_document(record), "a" * 32)
+    assert edges[0]["level"] == "tape", edges[0]
+    assert edges[0]["from"]["run_id"] == "r_0123456789abcdef" and edges[0]["to"]["run_id"] is None
+    assert summary["run_level"] == 0 and summary["tape_level"] == 1
+
+
+def test_a_links_document_that_cannot_be_read_is_reported_and_not_raised() -> None:
+    edges, summary = recovery.graph_edges(b"{not json", "a" * 32)
+    assert edges == [] and summary["links_unreadable"] is True
+    empty, plain = recovery.graph_edges(b"", "a" * 32)
+    assert empty == [] and plain == recovery.empty_edge_summary(), "no links is not an error"
+
+
 def test_every_class_string_matches_the_plan_table() -> None:
     plan = (ROOT / "docs" / "BLACKBOX_FINAL_ARCHITECTURE_v1.1.md").read_text(encoding="utf-8")
     for name in ("INTERRUPTED_BEFORE_FIRST_BYTE", "INTERRUPTED_MID_STREAM", "INTERRUPTED_AFTER_RESPONSE",
