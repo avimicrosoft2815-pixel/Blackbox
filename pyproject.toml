@@ -75,7 +75,8 @@ select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF", "S", "PIE"]
 ignore = ["BLE001", "S110", "S112", "SIM115", "EXE001", "E501", "RUF001", "RUF002", "RUF003", "B007", "S101"]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/*" = ["S101", "S108", "E402", "S603", "S607"]
+# S310: tests fetch the loopback URL they just bound, which is the assertion rather than a habit
+"tests/*" = ["S101", "S108", "E402", "S603", "S607", "S310"]
 "bench/*" = ["S", "E402"]
 # one-shot measurement recipes: terse is the point, their JSON output is what is reviewed
 "bench/probes/*" = ["S", "E402", "E701", "E702", "E741", "UP031", "SIM105", "RUF046"]

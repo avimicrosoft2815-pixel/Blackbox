@@ -5,8 +5,8 @@
     "docs/STATUS.md",
     "bench/results/*.json"
   ],
-  "next_ticket": "P4-11",
-  "next_note": "P4-10 (viewer) and P4-17 (read-only diagnosis + repair brief) are done; P4-18 (a proposal/approval applier) is open and must not be folded into P4-17. Next: P4-11, the loopback `blackbox serve` with a one-time token and a CSP, then the interruption lab. P3B-03 is still unverified for the node path (no Node in this sandbox): do not mark it done. Every Windows/macOS claim comes from a CI run id; the three macOS cells have had no runner since 2026-11-16T13:00Z and are recorded as unmeasured.",
+  "next_ticket": "P3B-03",
+  "next_note": "P4-10 (viewer), P4-17 (read-only diagnosis + repair brief) and P4-11 (loopback `blackbox serve`) are done; P4-18 (a proposal/approval applier) is open and must not be folded into P4-17. Next: P3B-03's node acceptance (`blackbox run -- node app.js` with linked nodes) \u2014 no Node exists in this sandbox, so it stays unverified until a machine runs it; then P0-03 (nightly) and the interruption lab. Every Windows/macOS claim names a CI run id; the macOS cells have had no runner since 2026-11-16T13:00Z and are recorded as unmeasured.",
   "last_green_commit": "ff85b59",
   "last_green_commit_note": "run 43768293790 on ff85b59, ten jobs ten success \u2014 P3B-08 ticked on its own evidence and the rebind budget taken as a median of five (defect 40), after run 43767898299 read 107.9 ms against 100 on py3.11/macos-latest. 3f29d63 is the merge of PR #14 on main (P3B-09, run 43767064900 ten of ten on 35c0cdf). Superseded in part on 2026-11-16: the rebind budget is no longer taken as a median of five. It is measured as an outage (detection + rebind) on every watchdog-triggered sample in two columns, the tick moved to 20 ms so the bound is not spent waiting for a watchdog to look, and the worst of 240 samples over two runs measured 21.86 ms (bench/results/2026-11-16-rebind-{a,b}.json, D-043, ADR-006). The macOS cell in this run is the second data point the row still owes, not a confirmation it has. P3B-03's attachment half landed on 2026-11-16 without a CI run of its own yet: the Python auto-import is a temporary sitecustomize (a .pth on PYTHONPATH is never read \u2014 measured, D-044), a child's tape now names the launcher's run so one run is a set of capsules joined by exact links, and counts.nodes counts nodes rather than interrupted nodes (defect 41). CI on this branch, as of 2026-11-16T14:05Z: run 43878083615 (7694e07) is red, but not on a test \u2014 all six ubuntu/windows cells and docs passed, and the three macos-latest jobs were cancelled with no runner assigned and no step run (jobs 133336315138/133336315239/133336315349, runner_name empty). Run 43880930567 (66830f2) was still queued at that time. So the macOS data point ADR-006 \u00a76 owes has not arrived, and nothing in this branch may be described as green on macOS. Corrected on 2026-11-16T14:25Z: run 43880930567 had *finished* by then \u2014 three Windows cells failed on two of the new launcher tests (POSIX-only kill and /bin/sh; defect 43, fixed in this commit) and one macOS cell (py3.11) passed the whole suite, which is the first macOS evidence for ADR-006's per-sample rebind assertion. Two macOS cells were still cancelled with no runner. No Windows or macOS cell has yet run the fixes in this commit.",
   "gates": {
@@ -133,6 +133,7 @@
     "L4": {
       "done": [
         "P4-10",
+        "P4-11",
         "P4-17"
       ],
       "wip": [],
@@ -146,7 +147,6 @@
         "P4-07",
         "P4-08",
         "P4-09",
-        "P4-11",
         "P4-12",
         "P4-13",
         "P4-14",

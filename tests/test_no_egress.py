@@ -36,6 +36,8 @@ def _allowed_import(path: Path, name: str) -> bool:
     * the mock provider may import `socket`/`http.server` at module scope, because it *is* a server, on loopback.
     """
     root = name.split(".")[0]
+    if _capture_policy.is_server(path):
+        return name.split(".")[0] in _capture_policy.SERVER_MODULES
     if _capture_policy.is_proxy(path):
         # `urllib.parse` is a parser; every other `urllib` submodule, and the root, stay banned below.
         if name in _capture_policy.PROXY_DOTTED:

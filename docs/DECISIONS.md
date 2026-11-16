@@ -669,3 +669,38 @@ allowed.
 "change detection, preserve user edits, rollback". (b) Parsing the brief back in to apply it: that makes the document an
 instruction channel, which is exactly what the untrusted-evidence rule forbids. (c) Sending the capsule to a model for a
 second opinion: the addendum forbids egress, and a diagnosis whose value depends on an account is a different product.
+
+## D-048 — the viewer is served once, at a secret path, and logs nothing (2026-11-16, P4-11)
+
+**Context.** `blackbox view` writes one file, and `file://` is the best default: no process, no port, no token. But a
+capsule that arrives from someone else often has to be opened in a browser that refuses `file://` (some managed
+configurations do), or one where an opaque origin blocks even a clipboard write. The plan's answer is a loopback server
+with a one-time token.
+
+**Decision.** `blackbox serve` binds `127.0.0.1` on an ephemeral port, serves the *same inlined document*, and stops
+after the first successful fetch. The token is a **path segment**, not a fragment: a fragment never reaches a server, so
+a server cannot require one, and this page needs no second request to validate anything because the capsule is inlined.
+`docs/DEVIATIONS.md` DV-015 records that change against the plan's wording.
+
+**Why the bind and the token are properties, not defaults.**
+
+* `HOST` is a module constant and the bind tuple is a literal. There is no `--host`, and no wildcard address appears in
+  the file anywhere: a viewer that can be told to bind a wildcard is a viewer that can publish a customer's capsule to
+  the office network because of one flag.
+* The module has **no client-socket call at all** — the AST test looks for `connect`, `create_connection`, `urlopen`,
+  `open_connection`, `getaddrinfo`. A server that fetches anything would make "loopback-only" meaningless, because the
+  risk is what the process can reach, not what it listens on.
+* The 404 for a wrong path is identical to the 404 for a well-formed guess, and the body never echoes the token: the
+  only way to learn the secret is to have been given it.
+* `log_message` is silenced. The request line contains the token, so the default access log would write a capability
+  into stderr, a CI log, or a screenshot — and it would do so on the very first request.
+
+**Consequences.** A user who needs to look at the page twice runs `--keep-open` (the URL stays valid while the process
+runs, which the command says out loud). `--keep-open` is a deliberate second mode, not a default, because "the server
+you forgot you started" is the usual way a local tool becomes an exposure.
+
+**Rejected.** (a) A token in a cookie or a header set by JS: it needs the page to make a request, which means the page
+must fetch its own data, which means the offline single-file property is lost for the served mode and the two modes
+drift. (b) Auto-opening a browser: `webbrowser` is on the forbidden-import list, opening a browser is a side effect a
+caller did not ask for, and printing the URL is enough. (c) Serving on a fixed port: an ephemeral one avoids colliding
+with whatever the user already runs, and the URL is printed anyway.
