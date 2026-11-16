@@ -1,9 +1,13 @@
-"""Derived capsule parts, recomputed and compared (D-053, §13.1a) — `graph.json` today.
+"""Derived capsule parts, recomputed and compared (D-053, P4-13, §13.1a) — `graph.json` and `events.jsonl`.
 
 The raw frames are the only authoritative part of a capsule; `graph.json` is a *derived* one: nodes come from the
 `NODE_*`/`MODEL_*` frames and edges come from `links.json`, both of which the capsule already carries. That is what makes
 verification possible without trusting the derived file: recompute it from the segments, compare, and report drift as
 `BBX-E412` rather than opening a graph nobody can check.
+
+`events/events.jsonl` (P4-13) is the same contract applied to a second artefact: it is a pure function of the frames
+(`export_jsonl.render`), so it can be recomputed byte for byte, and a line edited after sealing is found by comparing the
+bytes rather than by trusting the file.
 
 Two things this deliberately does not do. It does not *repair*: a drifted part is reported and the capsule is left
 exactly as it is, because a verifier that rewrites the artefact has destroyed the evidence of the drift. And it does not
@@ -17,6 +21,7 @@ import json
 from typing import Any
 
 from blackbox import constants as C
+from blackbox.cap import export_jsonl
 from blackbox.cap import format as cap
 from blackbox.errors import bbx
 from blackbox.rec import recovery
@@ -82,21 +87,69 @@ def _has_seg_end(frames: list[dict[str, Any]]) -> bool:
 COMPARED = ("nodes", "open_nodes", "edges", "edge_summary", "frames", "run_status")
 
 
+def recompute_events(capsule: cap.Capsule) -> bytes | None:
+    """The `events.jsonl` this capsule's own frames imply, or `None` when the capsule does not carry the part."""
+    if cap.EVENTS_NAME not in capsule.entries:
+        return None
+    return export_jsonl.render(frames_of(capsule))
+
+
+#: The parts this build knows how to recompute, in the order a report lists them. A part in a capsule that is not here
+#: is not verified — and is reported as such, because "we cannot check this" must never look like "it checked out".
+PARTS = (cap.EVENTS_NAME, cap.GRAPH_NAME)
+
+
 def verify(capsule: cap.Capsule) -> dict[str, Any]:
-    """`{"ok", "parts": [...], "drift": [...]}` for one capsule, recomputing every derived part it declares."""
-    report: dict[str, Any] = {"ok": True, "parts": [], "drift": [], "absent": []}
+    """`{"ok", "parts", "drift", "absent"}` for one capsule, recomputing every derived part it carries."""
+    report: dict[str, Any] = {"ok": True, "parts": [], "drift": [], "absent": [], "unknown": []}
     declared = capsule.manifest.get("derived_parts")
     declared_parts = [part for part in declared if isinstance(part, dict)] if isinstance(declared, list) else []
-    if cap.GRAPH_NAME not in capsule.entries:
-        report["absent"].append(cap.GRAPH_NAME if not declared_parts else f"{cap.GRAPH_NAME} (not in this capsule)")
-        return report
-    stored_bytes = capsule.entry(cap.GRAPH_NAME)
-    stored = json.loads(stored_bytes.decode("utf-8"))
     declared_names = {part.get("name"): part for part in declared_parts}
-    declared_sha = (declared_names.get(cap.GRAPH_NAME) or {}).get("sha256")
-    actual_sha = hashlib.sha256(stored_bytes).hexdigest()
-    if declared_sha is not None and declared_sha != actual_sha:
-        report["drift"].append({"part": cap.GRAPH_NAME, "field": "sha256", "declared": declared_sha, "actual": actual_sha})
+    for name in declared_names:
+        if name not in PARTS:
+            report["unknown"].append(name)
+    present = [name for name in PARTS if name in capsule.entries]
+    if not present:
+        report["absent"] = [f"{cap.GRAPH_NAME} (no derived parts in this capsule)"] if not declared_parts else \
+                           [f"{part} (declared, not in this capsule)" for part in PARTS]
+        report["ok"] = True                    # nothing carried, nothing wrong: absence is reported, not failed
+        return report
+    for name in PARTS:
+        if name not in capsule.entries:
+            report["absent"].append(f"{cap.GRAPH_NAME if name == cap.GRAPH_NAME else name} (not in this capsule)")
+            continue
+        stored_bytes = capsule.entry(name)
+        actual_sha = hashlib.sha256(stored_bytes).hexdigest()
+        declared_sha = (declared_names.get(name) or {}).get("sha256")
+        if declared_sha is not None and declared_sha != actual_sha:
+            report["drift"].append({"part": name, "field": "sha256", "declared": declared_sha, "actual": actual_sha})
+        if name == cap.GRAPH_NAME:
+            _compare_graph(capsule, stored_bytes, report)
+        else:
+            expected_bytes = recompute_events(capsule) or b""
+            difference = export_jsonl.first_difference(stored_bytes, expected_bytes)
+            if difference is not None:
+                report["drift"].append({"part": name, "field": f"line {difference['line']}",
+                                        "stored": difference.get("stored"),
+                                        "recomputed": difference.get("recomputed"),
+                                        **({"note": difference["note"]} if "note" in difference else {})})
+        report["parts"].append({"name": name, "sha256": actual_sha,
+                                "declared": declared_sha is not None,
+                                "generator": (declared_names.get(name) or {}).get("generator")})
+    # Drift fails; a part this build cannot recompute is reported (`unknown`) and does not, because an older tool
+    # reading a newer capsule must not call it corrupt.
+    report["ok"] = not report["drift"]
+    return report
+
+
+def _compare_graph(capsule: cap.Capsule, stored_bytes: bytes, report: dict[str, Any]) -> None:
+    """The graph's own comparison: JSON keys, because a graph is a document and not a stream of lines."""
+    try:
+        stored = json.loads(stored_bytes.decode("utf-8"))
+    except Exception as exc:
+        report["drift"].append({"part": cap.GRAPH_NAME, "field": "json",
+                                "stored": f"{type(exc).__name__}: {exc}", "recomputed": None})
+        return
     expected = recompute(capsule)
     for key in COMPARED:
         if expected is None or key not in stored:
@@ -105,11 +158,6 @@ def verify(capsule: cap.Capsule) -> dict[str, Any]:
             report["drift"].append({"part": cap.GRAPH_NAME, "field": key,
                                     "stored": _first_difference(stored[key], expected[key]),
                                     "recomputed": _first_difference(expected[key], stored[key])})
-    report["parts"].append({"name": cap.GRAPH_NAME, "sha256": actual_sha,
-                            "declared": declared_sha is not None, "generator": (declared_names.get(cap.GRAPH_NAME)
-                                                                                or {}).get("generator")})
-    report["ok"] = not report["drift"]
-    return report
 
 
 def _canonical(value: Any) -> str:

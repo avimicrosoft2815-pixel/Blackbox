@@ -49,9 +49,12 @@ def test_the_capsule_carries_its_graph_as_a_declared_derived_part(tmp_path):
     assert [node["name"] for node in graph["nodes"]] == ["agent"]
     assert graph["nodes"][0]["status"] == "closed"
     parts = manifest["derived_parts"]
-    assert [part["name"] for part in parts] == [cap.GRAPH_NAME]
-    assert parts[0]["sha256"] == __import__("hashlib").sha256(capsule.entry(cap.GRAPH_NAME)).hexdigest()
-    assert parts[0]["generator"].startswith("blackbox ")
+    # Two derived parts since P4-13, declared in name order so the manifest is a function of its inputs only.
+    assert [part["name"] for part in parts] == sorted([cap.EVENTS_NAME, cap.GRAPH_NAME])
+    declared = {part["name"]: part for part in parts}
+    for name in (cap.EVENTS_NAME, cap.GRAPH_NAME):
+        assert declared[name]["sha256"] == __import__("hashlib").sha256(capsule.entry(name)).hexdigest(), name
+        assert declared[name]["generator"].startswith("blackbox "), name
     report = derived.verify(capsule)
     assert report["ok"] and report["drift"] == [], report
     assert report["parts"][0]["declared"] is True
@@ -84,14 +87,16 @@ def test_a_capsule_written_before_the_graph_existed_still_verifies(tmp_path):
     path, manifest = _capsule(tmp_path)
     capsule = cap.read_capsule(str(path))
     entries = {name: blob for name, blob in capsule.entries.items()
-               if name not in (cap.MANIFEST_NAME, cap.INTEGRITY_NAME, cap.GRAPH_NAME)}
+               if name not in (cap.MANIFEST_NAME, cap.INTEGRITY_NAME, cap.GRAPH_NAME, cap.EVENTS_NAME)}
     old_manifest = {key: value for key, value in manifest.items() if key != "derived_parts"}
     older = tmp_path / "older.bbx"
     cap.write_capsule(str(older), entries, old_manifest)
     check = cap.read_capsule(str(older))
     report = derived.verify(check)
     assert report["ok"] and report["drift"] == []
-    assert report["absent"] == [cap.GRAPH_NAME]
+    # Nothing derived, nothing declared: an old capsule is reported absent and passes, which is the compatibility
+    # rule in the direction that matters — a new build must not call an old capsule corrupt.
+    assert report["absent"] and cap.GRAPH_NAME in report["absent"][0]
     assert capsule_main(["verify", str(path)]) == 0
 
 
@@ -117,7 +122,8 @@ def test_json_output_carries_the_report(tmp_path, capsys):
     path, _manifest = _capsule(tmp_path)
     assert capsule_main(["verify", str(path), "--json"]) == 0
     body = json.loads(capsys.readouterr().out)
-    assert body["ok"] is True and body["parts"][0]["name"] == cap.GRAPH_NAME
+    names = [part["name"] for part in body["parts"]]
+    assert body["ok"] is True and names == sorted([cap.EVENTS_NAME, cap.GRAPH_NAME]), names
 
 
 @pytest.mark.parametrize("field", ["nodes", "edges", "edge_summary", "open_nodes", "frames"])

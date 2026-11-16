@@ -92,8 +92,9 @@ def _break_and_wait(proxy: ProxyThread, timeout: float = 5.0) -> dict:
     """Close the listener behind the supervisor's back and time how long the child would have waited.
 
     The number that matters is the **outage**: from the listener stopping to a new listener serving on the same port.
-    That includes the supervisor's tick, because a watchdog can only notice on a tick — measuring `rebind()` alone
-    would answer an easier question than §11.8 asks, and would hide the tick that dominates the total.
+    Three numbers are returned, and they answer different questions: `outage_ms` is what a child experiences,
+    `rebind_ms` is the work inside `rebind()`, and `noticed_ms` is how long the supervisor took to *see* the loss —
+    present only when the listener said so (`lost_cb`, defect 58), absent when detection was the tick.
     """
     import asyncio
 
@@ -102,6 +103,7 @@ def _break_and_wait(proxy: ProxyThread, timeout: float = 5.0) -> dict:
     assert server is not None and loop is not None
     port_before = proxy.port
     before = len(proxy.rebinds)
+    noticed_before = len(proxy.noticed_ms)
     started = time.monotonic()
     asyncio.run_coroutine_threadsafe(server.close(), loop).result(5)
     deadline = time.monotonic() + timeout
@@ -111,7 +113,9 @@ def _break_and_wait(proxy: ProxyThread, timeout: float = 5.0) -> dict:
                 and len(proxy.rebinds) > before):
             return {"outage_ms": (time.monotonic() - started) * 1000.0,
                     "rebind_ms": proxy.rebinds[before], "port_before": port_before,
-                    "port_after": proxy.port, "watchdog": True}
+                    "port_after": proxy.port, "watchdog": True,
+                    "noticed_ms": (proxy.noticed_ms[len(proxy.noticed_ms) - 1]
+                                   if len(proxy.noticed_ms) > noticed_before else None)}
         time.sleep(0.0005)
     raise AssertionError(f"the watchdog did not restore service within {timeout} s")
 
@@ -161,3 +165,22 @@ def test_every_watchdog_rebind_lands_inside_the_budget_not_the_median_of_them():
         f"worst watchdog outage {worst:.1f} ms over the {REBIND_BUDGET_MS} ms budget; "
         f"outages {[round(o, 1) for o in outages]} ms, rebinds {[round(s['rebind_ms'], 2) for s in samples]} ms, "
         f"worst watchdog tick lateness {max(lateness, default=0.0):.1f} ms over {len(lateness)} ticks")
+
+
+def test_a_listener_that_dies_without_saying_so_is_still_restored_on_the_tick():
+    """The early notice is an optimisation of detection, not a replacement for the watchdog (defect 58).
+
+    A close says so and is noticed in microseconds; a listener that dies for any other reason — an OS error, a socket
+    pulled out from under it, a close before the callback was attached — says nothing, and the tick is the only thing
+    left. This test removes the notice and asserts the old behaviour survives, because a fast path that is the *only*
+    path is a new way to lose the listener entirely.
+    """
+    with ProxyThread(_table()) as proxy:
+        listener = proxy.server
+        assert listener is not None
+        listener.lost_cb = None                      # die silently, the way an OS-level loss would
+        sample = _break_and_wait(proxy)
+        assert sample["noticed_ms"] is None, "nothing notified the supervisor, so nothing may claim an early notice"
+        assert proxy.noticed_ms == [], proxy.noticed_ms
+    assert sample["outage_ms"] > 0
+    assert sample["port_after"] == sample["port_before"], "a backstop rebind keeps the port the child was told"

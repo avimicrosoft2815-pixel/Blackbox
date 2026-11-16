@@ -152,6 +152,14 @@ class ProxyThread:
         self._server: ProxyServer | None = None
         self._ready = threading.Event()
         self._stopping = threading.Event()
+        # Early notice from a listener that is being closed (defect 58): set by `ProxyServer.lost_cb`, waited on by the
+        # watchdog, so a close is noticed in microseconds instead of at the next tick. The tick stays as the backstop
+        # for a listener that dies without saying so — an OS error, a thread killed from outside, or a close that
+        # happened before the callback was attached.
+        self._wake = threading.Event()
+        self.lost_at: float | None = None                  # monotonic time of the last early notice
+        self.noticed_ms: list[float] = []                  # per detection: notify -> the watchdog saw it
+
         self._start_error: BaseException | None = None
         self.rebinds: list[float] = []                     # milliseconds each rebind took
         # How late each watchdog tick woke, in milliseconds: `interval - tick`. A rebind cannot start before the
@@ -182,6 +190,7 @@ class ProxyThread:
             self._server = self._loop.run_until_complete(
                 ProxyServer(self.routes, receiver=self.receiver, port=self._wanted_port,
                             retry_transmitted=self.retry_transmitted).start())
+            self._server.lost_cb = self._listener_lost
         except BaseException as exc:                        # reported through `start()`, not swallowed
             self._start_error = exc
             self._ready.set()
@@ -190,7 +199,10 @@ class ProxyThread:
         self._loop.run_forever()
 
     def stop(self) -> None:
+        if self._server is not None:
+            self._server.lost_cb = None
         self._stopping.set()
+        self._wake.set()
         loop = self._loop
         if loop is not None and self._server is not None:
             with contextlib.suppress(Exception):
@@ -221,15 +233,30 @@ class ProxyThread:
         return self._server.stats if self._server is not None else None
 
     # -- supervision ---------------------------------------------------------------------------------------------
+    def _listener_lost(self) -> None:
+        """Called on the loop thread the instant a listener is closed, and nothing else."""
+        self.lost_at = time.monotonic()
+        self._wake.set()
+
     def _supervise(self) -> None:
         tick = self._supervise_ms / 1000.0
         previous = time.monotonic()
-        while not self._stopping.wait(tick):
+        while not self._stopping.is_set():
+            # Woken either by the tick or by a listener saying it is gone. The flag is cleared *before* the check, so a
+            # close that lands between the two sets it again and the next pass sees it.
+            self._wake.wait(tick)
+            self._wake.clear()
             now = time.monotonic()
             late = max(0.0, (now - previous - tick) * 1000.0)
+            noticed = self.lost_at
+            self.lost_at = None
+            if noticed is not None and len(self.noticed_ms) < 4096:
+                self.noticed_ms.append(max(0.0, (now - noticed) * 1000.0))
             if len(self.wake_late_ms) < 4096:
                 self.wake_late_ms.append(late)
             previous = now
+            if self._stopping.is_set():
+                return
             if self._server is None or self._loop is None:
                 continue
             if self._server.is_serving:
@@ -245,9 +272,12 @@ class ProxyThread:
                 raise RuntimeError("the proxy thread is not running")
             old = self._server
             if old is not None:
+                old.lost_cb = None                 # our own rebind is not a loss; the watchdog is already here
                 with contextlib.suppress(Exception):
                     asyncio.run_coroutine_threadsafe(old.close(), loop).result(5)
             self._server = self._restart(loop, timeout)
+            if self._server is not None:
+                self._server.lost_cb = self._listener_lost
             elapsed = (time.monotonic() - started) * 1000.0
             self.rebinds.append(elapsed)
             return elapsed

@@ -22,7 +22,9 @@ def _print_report(path: str, report: dict[str, Any], *, as_json: bool) -> None:
         declared = "declared" if part["declared"] else "NOT declared in manifest.derived_parts"
         print(f"  {part['name']}: sha256 {part['sha256'][:16]}… ({declared}, generator {part['generator'] or 'unknown'})")
     for name in report["absent"]:
-        print(f"  {name}: absent — this capsule carries no derived graph, so there is nothing to check")
+        print(f"  {name}: absent — this capsule carries no such derived part, so there is nothing to check")
+    for name in report.get("unknown", []):
+        print(f"  {name}: declared, but this build cannot recompute it — not checked, and not a pass")
     for drift in report["drift"]:
         stored = drift.get("stored", drift.get("declared"))
         fresh = drift.get("recomputed", drift.get("actual"))
@@ -34,7 +36,8 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
         prog="blackbox capsule",
         description="Verify a capsule's derived parts against the raw frames it carries. `verify` recomputes "
-                    "`graph.json` from the segment bytes and `links.json`, and reports drift as BBX-E412. It never "
+                    "each derived part it carries (`graph.json`, `events/events.jsonl`) from the segment bytes, and "
+                    "reports drift as BBX-E412. It never "
                     "rewrites the capsule: a verifier that repaired the artefact would erase the evidence it found.")
     ap.add_argument("action", choices=("verify",), help="what to do with the capsule")
     ap.add_argument("capsule", help="path to a .bbx capsule")

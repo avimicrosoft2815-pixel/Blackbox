@@ -667,3 +667,19 @@ plan's §10 shape, and it is append-only.
   there is 0.5–1.8 ms, and the only red assertion on the branch is a wall-clock bound on a thread the runner stopped
   scheduling. That is also why this entry is open: the bound may be the right one to keep and the test may need to
   measure the machine's share separately, and that choice belongs to the owner, not to a green build.
+  **Fix, in two parts, and the gate is untouched** (D-055). (1) *Measure the three components separately*: the failure
+  message prints the rebinds and the worst tick lateness beside the outage, so a red row says which half was ours; the
+  bench writes `outage_ms`, `rebind_ms`, `detection_ms` (outage − rebind, every sample) and the supervisor's own
+  `noticed_ms` with its own `n`, per column. (2) *Notice earlier*: `ProxyServer.close()` now calls a one-shot `lost_cb`,
+  `ProxyThread` turns it into a `threading.Event` the watchdog waits on instead of sleeping out the whole tick, and a
+  close is detected in microseconds. The tick remains as the **backstop** for a listener that dies without saying so,
+  and `tests/test_proxy_supervisor.py::test_a_listener_that_dies_without_saying_so_is_still_restored_on_the_tick`
+  removes the notice to prove that path still restores service on the same port. Measured on this box
+  (`bench/results/2026-11-16-rebind-detectors.json`, n=40 per column, Linux 6.1 x86_64, CPython 3.11.2, 2 CPUs, idle and
+  one busy process per CPU): notice columns outage p50 0.72–0.92 ms / max 1.70–3.30 ms with `noticed` p50 0.02–0.08 ms;
+  tick columns outage p50 11.9–12.7 ms / max 20.5–21.1 ms with `noticed` n=0. **160 samples, zero over the 100 ms
+  budget, and the assertion is still per-sample on the end-to-end outage.** **Still open**, deliberately: what the macOS
+  runner did to this branch is 113 ms of *lateness*, and no notice helps a thread that is not scheduled — so the entry
+  stays open until a run of the four-column bench on a runner that starves threads shows the notice columns inside the
+  budget while the tick columns show the stall. The universal-100 ms claim is not made anywhere: `bench_rebind.py`'s own
+  `method.bound` string says the budget is a gate on the machine that ran the file, not a promise about any machine.

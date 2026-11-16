@@ -966,3 +966,84 @@ name the slot the call ran in on the seam's side, and the other end is `null` be
 Defect 55 stays open with the residual narrowed to exactly that: a node identity both vantages can write (the SDK knows
 its slot; the proxy would have to be told it on the wire) is the next decision, and until it exists no test may call
 these edges node-level.
+
+## D-054 — the export names only what the mapping names (2026-11-16, P4-13)
+
+`events.jsonl` exists so a capsule can be read by tools this project does not ship, and the risk of a "standard" export
+is that it dresses our guesses in a standards namespace. So the rule is one sentence — **a `gen_ai.*` name is used only
+where the pinned semantic conventions have one for the thing we actually recorded** — and the rest follows from it.
+
+**The pin.** OpenTelemetry semantic conventions **v1.27.0**, read from the upstream repository when this was written. At
+that tag the system attribute is `gen_ai.system` (the later `gen_ai.provider.name` is a different name for a later
+version, and using it here would be a claim about a release we did not read), and `gen_ai.operation.name`'s well-known
+values are `chat` and `text_completion`. The tag is in the code (`export_jsonl.SEMCONV`) and in `format.md`, because a
+name without a version is a name that means something else next year.
+
+**What is mapped, and from what.** `gen_ai.operation.name` from the recorded request path, only for the APIs the
+mapping lists (`/chat/completions`, `/messages`, `/api/chat` → `chat`; `/completions`, `/api/generate` →
+`text_completion`). `gen_ai.system` from the recorded provider host, only for a host we can name. `gen_ai.request.model`
+from the model the frame recorded. Nothing else: this build has no response decoder yet (P3-08 is still open), so there
+are no usage or finish-reason attributes to map, and inventing them from a byte count would be exactly the failure this
+record exists to prevent.
+
+**What is deliberately absent.** A provider we cannot name gets no `gen_ai.system` (the host goes to
+`bbx.provider.host`); an API we cannot name gets no `gen_ai.operation.name`; and there is no `error.type`, because the
+tape stores an error *message* and semconv defines a low-cardinality *type* — the message is carried as `bbx.model.error`
+instead of being relabelled into a namespace that promises more. Payloads for kinds the mapping says nothing about are
+carried verbatim under `bbx.payload` below 2 KiB and as `{bytes, sha256, truncated}` above it.
+
+**Content is not copied.** A `MODEL_CHUNK` line carries a byte count and, when the sink wrote one, the `[bbx-…]` tag —
+never the bytes. A derived file that duplicated the model's text would be a second copy of the thing the content policy
+was written to protect, in a file whose whole purpose is to be handed to other tools.
+
+**It is a derived part, checked the same way as the graph.** `manifest.derived_parts[]` carries its sha256, `capsule
+verify` re-renders it from the capsule's own segments and compares bytes, and a mismatch is `BBX-E412` naming the first
+line that differs. The file is a pure function of the frames (sorted keys, no timestamp, LF, final newline), which is
+what makes that comparison meaningful. An edited line is reported and the capsule is left alone; a capsule written
+before the part existed verifies as `absent`; a part this build cannot recompute is listed as `unknown` and never
+printed as a pass — an old binary must not call a newer capsule corrupt, and a newer one must not call an unverified
+part checked.
+
+Consequence, stated plainly: the export is a **timeline with standards-compliant names where they exist**, not an
+OTLP export. P4-14 (`otlp/spans.json`) is the ticket that turns nodes and calls into spans, and it will need the same
+discipline: a pinned semconv commit, a schema snapshot, and no attribute this build cannot justify.
+
+## D-055 — a close says it happened; the tick stays for everything else (2026-11-16, P3B-03/defect 58)
+
+Defect 58 measured the watchdog's outage on a starved macOS runner: 104.7 ms and 113.5 ms worst samples against a 100 ms
+budget, with **every rebind between 0.5 and 1.8 ms** and, from the field added in `37f5fbf`, a **113.2 ms worst tick
+lateness** on the same run — the outage was the supervisor thread not being scheduled, not the rebind.
+
+Two ways out, and only one of them is honest. The dishonest one is to relax the assertion until the runner stops
+failing it, which is what defect 40 was: a median quoted over an experiment that did not measure the thing the plan
+asks. The honest one is to notice earlier, because most of the 20 ms tick was being spent waiting for news that the
+listener could have sent: `ProxyServer.close()` now calls a `lost_cb`, `ProxyThread` sets a `threading.Event` from it,
+and the watchdog waits on that event with the tick as a timeout. A close is therefore detected in **microseconds**
+instead of up to a tick.
+
+Measured, in `bench/results/2026-11-16-rebind-detectors.json` (n=40 per column, one interpreter hosting the proxy and the
+measuring client, Linux 6.1 x86_64, CPython 3.11.2, 2 CPUs, idle and one busy process per CPU):
+
+| column | outage p50 / max | rebind max | detection p50 | supervisor's own `noticed` |
+|---|---|---|---|---|
+| notice / idle | 0.92 / 1.70 ms | 0.97 ms | 0.50 ms | 0.076 ms (n=40) |
+| notice / loaded | 0.72 / 3.30 ms | 0.56 ms | 0.50 ms | 0.022 ms (n=40) |
+| tick / idle | 12.73 / 21.10 ms | 1.14 ms | 11.67 ms | none (n=0) |
+| tick / loaded | 11.91 / 20.52 ms | 0.59 ms | 11.33 ms | none (n=0) |
+
+160 samples, zero over budget, and the gate is still the **end-to-end outage per sample** — the number a child waits on,
+not a component. What the table adds is the attribution: which part was detection and which was the rebind.
+
+**The tick stays, and it is not decoration.** A listener that dies without closing — an OS-level error, a socket pulled
+out from under the loop, a close that happened before the callback was attached — says nothing, and the watchdog is the
+only detector left. `tests/test_proxy_supervisor.py::test_a_listener_that_dies_without_saying_so_is_still_restored_on_the_tick`
+removes the notice and asserts the old path still restores service on the same port, with `noticed` empty so nothing
+claims an early notice it did not get.
+
+**What this does not claim.** Not a universal 100 ms bound. A thread the OS does not schedule cannot be bounded by this
+or any sleeping-thread design: the macOS failure was 113 ms of *lateness*, and no amount of notice helps if the process
+is not running. What the notice does is remove the tick from the common case (a listener closed by the process that owns
+it), which is where the 20 ms — and on that runner the 113 ms — was being spent. The bound that can be promised is the
+one measured: **a rebind is 0.2–1.8 ms of work**, and an outage is that plus however long the machine takes to run a
+thread that has been woken. `bench/bench_rebind.py` writes both columns and its own `method.bound` string says so, so a
+reader does not have to find this paragraph to learn it.

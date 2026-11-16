@@ -31,6 +31,7 @@ import hashlib
 import socket
 import ssl
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -236,6 +237,10 @@ class ProxyServer:
         self._tls: dict[bool, ssl.SSLContext] = {}
         self._writers: set[asyncio.StreamWriter] = set()
         self.pool = _UpstreamPool()
+        # Called, once, when this listener is closed: the supervisor's early notice (defect 58). A watchdog can only
+        # notice on a tick, and a tick is most of a 100 ms budget; a close knows the moment it happens, so it says so.
+        # It is a *notification*, not a promise: a listener that dies for another reason still waits for the tick.
+        self.lost_cb: Callable[[], None] | None = None
 
     # -- lifecycle -----------------------------------------------------------------------------------------------
     async def start(self) -> ProxyServer:
@@ -276,6 +281,10 @@ class ProxyServer:
             with contextlib.suppress(Exception):
                 await self._server.wait_closed()
             self._server = None
+            notice, self.lost_cb = self.lost_cb, None          # one-shot: a second close is not a second loss
+            if notice is not None:
+                with contextlib.suppress(Exception):
+                    notice()
 
     async def serve_forever(self) -> None:
         if self._server is None:

@@ -29,6 +29,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from blackbox import constants as C
+from blackbox.cap import export_jsonl
 from blackbox.cap import format as cap
 from blackbox.cap_sdk.sink import chunk_bytes
 from blackbox.codec import cbor
@@ -723,12 +724,18 @@ class Recovery:
         self._write_graph_edges(entries[cap.LINKS_NAME])
         # D-053, §13.1: the graph ships *inside* the capsule, and as a declared derived part — the bytes the user opens
         # are the bytes `cap.derived` can recompute from the segments, so an edited graph is a detected one (BBX-E412).
+        # P4-13: the timeline as one JSON object per frame, derived from the same scan the graph is, so both are inside
+        # the hashed container and both can be recomputed from it by `blackbox capsule verify`.
+        derived: dict[str, bytes] = {}
         graph_bytes = self._graph_bytes()
         if graph_bytes is not None:
-            entries[cap.GRAPH_NAME] = graph_bytes
-            manifest["derived_parts"] = [{"name": cap.GRAPH_NAME,
-                                          "sha256": hashlib.sha256(graph_bytes).hexdigest(),
-                                          "generator": "blackbox 0.1.0.dev0"}]
+            derived[cap.GRAPH_NAME] = graph_bytes
+        derived[cap.EVENTS_NAME] = export_jsonl.render(scan.frames)
+        for part_name, part_bytes in derived.items():
+            entries[part_name] = part_bytes
+        manifest["derived_parts"] = [{"name": part_name, "sha256": hashlib.sha256(part_bytes).hexdigest(),
+                                      "generator": "blackbox 0.1.0.dev0"}
+                                     for part_name, part_bytes in sorted(derived.items())]
         input_hash = _hash(*(f"{k}:{blake2b(v).hex()}" for k, v in sorted(entries.items())))
         if self._skip("SEALED", input_hash):
             existing = cap.read_capsule(self.capsule_path)

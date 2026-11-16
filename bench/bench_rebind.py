@@ -67,15 +67,24 @@ def _burn(stop: Any) -> None:
             value = (value * 1103515245 + 12345) & 0x7FFFFFFF
 
 
-def _outage_once(proxy: ProxyThread) -> dict[str, Any]:
-    """Break the listener and wait for the supervisor to bring it back. Returns one sample."""
+def _outage_once(proxy: ProxyThread, *, notify: bool = True) -> dict[str, Any]:
+    """Break the listener and wait for the supervisor to bring it back. Returns one sample.
+
+    `notify=False` removes the listener's own notice before closing it, so the loss is the kind nothing announces (an
+    OS-level death, a socket pulled out from under the loop): the watchdog tick is then the only detector, and the
+    column measures the backstop rather than the fast path.
+    """
     server = proxy.server
     loop = proxy._loop
     if server is None or loop is None:
         raise RuntimeError("the proxy thread is not running")
+    if not notify:
+        server.lost_cb = None
     port_before = proxy.port
     rebinds_before = len(proxy.rebinds)
-    started = time.perf_counter_ns()
+    noticed_before = len(proxy.noticed_ms)
+    signalled_ns = time.perf_counter_ns()
+    started = signalled_ns
     asyncio.run_coroutine_threadsafe(server.close(), loop).result(5)
     deadline = time.monotonic() + 5.0
     restored = False
@@ -88,9 +97,13 @@ def _outage_once(proxy: ProxyThread) -> dict[str, Any]:
         time.sleep(POLL_S)
     ended = time.perf_counter_ns()
     rebind_ms = proxy.rebinds[rebinds_before] if len(proxy.rebinds) > rebinds_before else None
+    noticed = proxy.noticed_ms[len(proxy.noticed_ms) - 1] if len(proxy.noticed_ms) > noticed_before else None
     return {
         "outage_ms": round((ended - started) / 1_000_000, 3),
         "rebind_ms": None if rebind_ms is None else round(rebind_ms, 3),
+        # The supervisor's own view of detection (notify -> noticed), which is only defined when the listener said so.
+        # `detection_ms` below is the external one (outage - rebind) and does not depend on that.
+        "noticed_ms": None if noticed is None else round(noticed, 3),
         "restored": restored,
         "port_before": port_before,
         "port_after": proxy.port,
@@ -98,7 +111,8 @@ def _outage_once(proxy: ProxyThread) -> dict[str, Any]:
     }
 
 
-def _column(trials: int, *, supervise_ms: float, loaded: bool, seed: int = 20261116) -> dict[str, Any]:
+def _column(trials: int, *, supervise_ms: float, loaded: bool, notify: bool = True,
+            seed: int = 20261116) -> dict[str, Any]:
     stoppers: list[Any] = []
     busy: list[multiprocessing.Process] = []
     if loaded:
@@ -121,7 +135,7 @@ def _column(trials: int, *, supervise_ms: float, loaded: bool, seed: int = 20261
             # distribution). Sleeping a random fraction of a tick samples the whole space; the max over these samples
             # is the number the budget must survive.
             time.sleep(rng.uniform(0.0, supervise_ms / 1000.0))
-            samples.append(_outage_once(proxy))
+            samples.append(_outage_once(proxy, notify=notify))
     finally:
         with contextlib.suppress(Exception):
             proxy.stop()
@@ -131,6 +145,7 @@ def _column(trials: int, *, supervise_ms: float, loaded: bool, seed: int = 20261
             process.join(5)
     outages = [s["outage_ms"] for s in samples if s["restored"]]
     rebinds = [s["rebind_ms"] for s in samples if s["rebind_ms"] is not None]
+    noticed = [s["noticed_ms"] for s in samples if s["noticed_ms"] is not None]
     not_restored = [s for s in samples if not s["restored"]]
     moved = [s for s in samples if not s["port_kept"]]
     detection = [round(o - r, 3) for o, r in zip(outages, rebinds, strict=False) if r is not None]
@@ -139,10 +154,16 @@ def _column(trials: int, *, supervise_ms: float, loaded: bool, seed: int = 20261
         "supervise_ms": supervise_ms,
         "phase_seed": seed,
         "loaded": loaded,
+        "detection": "listener-notice" if notify else "watchdog-tick",
         "n": len(samples),
         "outage_ms": summary(outages),
         "rebind_ms": summary(rebinds),
+        # Two independent views of detection, reported side by side and never merged: the external one (outage minus
+        # rebind, defined for every sample) and the supervisor's own (notify -> noticed, defined only for a listener
+        # that said it was going), with its own sample count so an absent number is visible as absent.
         "detection_ms": summary(detection),
+        "noticed_ms": summary(noticed),
+        "noticed_n": len(noticed),
         "not_restored": len(not_restored),
         "port_moved": len(moved),
         "samples": samples,
@@ -153,29 +174,49 @@ def _column(trials: int, *, supervise_ms: float, loaded: bool, seed: int = 20261
 
 
 def run(trials: int, *, supervise_ms: float = 20.0) -> dict[str, Any]:
-    idle = _column(trials, supervise_ms=supervise_ms, loaded=False)
-    loaded = _column(trials, supervise_ms=supervise_ms, loaded=True)
+    """Four columns: the two conditions (idle, loaded) crossed with the two detectors (notice, tick).
+
+    The point of the cross is that they measure different things and neither may be quoted as the other: a listener
+    that says it is going is noticed in microseconds, while one that dies silently still waits for a tick. Both are
+    real, and a bound that only covers the first is a bound on a lucky death.
+    """
+    columns = {
+        "notice_idle": _column(trials, supervise_ms=supervise_ms, loaded=False, notify=True),
+        "notice_loaded": _column(trials, supervise_ms=supervise_ms, loaded=True, notify=True),
+        "tick_idle": _column(trials, supervise_ms=supervise_ms, loaded=False, notify=False),
+        "tick_loaded": _column(trials, supervise_ms=supervise_ms, loaded=True, notify=False),
+    }
+    total = sum(column["n"] for column in columns.values())
+    over = sum(column["over_budget"]["count"] for column in columns.values())
+    worst = max(column["outage_ms"].get("max") or 0.0 for column in columns.values())
     gate = {
         "watchdog_rebind_ms": {
-            "n": idle["n"] + loaded["n"],
+            "n": total,
             "budget": REBIND_BUDGET_MS,
-            "idle_worst_ms": idle["outage_ms"].get("max"),
-            "loaded_worst_ms": loaded["outage_ms"].get("max"),
-            "over_budget_samples": idle["over_budget"]["count"] + loaded["over_budget"]["count"],
-            # Per-sample, both columns. The requirement is about a child waiting for a listener, and a child does not
-            # get the median of a distribution that happens to look better.
-            "pass": idle["pass"] and loaded["pass"],
+            # The gate is the end-to-end outage, per sample, in all four columns — the number a child experiences.
+            # Nothing here relaxes it; the columns only say which part of it was detection and which was the rebind.
+            "worst_outage_ms": worst,
+            "by_condition": {name: column["outage_ms"].get("max") for name, column in columns.items()},
+            "over_budget_samples": over,
+            "pass": over == 0 and all(column["not_restored"] == 0 and column["port_moved"] == 0
+                                      for column in columns.values()),
         }
     }
     return {
         "gate": gate,
-        "idle": idle,
-        "loaded": loaded,
+        **columns,
         "method": {
-            "outage_ms": "from the listener being closed to a new listener serving on the same port; includes the "
-                         "supervisor tick, because a watchdog can only notice on a tick",
+            "outage_ms": "from the listener being closed to a new listener serving on the same port: what a child "
+                         "experiences, and the only number the gate is on",
             "rebind_ms": "ProxyThread.rebinds: inside rebind(), excluding detection",
-            "detection_ms": "outage_ms - rebind_ms, the tick's contribution",
+            "detection_ms": "outage_ms - rebind_ms, every sample: what was not the rebind",
+            "noticed_ms": "the supervisor's own detection time (lost_cb -> watchdog saw it); defined only when the "
+                          "listener notified, so `noticed_n` may be smaller than `n`",
+            "detection": "`listener-notice` closes a listener that still has its notice attached (the fast path); "
+                         "`watchdog-tick` removes the notice first, so the tick is the only detector (the backstop)",
+            "bound": "the 100 ms budget is a gate on the observed samples of the machine that ran this file. It is "
+                     "NOT a claim that a rebind is inside 100 ms on any machine: a thread the OS does not schedule "
+                     "cannot be bounded by this or any sleeping-thread design (defect 58)",
             "phase": "each trial sleeps a seeded random fraction of a tick before breaking the listener, so the "
                      "samples cover the whole detection phase instead of locking onto the worst case",
             "poll_s": POLL_S,
@@ -202,10 +243,12 @@ def main(argv: list[str]) -> int:
     report["wall_s"] = round(time.time() - started, 3)
     Path(args.out).parent.mkdir(parents=True, exist_ok=True)
     Path(args.out).write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    for column in ("idle", "loaded"):
-        block = report[column]
-        print(f"{column:7s} outage {json.dumps(block['outage_ms'])}  rebind {json.dumps(block['rebind_ms'])}")
-        print(f"{'':7s} over-budget {block['over_budget']}  port_moved {block['port_moved']}  "
+    for name in ("notice_idle", "notice_loaded", "tick_idle", "tick_loaded"):
+        block = report[name]
+        print(f"{name:14s} outage {json.dumps(block['outage_ms'])}")
+        print(f"{'':14s} rebind {json.dumps(block['rebind_ms'])}  detection {json.dumps(block['detection_ms'])}")
+        print(f"{'':14s} noticed {json.dumps(block['noticed_ms'])} (n={block['noticed_n']})  "
+              f"over-budget {block['over_budget']['count']}  port_moved {block['port_moved']}  "
               f"not_restored {block['not_restored']}")
     verdict = report["gate"]["watchdog_rebind_ms"]
     print(f"{'gate':7s} {'PASS' if verdict['pass'] else 'FAIL'}  {json.dumps({k: v for k, v in verdict.items() if k != 'pass'})}")

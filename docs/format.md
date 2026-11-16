@@ -356,6 +356,7 @@ ZIP, STORED for raw segment bodies and DEFLATE for JSON, entries sorted with `ma
 | `manifest.json` | identity, `run` block (status, `status_cause`, completeness, `truncated_tail`, `lost_from_seq`), `gaps`, `counts`, `integrity {alg, entries, root}`, `signature: null` |
 | `INTEGRITY.sha256` | `<sha256>  <name>` per entry except itself and `manifest.json`, sorted |
 | `graph.json` | the run's nodes and edges, byte-identical to the run directory's copy (D-052, entry since D-053) |
+| `events/events.jsonl` | the timeline, one JSON object per frame, derived from the redacted frames (P4-13, D-054) |
 | `links.json` | the resolved `LINK` records and, since D-053, the `call_links` |
 
 `integrity.root = sha256(INTEGRITY.sha256)` — the manifest can therefore carry the root without hashing itself,
@@ -365,12 +366,38 @@ written as `.<id>.partial` with `O_EXCL`, fsynced, `os.replace`d, then the direc
 is a complete `.bbx`. Reading validates names (absolute, `..`, backslash, NUL), case-folded duplicates, sizes,
 entry-count and ratio **before** it trusts a single entry.
 
-**Derived parts.** `graph.json` (and, later, the other derived artefacts) is listed in `manifest.derived_parts[]` as
-`{name, sha256, generator}` — the hash of the exact bytes written into the capsule. `blackbox capsule verify <capsule>`
-recomputes each declared part from the capsule's own `events/*.raw` and compares the hash, the node count and the edge
-count (`cap/derived.py`, `COMPARED`); a mismatch is `BBX-E412` and exits 1, an unreadable capsule exits 2, and a
-capsule that declares no derived parts verifies as `absent` and exits 0. Verification never rewrites anything: a
-capsule whose graph has drifted is reported, not repaired, and the raw frames it was derived from are untouched.
+**Derived parts.** `graph.json` and `events/events.jsonl` are listed in `manifest.derived_parts[]` as
+`{name, sha256, generator}` — the hash of the exact bytes written into the capsule — sorted by name so the manifest is a
+function of its inputs. `blackbox capsule verify <capsule>` recomputes each part from the capsule's own `events/*.raw`
+(`cap/derived.py`): the graph key by key (`COMPARED`: nodes, edges, counts, frames, status), the export byte for byte,
+reporting the first line that differs. A mismatch is `BBX-E412` and exits 1, an unreadable capsule exits 2, a capsule
+that declares no derived parts verifies as `absent` and exits 0, and a part this build cannot recompute is listed as
+`unknown` — printed, never counted as a pass. Verification never rewrites anything: a capsule whose part has drifted is
+reported, not repaired, and the raw frames it was derived from are untouched.
+
+#### `events/events.jsonl` — the timeline, one object per frame (P4-13, D-054)
+
+One line per frame, `LF`-terminated with a final newline, keys sorted, no generation timestamp: the file is a pure
+function of the frames, which is what makes `capsule verify` a comparison instead of a hope. Each object is
+
+`{"seq", "kind", "kind_id", "time_unix_nano", "bbx_mono_nano", "segment", "node_slot", "run_slot", "attributes"}`
+
+and every attribute name is either a **pinned OpenTelemetry semconv name** or one of ours:
+
+| attribute | when | source |
+|---|---|---|
+| `gen_ai.operation.name` | a `MODEL_REQUEST` whose path is an API the mapping knows (`chat`, `text_completion`) | semconv **v1.27.0** |
+| `gen_ai.system` | the recorded provider host is one we can name (`api.openai.com` → `openai`, `api.anthropic.com` → `anthropic`, `api.cohere.*` → `cohere`, `aiplatform.googleapis.com` → `vertex_ai`) | semconv **v1.27.0** |
+| `gen_ai.request.model` | the frame recorded a model | semconv **v1.27.0** |
+| `bbx.model.*`, `bbx.node.*`, `bbx.run.*`, `bbx.gap.*`, `bbx.chain.*`, `bbx.chunk.*`, `bbx.payload`, `bbx.redaction` | everything else | this project |
+
+Three things it deliberately does not do. It does not **guess a provider**: an address that is not a known provider gets
+no `gen_ai.system`, and the host it dialled is still written as `bbx.provider.host`. It does not **copy content**: a
+`MODEL_CHUNK` line carries its byte count, and the `[bbx-hash …]`/`[bbx-off …]` tag when the sink wrote one, never the
+bytes — the export is a timeline, and the bytes stay in the segments under the content policy. And it does not **emit
+`error.type`**: the tape records an error *message*, and a message is not a type, so the string is carried as
+`bbx.model.error` rather than dressed as a semconv value. Payloads of kinds the mapping says nothing about are carried
+under `bbx.payload`, or as a digest and a length when they exceed 2 KiB.
 
 ## 9. Conformance vectors
 
