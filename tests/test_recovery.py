@@ -129,6 +129,45 @@ def test_a_closed_node_is_not_interrupted() -> None:
     assert recovery.classify_nodes(frames) == []
 
 
+def test_the_graph_lists_every_node_the_run_had_not_only_the_unclosed_ones() -> None:
+    """Defect 54: a clean run's `graph.json` listed no nodes while its manifest counted one.
+
+    `classify_nodes` answers "what was interrupted" and correctly returns nothing for a run whose nodes all closed, so
+    the graph — the artefact a reader opens to see the run's shape — has to be built from the `NODE_OPEN` frames and
+    take each node's status from its `NODE_CLOSE` or, failing that, from the classification.
+    """
+    from blackbox.codec import cbor
+
+    frames = [_frame(1, C.KIND_NODE_OPEN, slot=1, payload=cbor.encode({"name": "agent", "kind": "run", "parent": None})),
+              _frame(2, C.KIND_MODEL_REQUEST, slot=1),
+              _frame(3, C.KIND_NODE_CLOSE, slot=1, payload=cbor.encode({"name": "agent", "kind": "run",
+                                                                        "outcome": "ok", "duration_us": 12})),
+              # a second node the app opened and never closed: the graph must carry it too, classified
+              _frame(4, C.KIND_NODE_OPEN, slot=2, payload=cbor.encode({"name": "fetch", "kind": "tool"}))]
+    graph = recovery.graph_nodes(frames, interrupted=recovery.classify_nodes(frames))
+    assert [n["node_slot"] for n in graph] == [1, 2]
+    closed, interrupted = graph
+    assert closed["status"] == "closed" and closed["outcome"] == "ok" and closed["name"] == "agent"
+    assert interrupted["status"] == recovery.INTERRUPTED_IN_TOOL, interrupted
+    # the manifest's `counts.nodes` answers the same question, so the two must not disagree (that was the defect)
+    assert len(graph) == recovery.node_count(frames)
+
+
+def test_the_capsule_of_a_clean_run_does_not_call_itself_interrupted(tmp_path) -> None:
+    """End to end on a real tape: seal it with `close()`, recover, and read what the capsule says about the run."""
+    data = tmp_path / "data"
+    writer = TapeWriter(str(data), mode="process").open()
+    with writer:
+        writer.emit(C.KIND_NODE_OPEN, b"{}", node_slot=1)
+        writer.emit(C.KIND_NODE_CLOSE, b"{}", node_slot=1)
+    result = recovery.recover(str(data), writer.writer_uuid.hex())
+    assert result is not None
+    assert result.run_status == "recovered", (result.run_status, result.status_cause)
+    assert result.status_cause == "PROCESS_DEATH"
+    capsule = pathlib.Path(result.capsule_path or "")
+    assert capsule.exists()
+
+
 def test_every_class_string_matches_the_plan_table() -> None:
     plan = (ROOT / "docs" / "BLACKBOX_FINAL_ARCHITECTURE_v1.1.md").read_text(encoding="utf-8")
     for name in ("INTERRUPTED_BEFORE_FIRST_BYTE", "INTERRUPTED_MID_STREAM", "INTERRUPTED_AFTER_RESPONSE",

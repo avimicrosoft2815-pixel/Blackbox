@@ -826,3 +826,31 @@ and where they do not it reports `private_by_mode: false` through the result, th
 guarantee that is conditional on the platform has to say so at every point a user reads it, or the document is the lie
 rather than the code.
 
+---
+
+## D-051 — the child captures its own traffic, and a process gets one seam (2026-11-16, P3B-03/P4-18)
+
+`api.install()` opened the child's tape and installed no seam, so the auto-import bought a capsule with a bootstrap
+frame set and nothing else (defect 49). The proxy's vantage still recorded the call, which is exactly why the gap
+survived: the run *looked* captured, and only the frame kinds said which vantage produced them. `install()` now asks
+`preflight.choose()` for a seam once the tape exists, resolving the node slot per event rather than once at install
+time, because a seam outlives any one `with api.run(...)` — a seam that captured the slot at install would book every
+later call to the node that happened to be open then, or to none.
+
+The interesting part is what happened to callers that had already done this themselves. Two hooks on one client class
+fire the recorder twice, and a stream consulted twice is a stream closed twice: with `install()` patching and
+`tests/_day14_child.py` patching on top, `openai` raised *Attempted to call a sync close on an async stream* before
+reading a byte. The naive fix — "the product's seam wins, throw ours away" — leaves the second caller without a
+recorder. So the module keeps the seam it installed, and `choose()` hands that seam back with attempt status
+`already-installed`. Invariant: **one seam per client class per process**, announced rather than assumed, and everyone
+who asks gets a working recorder. The alternative, letting each caller wrap the last, is a stack whose failure mode is
+an SDK-internal error in the app's first model call — the worst place to learn that recording was installed twice.
+
+Costs accepted, and stated because they are easy to over-read. Adoption is process-global and keyed on the seam, not on
+the recorder, so `capture_status()["installed"]` with `attempts[0]["status"] == "already-installed"` means *the process
+is captured*, not *this tape is receiving the frames*: the adopted seam writes to whatever sink its installer chose. In
+the product's own path the question is asked exactly once — `install()` is refcounted, so a second caller refs the
+existing lifecycle instead of installing — and `release()` only undoes the seam `install()` adopted, because adoption is
+the product's private bookkeeping and no third party registers with it. A general "attach to someone else's seam"
+protocol is deliberately not built here; the invariant only has to hold for the two parties that exist. Proven by
+`tests/test_launcher_attach.py`'s three capture tests, red with `install_capture()` disabled.

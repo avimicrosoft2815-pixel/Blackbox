@@ -136,6 +136,18 @@ def scan(data_dir: str, writer_uuid_hex: str, *, max_frames: int = 2_000_000) ->
             result.truncated_tail = True
             result.lost_from_seq = head.head_seq
 
+    # 1b. the *active* segment's own seal, which is how a cleanly closed tape says it finished. `sealed_segments` used to
+    # be filled only from the loop below, which skips `n_active` by construction — so a tape sealed on close (the normal
+    # path: `TapeWriter.close()` writes SEG_END and then the seal) scanned as `sealed: []`, and every clean run's capsule
+    # said SEAL_INTERRUPTED / SEAL_NEVER_FINISHED. The seal has to describe the bytes the head commits, or it is a seal
+    # from before a later append and says nothing about what is on the tape now: `end_seq` is the seq of the `SEG_END`
+    # that closed this segment, and the committed head names the same seq only if nothing came after it.
+    active_sealed = False
+    if os.path.exists(active_path):
+        active_seal = seal_mod.read(segments.seal_path(tape_dir, n_active))
+        active_sealed = (active_seal is not None and active_seal["segment_no"] == n_active
+                         and active_seal["end_seq"] == head.head_seq)
+
     # 2. earlier segments, oldest first so seq order is stable
     for n in sorted(segs):
         if n >= n_active:
@@ -219,6 +231,9 @@ def scan(data_dir: str, writer_uuid_hex: str, *, max_frames: int = 2_000_000) ->
                 start = prev = seq
                 run_reason = r
             result.gaps.append({"from": start, "to": prev, "reason": run_reason})
+    if active_sealed:
+        # Appended last so the list stays ascending: `n_active` is the highest segment number.
+        result.sealed_segments.append(n_active)
     return result
 
 

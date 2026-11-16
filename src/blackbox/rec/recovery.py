@@ -246,6 +246,57 @@ def node_count(frames: list[dict[str, Any]]) -> int:
     return len(slots)
 
 
+def graph_nodes(frames: list[dict[str, Any]], *, interrupted: list[NodeRecord] | None = None) -> list[dict[str, Any]]:
+    """Every node the tape opened, with the status each one ended in — the list `graph.json` is supposed to hold.
+
+    `classify_nodes` answers §14.4's question ("what was interrupted, and what may have happened") and therefore
+    returns *only* unclosed nodes; using it for the graph made a clean run's `graph.json` list no nodes at all while the
+    same tape's manifest said `nodes: 1` (defect 54). A node that closed carries the outcome its `NODE_CLOSE` recorded;
+    a node that did not carries the interrupted classification that `classify_nodes` produced for it.
+    """
+    by_slot = {record.node_slot: record for record in (interrupted or [])}
+    nodes: dict[int, dict[str, Any]] = {}
+    for f in frames:
+        slot = int(f.get("node_slot") or 0)
+        kind = f["kind"]
+        if kind == C.KIND_NODE_OPEN:
+            if not slot:
+                continue                              # slot 0 is the run itself, not a node
+            payload = _payload(f.get("payload") or b"")
+            nodes[slot] = {"node_slot": slot, "name": payload.get("name"), "kind": payload.get("kind"),
+                           "parent": payload.get("parent"), "opened_ns": payload.get("opened_ns"),
+                           "status": "unclosed", "outcome": None, "detail": ""}
+        elif kind == C.KIND_NODE_CLOSE:
+            node = nodes.get(slot)
+            payload = _payload(f.get("payload") or b"")
+            if node is None:
+                # A close with no open in this scan: the segment holding the open was retained away. Say so instead of
+                # inventing a status, and keep the slot because a reader can still see *a* node existed.
+                node = nodes[slot] = {"node_slot": slot, "name": payload.get("name"), "kind": payload.get("kind"),
+                                      "parent": None, "opened_ns": None, "status": "closed", "outcome": None,
+                                      "detail": "NODE_OPEN is not in this scan"}
+            node["status"] = "closed"
+            node["outcome"] = payload.get("outcome")
+            node["duration_us"] = payload.get("duration_us")
+    for slot, node in nodes.items():
+        record = by_slot.get(slot)
+        if record is not None and node["status"] != "closed":
+            node["status"] = record.status
+            node["detail"] = record.detail
+    return [nodes[slot] for slot in sorted(nodes)]
+
+
+def _payload(raw: bytes) -> dict[str, Any]:
+    """A frame payload as a dict, or an empty dict when it will not decode: a graph entry is not worth an exception."""
+    if not raw:
+        return {}
+    try:
+        decoded = cbor.decode_exact(raw)
+    except Exception:
+        return {}
+    return decoded if isinstance(decoded, dict) else {}
+
+
 def run_status(frames: list[dict[str, Any]], *, sealed: bool) -> tuple[str, str | None]:
     """`(status, status_cause)` for the run itself: `SEAL_INTERRUPTED` when the run ended but was never sealed."""
     has_end = any(f["kind"] == C.KIND_RUN_END for f in frames)
@@ -483,7 +534,8 @@ class Recovery:
         nodes = classify_nodes(scan.frames, now_wall_ns=self.now_ns)
         status, cause = run_status(scan.frames, sealed=bool(scan.sealed_segments) and not scan.truncated_tail)
         graph: dict[str, object] = {"writer_uuid": self.writer_uuid_hex, "run_id": self.run_id,
-                 "frames": scan.frame_count, "gaps": scan.gaps, "nodes": [n.to_dict() for n in nodes],
+                 "frames": scan.frame_count, "gaps": scan.gaps,
+                 "nodes": graph_nodes(scan.frames, interrupted=nodes),
                  "run_status": status, "status_cause": cause,
                  "open_nodes": sum(1 for n in nodes), "edges": []}
         payload = json.dumps(graph, sort_keys=True).encode()

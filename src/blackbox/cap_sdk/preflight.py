@@ -78,6 +78,22 @@ def _kwargs_for(module: Any, client: Any) -> dict[str, Any]:
     return {"client": client} if "client" in parameters else {}
 
 
+#: The seam the *product* installed (`api.install_capture`). Kept here so a second installer does not patch the same
+#: client class twice — two hooks on one class fire the recorder twice and the SDK then closes a stream twice. Measured,
+#: not theorised: with `api.install()` and a script that installed its own seam, `openai`'s stream raised
+#: "Attempted to call a sync close on an async stream" before a byte was read.
+_ADOPTED: dict[str, Any] = {"seam": None, "handle": None}
+
+
+def adopt(seam: str | None, handle: Any) -> None:
+    """Record that the product installed this seam, so `choose()` can hand it back instead of patching again."""
+    _ADOPTED["seam"], _ADOPTED["handle"] = seam, handle
+
+
+def release() -> None:
+    _ADOPTED["seam"], _ADOPTED["handle"] = None, None
+
+
 def choose(recorder: Receiver, *, seams: list[tuple[str, Any]] | None = None,
            forced: dict[str, str] | None = None, client: Any = None) -> PreflightResult:
     """Try each seam in order. `forced` maps a seam name to a failure message, for the forced-failure tests.
@@ -88,6 +104,12 @@ def choose(recorder: Receiver, *, seams: list[tuple[str, Any]] | None = None,
     """
     attempts: list[SeamAttempt] = []
     forced = forced or {}
+    if seams is None and _ADOPTED["handle"] is not None:
+        # One patch per client class per process. The caller keeps running; its recorder is simply not the one writing,
+        # and the decision says so rather than reporting a seam it did not install.
+        return PreflightResult(seam=_ADOPTED["seam"], handle=_ADOPTED["handle"],
+                               attempts=[SeamAttempt(_ADOPTED["seam"] or "-", "already-installed",
+                                                     "the product installed this seam; a second patch would double it")])
     for name, module in (seams if seams is not None else default_seams()):
         if name in forced:
             attempts.append(SeamAttempt(name, "forced-failed", forced[name]))

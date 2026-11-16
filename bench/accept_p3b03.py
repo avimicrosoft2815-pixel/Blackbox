@@ -63,6 +63,17 @@ reply = client.chat.completions.create(model="gpt-4o-mini",
 print("sdk", reply.choices[0].message.content)
 '''
 
+SDK_NODE_CLIENT = '''\
+import openai
+from blackbox import api
+
+client = openai.OpenAI()
+with api.run("answer"):
+    reply = client.chat.completions.create(model="gpt-4o-mini",
+                                           messages=[{"role": "user", "content": "hi"}])
+print("sdk-nodes", reply.choices[0].message.content)
+'''
+
 NODE_CLIENT = '''\
 const http = require('http');
 const base = new URL(process.env.OPENAI_BASE_URL);
@@ -162,6 +173,7 @@ def inspect(data_dir: Path) -> list[dict]:
             "has_proxy_vantage": all(k in kinds for k in (KIND_NAMES[KIND_MODEL_REQUEST],
                                                           KIND_NAMES[KIND_MODEL_CHUNK],
                                                           KIND_NAMES[KIND_MODEL_RESPONSE])),
+            "nodes": (manifest.get("counts") or {}).get("nodes"),
             "links": links.get("summary") or links,
             "link_pairs": [{"class": link.get("class"), "left_run": link.get("left_run"),
                             "right_run": link.get("right_run")} for link in (links.get("links") or [])],
@@ -169,7 +181,30 @@ def inspect(data_dir: Path) -> list[dict]:
     return out
 
 
-CLIENTS = {"python": PY_CLIENT, "node": NODE_CLIENT, "sdk": SDK_CLIENT}
+def graphs(data_dir: Path) -> list[dict]:
+    """What each tape's own `graph.json` says, because `counts.nodes` in a manifest is a summary of this file.
+
+    The ticket's sentence is about *nodes*, and a run can pass every other check while its graph lists none, which is
+    exactly how it looked before defect 49 was closed. Reading the graph rather than the count keeps the report about
+    the artefact a user opens.
+    """
+    out = []
+    for path in sorted((data_dir / "runs").glob("*/graph.json")):
+        try:
+            graph = json.loads(path.read_text(encoding="utf-8"))
+        except Exception as exc:                             # a graph that cannot be read is a finding, not a crash
+            out.append({"run_dir": path.parent.name, "error": f"{type(exc).__name__}: {exc}"})
+            continue
+        nodes = graph.get("nodes") or []
+        out.append({"run_dir": path.parent.name, "writer_uuid": graph.get("writer_uuid"),
+                    "run_id": graph.get("run_id"), "graph_nodes": len(nodes), "graph_edges": len(graph.get("edges") or []),
+                    "open_nodes": graph.get("open_nodes"),
+                    "node_statuses": sorted({str(n.get("status")) for n in nodes}),
+                    "node_slots": sorted({n.get("slot") for n in nodes})})
+    return out
+
+
+CLIENTS = {"python": PY_CLIENT, "node": NODE_CLIENT, "sdk": SDK_CLIENT, "sdk-nodes": SDK_NODE_CLIENT}
 
 
 def run_client(work: Path, data: Path, upstream: str, name: str, cmd: list[str], client: Path) -> dict:
@@ -182,6 +217,7 @@ def run_client(work: Path, data: Path, upstream: str, name: str, cmd: list[str],
     proc = subprocess.run(argv, cwd=str(work), env=env, capture_output=True, text=True, timeout=180)
     capsules = inspect(data)
     run_ids = {c["run_id"] for c in capsules}
+    graph = graphs(data)
     return {
         "client": name,
         "command": cmd,
@@ -196,6 +232,9 @@ def run_client(work: Path, data: Path, upstream: str, name: str, cmd: list[str],
         "one_run_id_across_capsules": len(run_ids) == 1,
         "run_ids_seen": sorted(r for r in run_ids if r),
         "links": [pair for c in capsules for pair in c["link_pairs"]],
+        "graphs": graph,
+        "total_nodes": sum(g["graph_nodes"] for g in graph if "graph_nodes" in g),
+        "exact_pairs": [pair for c in capsules for pair in c["link_pairs"] if pair.get("class") == "exact"],
     }
 
 
@@ -214,6 +253,9 @@ def main(argv: list[str] | None = None) -> int:
             cases.append(("node", [node, "client.js"], work / "client.js"))
         if _has_openai():
             cases.append(("sdk", [sys.executable, "sdk_client.py"], work / "sdk_client.py"))
+            # The ticket's sentence is about *nodes*: an app that labels its work with `api.run` is the only kind
+            # that can produce one, so the harness has to run one or the report cannot answer the question.
+            cases.append(("sdk-nodes", [sys.executable, "sdk_node_client.py"], work / "sdk_node_client.py"))
         for name, cmd, client in cases:
             data = work / f"data-{name}"
             results.append(run_client(work, data, upstream_url, name, cmd, client))
@@ -234,6 +276,21 @@ def main(argv: list[str] | None = None) -> int:
             "every_capsule_root_ok": all(r["every_root_ok"] for r in results),
             "both_clients_exit_zero": all(r["exit_code"] == 0 for r in results),
             "one_run_id_across_capsules": all(r["one_run_id_across_capsules"] for r in results),
+            # A clean run's tape is sealed by its writer's own close, so the capsule must not call the run interrupted
+            # (defect 53: every clean run said SEAL_INTERRUPTED because the scanner never read the active segment's seal).
+            "clean_runs_are_not_reported_as_interrupted": all(
+                c["run_status"] == "recovered" for r in results for c in r["capsules"]),
+            # Only a run with two capsules can show a link; a single-capsule run has no sibling to be linked to, and
+            # asserting otherwise would fail a case for being captured by one vantage rather than two.
+            "exact_links_join_every_run_with_two_capsules": all(
+                r["exact_pairs"] for r in results if r["capsule_count"] > 1),
+            # Nodes come from the app's own labels (`api.run`), so the instrumented case is the one that can answer
+            # this; an unmodified client records a model call and no node, which is the product's design, not a miss.
+            "app_nodes_are_in_the_graph": {r["client"]: r["total_nodes"] for r in results},
+            # The half that is still open, reported rather than omitted: `graph.json`'s `edges` is always empty, so the
+            # cross-vantage relation lives in `links.json` and not in the graph the ticket's sentence names (defect 55).
+            "graph_has_cross_vantage_edges": all(
+                g.get("graph_edges", 0) for r in results for g in r["graphs"] if g.get("graph_nodes")),
             "node_available": node is not None,
         },
     }
@@ -243,7 +300,8 @@ def main(argv: list[str] | None = None) -> int:
     for result in results:
         print(f"{result['client']:6} exit {result['exit_code']} capsules {result['capsule_count']} "
               f"proxy-vantage {result['proxy_vantage_recorded']} roots {result['every_root_ok']} "
-              f"one-run-id {result['one_run_id_across_capsules']} ({', '.join(result['run_ids_seen'])})")
+              f"one-run-id {result['one_run_id_across_capsules']} ({', '.join(result['run_ids_seen'])}) "
+              f"nodes {result['total_nodes']} exact {len(result['exact_pairs'])}")
     print("verdict:", json.dumps(report["verdict"], sort_keys=True))
     print("written:", out)
     return 0

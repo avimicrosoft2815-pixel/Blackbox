@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
 from itertools import pairwise
 from pathlib import Path
@@ -158,9 +159,44 @@ def test_roll_produces_two_sealed_segments_and_a_full_scan(tmp_path):
 
     result = scanner.scan(str(tmp_path), uuid)
     assert result.completeness() == "full", result.summary()
-    assert result.sealed_segments == segs[:-1]
+    # Every segment is sealed, including the last one: `close()` writes `SEG_END` and then the seal. This assertion used
+    # to say `segs[:-1]`, which was the scanner's blind spot (it skipped the active segment) written down as a rule.
+    assert result.sealed_segments == segs
     # every event that publish() returned for is on the tape
     assert result.last_seq >= written
+
+
+def test_a_clean_close_is_sealed_and_a_cut_off_tape_is_not(tmp_path):
+    """The difference the capsule's `run.status` is built from, measured on the tape rather than assumed.
+
+    Defect 53: the scanner filled `sealed_segments` only from the segments *before* the active one, so a tape sealed by
+    `close()` (every clean run) and a tape cut off by `SIGKILL` were indistinguishable — both scanned `sealed: []` — and
+    the vocabulary in §14.4 ("`RUN_END` present but no seal ⇒ `SEAL_INTERRUPTED`") made every clean run say it.
+    """
+    clean_root = tmp_path / "clean"
+    w = TapeWriter(str(clean_root), mode="process").open()
+    w.emit(C.KIND_RUN_START, b"{}", node_slot=0)
+    uuid_clean = w.writer_uuid.hex()
+    w.close()
+    assert scanner.scan(str(clean_root), uuid_clean).sealed_segments == [1]
+
+    killed_root = tmp_path / "killed"
+    # A child that writes, publishes, and leaves without closing: what `SIGKILL` mid-run leaves behind. `os._exit` skips
+    # the writer's `close()` and the interpreter's cleanup, so nothing but the frames themselves is on disk.
+    code = (
+        "import os, sys\n"
+        "from blackbox.tape.writer import TapeWriter\n"
+        "w = TapeWriter(sys.argv[1], mode='process').open()\n"
+        "w.emit(1, b'{}', node_slot=0)\n"
+        "w.publish()\n"
+        "print(w.writer_uuid.hex(), flush=True)\n"
+        "os._exit(0)\n"
+    )
+    proc = subprocess.run([sys.executable, "-c", code, str(killed_root)], capture_output=True, text=True,
+                          env={**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parents[1] / "src")})
+    assert proc.returncode == 0, proc.stderr
+    uuid_killed = proc.stdout.strip().splitlines()[0]
+    assert scanner.scan(str(killed_root), uuid_killed).sealed_segments == []
 
 
 def test_roll_exactly_at_chain_emission_keeps_seq_dense(tmp_path):

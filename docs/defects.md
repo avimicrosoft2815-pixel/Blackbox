@@ -460,7 +460,7 @@ plan's §10 shape, and it is append-only.
   Windows is not a detail of this feature, it is a way for a byte-exact guarantee to be silently untrue.
 
 - **defect 49 — the auto-import makes a tape and installs no seam, so an unmodified SDK script records nothing itself.**
-  **Open.** `cap_sdk/autoimport.py::activate()` calls `api.install()`, which opens the child's tape and writes
+  **Closed 2026-11-16.** `cap_sdk/autoimport.py::activate()` calls `api.install()`, which opens the child's tape and writes
   `RUN_START`/`RUN_END` — and nothing else. The three capture seams are installed by `cap_sdk/preflight.py::choose()`,
   and **no module in `src/` calls `choose()`**: the seams are exercised by tests and by the day-14 lab, which wires them
   by hand (`SinkRecorder(TapeSink(api.emit))`). Measured under `blackbox run`: a child using the real `openai` 3.51.0
@@ -470,6 +470,27 @@ plan's §10 shape, and it is append-only.
   vantage is empty and the summary line implies otherwise. This is why P3B-03's "one run with linked nodes" is not
   claimed as met: with no seam and no `NODE_OPEN`, both vantages report `nodes: 0` and the graphs have no nodes to link.
   Found by adding the SDK client to the acceptance harness rather than by reading the flag.
+  **Fix**: `api.install()` calls `api.install_capture()` once the child's tape exists — after `RUN_START` and the
+  Keeper, so a recording that fails is still a run — and that builds `SinkRecorder(TapeSink(_emit_at_current_node))` over
+  the same writer the launcher's tape uses, then asks `preflight.choose()`. The node slot is resolved per *event*
+  (`rec.context.current()`, slot 0 when no node is open), not once at install time, because a seam outlives any one
+  `with api.run(...)`. `capture_status()` and `status()["capture"]` report `{installed, seam, attempts}` without the
+  handle or the recorder, and `_close_locked()` releases the seam before the writer goes away, so a later close cannot
+  emit into a dead tape. Installing a seam from `install()` exposed the second half of the defect: a product that had
+  installed its own seam (`tests/_day14_child.py` does exactly that, as the day-14 lab's examples do) got the client
+  class patched **twice**, and `openai` then raised *Attempted to call a sync close on an async stream* before reading a
+  byte — reproduced here, not theorised. So `preflight` gained `adopt()`/`release()`: when the product has
+  already installed a seam, `choose()` returns that seam with attempt status `already-installed` and the reason *the
+  product installed this seam; a second patch would double it*, instead of patching again. One seam per process, and
+  the second caller still gets a working recorder. **Tests**: `tests/test_launcher_attach.py::test_a_childs_own_model_call_lands_on_its_own_tape`
+  (proxy **off**, real `httpx` child, `MODEL_REQUEST` present, `counts.nodes == 1`, `nodes_interrupted == 0`),
+  `::test_the_same_capture_works_for_an_unmodified_openai_client` (real `openai` client, same assertions) and
+  `::test_one_seam_per_process_even_when_the_app_installs_its_own` (the second `choose()` returns `httpx-hooks` with
+  `already-installed`, and one request writes exactly one `MODEL_REQUEST`). All three are red with `install_capture()`
+  disabled — the child's capsule then holds `{RUN_START, NODE_OPEN, NODE_CLOSE, RUN_END, SEG_END}` and the second
+  decision says `installed` — and green with it, which is the check that these tests are about the defect and not about
+  the harness. This closes *recording nothing on the child's own tape*; it does not by itself tick P3B-03's "one run
+  with linked nodes", which still needs a run whose `graph.json` shows nodes and `exact` links between the vantages.
 
 - **defect 50 — `_read_nofollow` followed the link on the one platform where the flag is missing.** Run 43922055318
   (HEAD `081fac5`) failed `test_reading_an_original_does_not_follow_a_link` on all three Windows cells with *DID NOT
@@ -508,3 +529,52 @@ plan's §10 shape, and it is append-only.
   a separator. Worth recording precisely because it looks like the two above: a Windows red cell is not evidence of a
   product bug until the failure line says so.
 
+- **defect 53 — every cleanly sealed run was reported `SEAL_INTERRUPTED`, in its capsule and in the summary line.**
+  Found while measuring P3B-03's acceptance line: all four cells of a fresh `bench/accept_p3b03.py` run exited 0 and every
+  capsule still said `run.status: SEAL_INTERRUPTED, status_cause: SEAL_NEVER_FINISHED`. The cause was one line of the
+  scanner: `sealed_segments` was filled only by the loop over the segments *before* the active one (`n < n_active` by
+  construction), so the seal that `TapeWriter.close()` writes for the last segment — the normal end of every run — was
+  never read. Measured directly: a tape written and closed in one process has `00000001.seal` on disk,
+  `seal.read()` returns a valid record for it, and `scanner.scan(...).sealed_segments` was `[]`. §14.4's rule is
+  "`RUN_END` present but no seal ⇒ `SEAL_INTERRUPTED`", so every clean run told the user its capsule build had been
+  interrupted and was "safe to re-run" — the one sentence a re-run would change nothing about. **Fix**: the scanner also
+  reads the active segment's seal and counts it when `seal["segment_no"] == n_active` **and**
+  `seal["end_seq"] == head.head_seq`, i.e. only when the seal describes exactly the bytes the committed head names; a
+  seal left over from before a later append does not match and is ignored, so a reopened tape cannot inherit a clean
+  verdict. **Two tests had the behaviour written down as a rule**:
+  `tests/test_tape.py::test_roll_produces_two_sealed_segments_and_a_full_scan` asserted `sealed_segments == segs[:-1]`
+  *after* calling `w.close()`, and `tests/test_launcher.py::test_the_plan_acceptance_line_leaves_a_recovered_run`
+  asserted `SEAL_INTERRUPTED` for `sh -c 'kill -9 $$'` — where the *child* dies and the launcher's own tape closes
+  cleanly, so the assertion was about the scanner's blind spot and not about the killed child (whose death is
+  `exit_code: 137`/`signaled: 9` in the same test). Both now assert the contract. **New test**:
+  `tests/test_tape.py::test_a_clean_close_is_sealed_and_a_cut_off_tape_is_not` writes one tape with `close()` and one in
+  a child that `os._exit`s after `publish()`, and asserts `[1]` against `[]` — so `SEAL_INTERRUPTED` stays reachable and
+  is still what a genuinely cut-off writer (the SDK's tape under `SIGKILL`, `tests/test_day14_kill.py`) reports.
+
+- **defect 54 — a clean run's `graph.json` listed no nodes while the same tape's manifest counted one.** `step_graphed`
+  built `graph["nodes"]` from `classify_nodes`, which answers §14.4's question and therefore returns *only unclosed*
+  nodes; the manifest's `counts.nodes` is `node_count`, which counts `NODE_OPEN` slots. Defect 41 fixed exactly this
+  disagreement for the manifest and left the graph holding the other half, so after the seam was installed (defect 49)
+  the two artefacts described different runs: capsule `counts.nodes: 1`, `graph.json` `nodes: []`, `open_nodes: 0`.
+  Nothing in `src/` reads `graph.json`, which is why no test caught it. **Fix**: `graph_nodes()` writes one entry per
+  `NODE_OPEN` slot — `node_slot`, `name`, `kind`, `parent`, `opened_ns`, and a status taken from the `NODE_CLOSE`
+  payload (`outcome`, `duration_us`) or, for a node that never closed, from the interrupted classification — sorted by
+  slot; a `NODE_CLOSE` whose `NODE_OPEN` is not in the scan keeps its slot and says so rather than being dropped.
+  `open_nodes` keeps its meaning: the number still open. **Tests**:
+  `tests/test_recovery.py::test_the_graph_lists_every_node_the_run_had_not_only_the_unclosed_ones` (a closed node and an
+  interrupted one in one graph, and the count agrees with `node_count`),
+  `::test_the_capsule_of_a_clean_run_does_not_call_itself_interrupted`. Measured end to end in the acceptance report:
+  the `sdk-nodes` case now has `graph_nodes: 1` next to `counts.nodes: 1`.
+
+- **defect 55 — `graph.json` carries no edges, so "linked nodes" cannot be read from the graph the ticket names.**
+  **Open, deliberately.** `step_graphed` writes `"edges": []` unconditionally; the cross-vantage relation exists only in
+  `links.json`, where the acceptance harness measures `exact` pairs joining the two capsules of a run
+  (`bench/results/2026-11-16-p3b03-acceptance.json`: every two-capsule case has them, the single-capsule `node` case has
+  nothing to link to). Plan §11.10 and §13.2 describe `linked_exact` edges joining nodes recorded by different vantage
+  points, and §graph lists "nodes, edges, CSR adjacency" — so P3B-03's sentence "one run with linked nodes" is met as
+  *one run, one run id, exact links between the vantages* and not as *an edge in the graph*. This is recorded rather
+  than fixed because the fix is a design decision, not a repair: which ids edges join (a per-tape node slot does not identify a node on
+  its own, since every tape numbers its nodes from 1), what direction and confidence an `exact` edge carries, and where a proxy-vantage call that has
+  no node slot (slot 0 is the run itself) attaches. Those choices belong in a decision record before code, and this
+  entry exists so the ticket cannot be ticked by quietly reading `links.json` as if it were the graph. The harness
+  reports the fact as `verdict.graph_has_cross_vantage_edges: false` instead of omitting it.

@@ -30,6 +30,8 @@ import pytest
 from blackbox.cap import format as cap
 from blackbox.rec import launcher, recovery
 
+SRC = Path(__file__).resolve().parents[1] / "src"
+
 # The child reports what it can see into a file: its stdout belongs to it, and a test that reads the parent's stdout
 # would be measuring pytest's capture rather than the child's environment.
 REPORT = """
@@ -416,3 +418,126 @@ class _Tee:
 
     def flush(self) -> None:
         self.stream.flush()
+
+# ── defect 49: the child's own vantage, captured by the child's own seam ─────────────────────────────────────────────
+HTTPX_CHILD = """
+import httpx
+from blackbox import api
+
+with api.run("call-the-model"):
+    response = httpx.post(BASE + "/chat/completions", timeout=10,
+                          json={"model": "mock-1", "messages": [{"role": "user", "content": "hi"}]})
+    print("CHILD", response.status_code)
+"""
+
+OPENAI_CHILD = """
+import openai
+from blackbox import api
+
+with api.run("call-the-model"):
+    client = openai.OpenAI(api_key="test-key", base_url=BASE, max_retries=0)
+    reply = client.chat.completions.create(model="mock-1", messages=[{"role": "user", "content": "hi"}])
+    print("CHILD", reply.choices[0].message.content)
+"""
+
+
+def _frame_kinds(raw: bytes) -> list[str]:
+    from blackbox import constants as consts
+    from blackbox.tape import frame as frame_mod
+
+    kinds: list[str] = []
+    off = consts.SEGMENT_HEADER_BYTES
+    while off < len(raw):
+        try:
+            frame, off = frame_mod.decode(raw, off)
+        except Exception:                              # the segment is padded; padding is not a frame
+            break
+        kinds.append(consts.KIND_NAMES[frame["kind"]])
+    return kinds
+
+
+def _run_capture_child(tmp_path, source: str):
+    """A real child under the launcher with the proxy OFF: only the child's own seam can produce a MODEL frame."""
+    from blackbox.cap_sdk.mock_provider import MockProvider, Scenario
+
+    script = tmp_path / "child_capture.py"
+    data_dir = tmp_path / "data"
+    with MockProvider(Scenario(chunks=3, delay_ms=0)) as provider:
+        script.write_text(f"BASE = {provider.openai_base_url()!r}\n" + source, encoding="utf-8")
+        with open(tmp_path / "out.txt", "w", encoding="utf-8") as out:
+            result = launcher.launch([sys.executable, str(script)], data_dir=str(data_dir), out=out,
+                                     proxy=False, env={**os.environ, "PYTHONPATH": str(SRC)})
+    capsules = [cap.read_capsule(str(path)) for path in sorted((data_dir / "capsules").glob("*.bbx"))]
+    return result, capsules
+
+
+def _child_capsule(capsules):
+    """The child's own capsule out of the two a run writes: the launcher's vantage holds no MODEL frames."""
+    holders = [capsule for capsule in capsules if "MODEL_REQUEST" in _frame_kinds(capsule.frames_of(1))]
+    assert len(holders) == 1, [(_frame_kinds(c.frames_of(1)), c.manifest["counts"]) for c in capsules]
+    return holders[0]
+
+
+def test_a_childs_own_model_call_lands_on_its_own_tape(tmp_path):
+    """Defect 49's repair: the child records its own traffic instead of leaving it to the proxy's vantage.
+
+    The proxy is off here, so nothing but the child's seam can produce a `MODEL_REQUEST`. Before this,
+    `api.install()` opened the tape and installed no seam (`preflight.choose()` had no caller in `src/`), so the child's
+    capsule held `{RUN_START, RUN_END, SEG_END}` while the summary line said `sdk auto-import (sitecustomize)`.
+    """
+    result, capsules = _run_capture_child(tmp_path, HTTPX_CHILD)
+    assert result.exit_code == 0, result.exit_code
+    # a run writes two capsules: the launcher's vantage and the child's. Only the child's holds MODEL frames.
+    assert len(capsules) == 2, [capsule.manifest["counts"] for capsule in capsules]
+    capsule = _child_capsule(capsules)
+    kinds = _frame_kinds(capsule.frames_of(1))
+    assert "MODEL_REQUEST" in kinds, f"the child's own tape recorded {sorted(kinds)}"
+    assert {"MODEL_CHUNK", "MODEL_RESPONSE"} & set(kinds), sorted(kinds)
+    # the call was made inside `with api.run(...)`, so it belongs to that node and the node closed cleanly
+    assert capsule.manifest["counts"]["nodes"] == 1, capsule.manifest["counts"]
+    assert capsule.manifest["counts"]["nodes_interrupted"] == 0, capsule.manifest["counts"]
+
+
+def test_the_same_capture_works_for_an_unmodified_openai_client(tmp_path):
+    """Seam A over a real SDK client, not a mock: the child imports `openai` and does what its README says."""
+    pytest.importorskip("openai")
+    result, capsules = _run_capture_child(tmp_path, OPENAI_CHILD)
+    assert result.exit_code == 0, result.exit_code
+    capsule = _child_capsule(capsules)
+    assert capsule.manifest["counts"]["nodes"] == 1, capsule.manifest["counts"]
+
+
+def test_one_seam_per_process_even_when_the_app_installs_its_own(tmp_path):
+    """Two seams on one client class fire the recorder twice, and `openai` then closes a stream twice.
+
+    Measured, not theorised: with `api.install()` installing a seam and a child installing its own on top, the SDK
+    raised *Attempted to call a sync close on an async stream* before reading a byte. `preflight.choose()` hands back
+    the product's seam instead of patching again.
+    """
+    source = """
+import json
+import os
+import httpx
+from blackbox import api
+from blackbox.cap_sdk.preflight import choose
+from blackbox.cap_sdk.sink import SinkRecorder, TapeSink
+
+mine = SinkRecorder(TapeSink(api.emit))
+decision = choose(mine)
+with open(os.path.join(os.path.dirname(__file__), "seam.json"), "w", encoding="utf-8") as handle:
+    json.dump({"seam": decision.seam, "statuses": [a.status for a in decision.attempts]}, handle)
+with api.run("call-the-model"):
+    httpx.post(BASE + "/chat/completions", timeout=10,
+               json={"model": "mock-1", "messages": [{"role": "user", "content": "hi"}]})
+"""
+    result, capsules = _run_capture_child(tmp_path, source)
+    assert result.exit_code == 0
+    capsule = _child_capsule(capsules)
+    # the second `choose()` returned the product's seam instead of patching httpx once more, so one request
+    # produces exactly one MODEL_REQUEST: a doubled seam would write two.
+    kinds = _frame_kinds(capsule.frames_of(1))
+    assert kinds.count("MODEL_REQUEST") == 1, kinds
+    assert capsule.manifest["counts"]["nodes"] == 1, capsule.manifest["counts"]
+    second = json.loads((tmp_path / "seam.json").read_text(encoding="utf-8"))
+    assert second["seam"] == "httpx-hooks", second
+    assert second["statuses"] == ["already-installed"], second
