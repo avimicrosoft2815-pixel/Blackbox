@@ -40,10 +40,22 @@ def _sha(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
+def _write(path: Path, text: str) -> Path:
+    """Write the bytes the hash is taken over, on every platform.
+
+    `Path.write_text` opens in text mode, which on Windows turns every `\n` into `\r\n`. The fixtures then hashed
+    `"a\nb"` while the file on disk held `"a\r\nb"`, so the applier's write-time hash re-check was right and the test
+    was wrong: it reported "changed after it was approved" for a file nobody had touched. Every fixture here writes
+    bytes for that reason — the same reason the applier reads them that way (D-050, C29).
+    """
+    path.write_bytes(text.encode("utf-8"))
+    return path
+
+
 def _repo(tmp_path: Path) -> Path:
     repo = tmp_path / "repo"
     (repo / "src").mkdir(parents=True)
-    (repo / "src" / "app.py").write_text("def handler():\n    raise RuntimeError('boom')\n", encoding="utf-8")
+    _write(repo / "src" / "app.py", "def handler():\n    raise RuntimeError('boom')\n")
     return repo
 
 
@@ -51,17 +63,17 @@ def _proposal(tmp_path: Path, repo: Path, changes: list[dict], **extra) -> Path:
     document = {"schema": SCHEMA, "title": "catch the error instead of raising", "rationale": "the tape shows a raise",
                 "tests": ["pytest tests/test_app.py -q"], "risk": ["changes control flow"], "changes": changes, **extra}
     path = tmp_path / "proposal.json"
-    path.write_text(json.dumps(document, indent=2), encoding="utf-8")
+    path.write_bytes(json.dumps(document, indent=2).encode("utf-8"))
     return path
 
 
 def _change(repo: Path, path: str, content: str, *, new: bool = False) -> dict:
-    expected = None if new else _sha((repo / path).read_text(encoding="utf-8"))
+    expected = None if new else hashlib.sha256((repo / path).read_bytes()).hexdigest()
     return {"path": path, "expected_sha256": expected, "content": content}
 
 
 def _snapshot(root: Path) -> dict[str, str]:
-    return {str(p.relative_to(root)): (p.read_text(encoding="utf-8") if p.is_file() else "<dir>")
+    return {str(p.relative_to(root)): (p.read_bytes().hex() if p.is_file() else "<dir>")
             for p in sorted(root.rglob("*")) if ".blackbox-repair" not in str(p)}
 
 
@@ -130,7 +142,7 @@ def test_a_file_that_changed_after_the_preview_aborts_the_apply(tmp_path, capsys
     proposal_path = _proposal(tmp_path, repo, [_change(repo, "src/app.py", "def handler():\n    return 1\n")])
     proposal = load(str(proposal_path), repo=str(repo))
     token = proposal.token()
-    (repo / "src" / "app.py").write_text("def handler():\n    return 'a human edited this'\n", encoding="utf-8")
+    _write(repo / "src" / "app.py", "def handler():\n    return 'a human edited this'\n")
     before = _snapshot(repo)
     assert repair_main(["apply", str(proposal_path), "--repo", str(repo), "--approve", token]) == 2
     err = capsys.readouterr().err
@@ -144,7 +156,7 @@ def test_a_proposal_edited_after_approval_is_refused(tmp_path, capsys):
     token = load(str(proposal_path), repo=str(repo)).token()
     document = json.loads(proposal_path.read_text(encoding="utf-8"))
     document["changes"][0]["content"] = "def handler():\n    import socket\n    return 2\n"
-    proposal_path.write_text(json.dumps(document), encoding="utf-8")
+    proposal_path.write_bytes((json.dumps(document)).encode("utf-8"))
     before = _snapshot(repo)
     assert repair_main(["apply", str(proposal_path), "--repo", str(repo), "--approve", token]) == 2
     assert _snapshot(repo) == before
@@ -163,7 +175,7 @@ def test_a_path_that_escapes_the_repository_is_refused(tmp_path, path):
 def test_a_symlinked_file_is_refused(tmp_path):
     repo = _repo(tmp_path)
     outside = tmp_path / "outside.py"
-    outside.write_text("secret\n", encoding="utf-8")
+    outside.write_bytes(b"secret\n")
     os.symlink(outside, repo / "src" / "linked.py")
     proposal = _proposal(tmp_path, repo, [{"path": "src/linked.py", "expected_sha256": _sha("secret\n"),
                                            "content": "replaced\n"}])
@@ -187,8 +199,8 @@ def test_a_proposal_may_create_a_file_but_must_be_right_about_it(tmp_path):
     good = _proposal(tmp_path, repo, [{"path": "src/extra.py", "expected_sha256": None, "content": "x = 1\n"}])
     assert load(str(good), repo=str(repo)).changes[0].is_new()
     lying = tmp_path / "lying.json"
-    lying.write_text(json.dumps({"schema": SCHEMA, "changes": [
-        {"path": "src/app.py", "expected_sha256": None, "content": "x\n"}]}), encoding="utf-8")
+    lying.write_bytes(json.dumps({"schema": SCHEMA, "changes": [
+        {"path": "src/app.py", "expected_sha256": None, "content": "x\n"}]}).encode("utf-8"))
     with pytest.raises(ProposalError) as caught:
         load(str(lying), repo=str(repo))
     assert "already exists" in str(caught.value)
@@ -205,7 +217,7 @@ def test_deletion_is_not_supported(tmp_path):
 def test_a_wrong_schema_is_refused(tmp_path):
     repo = _repo(tmp_path)
     path = tmp_path / "bad.json"
-    path.write_text(json.dumps({"schema": "something-else", "changes": []}), encoding="utf-8")
+    path.write_bytes((json.dumps({"schema": "something-else", "changes": []})).encode("utf-8"))
     with pytest.raises(ProposalError) as caught:
         load(str(path), repo=str(repo))
     assert "schema must be" in str(caught.value)
@@ -289,7 +301,7 @@ def test_verify_reports_a_failure_honestly_and_keeps_the_output_tail(tmp_path, c
 def test_risk_notes_are_named_for_the_things_a_reviewer_should_notice(tmp_path):
     repo = _repo(tmp_path)
     (repo / ".github" / "workflows").mkdir(parents=True)
-    (repo / ".github" / "workflows" / "ci.yml").write_text("on: push\n", encoding="utf-8")
+    _write(repo / ".github" / "workflows" / "ci.yml", "on: push\n")
     proposal_path = _proposal(tmp_path, repo, [
         _change(repo, ".github/workflows/ci.yml", "on: push\njobs: {}\n"),
         {"path": "src/new.py", "expected_sha256": None, "content": "import subprocess\n"}])
@@ -305,7 +317,7 @@ def test_a_target_replaced_by_a_symlink_after_approval_is_refused_and_the_outsid
     """The interesting attack: approve a real file, then point that path at something else before the write."""
     repo = _repo(tmp_path)
     outside = tmp_path / "outside.txt"
-    outside.write_text("do not touch\n", encoding="utf-8")
+    outside.write_bytes(b"do not touch\n")
     proposal_path = _proposal(tmp_path, repo, [_change(repo, "src/app.py", "def handler():\n    return 1\n")])
     token = load(str(proposal_path), repo=str(repo)).token()
     (repo / "src" / "app.py").unlink()
@@ -332,7 +344,7 @@ def test_the_last_check_runs_immediately_before_each_write_not_only_at_load(tmp_
     """Inject the swap *during* the apply, after `_prepare` has approved the tree: the per-file re-check must catch it."""
     repo = _repo(tmp_path)
     blocker = tmp_path / "blocker.txt"
-    blocker.write_text("untouched\n", encoding="utf-8")
+    blocker.write_bytes(b"untouched\n")
     changes = [_change(repo, "src/app.py", "def handler():\n    return 1\n"),
                {"path": "src/second.py", "expected_sha256": None, "content": "y = 2\n"}]
     proposal_path = _proposal(tmp_path, repo, changes)
@@ -356,7 +368,7 @@ def test_the_last_check_runs_immediately_before_each_write_not_only_at_load(tmp_
 def test_reading_an_original_does_not_follow_a_link(tmp_path):
     """`_read_nofollow` is the mechanism behind the check, so it is tested on its own."""
     target = tmp_path / "real.txt"
-    target.write_text("bytes\n", encoding="utf-8")
+    target.write_bytes(b"bytes\n")
     link = tmp_path / "link.txt"
     os.symlink(target, link)
     assert apply_mod._read_nofollow(str(target)) == b"bytes\n"
@@ -451,7 +463,7 @@ def test_the_manifest_says_rolled_back_when_the_apply_fails(tmp_path, monkeypatc
 # ── rollback under hostile failure: every file attempted, failures named ─────────────────────────────────────────
 def test_rollback_attempts_every_file_and_names_the_one_it_could_not_restore(tmp_path, monkeypatch):
     repo = _repo(tmp_path)
-    (repo / "src" / "b.py").write_text("b = 2\n", encoding="utf-8")
+    _write(repo / "src" / "b.py", "b = 2\n")
     changes = [_change(repo, "src/app.py", "def handler():\n    return 1\n"),
                _change(repo, "src/b.py", "b = 3\n")]
     proposal = load(str(_proposal(tmp_path, repo, changes)), repo=str(repo))
@@ -478,7 +490,7 @@ def test_rollback_attempts_every_file_and_names_the_one_it_could_not_restore(tmp
     assert "COULD NOT restore" in message and "app.py" in message, "a rollback that lies is worse than one that fails"
     assert "manual intervention required" in message
     # b.py was never modified, so it is untouched; app.py could not be restored and the message says exactly that.
-    assert (repo / "src" / "b.py").read_text(encoding="utf-8") == before["src/b.py"]
+    assert (repo / "src" / "b.py").read_bytes().hex() == before["src/b.py"]
 
 
 def test_a_keyboard_interrupt_mid_apply_still_rolls_back(tmp_path, monkeypatch):
@@ -628,7 +640,7 @@ def test_a_symlink_inside_the_repository_is_still_refused_when_the_root_is_reach
     real_repo = _repo(tmp_path)
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
-    (elsewhere / "app.py").write_text("stolen = True\n", encoding="utf-8")
+    _write(elsewhere / "app.py", "stolen = True\n")
     (real_repo / "src" / "app.py").unlink()
     (real_repo / "src" / "app.py").symlink_to(elsewhere / "app.py")
     via_link = tmp_path / "reachable"
@@ -648,10 +660,10 @@ def test_an_intermediate_directory_swapped_mid_apply_is_caught(tmp_path, monkeyp
     """
     repo = _repo(tmp_path)
     (repo / "src" / "deep").mkdir()
-    (repo / "src" / "deep" / "app.py").write_text("v = 1\n", encoding="utf-8")
+    _write(repo / "src" / "deep" / "app.py", "v = 1\n")
     decoy = repo / "decoy"
     decoy.mkdir()
-    (decoy / "app.py").write_text("v = 1\n", encoding="utf-8")
+    _write(decoy / "app.py", "v = 1\n")
     change = {"path": "src/deep/app.py", "expected_sha256": _sha("v = 1\n"), "content": "v = 2\n"}
     proposal = load(str(_proposal(tmp_path, repo, [change])), repo=str(repo))
     real_assert, calls = apply_mod._assert_safe_target, {"n": 0}

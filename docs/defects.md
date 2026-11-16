@@ -435,3 +435,15 @@ plan's §10 shape, and it is append-only.
   a run id would collide on one capsule path unless capsule identity is derived from the writer too, and the
   `recovery.done.<STEP>` resumability markers are keyed on it. That is a ticket, not a patch at the end of a session.
 
+- **defect 48 — the repair tests hashed `\n` and wrote `\r\n`, so the applier's own guard failed them on Windows.**
+  Run 43916957036 (5663879) fixed the symlink-root refusal and the Windows cells still failed, on
+  `test_the_right_token_applies_exactly_the_approved_bytes_and_keeps_a_backup` and two neighbours, with
+  *"src/app.py changed after it was approved (reviewed b912ea56, now f9c84e02)"*. Nothing had changed: `Path.write_text`
+  opens in text mode and translates `0x0A` to `0x0D 0x0A` on Windows, while the fixture's `_sha(text)` hashed the
+  untranslated string. The product was right — a file whose bytes differ from the reviewed hash is exactly what the
+  write-time re-check exists to refuse — and the fixture was the thing that was wrong, on the platform where nobody had
+  run it. **Fix**: every fixture write goes through `_write()` (`write_bytes`), `_change()` hashes `read_bytes()`, and the
+  tree snapshot compares hex bytes rather than text, so a CRLF difference can no longer hide inside `read_text`'s
+  translation on either side. This is the third defect in this family (C29, D-050, and now the tests): text mode on
+  Windows is not a detail of this feature, it is a way for a byte-exact guarantee to be silently untrue.
+
