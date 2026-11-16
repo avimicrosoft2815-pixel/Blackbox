@@ -6,7 +6,7 @@
     "bench/results/*.json"
   ],
   "next_ticket": "P3B-03",
-  "next_note": "P4-10 (viewer), P4-17 (read-only diagnosis + repair brief) and P4-11 (loopback `blackbox serve`) are done; P4-18 (a proposal/approval applier) is open and must not be folded into P4-17. Next: P3B-03's node acceptance (`blackbox run -- node app.js` with linked nodes) \u2014 no Node exists in this sandbox, so it stays unverified until a machine runs it; then P0-03 (nightly) and the interruption lab. Every Windows/macOS claim names a CI run id; the macOS cells have had no runner since 2026-11-16T13:00Z and are recorded as unmeasured.",
+  "next_note": "The diagnosis surface is complete end to end: P4-17 (read-only evidence + report + brief), P4-19 (the interruption lab, real kills) and P4-18 (the approval gate that applies a proposal someone else wrote). Next: P3B-03's node acceptance (`blackbox run -- node app.js` with linked nodes) \u2014 no Node in this sandbox, so it stays unverified; then P0-03 (nightly) and P4-12/P4-13 (format freeze and export parts). Every Windows/macOS claim names a CI run id; the macOS cells have had no runner since 2026-11-16T13:00Z and are recorded as unmeasured.",
   "last_green_commit": "724f1b4",
   "last_green_commit_note": "Run 43888826452 (724f1b4, P4-17 diagnosis) is the first run where **all three Windows cells pass**: py3.11, py3.12 and py3.13 on windows-latest are green, as are the three ubuntu cells and the docs job \u2014 seven of ten jobs. The run's own conclusion is still `failure`, because the three macOS jobs were `cancelled` with no runner assigned and GitHub counts a cancelled job as a failure; `last_green_commit` below therefore names a commit whose Windows and Linux cells are green and whose macOS cells never ran. That closes defect 43: the POSIX-only kill expectation and the cmd.exe redirect were fixed in 1009576, and the second round (exit 15 is the signal number on Windows; a quoted redirect does not survive list2cmdline) in 724f1b4. Run 43889007689 (283554f) repeats the same pattern: 7 success, 3 cancelled. **macOS is unmeasured in both runs**; the last macOS evidence remains 43880930567, where py3.11/macos passed the whole suite (including ADR-006's per-sample rebind assertion) and the other two macOS cells never ran. Earlier failing runs kept for the record: 43885473662 and 43882470350 (Windows), 43880930567 (Windows), 43878083615 (no runner at all).",
   "gates": {
@@ -135,6 +135,7 @@
         "P4-10",
         "P4-11",
         "P4-17",
+        "P4-18",
         "P4-19"
       ],
       "wip": [],
@@ -152,8 +153,7 @@
         "P4-13",
         "P4-14",
         "P4-15",
-        "P4-16",
-        "P4-18"
+        "P4-16"
       ]
     },
     "L5": {

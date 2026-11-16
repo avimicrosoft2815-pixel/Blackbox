@@ -177,10 +177,15 @@ S: dict[str, tuple[str, str, str, str, str, str]] = {
     "P3B-08": ('**done**', 'HEAD', 'tests/proxy/ (15), tests/test_proxy_server.py (18), tests/test_proxy_routes.py (10), bench/bench_proxy.py',
                'bench/results/2026-11-15-proxy.json', 'self',
                'the four §15.1 rows are measured with origin, proxy and client in three separate processes: added latency p50 0.165 / p99 0.471 ms, first-byte p50 0.184 ms, 200 concurrent streams with 0 errors, RSS growth 0.0 MiB at 50 req/s; S16 (`SIGKILL` mid-stream → `INTERRUPTED_PROXY`, no terminal frame), both disconnect classes on a real tape, header stripping, the allowlist, and the curl/Node/openai-SDK client matrix; the ten cells are green in run 43767064900'),
-    "P4-18": ("todo", "—", "—", "—", "—",
-              "not started, and not to be folded into P4-17: an applier needs its own approval gate (path restriction, "
-              "change detection against the reviewed bytes, rollback) before it may write anything. Until then the "
-              "brief is a document a human applies, and the product says so in its own text"),
+    "P4-18": ("done", "HEAD", "tests/test_repair_workflow.py (22)", "—", "self",
+              "`blackbox repair preview|apply|verify`: the product still writes no patch — it reviews and applies the "
+              "proposal a human or agent wrote. Preview prints exact paths, a unified diff, named risk notes, the "
+              "suggested tests labelled as not-run, and the scope, and writes nothing. Apply requires a token bound to "
+              "the proposal bytes, the repository root and every target's reviewed hash; a file edited after the "
+              "preview or a proposal edited after approval aborts with the tree unchanged, and the message names the "
+              "file that moved. No `..`, no absolute path, no symlink in any component, no deletion; writes are atomic, "
+              "mode-preserving, backed up and rolled back on failure. Verify runs only the commands a human passes and "
+              "reports their real exit codes; with none it exits 3 and says the change is unverified"),
     "P4-19": ("done", "HEAD", "tests/test_interruption_lab.py (18)",
               "bench/results/2026-11-16-interruption-lab.json", "self",
               "six real children, one per interruption class, killed with a real signal and recovered for real: every "

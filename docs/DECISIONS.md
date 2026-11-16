@@ -704,3 +704,42 @@ must fetch its own data, which means the offline single-file property is lost fo
 drift. (b) Auto-opening a browser: `webbrowser` is on the forbidden-import list, opening a browser is a side effect a
 caller did not ask for, and printing the URL is enough. (c) Serving on a fixed port: an ephemeral one avoids colliding
 with whatever the user already runs, and the URL is printed anyway.
+
+## D-049 — the applier exists, and it applies *your* proposal, not its own (2026-11-16, P4-18)
+
+**Context.** D-047 shipped the diagnosis without an applier and recorded why: a tool that both finds the problem and
+edits the code has an incentive to find something to edit. The addendum still wants the second half of the workflow —
+"show exact paths, before/after diff, risk, expected tests, scope; apply only after fresh explicit approval". Those two
+positions are only in conflict if the applier has to author the patch.
+
+**Decision.** It does not. `blackbox repair` reviews and applies a **proposal written by a human or an agent**, and the
+product contributes only the gate. `diagnose` keeps producing evidence and a brief that names no file (D-047); the
+proposal is where a `path:line` comes from, and it comes from someone with the code in front of them.
+
+**The gate, in the order it refuses.**
+
+1. **`preview` writes nothing** and prints what a reviewer needs: exact paths with the current hash, a unified diff, risk
+   notes, the suggested tests *labelled as not run*, and the scope in files/lines/directories.
+2. **The approval token is bound to state, not to intent.** It hashes the proposal's bytes, the repository root, and the
+   reviewed hash of every target. `apply` recomputes it from the *current* tree, so a file that moved after the preview,
+   or a proposal edited after approval, is refused before a byte is written — and the message names the file that moved.
+3. **Paths cannot escape**: relative only, no `..`, no absolute, no symlink in any component, resolved inside the repo,
+   parent directory must already exist. Deletion is not in the format, because a proposal that can delete has a failure
+   mode the proposal cannot undo.
+4. **Writes are atomic and reversible**: temp file + `os.replace`, mode preserved, originals copied to
+   `.blackbox-repair/backup-<time>-<token>/`, and any failure restores every file already written and removes the ones it
+   created. A half-applied repair is worse than none.
+5. **Nothing from the proposal is executed.** Its `tests` list is displayed as a suggestion. `verify --test CMD` runs
+   only commands a human typed at that moment, reports each exit code and output tail, and says in the report that the
+   suggested tests were *not* executed. With no commands it exits 3 and calls the change unverified.
+
+**Consequences.** `repair` is a separate command from `diagnose`, in a separate package, and the diagnosis package still
+has no write path at all (its AST test is unchanged). A proposal is a file, so it can be reviewed, diffed, committed to a
+ticket and thrown away — and a rejected one costs nothing.
+
+**Rejected.** (a) Generating a proposal from the brief: the brief has no locations, so the generator would invent them —
+the exact failure D-047 forbids. (b) A `--yes` flag on `apply` that skips the token: an approval that is not bound to
+state is a confirmation dialog, not a decision. (c) Running the proposal's tests automatically: the tests come from the
+same untrusted document as the patch, and "run whatever the evidence says" is how a traced string becomes a command.
+(d) Auto-commit after apply: the diff and the tests are the reviewer's evidence, and a commit message written by the
+tool would claim a verification it did not perform.

@@ -34,6 +34,7 @@ same table, so a code in a log line always has a next step attached to it.
 | `BBX-E224` | sealed segment does not match its footer | quarantine the segment; do not delete it |
 | `BBX-E225` | frame is larger than one segment | externalise the payload or raise segment_bytes |
 | `BBX-E230` | diagnosis: nothing readable to diagnose | pass a .bbx capsule or a data dir that holds one |
+| `BBX-E231` | repair proposal refused; nothing was written | read `blackbox repair preview` and fix the proposal |
 | `BBX-E310` | requested window exceeds max_attached shards | narrow the range or read capsules |
 | `BBX-E330` | index schema newer than this binary | upgrade, or run `blackbox index --rebuild` |
 | `BBX-E401` | capsule too large | raise capsule_max_bytes or split the run |
@@ -55,4 +56,4 @@ same table, so a code in a log line always has a next step attached to it.
 | `BBX-E601` | serverless: /tmp not writable | set data_dir to a writable path |
 | `BBX-E602` | serverless: recovered a previous invocation's run | expected; the capsule path was handed to on_capsule |
 
-49 codes.
+50 codes.
