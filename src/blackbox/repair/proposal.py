@@ -72,6 +72,9 @@ class Proposal:
     suggested_tests: list[str]
     changes: list[Change] = field(default_factory=list)
     raw: bytes = b""
+    #: The repository root this proposal was resolved against, as a real path. It is part of the token and of every
+    #: write-time re-check, so it cannot be inferred later from the proposal file's own location.
+    repo: str = ""
 
     # ── the two numbers that gate everything ─────────────────────────────────────────────────────────────────────────
     def token(self) -> str:
@@ -84,7 +87,7 @@ class Proposal:
         material = {
             "schema": SCHEMA,
             "proposal": hashlib.sha256(self.raw).hexdigest(),
-            "repo": os.path.realpath(os.path.dirname(self.path)),
+            "repo": self.repo or os.path.realpath(os.path.dirname(self.path)),
             "targets": [[c.absolute, c.expected_sha256, c.current_sha256,
                          hashlib.sha256(c.content.encode("utf-8")).hexdigest()] for c in self.changes],
         }
@@ -202,7 +205,7 @@ def load(proposal_path: str, *, repo: str) -> Proposal:
         raise ProposalError("risk must be a list of strings")
     return Proposal(path=proposal_path, title=str(document.get("title") or "(untitled)"),
                     rationale=str(document.get("rationale") or ""), risk=list(risk),
-                    suggested_tests=list(tests), changes=changes, raw=raw)
+                    suggested_tests=list(tests), changes=changes, raw=raw, repo=os.path.realpath(repo))
 
 
 def _imports_process_or_network(content: str) -> bool:

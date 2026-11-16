@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 
 from blackbox.repair.apply import apply as apply_proposal
@@ -64,7 +65,13 @@ def _preview(args: argparse.Namespace) -> int:
 
 
 def _apply(args: argparse.Namespace) -> int:
-    proposal = load(args.proposal, repo=args.repo)
+    # `load` is inside the guard: a proposal whose paths have moved is refused at read time as well as at write time,
+    # and a refusal must be exit 2 with a message, never a traceback a caller has to parse.
+    try:
+        proposal = load(args.proposal, repo=args.repo)
+    except ProposalError as exc:
+        print(f"blackbox repair: {exc}", file=sys.stderr)
+        return 2
     if not args.approve:
         print("refusing to apply without --approve <token>; run `blackbox repair preview` first", file=sys.stderr)
         print(f"the token for the current state is {proposal.token()} — but read the preview before using it",
@@ -86,6 +93,14 @@ def _apply(args: argparse.Namespace) -> int:
 
 def _verify(args: argparse.Namespace) -> int:
     commands = args.test or []
+    if commands:
+        # Said before anything runs, because this is the one command in this product that executes user-supplied text.
+        print(f"Executing {len(commands)} command(s) through the platform shell in {os.path.abspath(args.repo)}:")
+        for command in commands:
+            print(f"  $ {command}")
+        print("These run with your privileges: they can change anything you can. Nothing from the proposal is executed —")
+        print("only the commands above, which you supplied on this command line.")
+        print()
     report = verify_change(commands, cwd=args.repo)
     for row in report["ran"]:
         state = "PASS" if row["exit_code"] == 0 else "FAIL"
@@ -100,14 +115,19 @@ def _verify(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(prog="blackbox repair",
-                                 description="Review and apply a repair proposal written by a human or an agent.")
+    ap = argparse.ArgumentParser(
+        prog="blackbox repair",
+        description="Review and apply a repair proposal written by a human or an agent.",
+        epilog="`preview` and `apply` execute nothing. `verify --test CMD` DOES execute CMD: it runs through the "
+               "platform shell in --repo, as you, and prints each command before running it. The proposal's own `tests` "
+               "list is only ever displayed.")
     ap.add_argument("action", choices=("preview", "apply", "verify"), help="what to do with the proposal")
     ap.add_argument("proposal", help="path to a proposal JSON file")
     ap.add_argument("--repo", default=".", help="repository root the proposal's paths are relative to (default: .)")
     ap.add_argument("--approve", metavar="TOKEN", help="the token `preview` printed; required by `apply`")
     ap.add_argument("--test", action="append", metavar="CMD",
-                    help="a command to run for `verify` (repeatable). Only commands given here are ever executed")
+                    help="a command to RUN for `verify` (repeatable). It is executed through the platform shell in "
+                         "`--repo`, with your privileges; nothing from the proposal is ever executed")
     ap.add_argument("--json", action="store_true", help="print the preview's machine-readable summary")
     args = ap.parse_args(argv)
     if args.action == "preview":

@@ -743,3 +743,60 @@ state is a confirmation dialog, not a decision. (c) Running the proposal's tests
 same untrusted document as the patch, and "run whatever the evidence says" is how a traced string becomes a command.
 (d) Auto-commit after apply: the diff and the tests are the reviewer's evidence, and a commit message written by the
 tool would claim a verification it did not perform.
+
+## D-050 — the applier's guarantees are write-time, and two of them are weaker on Windows (2026-11-16, P4-18)
+
+**Context.** D-049 shipped the gate: a token bound to the reviewed state, atomic per-file writes, a rollback. Then the
+gate was attacked in the way it would actually be attacked — not by a user typing nonsense, but by the tree moving
+underneath it. Every check in D-049 happened while the proposal was being *read*. Between that read and the write there
+is a window, and the thing on the other side of the window is a file nobody reviewed: swap the target for a symlink to
+`~/.ssh/authorized_keys`, or replace the parent directory with a link, and a reader-time check is a check of a file that
+no longer exists. Four questions had no answer, and a fifth turned out not to be a question about Unix at all.
+
+**Decided.**
+
+1. **Every check that matters runs again per file, immediately before that file's write.** Still inside the repository
+   (by `realpath`, not by string prefix), no link at the target or its parent, still the reviewed hash, and the bytes
+   are read back and compared after the write. A swap in the window is refused at the moment it matters.
+2. **Descriptors never follow a link**, and originals are read that way too: `O_NOFOLLOW` on the read, `O_CREAT|O_EXCL|
+   O_NOFOLLOW` on the temporary, `os.replace` to rename *over* the target rather than through it.
+3. **A manifest is written before the first mutation.** `apply-manifest.json` records the planned paths, their approved
+   hashes and the backup directory, then flips to `applied` or `rolled_back`. A process killed mid-apply cannot roll
+   back — there was no chance — but it can be audited, and "the tree is in an unknown state" is then a claim with
+   evidence rather than a guess.
+4. **Rollback does not use the mechanism that failed.** Restores take their own plain truncating write with retries, run
+   in reverse order, attempt *every* file instead of stopping at the first that will not come back, and the error names
+   the files still wrong and says manual intervention is required. A rollback that reports success while a file is still
+   wrong is the worst outcome available to this feature, worse than an apply that refuses to start.
+5. **Backups live inside the repository**, at `<repo>/.blackbox-repair/backup-<UTC>-<token8>/`, mode `0700`, refused if
+   it or any parent is a symlink, and every copy is re-hashed after it is written. Inside, because the alternative —
+   `/tmp` or a cache directory — puts the only copy of the user's file somewhere that may not exist tomorrow, may be on
+   another filesystem, and is readable by other accounts on a shared machine. `0700` because these are the user's source
+   files in plain text. The cost is that a repair leaves a directory in the tree, which is why the manifest is in it and
+   the path is in every message.
+
+**The Windows limit, stated rather than closed.** `O_NOFOLLOW` does not exist there (`os.O_NOFOLLOW` is absent and the
+constant here is 0), so point 2 holds only through the `islink` checks of point 1. On Windows the guarantee is therefore
+*check-then-write*, and a swap landing inside that window is not detected. Closing it means opening by handle with
+`FILE_FLAG_OPEN_REPARSE_POINT` and writing through that handle, which is a different implementation of `_atomic_write`
+per platform. Not done, and P4-18 does not claim otherwise.
+
+**The fifth question was not about links at all.** Guard C29 in `tests/test_platform_dispatch.py` exists because a bare
+`os.open` yields a **text-mode** descriptor on Windows, and the first revision of this file used three of them — for the
+read, the temporary, and the restore. That is not a style violation on this path: the file being read is the one that is
+hashed for approval and copied into the backup, so a translated read makes the approved hash unreachable (the apply
+refuses a file nobody touched), and a translated restore silently rewrites every line ending in the file it just put
+back. All three now go through `platform().open_fd`, which sets `O_BINARY`, and two tests hold a CRLF-and-NUL file to a
+byte-for-byte comparison across both the apply and the rollback. The guard was right and the code was wrong.
+
+**`verify --test` executes the command.** Worth recording because the wording had drifted: "verifies the change" reads
+like a check, and the command a user passes is run through the platform shell, in their repository, with their
+privileges. The banner, the `--help` text and the epilog now say *executes*, and a test asserts the warning is printed
+before the command's output rather than after it — an announcement made afterwards is a receipt, not a warning.
+
+**Rejected.** (a) Silencing C29 for `repair/` with a `noqa`: the guard was describing a real corruption. (b) Treating
+the `O_RDONLY` exemption in C29 as covering the read path: that exemption is for directory handles used for `fsync`,
+which are never written through, and `_read_nofollow` reads content. (c) A best-effort rollback that raises on the first
+failure: it loses the information about which other files are still wrong, which is the only thing the user needs.
+(d) Storing backups outside the repo as the default: cheaper to write, and it makes the one artifact a rollback depends
+on the least durable thing in the system.

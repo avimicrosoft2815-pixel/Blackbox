@@ -118,7 +118,9 @@ def test_the_right_token_applies_exactly_the_approved_bytes_and_keeps_a_backup(t
     token = load(str(proposal_path), repo=str(repo)).token()
     assert repair_main(["apply", str(proposal_path), "--repo", str(repo), "--approve", token]) == 0
     assert (repo / "src" / "app.py").read_text(encoding="utf-8") == fixed
-    backups = list((tmp_path / ".blackbox-repair").rglob("00-app.py"))
+    # Backups live inside the repository, not beside the proposal: the proposal may be a file in /tmp, and a backup is a
+    # copy of the user's source, so it belongs where they can find it and where the permissions are theirs.
+    backups = list((repo / ".blackbox-repair").rglob("00-app.py"))
     assert backups and "RuntimeError" in backups[0].read_text(encoding="utf-8")
     assert "unverified" in capsys.readouterr().out
 
@@ -265,7 +267,7 @@ def test_verify_runs_the_command_a_human_gave_and_reports_the_exit_code(tmp_path
                         "--test", f'"{python}" -c "print(42)"']) == 0
     out = capsys.readouterr().out
     assert "PASS  exit   0" in out and "42" in out
-    assert "these are the commands that ran" in out
+    assert "these commands ran in this process" in out and "through the platform shell" in out
     assert repair_main(["verify", str(proposal), "--repo", str(repo),
                         "--test", f'"{python}" -c "import sys; sys.exit(7)"']) == 3
     assert "FAIL  exit   7" in capsys.readouterr().out
@@ -296,3 +298,305 @@ def test_risk_notes_are_named_for_the_things_a_reviewer_should_notice(tmp_path):
     assert any("CI configuration" in note for note in notes)
     assert any("creates a file" in note for note in notes)
     assert any("process or network module" in note for note in notes)
+
+
+# ── time-of-check / time-of-use: the tree can move between preview and write ─────────────────────────────────────
+def test_a_target_replaced_by_a_symlink_after_approval_is_refused_and_the_outside_file_survives(tmp_path):
+    """The interesting attack: approve a real file, then point that path at something else before the write."""
+    repo = _repo(tmp_path)
+    outside = tmp_path / "outside.txt"
+    outside.write_text("do not touch\n", encoding="utf-8")
+    proposal_path = _proposal(tmp_path, repo, [_change(repo, "src/app.py", "def handler():\n    return 1\n")])
+    token = load(str(proposal_path), repo=str(repo)).token()
+    (repo / "src" / "app.py").unlink()
+    os.symlink(outside, repo / "src" / "app.py")
+    before = outside.read_text(encoding="utf-8")
+    assert repair_main(["apply", str(proposal_path), "--repo", str(repo), "--approve", token]) == 2
+    assert outside.read_text(encoding="utf-8") == before, "a symlink must never be written through"
+    assert os.path.islink(repo / "src" / "app.py"), "and the link the attack installed is not silently removed either"
+
+
+def test_a_parent_directory_replaced_by_a_symlink_after_approval_is_refused(tmp_path):
+    repo = _repo(tmp_path)
+    (tmp_path / "elsewhere").mkdir()
+    proposal_path = _proposal(tmp_path, repo, [_change(repo, "src/app.py", "def handler():\n    return 1\n")])
+    token = load(str(proposal_path), repo=str(repo)).token()
+    (repo / "src" / "app.py").unlink()
+    (repo / "src").rmdir()
+    os.symlink(tmp_path / "elsewhere", repo / "src")
+    assert repair_main(["apply", str(proposal_path), "--repo", str(repo), "--approve", token]) == 2
+    assert not (tmp_path / "elsewhere" / "app.py").exists()
+
+
+def test_the_last_check_runs_immediately_before_each_write_not_only_at_load(tmp_path, monkeypatch):
+    """Inject the swap *during* the apply, after `_prepare` has approved the tree: the per-file re-check must catch it."""
+    repo = _repo(tmp_path)
+    blocker = tmp_path / "blocker.txt"
+    blocker.write_text("untouched\n", encoding="utf-8")
+    changes = [_change(repo, "src/app.py", "def handler():\n    return 1\n"),
+               {"path": "src/second.py", "expected_sha256": None, "content": "y = 2\n"}]
+    proposal_path = _proposal(tmp_path, repo, changes)
+    proposal = load(str(proposal_path), repo=str(repo))
+    real_assert = apply_mod._assert_safe_target
+    state = {"calls": 0}
+
+    def swap_on_second_call(path, *, repo_real):
+        state["calls"] += 1
+        if state["calls"] == 3:                       # prepare (1-2), then the pre-write check of the first file
+            os.unlink(path)
+            os.symlink(blocker, path)
+        return real_assert(path, repo_real=repo_real)
+
+    monkeypatch.setattr(apply_mod, "_assert_safe_target", swap_on_second_call)
+    with pytest.raises(ProposalError):
+        apply_proposal(proposal, approval=proposal.token())
+    assert blocker.read_text(encoding="utf-8") == "untouched\n"
+
+
+def test_reading_an_original_does_not_follow_a_link(tmp_path):
+    """`_read_nofollow` is the mechanism behind the check, so it is tested on its own."""
+    target = tmp_path / "real.txt"
+    target.write_text("bytes\n", encoding="utf-8")
+    link = tmp_path / "link.txt"
+    os.symlink(target, link)
+    assert apply_mod._read_nofollow(str(target)) == b"bytes\n"
+    with pytest.raises(OSError):
+        apply_mod._read_nofollow(str(link))
+
+
+# ── backups: inside the repository, private, and verified before the write ───────────────────────────────────────
+def test_the_backup_directory_is_inside_the_repository_and_private(tmp_path):
+    repo = _repo(tmp_path)
+    proposal_path = _proposal(tmp_path, repo, [_change(repo, "src/app.py", "def handler():\n    return 1\n")])
+    token = load(str(proposal_path), repo=str(repo)).token()
+    result = apply_proposal(load(str(proposal_path), repo=str(repo)), approval=token)
+    root = repo / ".blackbox-repair"
+    assert result.backup_dir and result.backup_dir.startswith(str(root))
+    assert (os.stat(root).st_mode & 0o777) == 0o700, "backups are the user's source code in plain text"
+    assert (os.stat(result.backup_dir).st_mode & 0o777) == 0o700
+    assert "RuntimeError" in (Path(result.backup_dir) / "00-app.py").read_text(encoding="utf-8")
+
+
+def test_a_symlinked_backup_root_is_refused(tmp_path):
+    repo = _repo(tmp_path)
+    (tmp_path / "elsewhere").mkdir()
+    os.symlink(tmp_path / "elsewhere", repo / ".blackbox-repair")
+    proposal_path = _proposal(tmp_path, repo, [_change(repo, "src/app.py", "def handler():\n    return 1\n")])
+    proposal = load(str(proposal_path), repo=str(repo))
+    with pytest.raises(ProposalError) as caught:
+        apply_proposal(proposal, approval=proposal.token())
+    assert "symlink" in str(caught.value)
+    assert not (tmp_path / "elsewhere" / "backup").exists()
+    assert "RuntimeError" in (repo / "src" / "app.py").read_text(encoding="utf-8"), "nothing was written"
+
+
+def test_a_backup_that_does_not_verify_stops_the_apply_before_the_write(tmp_path, monkeypatch):
+    """A backup that silently failed is worse than none: the rollback would restore the wrong bytes."""
+    repo = _repo(tmp_path)
+    proposal_path = _proposal(tmp_path, repo, [_change(repo, "src/app.py", "def handler():\n    return 1\n")])
+    proposal = load(str(proposal_path), repo=str(repo))
+    before = _snapshot(repo)
+    real_write = apply_mod._atomic_write
+
+    def corrupt_backup(path, data, mode):
+        if ".blackbox-repair" in path:
+            return real_write(path, b"not the original", mode)
+        return real_write(path, data, mode)
+
+    monkeypatch.setattr(apply_mod, "_atomic_write", corrupt_backup)
+    with pytest.raises(ProposalError) as caught:
+        apply_proposal(proposal, approval=proposal.token())
+    assert "did not verify" in str(caught.value)
+    assert _snapshot(repo) == before, "the original is untouched when its backup cannot be trusted"
+
+
+def test_a_manifest_is_written_before_the_first_mutation_and_finalised_after(tmp_path):
+    import json as _json
+
+    repo = _repo(tmp_path)
+    proposal_path = _proposal(tmp_path, repo, [_change(repo, "src/app.py", "def handler():\n    return 1\n")])
+    proposal = load(str(proposal_path), repo=str(repo))
+    result = apply_proposal(proposal, approval=proposal.token())
+    manifest = _json.loads(Path(result.manifest).read_text(encoding="utf-8"))
+    assert manifest["state"] == "applied"
+    assert manifest["token"] == proposal.token()
+    assert manifest["changes"][0]["path"] == "src/app.py"
+    assert manifest["changes"][0]["approved_sha256"] and manifest["changes"][0]["new_sha256"]
+
+
+def test_the_manifest_says_rolled_back_when_the_apply_fails(tmp_path, monkeypatch):
+    import json as _json
+
+    repo = _repo(tmp_path)
+    changes = [_change(repo, "src/app.py", "def handler():\n    return 1\n"),
+               {"path": "src/second.py", "expected_sha256": None, "content": "y = 2\n"}]
+    proposal = load(str(_proposal(tmp_path, repo, changes)), repo=str(repo))
+    real_write = apply_mod._atomic_write
+    calls = {"n": 0}
+
+    def fail_late(path, data, mode):
+        calls["n"] += 1
+        if calls["n"] == 3:                 # manifest, backup, then the first content write
+            raise OSError("injected")
+        return real_write(path, data, mode)
+
+    monkeypatch.setattr(apply_mod, "_atomic_write", fail_late)
+    with pytest.raises(ProposalError):
+        apply_proposal(proposal, approval=proposal.token())
+    manifests = list((repo / ".blackbox-repair").rglob("apply-manifest.json"))
+    assert manifests, "the audit record survives the failure"
+    assert _json.loads(manifests[0].read_text(encoding="utf-8"))["state"] == "rolled_back"
+
+
+# ── rollback under hostile failure: every file attempted, failures named ─────────────────────────────────────────
+def test_rollback_attempts_every_file_and_names_the_one_it_could_not_restore(tmp_path, monkeypatch):
+    repo = _repo(tmp_path)
+    (repo / "src" / "b.py").write_text("b = 2\n", encoding="utf-8")
+    changes = [_change(repo, "src/app.py", "def handler():\n    return 1\n"),
+               _change(repo, "src/b.py", "b = 3\n")]
+    proposal = load(str(_proposal(tmp_path, repo, changes)), repo=str(repo))
+    before = _snapshot(repo)
+    real_write, real_restore = apply_mod._atomic_write, apply_mod._restore_plain
+    calls = {"n": 0}
+
+    def fail_second_content(path, data, mode):
+        if path.endswith("b.py"):
+            calls["n"] += 1
+            raise OSError("injected write failure")
+        return real_write(path, data, mode)
+
+    def restore_but_fail_one(path, data, mode, **kwargs):
+        if path.endswith("app.py"):
+            raise OSError("injected restore failure")
+        return real_restore(path, data, mode, **kwargs)
+
+    monkeypatch.setattr(apply_mod, "_atomic_write", fail_second_content)
+    monkeypatch.setattr(apply_mod, "_restore_plain", restore_but_fail_one)
+    with pytest.raises(ProposalError) as caught:
+        apply_proposal(proposal, approval=proposal.token())
+    message = str(caught.value)
+    assert "COULD NOT restore" in message and "app.py" in message, "a rollback that lies is worse than one that fails"
+    assert "manual intervention required" in message
+    # b.py was never modified, so it is untouched; app.py could not be restored and the message says exactly that.
+    assert (repo / "src" / "b.py").read_text(encoding="utf-8") == before["src/b.py"]
+
+
+def test_a_keyboard_interrupt_mid_apply_still_rolls_back(tmp_path, monkeypatch):
+    repo = _repo(tmp_path)
+    changes = [_change(repo, "src/app.py", "def handler():\n    return 1\n"),
+               {"path": "src/second.py", "expected_sha256": None, "content": "y = 2\n"}]
+    proposal = load(str(_proposal(tmp_path, repo, changes)), repo=str(repo))
+    before = _snapshot(repo)
+    real_write = apply_mod._atomic_write
+    calls = {"n": 0}
+
+    def interrupt_second(path, data, mode):
+        calls["n"] += 1
+        if path.endswith("second.py"):
+            raise KeyboardInterrupt
+        return real_write(path, data, mode)
+
+    monkeypatch.setattr(apply_mod, "_atomic_write", interrupt_second)
+    with pytest.raises(ProposalError):
+        apply_proposal(proposal, approval=proposal.token())
+    assert _snapshot(repo) == before
+
+
+def test_applying_the_same_proposal_twice_is_refused_the_second_time(tmp_path):
+    repo = _repo(tmp_path)
+    proposal_path = _proposal(tmp_path, repo, [_change(repo, "src/app.py", "def handler():\n    return 1\n")])
+    first = load(str(proposal_path), repo=str(repo))
+    apply_proposal(first, approval=first.token())
+    second = load(str(proposal_path), repo=str(repo))
+    with pytest.raises(ProposalError):
+        apply_proposal(second, approval=first.token())
+    assert (repo / "src" / "app.py").read_text(encoding="utf-8") == "def handler():\n    return 1\n"
+
+
+# ── verify executes what it is given: say so, and prove it ───────────────────────────────────────────────────────
+def test_verify_reports_that_it_executes_the_command_it_was_given(tmp_path, capsys):
+    repo = _repo(tmp_path)
+    proposal = _proposal(tmp_path, repo, [_change(repo, "src/app.py", "def handler():\n    return 1\n")])
+    marker = tmp_path / "executed.txt"
+    code = repair_main(["verify", str(proposal), "--repo", str(repo), "--test", f"echo ran > '{marker}'"])
+    out = capsys.readouterr().out
+    assert code == 0
+    assert marker.exists(), "--test executes the command; that is the feature, and the report now says so"
+    assert "through the platform shell" in out
+    assert "these commands ran in this process" in out
+    report = verify([f"echo again >> '{marker}'"], cwd=str(repo))
+    assert report["executes"] is True and report["ran"][0]["shell"] is True
+    assert report["ran"][0]["cwd"] == str(repo)
+    assert len(marker.read_text(encoding="utf-8").splitlines()) == 2
+
+
+def test_the_banner_comes_before_anything_runs(tmp_path, capsys):
+    """A message printed after the command is a receipt, not a warning. Order is part of the contract here."""
+    repo = _repo(tmp_path)
+    proposal = _proposal(tmp_path, repo, [_change(repo, "src/app.py", "def handler():\n    return 1\n")])
+    marker = tmp_path / "ordered.txt"
+    code = repair_main(["verify", str(proposal), "--repo", str(repo), "--test", f"echo run >> '{marker}'"])
+    out = capsys.readouterr().out
+    assert code == 0
+    banner = out.index("Executing 1 command(s)")
+    result = out.index("PASS")
+    assert banner < result, "the warning about execution has to precede the execution"
+    assert "$ echo run" in out
+    assert "These run with your privileges" in out
+
+
+def test_the_help_text_says_that_verify_executes_the_command(capsys):
+    with pytest.raises(SystemExit) as caught:
+        repair_main(["--help"])
+    assert caught.value.code == 0
+    help_text = capsys.readouterr().out
+    assert "DOES execute CMD" in help_text
+    assert "executed through the platform shell" in help_text
+    assert "proposal's own `tests` list is only ever displayed" in help_text
+
+
+# ── bytes are bytes: no newline translation in, and none out ───────────────────────────────────────────────────────
+def test_a_file_with_crlf_and_nul_is_written_back_byte_for_byte(tmp_path):
+    """C29 on the repair path.
+
+    `os.open` without `O_BINARY` gives a *text* descriptor on Windows, which rewrites `0x0A` going in and coming out.
+    For an applier that is not a portability nicety: the file being read is the one hashed for approval and copied
+    into the backup, so a translated read makes the approved hash unreachable (the apply would refuse a file nobody
+    touched), and a translated write silently changes every line ending in the file it "restored". The CRLF source
+    below makes the *read* half of that assertion too: if the hash came from a translated read, this apply aborts.
+    """
+    repo = _repo(tmp_path)
+    original = b"one\r\ntwo\r\nthree\x00\r\n"
+    (repo / "src" / "app.py").write_bytes(original)
+    replacement = "one\r\nTWO\r\nthree\x00\r\n"
+    change = {"path": "src/app.py", "expected_sha256": hashlib.sha256(original).hexdigest(), "content": replacement}
+    proposal = load(str(_proposal(tmp_path, repo, [change])), repo=str(repo))
+
+    apply_proposal(proposal, approval=proposal.token())
+
+    assert (repo / "src" / "app.py").read_bytes() == replacement.encode("utf-8")
+    backup = next((repo / ".blackbox-repair").rglob("*app.py"))      # backups are numbered: 00-app.py
+    assert backup.read_bytes() == original, "the backup holds the bytes that were there, not a translated copy"
+
+
+def test_a_rollback_puts_the_exact_original_bytes_back(tmp_path, monkeypatch):
+    repo = _repo(tmp_path)
+    original = b"alpha\r\nbeta\r\n\x00end"
+    (repo / "src" / "app.py").write_bytes(original)
+    changes = [{"path": "src/app.py", "expected_sha256": hashlib.sha256(original).hexdigest(),
+                "content": "alpha\r\nGAMMA\r\n"},
+               {"path": "src/second.py", "expected_sha256": None, "content": "y = 2\n"}]
+    proposal = load(str(_proposal(tmp_path, repo, changes)), repo=str(repo))
+    real_write = apply_mod._atomic_write
+    calls = {"n": 0}
+
+    def fail_late(path, data, mode):
+        calls["n"] += 1
+        if calls["n"] == 3:
+            raise OSError("injected")
+        return real_write(path, data, mode)
+
+    monkeypatch.setattr(apply_mod, "_atomic_write", fail_late)
+    with pytest.raises(ProposalError):
+        apply_proposal(proposal, approval=proposal.token())
+    assert (repo / "src" / "app.py").read_bytes() == original
