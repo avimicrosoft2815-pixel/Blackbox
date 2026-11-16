@@ -1,8 +1,11 @@
 # BlackBox build status — 2026-11-16 — trunk `c3782a2` — gates: **G-Promise pass** (built and self-reviewed at `af908bc`, independently counter-signed at `fdb3875`; see `docs/gates/G-Promise.md`), G-Capture, G-Attach, G-Capsule, G-Sec, G-Release not yet opened
 
-**Branch** `arena/1c9b4b15-blackbox` · **base** `c3782a2` (PR #15 merged) · CI at the newest commit GitHub has seen,
-`c3782a2`: run `43769259576`, ten jobs, ten `success`. A row for this branch's own HEAD appears here once a run of it
-has finished; until then this file does not claim one. Before it `6a8a742` (`43749402312`) was ten of ten — the first green run
+**Branch** `arena/1c9b4b15-blackbox` · **base** `c3782a2` (PR #15 merged) · CI at `ec4bd00`: run `43870366644`,
+**nine of ten `success` and one still queued** when this line was written — `py3.11 / macos-latest` and
+`py3.13 / macos-latest` are green, which is the cell that read 107.9 ms in defect 40 now passing the per-sample
+watchdog gate, while `py3.12 / macos-latest` had not been picked up by a runner yet. Before it `853fa5e`
+(`43868190667`) had seven `success` and three **cancelled** macOS jobs: not a product failure, GitHub cancelled the
+queued cells when the newer push superseded the run. Before this branch, `c3782a2` (`43769259576`) was ten of ten. Before it `6a8a742` (`43749402312`) was ten of ten — the first green run
 containing the hook path — and two of the runs between were nine of ten for reasons that were not the product:
 `4f285ed` (`43749014701`, three Windows cells, defect 37: a POSIX path join in a new test) and `c411a53`
 (`43750531880`, one macOS cell, defect 38: a byte-bound test a 100 ms coalesce window could answer). `ac25b4a`
