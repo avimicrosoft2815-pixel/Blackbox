@@ -404,3 +404,11 @@ def test_evidence_is_read_only_after_load(tmp_path: Path) -> None:
     build(evidence).markdown()
     after = dataclasses.asdict(evidence)
     assert before == after
+
+
+def test_the_brief_points_at_the_sanctioned_repair_path_and_calls_itself_unverified(tmp_path: Path) -> None:
+    """The brief has no locations, so it cannot be a patch; it must say what the approved route is instead."""
+    brief = build(load(_clean(tmp_path))).brief()
+    assert "This brief is not a patch and cannot become one" in brief
+    assert "blackbox repair preview" in brief and "--approve" in brief and "blackbox repair verify" in brief
+    assert "Nothing in this brief counts as a verification" in brief
