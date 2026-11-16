@@ -561,3 +561,73 @@ joined by `links.json`**, which is where §11.10 puts a relation, and `merges_ru
 interrupted" table). Every clean run therefore reported `nodes: 0` while its `graph.json` listed the nodes. The plan's
 own example manifest has `"nodes": 44` for a run that finished. Fixed: `counts.nodes` counts `NODE_OPEN` slots, and the
 interrupted count moved to `counts.nodes_interrupted`, where it can be read for what it is (defect 41).
+
+## D-045 — the viewer is one offline file, black and gold, and every capsule value reaches the DOM as text
+
+*Date: 2026-11-16. Plan refs: §13.5 (viewer), P4-10, P4-11. Built: `src/blackbox/ui/` + `blackbox view`. Tests:
+`tests/test_ui_viewer.py` (17).*
+
+**One file, opened from disk.** P4-10 says "no framework, no CDN" and the product constraints say "offline, no egress".
+A static document is the only shape that satisfies both *by construction*: there is no port, no token, no CORS policy,
+and no request that could be made by accident. `blackbox view <capsule>` writes `viewer.html` beside the capsule (or
+`viewer.html` inside a data directory) with the stylesheet, the script and the capsule's summary **inlined**. The tests
+assert it from the built page rather than from the template: no `http://`, no `<link>`, no `fetch(`, and every
+`href`/`src` in the document is a fragment.
+
+**The theme is black and gold glass, and "readable" is a number.** The panels are translucent over a
+near-black ground with gold radial glows behind them, `backdrop-filter` blur, 1px gold hairline borders, and one
+opaque `--panel-solid` behind everything so contrast does not depend on what is behind the glass. The suite computes
+WCAG ratios from the stylesheet's **own** colour tokens — body text ≥ 4.5:1, secondary ≥ 4.5:1, gold and status
+accents ≥ 4.5:1 — so a later "prettier" palette fails a test instead of shipping. `prefers-contrast: more` raises the
+muted tokens and removes the translucency.
+
+**Motion is opt-in.** One `prefers-reduced-motion: reduce` block neutralises transitions, animations and smooth
+scrolling, and the script reads the same media query before asking for `behavior: "smooth"`, so a keyboard user who
+asked for less motion does not get a scrolling animation from a page that "handled" the CSS query.
+
+**The keyboard is the primary interface, not a fallback.** The timeline is a flat row list with `role="treeitem"`,
+`aria-selected`, `aria-level` and `aria-expanded`; `↑`/`↓` move, `→`/`Enter` expand, `←` collapses, `Home`/`End` jump,
+`/` filters, `?` opens the shortcut dialog, `Esc` closes it or clears the filter. Roving `tabindex` keeps the tab order
+at one element, there is a skip link, and focus is always visible (`:focus-visible`, 2px, gold).
+
+**The rule that matters for security: capsule data never reaches the DOM as markup.** `app.js` contains no
+`innerHTML`, `outerHTML`, `insertAdjacentHTML` or `document.write` — the test greps for all four — and every value is
+written with `textContent`. The JSON payload escapes `<` to `\u003c`, so a prompt containing `</script><script>` is
+characters in a data block, not script. The XSS corpus (six payloads, including `</script>`, `<img onerror=…>`,
+`javascript:` and a `\u2028`) survives a build → parse round-trip unchanged.
+
+**What the page refuses to invent.** A capsule that fails its own integrity root is a red banner and a `problems` list,
+not a timeline; a torn tail names `lost_from_seq`; a node with no close frame is shown as "never (the process ended
+first)" with a note that the viewer will not claim an outcome the tape does not contain; an empty data directory is a
+`BBX-E220` error rather than a blank page that looks like a clean run. And the tape shown first is the one with the
+most events — on `blackbox run -- python app.py` that is the child's SDK tape, not the launcher's five-frame boundary,
+because a page that opened on the boundary would look like a run in which nothing happened.
+
+**Not built, and not claimed**: P4-11's loopback server with a fragment token. The static file makes a server
+unnecessary for the primary path; the server is for re-rendering from disk on demand, and it is on the P4 remainder list
+rather than half-present here.
+
+## D-046 — the ticket ledger is generated, so a status that lives only in the file is a status waiting to be lost
+
+*Date: 2026-11-16. Plan refs: A1 (the ledger must not drift), `tools/gen_progress.py`, `docs/progress.md`,
+`docs/STATE.json`. Test: `tests/test_state_consistency.py::test_state_and_progress_agree_in_both_directions`.*
+
+**What happened.** `docs/progress.md` is generated from the plan's ticket table by `tools/gen_progress.py`, and the
+statuses come from a dict `S` inside that script. Six finished rows — P3B-04, -05, -06, -08, -09 and the wip P3B-07 —
+had been written straight into the generated file at some point and never into `S`. Everything agreed, because nothing
+regenerated the file. Adding P4-10 to `S` and running the generator reverted all six to **todo**: the file was correct
+and the source of truth was empty.
+
+**How it was caught, which is the useful part.** `test_state_and_progress_agree_in_both_directions` compares the ticks
+in both ledgers and failed immediately with *"done in STATE but not ticked in progress.md: P3B-04, P3B-05, P3B-06,
+P3B-08, P3B-09"*. The guard existed and worked; what it proved is that the *generator* is the place a status must live.
+
+**The repair.** The six (now nine, including the three P3B rows that were legitimately todo) rows are in `S`, with the
+statuses, commits, tests, measurements and notes copied verbatim from the previous file by a script rather than retyped,
+and a comment in `S` says why they are there. The generator's ticket filter now includes `P4-`, so the viewer rows are
+in the ledger instead of being absent from it while `STATE.json` listed them — the same class of drift, in the
+direction of silence.
+
+**The rule that follows**: a row's status is edited in `tools/gen_progress.py` and regenerated, never in
+`docs/progress.md`. A hand-edit of the generated file is a change that survives until the next regeneration, which is
+exactly the kind of "works until it doesn't" that this repository keeps finding and writing down.

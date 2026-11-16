@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="generator" content="blackbox">
+<!-- The one rule this file is built on: it opens from disk with no network. No CDN, no font URL, no fetch(). The
+     stylesheet and the script below were inlined by `blackbox view`; the data is one JSON block in this document. -->
+<title>BlackBox · evidence viewer</title>
+<!--BBX_CSS-->
+</head>
+<body>
+<a class="skip-link" href="#timeline">Skip to the timeline</a>
+
+<header class="topbar" role="banner">
+  <div class="brand" aria-hidden="true"><span class="mark"></span><span>BLACKBOX</span></div>
+  <div class="runline">
+    <h1 id="run-id" class="run-id">run</h1>
+    <span id="run-status" class="pill">—</span>
+    <span id="run-coverage" class="pill pill-quiet">—</span>
+  </div>
+  <div class="top-actions">
+    <button id="btn-help" class="ghost" type="button" aria-haspopup="dialog">Keys <kbd>?</kbd></button>
+  </div>
+</header>
+
+<div id="evidence-banner" class="banner" role="status" aria-live="polite" hidden>
+  <strong id="banner-title">Evidence boundary</strong>
+  <span id="banner-text"></span>
+</div>
+
+<div class="layout">
+  <nav class="rail glass" aria-label="Tapes in this run">
+    <h2 class="rail-title">Tapes</h2>
+    <ul id="tapes" class="tapes"></ul>
+    <h2 class="rail-title">Links</h2>
+    <ul id="links" class="links"></ul>
+  </nav>
+
+  <main id="timeline" class="glass" tabindex="-1" aria-label="Timeline">
+    <div class="toolbar">
+      <label class="search">
+        <span class="visually-hidden">Filter events</span>
+        <input id="filter" type="search" placeholder="Filter events  ( / )" autocomplete="off" spellcheck="false">
+      </label>
+      <div class="legend" aria-hidden="true">
+        <span class="dot dot-node"></span> node
+        <span class="dot dot-model"></span> model
+        <span class="dot dot-tool"></span> tool
+        <span class="dot dot-mark"></span> mark
+      </div>
+    </div>
+    <div id="tree" class="tree" role="tree" aria-label="Events, grouped by node" aria-live="polite"></div>
+    <p id="empty" class="empty" hidden>Nothing matches that filter.</p>
+  </main>
+
+  <aside class="inspector glass" aria-label="Inspector">
+    <h2 class="rail-title">Inspector</h2>
+    <div id="inspector">
+      <p class="muted">Select a row with <kbd>↑</kbd> <kbd>↓</kbd>, or click it. <kbd>Enter</kbd> opens a node.</p>
+    </div>
+  </aside>
+</div>
+
+<footer class="costbar glass" aria-label="Counts">
+  <dl id="cost"></dl>
+  <p id="boundary" class="boundary muted"></p>
+</footer>
+
+<dialog id="help" aria-labelledby="help-title">
+  <h2 id="help-title">Keyboard</h2>
+  <dl class="keys">
+    <dt><kbd>↑</kbd> <kbd>↓</kbd></dt><dd>Move between rows</dd>
+    <dt><kbd>←</kbd> <kbd>→</kbd></dt><dd>Collapse or expand the selected node</dd>
+    <dt><kbd>Enter</kbd></dt><dd>Open the selected node</dd>
+    <dt><kbd>Home</kbd> <kbd>End</kbd></dt><dd>First or last row</dd>
+    <dt><kbd>/</kbd></dt><dd>Filter the timeline</dd>
+    <dt><kbd>Esc</kbd></dt><dd>Close this dialog, or clear the filter</dd>
+    <dt><kbd>?</kbd></dt><dd>This list</dd>
+  </dl>
+  <form method="dialog"><button class="ghost" type="submit">Close</button></form>
+</dialog>
+
+<noscript>
+  <p class="banner">This viewer needs JavaScript because the capsule is rendered from the data block in this file.
+  Nothing is fetched: the data is already here, and <code>blackbox show</code> prints the same run as text.</p>
+</noscript>
+
+<script type="application/json" id="bbx-data"><!--BBX_DATA--></script>
+<!--BBX_JS-->
+</body>
+</html>

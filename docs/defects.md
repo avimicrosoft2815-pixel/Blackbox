@@ -330,3 +330,18 @@ plan's §10 shape, and it is append-only.
   capsule reports its node, and `tests/test_recovery.py` still asserts the interrupted table on the runs that have one.
   *Found by*: measuring P3B-03's "one run with linked nodes" rather than assuming it — the capsule was the thing being
   read at the time, and the zero was next to a `graph.json` that said otherwise.
+
+- **defect 42 — six finished ticket rows existed only in the generated ledger, and one regeneration reverted them.**
+  `docs/progress.md` is written by `tools/gen_progress.py` from the plan plus a dict of statuses in that script. P3B-04,
+  -05, -06, -08, -09 (done) and P3B-07 (wip) had been edited straight into the markdown at some point and never added to
+  the dict. Nothing noticed, because nothing regenerated the file — until P4-10's row was added and the generator ran,
+  at which point six finished tickets became `todo` in the ledger while `STATE.json` still had them done.
+  *Cause*: two sources of truth for one field, with the weaker one (a generated file) holding the real value.
+  *Caught by*: `tests/test_state_consistency.py::test_state_and_progress_agree_in_both_directions`, on the first
+  regeneration after the drift — the guard was already there and did its job.
+  *Fix*: the rows are in `tools/gen_progress.py`'s status map, copied from the previous file by a script rather than
+  retyped, and the generator's ticket filter now includes `P4-` so the viewer rows appear in the ledger at all
+  (they were silently absent while `STATE.json` listed them). D-046 records the rule: a status is edited in the
+  generator and regenerated, never in the file it generates.
+  *Test*: the consistency test above, plus a regenerated `docs/progress.md` in this commit whose diff is the P4 rows and
+  the restored P3B rows and nothing else.

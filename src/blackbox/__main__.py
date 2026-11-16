@@ -18,8 +18,9 @@ def main(argv: list[str] | None = None) -> int:
                     version=f"blackbox {__version__} (format v{C.FORMAT_VERSION})")
     ap.add_argument("command", nargs="?", default="status",
                     help="`status` prints the build line; `run -- cmd` runs a command under the recorder; "
-                         "`link <a> <b>` declares that two tapes describe one run; `ingest` is the command a "
-                         "coding agent's hook runs; `hook install|remove|status` manages the hook adapters")
+                         "`view <capsule>` writes one offline HTML page; `link <a> <b>` declares that two tapes "
+                         "describe one run; `ingest` is the command a coding agent's hook runs; "
+                         "`hook install|remove|status` manages the hook adapters")
     args, rest = ap.parse_known_args(argv)
     if args.command == "run":
         from blackbox.rec.launcher import main as run_main
@@ -30,15 +31,19 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "hook":
         from blackbox.cli.hook import main as hook_main
         return hook_main(rest)
+    if args.command == "view":
+        from blackbox.ui.viewer import main as view_main
+        return view_main(rest)
     if args.command == "link":
         from blackbox.cli.link import main as link_main
         return link_main(rest)
     if args.command == "status":
-        print(f"blackbox {__version__}: pre-alpha, storage and recovery layer only; "
-              f"no SDK, proxy or viewer yet.  Tape format v{C.FORMAT_VERSION}.")
+        print(f"blackbox {__version__}: pre-alpha. Storage, recovery, the capture seams, the loopback proxy, the "
+              f"launcher's attach and the offline viewer are built; the diagnosis workflow is not.  "
+              f"Tape format v{C.FORMAT_VERSION}.")
         print("See docs/STATUS.md for what is green, what is pending and what is not testable here.")
         return 0
-    print(f"unknown command {args.command!r}; this build implements --version, status, run, link, ingest and hook",
+    print(f"unknown command {args.command!r}; this build implements --version, status, run, view, link, ingest and hook",
           file=sys.stderr)
     return 2
 
