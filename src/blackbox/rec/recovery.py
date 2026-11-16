@@ -192,6 +192,24 @@ def classify_nodes(frames: list[dict[str, Any]], *, now_wall_ns: int | None = No
     return out
 
 
+def node_count(frames: list[dict[str, Any]]) -> int:
+    """How many nodes the run *had*, which is not how many are still open.
+
+    `classify_nodes` returns only the **unclosed** nodes, because its job is the §14.4 question ("what was interrupted,
+    and what may have happened"). The capsule's `counts.nodes` is the other question — the plan's example manifest says
+    `"nodes": 44` for a run whose nodes all finished — and it was being filled from the interrupted list, so every
+    clean run reported `nodes: 0` while its `graph.json` listed the nodes one directory away. Slot 0 is the run itself,
+    not a node.
+    """
+    slots: set[int] = set()
+    for f in frames:
+        if f["kind"] == C.KIND_NODE_OPEN:
+            slot = int(f.get("node_slot") or 0)
+            if slot:
+                slots.add(slot)
+    return len(slots)
+
+
 def run_status(frames: list[dict[str, Any]], *, sealed: bool) -> tuple[str, str | None]:
     """`(status, status_cause)` for the run itself: `SEAL_INTERRUPTED` when the run ended but was never sealed."""
     has_end = any(f["kind"] == C.KIND_RUN_END for f in frames)
@@ -453,8 +471,8 @@ class Recovery:
             "capture": {"coverage": "PARTIAL" if scan.truncated_tail else "FULL", "providers": []},
             "redaction": {"profile_id": "none", "content_mode": "full", "masks": 0, "failures": 0},
             "gaps": scan.gaps,
-            "counts": {"events": scan.frame_count, "nodes": len(self.result.node_statuses),
-                       "segments": len(entries)},
+            "counts": {"events": scan.frame_count, "nodes": node_count(scan.frames),
+                       "nodes_interrupted": len(self.result.node_statuses), "segments": len(entries)},
         }
         chain: dict[str, object] = {"chain_root": None, "per_segment": {}}
         for f in scan.frames:

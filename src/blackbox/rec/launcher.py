@@ -15,15 +15,27 @@ Three promises, and each one is a test in `tests/test_launcher.py`:
   not a separate command the user has to remember.
 
 The launcher never raises into the child's exit path: a failure to recover is reported, and the exit code still wins.
+
+**The Python auto-import (§11.9 step 4)** is the other half of "universal attach": a Python child gets a temporary
+directory on its `PYTHONPATH` holding a `sitecustomize.py`, which `site` imports before `__main__`, so `install()`
+happens without the application importing anything. (The plan calls this "a `.pth` in a temp site dir"; a `.pth` on
+`PYTHONPATH` is never read — measured, see `cap_sdk/autoimport.py` — so the mechanism is `sitecustomize`, the same one
+`opentelemetry-instrument` uses.) Two properties are load-bearing and are tested by name: the directory is **temporary**
+(created per run, deleted when the child exits — nothing is written into `site-packages` or a user's `~/.local/lib`), and
+it is **only** added for a Python command, because a `sitecustomize` on a shell child's `PYTHONPATH` is a file nothing
+reads and a variable nobody asked for.
 """
 from __future__ import annotations
 
 import contextlib
 import json
 import os
+import re
+import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from dataclasses import dataclass, field
@@ -57,8 +69,10 @@ class RunResult:
     dump_path: str | None = None
     writer_uuid: str = ""
     recovered: dict[str, Any] = field(default_factory=dict)
+    capsules: list[dict[str, Any]] = field(default_factory=list)   # P3B-03: every tape of this run, with its role
     recovery_error: str | None = None
     proxy: dict[str, Any] = field(default_factory=dict)      # P3B-03: url, port, exports, adopted, rebinds
+    sdk: dict[str, Any] = field(default_factory=dict)        # P3B-03: the temp .pth, what it is, whether it was used
     hooks: dict[str, Any] = field(default_factory=dict)      # P3B-07: inbox, tape, events, frames, quarantined
 
     def as_dict(self) -> dict[str, Any]:
@@ -269,7 +283,8 @@ def launch(argv: list[str], *, data_dir: str | None = None, stall_ms: int = 5_00
            env: dict[str, str] | None = None, out: IO[str] | None = None, recover: bool = True,
            run_id: str | None = None, proxy: bool = False, proxy_routes: Any = None,
            proxy_port: int = 0, proxy_receiver: Any = None,
-           proxy_retry_transmitted: bool = False) -> RunResult:
+           proxy_retry_transmitted: bool = False, proxy_force: bool = False,
+           sdk: bool = True, hooks: bool = True) -> RunResult:
     """Run `argv` under the recorder, watch for a stall, then recover the tape that the child left behind."""
     if not argv:
         raise ValueError("launch() needs a command")
@@ -287,15 +302,28 @@ def launch(argv: list[str], *, data_dir: str | None = None, stall_ms: int = 5_00
     child_env["BLACKBOX_HOME"] = data_dir
     child_env["BLACKBOX_STALL_MS"] = str(stall_ms)
     # A hook runs in the child's environment, so this is what tells `blackbox ingest` where *this* run's inbox is —
-    # and therefore which tape the events will be folded into (P3B-07).
-    child_env["BLACKBOX_INBOX"] = os.path.join(data_dir, "inbox")
+    # and therefore which tape the events will be folded into (P3B-07). `--no-hooks` removes the variable rather than
+    # leaving it and ignoring the files: a hook that still writes an inbox nobody folds is a directory that grows.
+    inbox_dir = os.path.join(data_dir, "inbox")
+    if hooks:
+        child_env["BLACKBOX_INBOX"] = inbox_dir
     # ---- the proxy (P3B-03): started before the child, because the child's environment names its port ----------
     proxy_thread, proxy_plan = (None, None)
     if proxy:
         proxy_thread, proxy_plan = _start_proxy(child_env, proxy_routes, proxy_port, proxy_receiver,
-                                                retry_transmitted=proxy_retry_transmitted)
+                                                retry_transmitted=proxy_retry_transmitted, force=proxy_force)
         child_env.update(proxy_plan.exports)
         child_env["BLACKBOX_PROXY_URL"] = proxy_thread.url
+        # Forcing is never silent: every variable the flag took away is named, with the value it had, because the
+        # user's next question is "which of my settings did this change".
+        if proxy_plan.overridden and out:
+            for var, was in sorted(proxy_plan.overridden.items()):
+                print(f"blackbox: --force-proxy points {var} at the proxy (was {was}); the run's traffic is recorded",
+                      file=out)
+    # ---- the Python auto-import (P3B-03): a temporary .pth, removed when the child exits --------------------------
+    sdk_record: dict[str, Any] = {"enabled": False, "reason": "--no-sdk" if not sdk else "not a Python command"}
+    if sdk:
+        sdk_record = _install_sdk(child_env, argv, out)
 
     writer.emit(C.KIND_RUN_START, cbor.encode({"run_id": run_id, "argv": list(argv), "pid": None,
                                                "stall_ms": stall_ms}))
@@ -303,17 +331,20 @@ def launch(argv: list[str], *, data_dir: str | None = None, stall_ms: int = 5_00
     started = time.monotonic()
     # no shell: argv is the caller's list, and nothing here is built from a string
     folder = _InboxFolder(data_dir, run_id, out)
-    folder.start()
+    if hooks:
+        folder.start()
     try:
         child = subprocess.Popen(argv, env=child_env)  # noqa: S603
     except BaseException:                      # a command that does not exist must not leave a listener behind
         if proxy_thread is not None:
             proxy_thread.stop()
+        cleanup_sdk(sdk_record)
         folder.close()
         keeper.stop()
         writer.close()
         raise
     result = RunResult(run_id=run_id, argv=list(argv), pid=child.pid, exit_code=0, stall_ms=stall_ms)
+    result.sdk = sdk_record
     watch = _Watch(data_dir, child.pid, stall_ms, out).start()
     try:
         raw = child.wait()
@@ -333,6 +364,7 @@ def launch(argv: list[str], *, data_dir: str | None = None, stall_ms: int = 5_00
                 "port": proxy_thread.port,
                 "exports": dict(sorted(proxy_plan.exports.items())),
                 "adopted": dict(sorted(proxy_plan.adopted.items())),
+                "overridden": dict(sorted(proxy_plan.overridden.items())),
                 "rebinds": list(proxy_thread.rebinds),
                 "retry_transmitted": proxy_thread.retry_transmitted,
                 "port_changed": proxy_thread.port_changed,
@@ -341,8 +373,12 @@ def launch(argv: list[str], *, data_dir: str | None = None, stall_ms: int = 5_00
         finally:
             proxy_thread.stop()
     try:
+        cleanup_sdk(sdk_record)              # the child is gone; the temporary site dir goes with it
         folder.close()                       # the last hook events of a session belong inside the run
         result.hooks = folder.summary()
+        if not hooks:
+            result.hooks = {"inbox": None, "tape": None, "events": 0, "frames": 0, "quarantined": [], "errors": [],
+                            "enabled": False, "reason": "--no-hooks"}
         writer.emit(C.KIND_RUN_END, cbor.encode({"run_id": run_id, "exit_code": result.exit_code,
                                                  "signaled": result.signaled, "stalled": watch.stalled,
                                                  "duration_ms": int(result.duration_s * 1000)}))
@@ -357,10 +393,17 @@ def launch(argv: list[str], *, data_dir: str | None = None, stall_ms: int = 5_00
     result.writer_uuid = writer.writer_uuid.hex()
     if recover:
         try:
-            rec = recovery.recover(data_dir, writer.writer_uuid.hex())
-            result.recovered = {"run_id": rec.run_id, "capsule_path": rec.capsule_path,
-                                "capsule_root": rec.capsule_root, "run_status": rec.run_status,
-                                "state": rec.state, "steps": rec.steps_run}
+            primary = writer.writer_uuid.hex()
+            capsules = _recover_run(data_dir, run_id, primary)
+            result.capsules = capsules
+            first = next((c for c in capsules if c["writer_uuid"] == primary), None)
+            if first is not None and "error" not in first:
+                result.recovered = {"run_id": first["run_id"], "capsule_path": first["capsule_path"],
+                                    "capsule_root": first["capsule_root"], "run_status": first["run_status"],
+                                    "state": first["state"], "capsules": len(capsules),
+                                    "roles": [c["role"] for c in capsules]}
+            elif capsules and "error" in capsules[0]:
+                result.recovery_error = capsules[0]["error"]
         except Exception as exc:                           # recovery is a report, never an exit-code change
             result.recovery_error = f"{type(exc).__name__}: {exc}"
     if out:
@@ -368,8 +411,162 @@ def launch(argv: list[str], *, data_dir: str | None = None, stall_ms: int = 5_00
     return result
 
 
+_PYTHON_NAME = re.compile(r"^python(\d+(\.\d+)*)?([a-z]*)?$")
+
+
+def _is_python_command(argv: list[str]) -> tuple[bool, str]:
+    """Is this child a Python interpreter, and why? No guessing from a shebang: the *resolved* name is the fact.
+
+    `argv[0]` is looked up through `PATH` exactly as `Popen` will look it up, then compared by base name — `python`,
+    `python3`, `python3.11`, a virtualenv's `python`, a `pythonw`. A `.py` file is not a Python command in this sense
+    (it may well be run by something else); the interpreter is.
+    """
+    name = argv[0] if argv else ""
+    resolved = shutil.which(name) or name
+    base = os.path.basename(resolved).lower()
+    if base.endswith(".exe"):
+        base = base[:-4]
+    return (bool(_PYTHON_NAME.match(base)), resolved)
+
+
+def _package_root() -> str | None:
+    """The directory that has `blackbox/` inside it, so the child's interpreter can import us at all."""
+    try:
+        import blackbox
+
+        return os.path.dirname(os.path.dirname(os.path.abspath(blackbox.__file__)))
+    except Exception:                                       # pragma: no cover - the launcher itself imported it
+        return None
+
+
+def _tape_run_id(data_dir: str, writer_uuid: str) -> str | None:
+    """The run id a tape names in its own `RUN_START`, or `None` when it has none (or cannot be read)."""
+    from blackbox.tape import scanner
+
+    try:
+        scan = scanner.scan(data_dir, writer_uuid)
+    except Exception:
+        return None
+    for frame in scan.frames:
+        if frame.get("kind") != C.KIND_RUN_START:
+            continue
+        try:
+            body = cbor.decode_exact(frame.get("payload") or b"")
+        except Exception:
+            continue
+        name = body.get("run_id") if isinstance(body, dict) else None
+        return name if isinstance(name, str) and name else None
+    return None
+
+
+def _tape_role(data_dir: str, writer_uuid: str) -> str:
+    """What a tape is, for the summary line: the SDK says so itself, the launcher's own has an `argv`."""
+    from blackbox.tape import scanner
+
+    try:
+        scan = scanner.scan(data_dir, writer_uuid)
+    except Exception:
+        return "unknown"
+    for frame in scan.frames:
+        if frame.get("kind") != C.KIND_RUN_START:
+            continue
+        try:
+            body = cbor.decode_exact(frame.get("payload") or b"")
+        except Exception:
+            return "unknown"
+        if not isinstance(body, dict):
+            return "unknown"
+        if body.get("source") == "sdk":
+            return "sdk"
+        if body.get("vantage") == "hook":
+            return "hook"
+        return "launcher"
+    return "launcher"
+
+
+def _recover_run(data_dir: str, run_id: str, primary: str) -> list[dict[str, Any]]:
+    """Recover **every** tape of this run (§11.9 step 6), the primary first, and report each one.
+
+    One `blackbox run` is not one tape: the launcher writes its own boundary, a Python child's SDK writes a second,
+    and the hook inbox a third. Recovering only the launcher's tape is why the child's frames were in no capsule at
+    all, and it is the difference between "the run was recovered" and "the run was recovered, minus the part that did
+    the work". Each tape keeps its own capsule (identity is per tape, `recovery.Recovery.run_id`), and the capsules
+    are joined by `links.json`, which is where §11.10 puts a relation rather than in a tape.
+    """
+    try:
+        entries = discover.discover(data_dir)
+    except OSError:
+        entries = []
+    order = [primary] + [e.writer_uuid for e in entries if e.writer_uuid != primary]
+    out: list[dict[str, Any]] = []
+    for writer_uuid in order:
+        if writer_uuid not in {e.writer_uuid for e in entries} and writer_uuid != primary:
+            continue
+        named = _tape_run_id(data_dir, writer_uuid)
+        if writer_uuid != primary and named != run_id:
+            continue                      # a tape from another run in the same data directory
+        role = _tape_role(data_dir, writer_uuid)
+        try:
+            rec = recovery.recover(data_dir, writer_uuid)
+        except Exception as exc:          # a tape that cannot be recovered is reported, not fatal
+            out.append({"writer_uuid": writer_uuid, "role": role, "error": f"{type(exc).__name__}: {exc}"})
+            continue
+        out.append({"writer_uuid": writer_uuid, "role": role, "run_id": rec.run_id,
+                    "capsule_path": rec.capsule_path, "capsule_root": rec.capsule_root,
+                    "run_status": rec.run_status, "state": rec.state, "linked_run_id": named})
+    return out
+
+
+def _install_sdk(env: dict[str, str], argv: list[str], out: IO[str] | None) -> dict[str, Any]:
+    """Prepend a temporary `.pth` site dir to the child's `PYTHONPATH`; return the record of what was done.
+
+    The directory holds one file, `blackbox-autoload.pth`, whose single line is an `import`. `site` executes it during
+    start-up, so the capture layer is installed before the application's first statement and the application's code
+    is untouched. The caller is responsible for `cleanup_sdk()` — the launcher does it in a `finally`, so a child that
+    is killed still leaves no directory behind.
+    """
+    from blackbox.cap_sdk import autoimport
+
+    is_python, resolved = _is_python_command(argv)
+    record: dict[str, Any] = {"enabled": False, "reason": "", "interpreter": resolved,
+                              "is_python": is_python, "site_dir": None,
+                              "mechanism": autoimport.MECHANISM, "file": autoimport.SITECUSTOMIZE_NAME}
+    if not is_python:
+        record["reason"] = "not a Python command"
+        return record
+    root = _package_root()
+    if root is None:                                        # pragma: no cover
+        record["reason"] = "the blackbox package could not be located"
+        return record
+    try:
+        site_dir = tempfile.mkdtemp(prefix="blackbox-sdk-")
+        with open(os.path.join(site_dir, autoimport.SITECUSTOMIZE_NAME), "w", encoding="utf-8") as fh:
+            fh.write(autoimport.SITECUSTOMIZE_BODY)
+    except OSError as exc:
+        record["reason"] = f"{type(exc).__name__}: {exc}"
+        return record
+    existing = env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = os.pathsep.join([site_dir, root] + ([existing] if existing else []))
+    env[autoimport.ENV_SDK] = "1"                          # the child may set it to 0 to opt out; --no-sdk is ours
+    record.update({"enabled": True, "reason": "temporary sitecustomize on PYTHONPATH", "site_dir": site_dir,
+                   "package_root": root})
+    if out:
+        print(f"blackbox: python child gets a temporary sitecustomize ({site_dir}); removed when it exits", file=out)
+    return record
+
+
+def cleanup_sdk(record: dict[str, Any]) -> None:
+    """Remove the temporary site dir. Idempotent, quiet, and never raises into an exit path."""
+    site_dir = record.get("site_dir")
+    if site_dir:
+        shutil.rmtree(site_dir, ignore_errors=True)
+        # `site_dir` is kept in the record on purpose: "where it was, and that it is gone" is checkable afterwards,
+        # while nulling it would leave a test only the launcher's word that a directory ever existed.
+        record["removed"] = True
+
+
 def _start_proxy(env: dict[str, str], routes: Any = None, port: int = 0, receiver: Any = None,
-                 *, retry_transmitted: bool = False) -> tuple[Any, Any]:
+                 *, retry_transmitted: bool = False, force: bool = False) -> tuple[Any, Any]:
     """Build the table from the plan, start the listener, and return it with the plan that names its port (P3B-03).
 
     The plan is made **before** the listener exists because the table depends on it (a base URL the user already set
@@ -379,12 +576,12 @@ def _start_proxy(env: dict[str, str], routes: Any = None, port: int = 0, receive
     from blackbox.proxy.supervisor import BASE_URL_VARS, ProxyThread, plan_exports
 
     wanted = tuple(name for _var, name in BASE_URL_VARS)
-    plan = plan_exports(env)
+    plan = plan_exports(env, force=force)
     table = routes or Routes.provider_defaults(names=wanted, default=plan.default_route or "openai")
     if plan.routes:
         table = table.extended(plan.routes, default=table.default or plan.default_route)
     thread = ProxyThread(table, receiver=receiver, port=port, retry_transmitted=retry_transmitted).start()
-    return thread, plan_exports(env, thread.url)
+    return thread, plan_exports(env, thread.url, force=force)
 
 
 def _summary_line(result: RunResult) -> str:
@@ -392,6 +589,10 @@ def _summary_line(result: RunResult) -> str:
     if result.proxy:
         bits.append(f"proxy {result.proxy['url']} ({len(result.proxy['exports'])} vars exported"
                     + (f", {len(result.proxy['adopted'])} adopted" if result.proxy["adopted"] else "") + ")")
+    if result.sdk and result.sdk.get("enabled"):
+        bits.append("sdk auto-import (sitecustomize)")
+    if result.hooks and result.hooks.get("enabled") is False:
+        bits.append("hooks off (--no-hooks)")
     if result.hooks and result.hooks.get("tape"):
         bits.append(f"hooks {result.hooks['events']} events ({result.hooks['frames']} frames) → tape "
                     f"{str(result.hooks['tape'])[:8]}"
@@ -401,8 +602,11 @@ def _summary_line(result: RunResult) -> str:
     if result.stalled:
         bits.append(f"STALLED (no commit for {result.stall_ms} ms)")
     if result.recovered:
+        more = len(result.capsules) - 1
         bits.append(f"recovered {result.recovered.get('run_id')} → {result.recovered.get('capsule_path')} "
-                    f"({result.recovered.get('run_status')}, root {str(result.recovered.get('capsule_root'))[:12]})")
+                    f"({result.recovered.get('run_status')}, root {str(result.recovered.get('capsule_root'))[:12]})"
+                    + (f" and {more} more tape{'s' if more != 1 else ''} "
+                       f"({', '.join(c['role'] for c in result.capsules[1:])})" if more > 0 else ""))
     elif result.recovery_error:
         bits.append(f"recovery failed: {result.recovery_error}")
     return "blackbox: " + " · ".join(bits)
@@ -426,6 +630,13 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--data-dir", default=None)
     ap.add_argument("--no-recover", action="store_true")
     ap.add_argument("--no-proxy", action="store_true", help="do not start the loopback proxy (P3B-03)")
+    ap.add_argument("--force-proxy", action="store_true",
+                    help="point every base-URL variable at the proxy even where the user already set one; each "
+                         "variable it displaces is named on stderr and in the run result")
+    ap.add_argument("--no-sdk", action="store_true",
+                    help="do not add the temporary .pth auto-import for a Python child")
+    ap.add_argument("--no-hooks", action="store_true",
+                    help="do not export BLACKBOX_INBOX and do not fold a hook inbox for this run")
     ap.add_argument("--proxy-port", type=int, default=0)
     ap.add_argument("--proxy-retry-transmitted", action="store_true",
                     help="retry GET/HEAD/OPTIONS once when the upstream dies after the request was sent; some "
@@ -447,7 +658,8 @@ def main(argv: list[str]) -> int:
         routes = Routes.from_specs(args.upstream, unverified=tuple(args.insecure_upstream), default=None)
     result = launch(cmd, data_dir=args.data_dir, stall_ms=args.stall_ms, out=sys.stderr,
                     recover=not args.no_recover, proxy=not args.no_proxy, proxy_routes=routes,
-                    proxy_port=args.proxy_port, proxy_retry_transmitted=args.proxy_retry_transmitted)
+                    proxy_port=args.proxy_port, proxy_retry_transmitted=args.proxy_retry_transmitted,
+                    proxy_force=args.force_proxy, sdk=not args.no_sdk, hooks=not args.no_hooks)
     return result.exit_code
 
 

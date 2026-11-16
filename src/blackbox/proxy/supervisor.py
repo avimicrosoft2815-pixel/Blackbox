@@ -66,6 +66,9 @@ class ExportPlan:
     exports: dict[str, str] = field(default_factory=dict)        # filled by `with_url()`, once the port exists
     point: dict[str, str] = field(default_factory=dict)          # variable → the route it should be pointed at
     adopted: dict[str, str] = field(default_factory=dict)        # variable → the upstream it already named
+    # `--force-proxy` took a value away from the child and pointed it at the listener instead. Kept separately from
+    # `adopted` because it is the one case where the recorder *did* move traffic, so the surface has to say so by name.
+    overridden: dict[str, str] = field(default_factory=dict)     # variable → the value it had
     routes: list[Route] = field(default_factory=list)
     default_route: str | None = None
 
@@ -78,18 +81,32 @@ class ExportPlan:
 
     def as_dict(self) -> dict[str, Any]:
         return {"exports": dict(sorted(self.exports.items())), "point": dict(sorted(self.point.items())),
-                "adopted": dict(sorted(self.adopted.items())),
+                "adopted": dict(sorted(self.adopted.items())), "overridden": dict(sorted(self.overridden.items())),
                 "upstreams": [route.name for route in self.routes], "default_route": self.default_route}
 
 
-def plan_exports(env: dict[str, str], proxy_url: str | None = None) -> ExportPlan:
+def plan_exports(env: dict[str, str], proxy_url: str | None = None, *, force: bool = False) -> ExportPlan:
     """Union the child's variables with the proxy's routes, without ever overwriting the child's own value.
 
     Called with no `proxy_url` it decides *what to point where* (`plan.point`), which is what the launcher needs
     before it can start a listener; `plan.with_url(url)` fills in the values afterwards. Called with a URL it does
     both, which is what the tests and any caller that already has a port want.
+
+    `force=True` is `--force-proxy`, and it means exactly one thing: **this run goes through the listener**, including
+    a variable the user had already pointed somewhere. It is not a quiet default — the value that was displaced is
+    returned in `plan.overridden` so the CLI can name it on stderr and the capsule can record it, because a recorder
+    that moves traffic without saying which variable it moved is the failure mode the whole design avoids.
     """
     plan = ExportPlan()
+    if force:
+        for var, name in BASE_URL_VARS:
+            value = (env.get(var) or "").strip()
+            if value:
+                plan.overridden[var] = value
+            plan.point[var] = name
+        pointed = [name for var, name in BASE_URL_VARS if var in plan.point]
+        plan.default_route = "openai" if "openai" in pointed else (pointed[0] if pointed else None)
+        return plan.with_url(proxy_url) if proxy_url is not None else replace(plan, exports={})
     adopted: list[Route] = []
     for var, name in BASE_URL_VARS:
         value = (env.get(var) or "").strip()

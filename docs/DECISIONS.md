@@ -523,3 +523,41 @@ whose rows look measured and are one repeated worst case.
 container, a C extension holding the GIL on the in-process attach path, and the measurement's own 0.5 ms granularity. The
 macOS cell becomes the second data point when CI next runs; until then the 4.7× margin is the argument, and it is an
 argument, not a result.
+
+## D-044 — the auto-import is a `sitecustomize`, and a child's tape names the run it belongs to
+
+*Date: 2026-11-16. Plan refs: §11.9 step 4 and step 6, §11.10, P3B-03. Supersedes nothing; corrects the plan's two
+spellings of one mechanism. Tests: `tests/test_launcher_attach.py` (20).*
+
+**The plan says "a `.pth` in a temp site dir / `PYTHONPATH`", and those are not the same thing in Python.** `site`
+processes `.pth` files only for directories it registered with `addsitedir`; a `.pth` that reached `sys.path` through
+`PYTHONPATH` is never opened. The first implementation did exactly what the sentence says and the test said
+`autoimport_ran is False`: a silent no-op that would have shipped as "Python attach works" and been found by a user with
+no captured calls. The mechanism that does run is a `sitecustomize.py` on `PYTHONPATH` — the one
+`opentelemetry-instrument` uses, and therefore the one the plan's parenthetical was pointing at. So the build writes
+`sitecustomize.py`, the run result names the mechanism, and `docs/attach.md` §1.1 says so in the same words a user
+would read.
+
+**The cost of that mechanism is one name, and it is shared.** Only one module called `sitecustomize` is imported, so a
+distro hook or another instrumenter would be shadowed by a launcher that simply took the name. The written file
+therefore **chains**: it runs the next `sitecustomize` on `sys.path` first and then installs, guarded against re-entering
+itself. A test builds a decoy hook in a temp directory and requires both effects.
+
+**The second half is about tape identity.** Under `blackbox run`, the SDK used to suppress its own `RUN_START` because
+"the launcher owns the run boundary". That is true of the launcher's tape and false of the child's: the SDK opens a
+*different* tape, and `correlate` reads a tape's run id from its own `RUN_START`, so the child's tape resolved to `None`
+and nothing could link. Measured on `blackbox run -- python app.py`: two tapes, one capsule, the child's frames in no
+capsule at all, `links: []`. The SDK now writes `RUN_START{run_id: $BLACKBOX_RUN_ID, source: "sdk", attached: true}`
+into **its own** tape and closes it with `RUN_END`; the launcher recovers **every** tape of the run (§11.9 step 6)
+rather than only its own, and each capsule carries an `exact` link to the others because the run id matches.
+
+**What did not change**: every tape keeps its own capsule. `Recovery.run_id` stays derived from the tape (writer uuid +
+creation time), because it names `runs/<id>/` and the capsule file, and two tapes sharing a directory would collide on
+markers — a resumed recovery would read the other tape's steps. "One run" is therefore expressed as **a set of capsules
+joined by `links.json`**, which is where §11.10 puts a relation, and `merges_runs` remains `False` by construction.
+
+**One number was wrong while this was being measured**: the capsule's `counts.nodes` was filled from
+`len(node_statuses)`, and `classify_nodes` returns only the *unclosed* nodes (its job is the §14.4 "what was
+interrupted" table). Every clean run therefore reported `nodes: 0` while its `graph.json` listed the nodes. The plan's
+own example manifest has `"nodes": 44` for a run that finished. Fixed: `counts.nodes` counts `NODE_OPEN` slots, and the
+interrupted count moved to `counts.nodes_interrupted`, where it can be read for what it is (defect 41).

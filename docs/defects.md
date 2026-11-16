@@ -317,3 +317,16 @@ plan's §10 shape, and it is append-only.
   point, not a confirmation; and ADR-006 §6 records what no in-process watchdog can promise (a frozen container, or a C
   extension holding the GIL past the tick on the in-process attach path). The 107.9 ms sample is retained here as the
   reason the margin matters, not as a number that has been explained away.
+
+- **defect 41 — every clean run's capsule said `counts.nodes: 0`, while its `graph.json` listed the nodes.** The count
+  was `len(result.node_statuses)`, and `recovery.classify_nodes` deliberately returns only the **unclosed** nodes,
+  because its job is the §14.4 table ("what was interrupted, and what may have happened"). The plan's example manifest
+  (§13.2) has `"nodes": 44` for a run whose nodes all finished, so the two disagreed and the code was the one that was
+  wrong: a reader, and later the viewer, would have read "no nodes" off a run that had a dozen.
+  *Cause*: one function answering two different questions, and the answer to the rarer one used for the common one.
+  *Fix*: `recovery.node_count(frames)` counts distinct `NODE_OPEN` slots (slot 0 is the run itself, not a node);
+  `counts.nodes` uses it, and the interrupted count is kept beside it as `counts.nodes_interrupted`.
+  *Test*: `tests/test_launcher_attach.py::test_one_run_is_one_set_of_linked_tapes_not_one_tape` asserts the child's
+  capsule reports its node, and `tests/test_recovery.py` still asserts the interrupted table on the runs that have one.
+  *Found by*: measuring P3B-03's "one run with linked nodes" rather than assuming it — the capsule was the thing being
+  read at the time, and the zero was next to a `graph.json` that said otherwise.

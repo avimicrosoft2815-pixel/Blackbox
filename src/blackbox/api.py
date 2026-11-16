@@ -116,16 +116,24 @@ def install(*, data_dir: str | None = None, signal_number: int | None = None,
             writer = TapeWriter(root, mode=mode, **writer_kw).open()
             _STATE.writer = writer
             _STATE.data_dir = root
-            # Under `blackbox run` the launcher owns the run boundary and sets BLACKBOX_RUN_ID in the child's
-            # environment; the SDK must not write a second RUN_START into that tape. Standalone, it must.
-            if not os.environ.get("BLACKBOX_RUN_ID"):
-                from blackbox.codec import cbor
+            # Under `blackbox run` the launcher sets BLACKBOX_RUN_ID in the child's environment. The obvious reading
+            # of that is "the launcher owns the run boundary, so the SDK writes no RUN_START" — and that reading is
+            # what made `blackbox run -- python app.py` leave two tapes that nothing joined: `correlate` reads a
+            # tape's run id from its own RUN_START, so a child tape without one resolves to `None` and cannot link to
+            # the launcher's run by run id (P3B-03's "one run with linked nodes", measured 2026-11-16). The SDK's tape
+            # is a *different* tape from the launcher's, so naming the run in it is not a second RUN_START in the
+            # launcher's tape — it is this tape saying which run it belongs to, which is exactly what §11.10 links on.
+            # `attached` distinguishes the two cases for a reader; `owns_run` is per tape, so this tape also closes
+            # itself with RUN_END instead of leaving recovery to classify a finished process as interrupted.
+            from blackbox.codec import cbor
 
-                writer.emit(C.KIND_RUN_START, cbor.encode({"run_id": writer.writer_uuid.hex(), "argv": None,
-                                                           "pid": os.getpid(), "source": "sdk"}))
-                writer.flush()
-                _STATE.runs_started += 1
-                _STATE.owns_run = True
+            attached_run = (os.environ.get("BLACKBOX_RUN_ID") or "").strip() or None
+            writer.emit(C.KIND_RUN_START, cbor.encode({"run_id": attached_run or writer.writer_uuid.hex(),
+                                                       "argv": None, "pid": os.getpid(), "source": "sdk",
+                                                       "attached": attached_run is not None}))
+            writer.flush()
+            _STATE.runs_started += 1
+            _STATE.owns_run = True
             if keeper:
                 _STATE.keeper = Keeper(writer).start()
         except Exception as exc:                      # fail-open: the app keeps running, unrecorded and told why
