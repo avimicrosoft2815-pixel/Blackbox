@@ -495,3 +495,31 @@ README is not evidence.
 **One consequence for the suite**: `tests/test_attach_doc.py` fails if any verdict row stops carrying either a version
 and a date or the word **unverified**, and it is checked against a doctored document in the same session that wrote it
 — the check refuses a row with a `**verified**` verdict and no evidence, which is the failure mode that matters here.
+
+## D-043 — the rebind budget is spent by the tick, so the tick is 20 ms and every sample is asserted
+
+*Date: 2026-11-16. Plan refs: §11.8, P3B-03 (supervision clause). Supersedes the median-of-five in defect 40; the
+measurement is ADR-006.*
+
+**The decision**: §11.8's "re-bound within 100 ms" is measured as an outage — from the listener stopping to a listener
+serving on the same port — because that is what a child waits through, and it therefore includes the supervisor's tick.
+The default tick drops from 50 ms to 20 ms (`SUPERVISE_MS`), and `tests/test_proxy_supervisor.py` asserts **every**
+watchdog-triggered sample, not a median of samples that were mostly manual.
+
+**Why the tick had to move, rather than the number being quoted harder**: measured on 2026-11-16, the rebind itself is
+p50 0.80–0.82 ms and max 2.90 ms — the budget was almost entirely being spent waiting for a watchdog to look. At a 50 ms tick
+the worst observed outage was 51.9 ms, which is inside 100 ms and leaves 48 ms for a thread that loses the CPU. Defect 40
+is what happens next: one shared macOS runner spent 107.9 ms, and the row failed on a number that was still, in the
+invariant sense, correct. At 20 ms the worst observed outage is 21.86 ms over 240 samples in two runs, and 78 ms is left for the same stall. The tick
+costs one attribute read on a thread already blocked in `Event.wait()`; there is nothing to trade away for a coarser one.
+
+**A decision about the measurement that will look pedantic and is not**: the first run of the new bench reported
+`min 50.35 / p50 50.95 / max 51.88` at n=40. A 50 ms *minimum* is not a distribution of a uniformly phased outage — the
+trials were back-to-back, each repaired exactly at a tick, so every break landed just after the next tick. The bench now
+randomises the phase per trial (seeded, recorded) and the JSON keeps every sample, because the alternative is a table
+whose rows look measured and are one repeated worst case.
+
+**What this does not claim**: ADR-006 §6 lists the four things the row still does not cover — one machine, a frozen
+container, a C extension holding the GIL on the in-process attach path, and the measurement's own 0.5 ms granularity. The
+macOS cell becomes the second data point when CI next runs; until then the 4.7× margin is the argument, and it is an
+argument, not a result.

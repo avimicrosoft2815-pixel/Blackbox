@@ -298,3 +298,22 @@ plan's §10 shape, and it is append-only.
   averaged away. A genuinely slow rebind still fails, on every sample; one scheduling pause no longer does.
   *Test*: `test_the_watchdog_brings_a_dead_listener_back_without_being_asked`; green at `19d831e`+ locally and in the
   re-run, and the number that a reader should quote is still the recorded median, not a rounding of the budget.
+- **defect 40, superseded 2026-11-16 — the median was a second measurement of the wrong quantity.** Closer reading of the
+  sentence the row implements (§11.8: *"the listener is re-bound within 100 ms"*) says the subject is the listener coming
+  back, so the quantity is an **outage** — detection (a tick) plus the rebind — and the tick is the larger of the two. The
+  median of five was wrong in three ways at once: it measured `rebind()` and called it the budget, four of its five
+  samples were manual `rebind()` calls no child experiences, and a median of a distribution is not the one outage a child
+  waits through.
+  *Fix*: `bench/bench_rebind.py` measures watchdog-triggered outages only, alternating idle and loaded columns, with the
+  phase randomised per trial and every sample kept, run twice and both committed
+  (`bench/results/2026-11-16-rebind-a.json`, `-b.json`); the default tick moved from
+  50 ms to 20 ms so the budget is not spent waiting for a watchdog to look (`SUPERVISE_MS`, D-043, ADR-006); and
+  `test_every_watchdog_rebind_lands_inside_the_budget_not_the_median_of_them` asserts **every** sample of 8 watchdog
+  rebinds against `REBIND_BUDGET_MS`, printing the worst one.
+  *Measured*: 240 samples over two runs — idle worst 21.86 / p50 11.58–12.39 / p95 20.53–20.77, loaded worst 21.47 /
+  p50 11.52–11.77, **0 of 240 samples over budget, 0 port moves**; rebind alone p50 0.80–0.82 / max 2.90 ms. Gate
+  **PASS** in both runs on a 2 vCPU Linux container.
+  *Still open*: the macOS arm64 cell that produced the 107.9 ms sample has not re-run since, so it is the second data
+  point, not a confirmation; and ADR-006 §6 records what no in-process watchdog can promise (a frozen container, or a C
+  extension holding the GIL past the tick on the in-process attach path). The 107.9 ms sample is retained here as the
+  reason the margin matters, not as a number that has been explained away.

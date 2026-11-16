@@ -6,9 +6,9 @@
     "bench/results/*.json"
   ],
   "next_ticket": "P3B-03",
-  "next_note": "L3: attach is one command with the receipts — the proxy's four §15.1 rows measured (P3B-08), the Claude Code and Codex hook adapters install byte-identically, the launcher folds the inbox into its own vantage, and `docs/attach.md` labels every surface with a version+date or the word unverified (openai 3.51.0, anthropic 2.8.0, curl 7.88.1, node v22.22.3 were run; defect 39 found and fixed). Next: P3B-03's remaining half — the Python auto-import .pth and the `--no-sdk` / `--force-proxy` / `--no-hooks` flags its done-when names — then P3B-07's bench-box cold-start row and the viewer. Suite 841.",
+  "next_note": "L3: attach is one command with the receipts \u2014 the proxy's four \u00a715.1 rows measured (P3B-08), the Claude Code and Codex hook adapters install byte-identically, the launcher folds the inbox into its own vantage, and `docs/attach.md` labels every surface with a version+date or the word unverified (openai 3.51.0, anthropic 2.8.0, curl 7.88.1, node v22.22.3 were run; defect 39 found and fixed). Next: P3B-03's remaining half \u2014 the Python auto-import .pth and the `--no-sdk` / `--force-proxy` / `--no-hooks` flags its done-when names \u2014 then P3B-07's bench-box cold-start row and the viewer. Suite 841.",
   "last_green_commit": "ff85b59",
-  "last_green_commit_note": "run 43768293790 on ff85b59, ten jobs ten success — P3B-08 ticked on its own evidence and the rebind budget taken as a median of five (defect 40), after run 43767898299 read 107.9 ms against 100 on py3.11/macos-latest. 3f29d63 is the merge of PR #14 on main (P3B-09, run 43767064900 ten of ten on 35c0cdf).",
+  "last_green_commit_note": "run 43768293790 on ff85b59, ten jobs ten success \u2014 P3B-08 ticked on its own evidence and the rebind budget taken as a median of five (defect 40), after run 43767898299 read 107.9 ms against 100 on py3.11/macos-latest. 3f29d63 is the merge of PR #14 on main (P3B-09, run 43767064900 ten of ten on 35c0cdf). Superseded in part on 2026-11-16: the rebind budget is no longer taken as a median of five. It is measured as an outage (detection + rebind) on every watchdog-triggered sample in two columns, the tick moved to 20 ms so the bound is not spent waiting for a watchdog to look, and the worst of 240 samples over two runs measured 21.86 ms (bench/results/2026-11-16-rebind-{a,b}.json, D-043, ADR-006). The macOS cell in this run is the second data point the row still owes, not a confirmation it has.",
   "gates": {
     "G-A": "pass",
     "G-Promise": "pass",
@@ -22,7 +22,7 @@
     "G-Sec": "pending",
     "G-Release": "pending"
   },
-  "gate_note": "a gate flips to pass only with a reviewer-signed docs/gates/G-<name>.md (AGENT_FINAL.md §4); the builder never ticks its own gate",
+  "gate_note": "a gate flips to pass only with a reviewer-signed docs/gates/G-<name>.md (AGENT_FINAL.md \u00a74); the builder never ticks its own gate",
   "open_blockers": [],
   "lane_status": {
     "L0": {
@@ -296,7 +296,7 @@
   "extra_work": [
     {
       "id": "P3-13MP",
-      "name": "loopback mock provider (required by G-Capture, no row in the plan's §18.5 table)",
+      "name": "loopback mock provider (required by G-Capture, no row in the plan's \u00a718.5 table)",
       "status": "done",
       "commit": "714554c",
       "tests": "tests/test_mock_provider.py (9)",
@@ -333,12 +333,12 @@
     },
     {
       "id": "P3-11c",
-      "name": "the §15.1 capture rows (Disabled, content=off, content=hash, provider Δ p95, install) and the content modes they needed",
+      "name": "the \u00a715.1 capture rows (Disabled, content=off, content=hash, provider \u0394 p95, install) and the content modes they needed",
       "status": "done",
       "commit": "HEAD",
       "tests": "tests/test_content_modes.py (9), bench/bench_capture.py",
       "measurement": "bench/results/2026-11-15-capture-overhead.json",
-      "note": "the sink ignored the configured content mode (defect 30): default `hash` in Appendix A, body written anyway. Now full/hash/off with the byte count in a payload header so recovery still answers \"how much arrived\"; redaction skipped in off mode. All five §15.1 rows measured on ext4 with tmpfs as a labelled second column; the content=hash worst case (a body containing `token`) is published beside the row rather than behind it",
+      "note": "the sink ignored the configured content mode (defect 30): default `hash` in Appendix A, body written anyway. Now full/hash/off with the byte count in a payload header so recovery still answers \"how much arrived\"; redaction skipped in off mode. All five \u00a715.1 rows measured on ext4 with tmpfs as a labelled second column; the content=hash worst case (a body containing `token`) is published beside the row rather than behind it",
       "label": "self"
     }
   ]

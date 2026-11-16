@@ -1,0 +1,1078 @@
+{
+  "gate": {
+    "watchdog_rebind_ms": {
+      "budget": 100.0,
+      "idle_worst_ms": 21.857,
+      "loaded_worst_ms": 21.471,
+      "n": 120,
+      "over_budget_samples": 0,
+      "pass": true
+    }
+  },
+  "hardware": {
+    "cpu_count": 2,
+    "implementation": "CPython",
+    "machine": "x86_64",
+    "n": 60,
+    "os": "Linux-6.1.158+-x86_64-with-glibc2.36",
+    "pid": 18125,
+    "python": "3.11.2",
+    "topology": "one interpreter hosting the proxy thread and the measuring client; the loaded column adds one busy process per CPU, because a shared runner is the condition the budget has to survive"
+  },
+  "idle": {
+    "budget_ms": 100.0,
+    "detection_ms": {
+      "max": 20.831,
+      "mean": 11.612,
+      "min": 1.179,
+      "n": 60,
+      "p50": 11.11,
+      "p95": 19.899,
+      "p99": 20.831
+    },
+    "loaded": false,
+    "n": 60,
+    "not_restored": 0,
+    "outage_ms": {
+      "max": 21.857,
+      "mean": 12.462,
+      "min": 1.725,
+      "n": 60,
+      "p50": 12.393,
+      "p95": 20.76,
+      "p99": 21.857
+    },
+    "over_budget": {
+      "count": 0,
+      "worst_ms": null
+    },
+    "pass": true,
+    "phase_seed": 20261116,
+    "port_moved": 0,
+    "rebind_ms": {
+      "max": 2.049,
+      "mean": 0.851,
+      "min": 0.546,
+      "n": 60,
+      "p50": 0.82,
+      "p95": 1.171,
+      "p99": 2.049
+    },
+    "samples": [
+      {
+        "outage_ms": 7.078,
+        "port_after": 38149,
+        "port_before": 38149,
+        "port_kept": true,
+        "rebind_ms": 1.044,
+        "restored": true
+      },
+      {
+        "outage_ms": 16.661,
+        "port_after": 38149,
+        "port_before": 38149,
+        "port_kept": true,
+        "rebind_ms": 0.884,
+        "restored": true
+      },
+      {
+        "outage_ms": 13.228,
+        "port_after": 38149,
+        "port_before": 38149,
+        "port_kept": true,
+        "rebind_ms": 0.844,
+        "restored": true
+      },
+      {
+        "outage_ms": 1.924,
+        "port_after": 38149,
+        "port_before": 38149,
+        "port_kept": true,
+        "rebind_ms": 0.63,
+        "restored": true
+      },
+      {
+        "outage_ms": 10.856,
+        "port_after": 38149,
+        "port_before": 38149,
+        "port_kept": true,
+        "rebind_ms": 0.776,
+        "restored": true
+      },
+      {
+        "outage_ms": 14.476,
+        "port_after": 38149,
+        "port_before": 38149,
+        "port_kept": true,
+        "rebind_ms": 0.954,
+        "restored": true
+      },
+      {
+        "outage_ms": 20.995,
+        "port_after": 38149,
+        "port_before": 38149,
+        "port_kept": true,
+        "rebind_ms": 1.096,
+        "restored": true
+      },
+      {
+        "outage_ms": 16.69,
+        "port_after": 38149,
+        "port_before": 38149,
+        "port_kept": true,
+        "rebind_ms": 0.869,
+        "restored": true
+      },
+      {
+        "outage_ms": 20.735,
+        "port_after": 38149,
+        "port_before": 38149,
+        "port_kept": true,
+        "rebind_ms": 0.895,
+        "restored": true
+      },
+      {
+        "outage_ms": 10.331,
+        "port_after": 38149,
+        "port_before": 38149,
+        "port_kept": true,
+        "rebind_ms": 0.895,
+        "restored": true
+      },
+      {
+        "outage_ms": 8.223,
+        "port_after": 38149,
+        "port_before": 38149,
+        "port_kept": true,
+        "rebind_ms": 0.771,
+        "restored": true
+      },
+      {
+        "outage_ms": 21.245,
+        "port_after": 38149,
+        "port_before": 38149,
+        "port_kept": true,
+        "rebind_ms": 1.065,
+        "restored": true
+      },
+      {
+        "outage_ms": 11.07,
+        "port_after": 38149,
+        "port_before": 38149,
+        "port_kept": true,
+        "rebind_ms": 0.904,
+        "restored": true
+      },
+      {
+        "outage_ms": 16.191,
+        "port_after": 38149,
+        "port_before": 38149,
+        "port_kept": true,
+        "rebind_ms": 0.835,
+        "restored": true
+      },
+      {
+        "outage_ms": 9.962,
+        "port_after": 38149,
+        "port_before": 38149,
+        "port_kept": true,
+        "rebind_ms": 0.897,
+        "restored": true
+      },
+      {
+        "outage_ms": 9.573,
+        "port_after": 38149,
+        "port_before": 38149,
+        "port_kept": true,
+        "rebind_ms": 0.778,
+        "restored": true
+      },
+      {
+        "outage_ms": 9.607,
+        "port_after": 38149,
+        "port_before": 38149,
+        "port_kept": true,
+        "rebind_ms": 0.69,
+        "restored": true
+      },
+      {
+        "outage_ms": 4.107,
+        "port_after": 38149,
+        "port_before": 38149,
+        "port_kept": true,
+        "rebind_ms": 0.727,
+        "restored": true
+      },
+      {
+        "outage_ms": 6.665,
+        "port_after": 38149,
+        "port_before": 38149,
+        "port_kept": true,
+        "rebind_ms": 0.678,
+        "restored": true
+      },
+      {
+        "outage_ms": 15.93,
+        "port_after": 38149,
+        "port_before": 38149,
+        "port_kept": true,
+        "rebind_ms": 0.766,
+        "restored": true
+      },
+      {
+        "outage_ms": 12.393,
+        "port_after": 38149,
+        "port_before": 38149,
+        "port_kept": true,
+        "rebind_ms": 0.748,
+        "restored": true
+      },
+      {
+        "outage_ms": 11.646,
+        "port_after": 38149,
+        "port_before": 38149,
+        "port_kept": true,
+        "rebind_ms": 0.741,
+        "restored": true
+      },
+      {
+        "outage_ms": 17.943,
+        "port_after": 38149,
+        "port_before": 38149,
+        "port_kept": true,
+        "rebind_ms": 0.819,
+        "restored": true
+      },
+      {
+        "outage_ms": 12.51,
+        "port_after": 38149,
+        "port_before": 38149,
+        "port_kept": true,
+        "rebind_ms": 1.4,
+        "restored": true
+      },
+      {
+        "outage_ms": 17.078,
+        "port_after": 38149,
+        "port_before": 38149,
+        "port_kept": true,
+        "rebind_ms": 2.049,
+        "restored": true
+      },
+      {
+        "outage_ms": 15.608,
+        "port_after": 38149,
+        "port_before": 38149,
+        "port_kept": true,
+        "rebind_ms": 1.171,
+        "restored": true
+      },
+      {
+        "outage_ms": 8.985,
+        "port_after": 38149,
+        "port_before": 38149,
+        "port_kept": true,
+        "rebind_ms": 0.843,
+        "restored": true
+      },
+      {
+        "outage_ms": 20.616,
+        "port_after": 38149,
+        "port_before": 38149,
+        "port_kept": true,
+        "rebind_ms": 0.612,
+        "restored": true
+      },
+      {
+        "outage_ms": 16.69,
+        "port_after": 38149,
+        "port_before": 38149,
+        "port_kept": true,
+        "rebind_ms": 0.869,
+        "restored": true
+      },
+      {
+        "outage_ms": 10.768,
+        "port_after": 38149,
+        "port_before": 38149,
+        "port_kept": true,
+        "rebind_ms": 0.76,
+        "restored": true
+      },
+      {
+        "outage_ms": 17.87,
+        "port_after": 38149,
+        "port_before": 38149,
+        "port_kept": true,
+        "rebind_ms": 0.812,
+        "restored": true
+      },
+      {
+        "outage_ms": 6.141,
+        "port_after": 38149,
+        "port_before": 38149,
+        "port_kept": true,
+        "rebind_ms": 0.612,
+        "restored": true
+      },
+      {
+        "outage_ms": 15.966,
+        "port_after": 38149,
+        "port_before": 38149,
+        "port_kept": true,
+        "rebind_ms": 0.88,
+        "restored": true
+      },
+      {
+        "outage_ms": 10.049,
+        "port_after": 38149,
+        "port_before": 38149,
+        "port_kept": true,
+        "rebind_ms": 0.809,
+        "restored": true
+      },
+      {
+        "outage_ms": 15.905,
+        "port_after": 38149,
+        "port_before": 38149,
+        "port_kept": true,
+        "rebind_ms": 0.835,
+        "restored": true
+      },
+      {
+        "outage_ms": 12.859,
+        "port_after": 38149,
+        "port_before": 38149,
+        "port_kept": true,
+        "rebind_ms": 0.702,
+        "restored": true
+      },
+      {
+        "outage_ms": 17.741,
+        "port_after": 38149,
+        "port_before": 38149,
+        "port_kept": true,
+        "rebind_ms": 0.748,
+        "restored": true
+      },
+      {
+        "outage_ms": 19.255,
+        "port_after": 38149,
+        "port_before": 38149,
+        "port_kept": true,
+        "rebind_ms": 0.828,
+        "restored": true
+      },
+      {
+        "outage_ms": 11.275,
+        "port_after": 38149,
+        "port_before": 38149,
+        "port_kept": true,
+        "rebind_ms": 0.818,
+        "restored": true
+      },
+      {
+        "outage_ms": 10.979,
+        "port_after": 38149,
+        "port_before": 38149,
+        "port_kept": true,
+        "rebind_ms": 0.738,
+        "restored": true
+      },
+      {
+        "outage_ms": 20.76,
+        "port_after": 38149,
+        "port_before": 38149,
+        "port_kept": true,
+        "rebind_ms": 0.897,
+        "restored": true
+      },
+      {
+        "outage_ms": 4.763,
+        "port_after": 38149,
+        "port_before": 38149,
+        "port_kept": true,
+        "rebind_ms": 0.887,
+        "restored": true
+      },
+      {
+        "outage_ms": 1.869,
+        "port_after": 38149,
+        "port_before": 38149,
+        "port_kept": true,
+        "rebind_ms": 0.65,
+        "restored": true
+      },
+      {
+        "outage_ms": 8.319,
+        "port_after": 38149,
+        "port_before": 38149,
+        "port_kept": true,
+        "rebind_ms": 0.832,
+        "restored": true
+      },
+      {
+        "outage_ms": 14.381,
+        "port_after": 38149,
+        "port_before": 38149,
+        "port_kept": true,
+        "rebind_ms": 0.649,
+        "restored": true
+      },
+      {
+        "outage_ms": 8.591,
+        "port_after": 38149,
+        "port_before": 38149,
+        "port_kept": true,
+        "rebind_ms": 0.867,
+        "restored": true
+      },
+      {
+        "outage_ms": 3.556,
+        "port_after": 38149,
+        "port_before": 38149,
+        "port_kept": true,
+        "rebind_ms": 0.58,
+        "restored": true
+      },
+      {
+        "outage_ms": 13.049,
+        "port_after": 38149,
+        "port_before": 38149,
+        "port_kept": true,
+        "rebind_ms": 0.73,
+        "restored": true
+      },
+      {
+        "outage_ms": 5.524,
+        "port_after": 38149,
+        "port_before": 38149,
+        "port_kept": true,
+        "rebind_ms": 0.757,
+        "restored": true
+      },
+      {
+        "outage_ms": 11.134,
+        "port_after": 38149,
+        "port_before": 38149,
+        "port_kept": true,
+        "rebind_ms": 0.912,
+        "restored": true
+      },
+      {
+        "outage_ms": 2.987,
+        "port_after": 38149,
+        "port_before": 38149,
+        "port_kept": true,
+        "rebind_ms": 0.73,
+        "restored": true
+      },
+      {
+        "outage_ms": 18.606,
+        "port_after": 38149,
+        "port_before": 38149,
+        "port_kept": true,
+        "rebind_ms": 0.84,
+        "restored": true
+      },
+      {
+        "outage_ms": 13.108,
+        "port_after": 38149,
+        "port_before": 38149,
+        "port_kept": true,
+        "rebind_ms": 0.953,
+        "restored": true
+      },
+      {
+        "outage_ms": 6.234,
+        "port_after": 38149,
+        "port_before": 38149,
+        "port_kept": true,
+        "rebind_ms": 0.769,
+        "restored": true
+      },
+      {
+        "outage_ms": 8.455,
+        "port_after": 38149,
+        "port_before": 38149,
+        "port_kept": true,
+        "rebind_ms": 0.837,
+        "restored": true
+      },
+      {
+        "outage_ms": 15.841,
+        "port_after": 38149,
+        "port_before": 38149,
+        "port_kept": true,
+        "rebind_ms": 0.777,
+        "restored": true
+      },
+      {
+        "outage_ms": 1.725,
+        "port_after": 38149,
+        "port_before": 38149,
+        "port_kept": true,
+        "rebind_ms": 0.546,
+        "restored": true
+      },
+      {
+        "outage_ms": 21.857,
+        "port_after": 38149,
+        "port_before": 38149,
+        "port_kept": true,
+        "rebind_ms": 1.026,
+        "restored": true
+      },
+      {
+        "outage_ms": 19.641,
+        "port_after": 38149,
+        "port_before": 38149,
+        "port_kept": true,
+        "rebind_ms": 1.192,
+        "restored": true
+      },
+      {
+        "outage_ms": 19.52,
+        "port_after": 38149,
+        "port_before": 38149,
+        "port_kept": true,
+        "rebind_ms": 0.82,
+        "restored": true
+      }
+    ],
+    "supervise_ms": 20.0
+  },
+  "loaded": {
+    "budget_ms": 100.0,
+    "detection_ms": {
+      "max": 20.806,
+      "mean": 11.653,
+      "min": 0.8,
+      "n": 60,
+      "p50": 10.825,
+      "p95": 19.973,
+      "p99": 20.806
+    },
+    "loaded": true,
+    "n": 60,
+    "not_restored": 0,
+    "outage_ms": {
+      "max": 21.471,
+      "mean": 12.251,
+      "min": 1.245,
+      "n": 60,
+      "p50": 11.515,
+      "p95": 20.627,
+      "p99": 21.471
+    },
+    "over_budget": {
+      "count": 0,
+      "worst_ms": null
+    },
+    "pass": true,
+    "phase_seed": 20261116,
+    "port_moved": 0,
+    "rebind_ms": {
+      "max": 0.838,
+      "mean": 0.598,
+      "min": 0.413,
+      "n": 60,
+      "p50": 0.586,
+      "p95": 0.805,
+      "p99": 0.838
+    },
+    "samples": [
+      {
+        "outage_ms": 6.802,
+        "port_after": 38315,
+        "port_before": 38315,
+        "port_kept": true,
+        "rebind_ms": 0.52,
+        "restored": true
+      },
+      {
+        "outage_ms": 16.666,
+        "port_after": 38315,
+        "port_before": 38315,
+        "port_kept": true,
+        "rebind_ms": 0.666,
+        "restored": true
+      },
+      {
+        "outage_ms": 11.996,
+        "port_after": 38315,
+        "port_before": 38315,
+        "port_kept": true,
+        "rebind_ms": 0.531,
+        "restored": true
+      },
+      {
+        "outage_ms": 2.43,
+        "port_after": 38315,
+        "port_before": 38315,
+        "port_kept": true,
+        "rebind_ms": 0.618,
+        "restored": true
+      },
+      {
+        "outage_ms": 10.422,
+        "port_after": 38315,
+        "port_before": 38315,
+        "port_kept": true,
+        "rebind_ms": 0.5,
+        "restored": true
+      },
+      {
+        "outage_ms": 13.923,
+        "port_after": 38315,
+        "port_before": 38315,
+        "port_kept": true,
+        "rebind_ms": 0.63,
+        "restored": true
+      },
+      {
+        "outage_ms": 20.555,
+        "port_after": 38315,
+        "port_before": 38315,
+        "port_kept": true,
+        "rebind_ms": 0.568,
+        "restored": true
+      },
+      {
+        "outage_ms": 16.505,
+        "port_after": 38315,
+        "port_before": 38315,
+        "port_kept": true,
+        "rebind_ms": 0.489,
+        "restored": true
+      },
+      {
+        "outage_ms": 20.379,
+        "port_after": 38315,
+        "port_before": 38315,
+        "port_kept": true,
+        "rebind_ms": 0.523,
+        "restored": true
+      },
+      {
+        "outage_ms": 10.294,
+        "port_after": 38315,
+        "port_before": 38315,
+        "port_kept": true,
+        "rebind_ms": 0.458,
+        "restored": true
+      },
+      {
+        "outage_ms": 7.904,
+        "port_after": 38315,
+        "port_before": 38315,
+        "port_kept": true,
+        "rebind_ms": 0.464,
+        "restored": true
+      },
+      {
+        "outage_ms": 20.695,
+        "port_after": 38315,
+        "port_before": 38315,
+        "port_kept": true,
+        "rebind_ms": 0.722,
+        "restored": true
+      },
+      {
+        "outage_ms": 10.796,
+        "port_after": 38315,
+        "port_before": 38315,
+        "port_kept": true,
+        "rebind_ms": 0.533,
+        "restored": true
+      },
+      {
+        "outage_ms": 15.456,
+        "port_after": 38315,
+        "port_before": 38315,
+        "port_kept": true,
+        "rebind_ms": 0.623,
+        "restored": true
+      },
+      {
+        "outage_ms": 10.132,
+        "port_after": 38315,
+        "port_before": 38315,
+        "port_kept": true,
+        "rebind_ms": 0.514,
+        "restored": true
+      },
+      {
+        "outage_ms": 8.954,
+        "port_after": 38315,
+        "port_before": 38315,
+        "port_kept": true,
+        "rebind_ms": 0.413,
+        "restored": true
+      },
+      {
+        "outage_ms": 9.505,
+        "port_after": 38315,
+        "port_before": 38315,
+        "port_kept": true,
+        "rebind_ms": 0.477,
+        "restored": true
+      },
+      {
+        "outage_ms": 4.054,
+        "port_after": 38315,
+        "port_before": 38315,
+        "port_kept": true,
+        "rebind_ms": 0.635,
+        "restored": true
+      },
+      {
+        "outage_ms": 6.814,
+        "port_after": 38315,
+        "port_before": 38315,
+        "port_kept": true,
+        "rebind_ms": 0.818,
+        "restored": true
+      },
+      {
+        "outage_ms": 16.052,
+        "port_after": 38315,
+        "port_before": 38315,
+        "port_kept": true,
+        "rebind_ms": 0.649,
+        "restored": true
+      },
+      {
+        "outage_ms": 11.861,
+        "port_after": 38315,
+        "port_before": 38315,
+        "port_kept": true,
+        "rebind_ms": 0.751,
+        "restored": true
+      },
+      {
+        "outage_ms": 11.515,
+        "port_after": 38315,
+        "port_before": 38315,
+        "port_kept": true,
+        "rebind_ms": 0.69,
+        "restored": true
+      },
+      {
+        "outage_ms": 18.314,
+        "port_after": 38315,
+        "port_before": 38315,
+        "port_kept": true,
+        "rebind_ms": 0.711,
+        "restored": true
+      },
+      {
+        "outage_ms": 11.009,
+        "port_after": 38315,
+        "port_before": 38315,
+        "port_kept": true,
+        "rebind_ms": 0.62,
+        "restored": true
+      },
+      {
+        "outage_ms": 16.534,
+        "port_after": 38315,
+        "port_before": 38315,
+        "port_kept": true,
+        "rebind_ms": 0.597,
+        "restored": true
+      },
+      {
+        "outage_ms": 16.034,
+        "port_after": 38315,
+        "port_before": 38315,
+        "port_kept": true,
+        "rebind_ms": 0.575,
+        "restored": true
+      },
+      {
+        "outage_ms": 8.904,
+        "port_after": 38315,
+        "port_before": 38315,
+        "port_kept": true,
+        "rebind_ms": 0.493,
+        "restored": true
+      },
+      {
+        "outage_ms": 20.748,
+        "port_after": 38315,
+        "port_before": 38315,
+        "port_kept": true,
+        "rebind_ms": 0.838,
+        "restored": true
+      },
+      {
+        "outage_ms": 16.555,
+        "port_after": 38315,
+        "port_before": 38315,
+        "port_kept": true,
+        "rebind_ms": 0.607,
+        "restored": true
+      },
+      {
+        "outage_ms": 10.93,
+        "port_after": 38315,
+        "port_before": 38315,
+        "port_kept": true,
+        "rebind_ms": 0.58,
+        "restored": true
+      },
+      {
+        "outage_ms": 17.669,
+        "port_after": 38315,
+        "port_before": 38315,
+        "port_kept": true,
+        "rebind_ms": 0.572,
+        "restored": true
+      },
+      {
+        "outage_ms": 5.441,
+        "port_after": 38315,
+        "port_before": 38315,
+        "port_kept": true,
+        "rebind_ms": 0.424,
+        "restored": true
+      },
+      {
+        "outage_ms": 15.565,
+        "port_after": 38315,
+        "port_before": 38315,
+        "port_kept": true,
+        "rebind_ms": 0.628,
+        "restored": true
+      },
+      {
+        "outage_ms": 10.306,
+        "port_after": 38315,
+        "port_before": 38315,
+        "port_kept": true,
+        "rebind_ms": 0.781,
+        "restored": true
+      },
+      {
+        "outage_ms": 15.676,
+        "port_after": 38315,
+        "port_before": 38315,
+        "port_kept": true,
+        "rebind_ms": 0.63,
+        "restored": true
+      },
+      {
+        "outage_ms": 12.975,
+        "port_after": 38315,
+        "port_before": 38315,
+        "port_kept": true,
+        "rebind_ms": 0.568,
+        "restored": true
+      },
+      {
+        "outage_ms": 17.079,
+        "port_after": 38315,
+        "port_before": 38315,
+        "port_kept": true,
+        "rebind_ms": 0.578,
+        "restored": true
+      },
+      {
+        "outage_ms": 19.479,
+        "port_after": 38315,
+        "port_before": 38315,
+        "port_kept": true,
+        "rebind_ms": 0.594,
+        "restored": true
+      },
+      {
+        "outage_ms": 11.237,
+        "port_after": 38315,
+        "port_before": 38315,
+        "port_kept": true,
+        "rebind_ms": 0.637,
+        "restored": true
+      },
+      {
+        "outage_ms": 10.79,
+        "port_after": 38315,
+        "port_before": 38315,
+        "port_kept": true,
+        "rebind_ms": 0.758,
+        "restored": true
+      },
+      {
+        "outage_ms": 20.627,
+        "port_after": 38315,
+        "port_before": 38315,
+        "port_kept": true,
+        "rebind_ms": 0.648,
+        "restored": true
+      },
+      {
+        "outage_ms": 4.019,
+        "port_after": 38315,
+        "port_before": 38315,
+        "port_kept": true,
+        "rebind_ms": 0.574,
+        "restored": true
+      },
+      {
+        "outage_ms": 2.653,
+        "port_after": 38315,
+        "port_before": 38315,
+        "port_kept": true,
+        "rebind_ms": 0.507,
+        "restored": true
+      },
+      {
+        "outage_ms": 7.975,
+        "port_after": 38315,
+        "port_before": 38315,
+        "port_kept": true,
+        "rebind_ms": 0.547,
+        "restored": true
+      },
+      {
+        "outage_ms": 14.295,
+        "port_after": 38315,
+        "port_before": 38315,
+        "port_kept": true,
+        "rebind_ms": 0.615,
+        "restored": true
+      },
+      {
+        "outage_ms": 8.018,
+        "port_after": 38315,
+        "port_before": 38315,
+        "port_kept": true,
+        "rebind_ms": 0.558,
+        "restored": true
+      },
+      {
+        "outage_ms": 3.182,
+        "port_after": 38315,
+        "port_before": 38315,
+        "port_kept": true,
+        "rebind_ms": 0.424,
+        "restored": true
+      },
+      {
+        "outage_ms": 13.031,
+        "port_after": 38315,
+        "port_before": 38315,
+        "port_kept": true,
+        "rebind_ms": 0.551,
+        "restored": true
+      },
+      {
+        "outage_ms": 5.697,
+        "port_after": 38315,
+        "port_before": 38315,
+        "port_kept": true,
+        "rebind_ms": 0.694,
+        "restored": true
+      },
+      {
+        "outage_ms": 11.507,
+        "port_after": 38315,
+        "port_before": 38315,
+        "port_kept": true,
+        "rebind_ms": 0.805,
+        "restored": true
+      },
+      {
+        "outage_ms": 2.176,
+        "port_after": 38315,
+        "port_before": 38315,
+        "port_kept": true,
+        "rebind_ms": 0.464,
+        "restored": true
+      },
+      {
+        "outage_ms": 18.415,
+        "port_after": 38315,
+        "port_before": 38315,
+        "port_kept": true,
+        "rebind_ms": 0.628,
+        "restored": true
+      },
+      {
+        "outage_ms": 13.425,
+        "port_after": 38315,
+        "port_before": 38315,
+        "port_kept": true,
+        "rebind_ms": 0.809,
+        "restored": true
+      },
+      {
+        "outage_ms": 5.239,
+        "port_after": 38315,
+        "port_before": 38315,
+        "port_kept": true,
+        "rebind_ms": 0.509,
+        "restored": true
+      },
+      {
+        "outage_ms": 8.13,
+        "port_after": 38315,
+        "port_before": 38315,
+        "port_kept": true,
+        "rebind_ms": 0.586,
+        "restored": true
+      },
+      {
+        "outage_ms": 16.561,
+        "port_after": 38315,
+        "port_before": 38315,
+        "port_kept": true,
+        "rebind_ms": 0.625,
+        "restored": true
+      },
+      {
+        "outage_ms": 1.245,
+        "port_after": 38315,
+        "port_before": 38315,
+        "port_kept": true,
+        "rebind_ms": 0.445,
+        "restored": true
+      },
+      {
+        "outage_ms": 21.471,
+        "port_after": 38315,
+        "port_before": 38315,
+        "port_kept": true,
+        "rebind_ms": 0.665,
+        "restored": true
+      },
+      {
+        "outage_ms": 18.95,
+        "port_after": 38315,
+        "port_before": 38315,
+        "port_kept": true,
+        "rebind_ms": 0.658,
+        "restored": true
+      },
+      {
+        "outage_ms": 19.49,
+        "port_after": 38315,
+        "port_before": 38315,
+        "port_kept": true,
+        "rebind_ms": 0.577,
+        "restored": true
+      }
+    ],
+    "supervise_ms": 20.0
+  },
+  "measured_at": "2026-11-16T13:33:19Z",
+  "method": {
+    "detection_ms": "outage_ms - rebind_ms, the tick's contribution",
+    "loaded": "one busy process per CPU, in separate interpreters",
+    "outage_ms": "from the listener being closed to a new listener serving on the same port; includes the supervisor tick, because a watchdog can only notice on a tick",
+    "phase": "each trial sleeps a seeded random fraction of a tick before breaking the listener, so the samples cover the whole detection phase instead of locking onto the worst case",
+    "poll_s": 0.0005,
+    "rebind_ms": "ProxyThread.rebinds: inside rebind(), excluding detection"
+  },
+  "wall_s": 2.691
+}

@@ -45,7 +45,17 @@ BASE_URL_SUFFIX: dict[str, str] = {"OPENAI_BASE_URL": "/v1"}
 # One spelling of the variable: the SDK's header module decides what counts as "a proxy is configured", and the launcher
 # must set exactly that variable to exactly that value or the `exact` link never happens (P3B-04).
 ENV_PROXY = cap_headers.ENV_PROXY
+# §11.8: "if it dies, the listener is re-bound within 100 ms". The subject of that sentence is the *listener coming
+# back*, which is detection (a watchdog can only notice on a tick) plus the rebind. Measured with `bench/bench_rebind.py`
+# on 2026-11-16: the rebind itself is p50 0.76 ms, and the budget was therefore being spent almost entirely on the tick.
+# A 50 ms tick put the worst-case outage at 51.9 ms — inside the budget, but with only 2x left for whatever a shared
+# runner does to a woken thread, and a 107.9 ms sample is what that looks like when it happens (defect 40).
+#
+# So the tick is 20 ms: worst-case outage ~21 ms, 4.7x under the budget, and detecting one attribute on a listener 50
+# times a second is not a cost anybody can measure. This is a design change, not a statistic: ADR-006 records the
+# definition and the distribution, and `tests/test_proxy_supervisor.py` asserts *every* watchdog sample, not the median.
 REBIND_BUDGET_MS = 100.0
+SUPERVISE_MS = 20.0                    # the default tick; a caller may pass any value it can defend
 START_TIMEOUT = 10.0
 
 
@@ -113,7 +123,7 @@ class ProxyThread:
     """A `ProxyServer` on its own loop in its own thread, with a watchdog that rebinds a dead listener."""
 
     def __init__(self, routes: Routes, *, receiver: Any = None, port: int = 0,
-                 supervise_ms: float = 50.0, retry_transmitted: bool = False) -> None:
+                 supervise_ms: float = SUPERVISE_MS, retry_transmitted: bool = False) -> None:
         self.routes = routes
         self.receiver = receiver
         self.retry_transmitted = retry_transmitted
@@ -235,4 +245,5 @@ class ProxyThread:
         self.stop()
 
 
-__all__ = ["BASE_URL_SUFFIX", "BASE_URL_VARS", "ENV_PROXY", "REBIND_BUDGET_MS", "ExportPlan", "ProxyThread", "plan_exports"]
+__all__ = ["BASE_URL_SUFFIX", "BASE_URL_VARS", "ENV_PROXY", "REBIND_BUDGET_MS", "SUPERVISE_MS", "ExportPlan",
+           "ProxyThread", "plan_exports"]
