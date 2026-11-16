@@ -177,6 +177,10 @@ S: dict[str, tuple[str, str, str, str, str, str]] = {
     "P3B-08": ('**done**', 'HEAD', 'tests/proxy/ (15), tests/test_proxy_server.py (18), tests/test_proxy_routes.py (10), bench/bench_proxy.py',
                'bench/results/2026-11-15-proxy.json', 'self',
                'the four §15.1 rows are measured with origin, proxy and client in three separate processes: added latency p50 0.165 / p99 0.471 ms, first-byte p50 0.184 ms, 200 concurrent streams with 0 errors, RSS growth 0.0 MiB at 50 req/s; S16 (`SIGKILL` mid-stream → `INTERRUPTED_PROXY`, no terminal frame), both disconnect classes on a real tape, header stripping, the allowlist, and the curl/Node/openai-SDK client matrix; the ten cells are green in run 43767064900'),
+    "P4-18": ("todo", "—", "—", "—", "—",
+              "not started, and not to be folded into P4-17: an applier needs its own approval gate (path restriction, "
+              "change detection against the reviewed bytes, rollback) before it may write anything. Until then the "
+              "brief is a document a human applies, and the product says so in its own text"),
     "P4-17": ("done", "HEAD", "tests/test_diagnose.py (25), tests/test_ui_viewer.py (20), "
               "tests/test_recovery.py (29)", "—", "self",
               "`blackbox diagnose` on a capsule or a data dir reads one capsule within a frame bound, classifies what was cut short "
