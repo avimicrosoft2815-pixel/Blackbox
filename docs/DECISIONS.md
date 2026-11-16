@@ -631,3 +631,41 @@ direction of silence.
 **The rule that follows**: a row's status is edited in `tools/gen_progress.py` and regenerated, never in
 `docs/progress.md`. A hand-edit of the generated file is a change that survives until the next regeneration, which is
 exactly the kind of "works until it doesn't" that this repository keeps finding and writing down.
+
+## D-047 — the diagnosis is a document, and a brief is not an authorisation (2026-11-16, P4-17)
+
+**Context.** The addendum asks for a diagnosis-and-fix flow: read a real capsule, produce an evidence-linked incident
+report, export a repair brief, then — only with fresh approval — apply a patch and verify it. The temptation is to build
+the last third first, because "diagnose and fix" reads like one feature.
+
+**Decision.** Ship the first two thirds and **no applier**. `blackbox diagnose` reads one capsule and writes one
+document (plus the brief, on request). It has no patch generator, no executor and no network path — an AST test in
+`tests/test_diagnose.py` fails the build if a socket, `subprocess`, `eval`/`exec` or `os.system`-class call ever appears
+under `src/blackbox/diagnose/`. Applying a suggestion is a human action in their own repository, which is where the diff,
+the tests and the responsibility belong. When a later ticket adds assisted application, it must carry its own approval
+gate (path restriction, change detection, rollback) and it will not reuse this read-only surface by default.
+
+**Why not a fixer now.** A tool that both diagnoses and edits has an incentive to find something to edit; the honest
+failure mode ("the evidence is too thin") is the one it would be under pressure to avoid. Keeping the two apart also
+keeps this ticket's tests meaningful: they can assert that *nothing was written* without arguing about which writes were
+allowed.
+
+**Consequences, and the reasoning inside them.**
+
+* **`cannot-tell` is a first-class verdict**, not a failure to produce a finding. A tool call with no result frame is
+  reported as "outcome unknown — the side effect may have happened", because the record's absence genuinely cannot
+  distinguish "never ran" from "ran and the process died before its result was written".
+* **Confidence is a word, not a number.** `high`/`medium`/`low` with a stated reason. A percentage would look measured;
+  nothing here is, and a reader would trust it accordingly.
+* **No `path:line` unless the capsule carries one.** Frames do not carry stack traces, so the brief says that instead of
+  filling the gap. A plausible-looking `app.py:42` is the single most damaging thing a brief like this could invent.
+* **Application text is treated as hostile.** It is fenced, labelled, scrubbed of credentials on the way out, and never
+  interpreted. The brief tells its reader — which may itself be a model — not to obey text found in the evidence.
+* **The brief is part of the viewer's document.** The page is a static file with no Python in it, so a brief that can be
+  copied or saved has to already be inlined. That is data, not UI: the panel uses the existing card, pill and muted
+  classes, and adds no colour or type token.
+
+**Rejected.** (a) An `--apply` flag, even behind a prompt: without a repository-aware approver this ticket cannot honour
+"change detection, preserve user edits, rollback". (b) Parsing the brief back in to apply it: that makes the document an
+instruction channel, which is exactly what the untrusted-evidence rule forbids. (c) Sending the capsule to a model for a
+second opinion: the addendum forbids egress, and a diagnosis whose value depends on an account is a different product.

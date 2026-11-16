@@ -56,6 +56,19 @@
   </main>
 
   <aside class="inspector glass" aria-label="Inspector">
+    <h2 class="rail-title">Diagnosis</h2>
+    <div id="diagnosis" class="diag">
+      <p class="muted">Reading the capsule…</p>
+    </div>
+    <details id="brief" class="brief" hidden>
+      <summary>Repair brief <span class="muted">— read-only, nothing is applied</span></summary>
+      <div class="brief-actions">
+        <button id="btn-copy-brief" class="ghost" type="button">Copy</button>
+        <button id="btn-save-brief" class="ghost" type="button">Save .md</button>
+        <span id="brief-status" class="muted" role="status" aria-live="polite"></span>
+      </div>
+      <pre id="brief-text" class="brief-text" tabindex="0"></pre>
+    </details>
     <h2 class="rail-title">Inspector</h2>
     <div id="inspector">
       <p class="muted">Select a row with <kbd>↑</kbd> <kbd>↓</kbd>, or click it. <kbd>Enter</kbd> opens a node.</p>

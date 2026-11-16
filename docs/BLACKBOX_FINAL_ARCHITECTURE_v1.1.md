@@ -2011,6 +2011,7 @@ This phase is what turns "Python recorder" into "attach to anything that speaks 
 
 | ID | Path | Action | Done when | Est |
 |---|---|---|---|---|
+| P4-17 | `diagnose/` + `cli/cmd_diagnose.py` | evidence in, documents out, **read-only**: bounded defensive capsule read (`BBX-E230`), §14.4 node classification, findings ranked `observed`/`likely`/`possible`/`cannot-tell` with alternatives and the check that would settle each, secrets scrubbed from everything that leaves, recorded application text fenced and labelled untrusted, incident report (markdown/JSON) and a repair brief that names no invented `path:line` and states its unknowns | a killed tool call is `cannot-tell`, never "the tool did not run"; `tests/test_diagnose.py` proves no network/eval/exec path exists by AST; `--brief` refuses to overwrite without `--force`; the same inputs produce the same document twice (2026-11-16) | 12 |
 | P5-01 | `index/schema.py` | DDL from §9.3 verbatim, `STRICT`/`WITHOUT ROWID`, indexes, `index_meta` | `blackbox index --init` creates a DB passing `integrity_check` | 4 |
 | P5-02 | `index/db.py` | connection factory, pragmas from §9.2, migration runner, version gate (`BBX-E330`) | opening a v+1 index refuses cleanly; v−1 migrates | 5 |
 | P5-03 | `index/ingest.py` | single-writer thread, prepared statements, 512-row/8 MiB transactions, watermark, `ON CONFLICT DO NOTHING` | re-ingesting the same run inserts 0 rows | 8 |
@@ -2705,6 +2706,7 @@ Removed keys: `ring_bytes`, `[rules]` (replaced by `[[trigger]]`). Precedence un
 | `BBX-E160` | blob not found in the store | the blob was collected or never committed; `blackbox verify` lists missing refs |
 | `BBX-E161` | blob header invalid | the file is not a readable BBXBLOB1 container; quarantine it |
 | `BBX-E162` | blob body does not match its hash | the blob was corrupted or modified; do not trust it, re-record |
+| `BBX-E230` | diagnosis: nothing readable to diagnose | pass a `.bbx` capsule, or a data dir that holds one (2026-11-16 build) |
 
 `BBX-E140` was briefly reused for "segment preallocation failed" in this build; that is `BBX-E132` and the
 registry now matches this appendix in both directions (`tests/test_errors.py`).

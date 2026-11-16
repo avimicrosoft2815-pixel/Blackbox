@@ -98,6 +98,7 @@ A † marks a Done-when cell paraphrased because the plan's wording uses a word 
 | `P4-14` | spans validate against a JSON-schema snapshot; a Phoenix/Langfuse-class importer accepts the file (manual check, documented) | **todo** | — | — | — | — |  |
 | `P4-15` | DevTools and Proxyman open it (manual check); size reported | **todo** | — | — | — | — |  |
 | `P4-16` | --writer \ | **todo** | — | — | — | — |  |
+| `P4-17` | a killed tool call is `cannot-tell`, never "the tool did not run"; `tests/test_diagnose.py` proves no network/eval/exec path exists by AST; `--brief` refuses to overwrite without `--force`; the same inputs produce the same document twice (2026-11-16) | **done** | HEAD | tests/test_diagnose.py (25), tests/test_ui_viewer.py (20), tests/test_recovery.py (29) | — | self | `blackbox diagnose` on a capsule or a data dir reads one capsule within a frame bound, classifies what was cut short with §14.4's own function, and writes an incident report plus a repair brief that names its unknowns, quotes recorded application text as fenced untrusted data, and refuses to overwrite a file a human wrote. Read-only by construction: an AST test fails the build if a socket, a subprocess or `eval` ever appears in the package. It found and fixed defect 44 (the `INTERRUPTED_IN_TOOL` row was unreachable, so a killed tool call was reported as 'never touched a tool') |
 
 ## Hot-path numbers (Stage-2 item 8: p50/p95/p99, N, warm-up, raw JSON)
 

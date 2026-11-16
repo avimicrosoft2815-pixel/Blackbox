@@ -33,6 +33,7 @@ REGISTRY: dict[str, tuple[str, str]] = {
     "BBX-E223": ("chain break", "run `blackbox verify` for the first discontinuity"),
     "BBX-E224": ("sealed segment does not match its footer", "quarantine the segment; do not delete it"),
     "BBX-E225": ("frame is larger than one segment", "externalise the payload or raise segment_bytes"),
+    "BBX-E230": ("diagnosis: nothing readable to diagnose", "pass a .bbx capsule or a data dir that holds one"),
     "BBX-E310": ("requested window exceeds max_attached shards", "narrow the range or read capsules"),
     "BBX-E330": ("index schema newer than this binary", "upgrade, or run `blackbox index --rebuild`"),
     "BBX-E401": ("capsule too large", "raise capsule_max_bytes or split the run"),

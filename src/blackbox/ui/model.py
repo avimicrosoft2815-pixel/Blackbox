@@ -103,6 +103,19 @@ def _rel_ms(wall_ns: int, start_ns: int) -> float:
     return round((wall_ns - start_ns) / 1_000_000, 3) if start_ns and wall_ns else 0.0
 
 
+def _node_kind(fields: dict[str, Any]) -> str | None:
+    """The `kind` in a node or mark payload, or None. Decoded defensively: a payload is application-controlled data."""
+    from blackbox.codec import cbor
+
+    try:
+        body = cbor.decode_exact(fields.get("payload") or b"")
+    except Exception:
+        return None
+    if isinstance(body, dict) and isinstance(body.get("kind"), str):
+        return str(body["kind"])
+    return None
+
+
 def _nodes(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """One entry per node slot that carries a name: what it was, when it ran, and whether it closed."""
     nodes: dict[int, dict[str, Any]] = {}
@@ -158,6 +171,9 @@ def document_for_capsule(path: str, *, role: str = "", writer: str = "") -> dict
                 "wall_ns": int(fields.get("wall_ns") or 0),
                 "rel_ms": 0.0,
                 "summary": _summary(fields),
+                # The node's own `kind` (`run`, `step`, `tool`, `turn`), when the payload has one: a tool call is a
+                # tool node, since no seam writes KIND_TOOL_REQUEST (defect 44).
+                "node_kind": _node_kind(fields),
                 "payload": fields.get("payload") or b"",
             })
     start_ns = next((e["wall_ns"] for e in events if e["kind"] == C.KIND_RUN_START and e["wall_ns"]), 0)
@@ -198,10 +214,44 @@ def document_for_capsule(path: str, *, role: str = "", writer: str = "") -> dict
         "links": links,
         "events": [{k: v for k, v in e.items() if k != "payload"} for e in events],
         "nodes": _nodes(events),
+        "diagnosis": _diagnosis(path, events),
         "cost": {"model_calls": sum(1 for e in events if e["kind"] == C.KIND_MODEL_REQUEST),
-                 "tool_calls": sum(1 for e in events if e["kind"] == C.KIND_TOOL_REQUEST),
+                 # A tool invocation is a *tool node*: no seam emits KIND_TOOL_REQUEST (defect 44), so counting the
+                 # frame kind alone reported 0 tool calls for every run the hook adapters recorded.
+                 "tool_calls": sum(1 for e in events if e["kind"] == C.KIND_TOOL_REQUEST
+                                   or (e["kind"] == C.KIND_NODE_OPEN and e.get("node_kind") == "tool")),
                  "chunks": sum(1 for e in events if e["kind"] == C.KIND_MODEL_CHUNK),
                  "stream_bytes": sum(len(e["payload"]) for e in events if e["kind"] == C.KIND_MODEL_CHUNK)},
+    }
+
+
+def _diagnosis(path: str, events: list[dict[str, Any]]) -> dict[str, Any]:
+    """The read-only diagnosis the page shows: headline, ranked findings, and the repair brief as text.
+
+    Computed here rather than in the page because the page is a static file with no Python in it: to copy a brief, the
+    brief has to already be in the document. Nothing here writes, runs or reaches anything — `build()` returns strings.
+    A capsule the diagnosis cannot read becomes an `error` field, not a blank panel: a viewer that silently drops a
+    section is worse than one that says why.
+    """
+    from blackbox.diagnose import build as build_diagnosis
+    from blackbox.diagnose import load as load_evidence
+
+    if not events:
+        return {"error": "no frames: there is nothing to diagnose"}
+    try:
+        report = build_diagnosis(load_evidence(path))
+    except Exception as exc:                       # a viewer must render the tape even when the report cannot
+        return {"error": f"{type(exc).__name__}: {exc}"}
+    counts: dict[str, int] = {}
+    for finding in report.findings:
+        counts[finding.verdict] = counts.get(finding.verdict, 0) + 1
+    return {
+        "headline": report.headline(),
+        "counts": counts,
+        "findings": [finding.to_dict() for finding in report.findings],
+        "cannot_know": list(report.evidence.cannot_know),
+        "brief": report.brief(),
+        "read_only": True,
     }
 
 

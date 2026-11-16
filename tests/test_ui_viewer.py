@@ -276,3 +276,48 @@ def test_the_cli_reports_what_it_wrote(capsys, run_dir):
     assert code == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["out"].endswith("viewer.html") and payload["bytes"] > 10_000
+
+
+# ── the diagnosis panel ─────────────────────────────────────────────────────────────────────────────────────────
+def test_the_page_carries_the_diagnosis_and_a_copyable_brief(page):
+    """The brief has to be *in* the document: the page is a file with no Python in it, and no network to ask."""
+    html, document = page
+    diag = document["diagnosis"]
+    assert diag["read_only"] is True
+    assert diag["headline"]
+    assert isinstance(diag["findings"], list)
+    assert diag["brief"].startswith("# Repair brief")
+    assert "applied nothing" in diag["brief"]
+    assert "No file or line is named here" in diag["brief"]
+    assert "Repair brief" in html and "btn-copy-brief" in html and "btn-save-brief" in html
+
+
+def test_the_diagnosis_panel_is_wired_to_existing_ids_and_adds_no_network_call(page):
+    html, _ = page
+    code = _code(html)
+    for element_id in ("diagnosis", "brief", "brief-text", "btn-copy-brief", "btn-save-brief", "brief-status"):
+        assert 'id="' + element_id + '"' in html, element_id
+    assert "navigator.clipboard.writeText" in code
+    assert "URL.createObjectURL" in code and "revokeObjectURL" in code
+    for pattern in ("fetch(", "XMLHttpRequest", "WebSocket", "http://", "https://"):
+        assert pattern not in code, f"{pattern!r} reached the page"
+
+
+def test_a_tool_node_counts_as_a_tool_call_in_the_page(tmp_path):
+    """Defect 44 again, from the reader's side: counting only `KIND_TOOL_REQUEST` showed 0 tools for every run."""
+    from blackbox.codec import cbor
+    from blackbox.rec import recovery
+    from blackbox.tape.writer import TapeWriter
+
+    data_dir = tmp_path / "data"
+    writer = TapeWriter(str(data_dir), segment_bytes=C.MIN_SEGMENT_BYTES)
+    writer.batch_bytes, writer.batch_ms = 0, 0.0
+    writer.open()
+    writer.append(C.KIND_RUN_START, cbor.encode({"run_id": "r_tool"}), node_slot=0, priority=2, run_slot=1)
+    writer.append(C.KIND_NODE_OPEN, cbor.encode({"name": "charge", "kind": "tool"}), node_slot=1, priority=2, run_slot=1)
+    writer.publish()
+    writer.close()
+    assert recovery.recover(str(data_dir)).capsule_path
+    document = model.document_for_path(str(data_dir))
+    assert document["cost"]["tool_calls"] == 1
+    assert document["diagnosis"]["findings"], "a tool node with no close is not a clean run"

@@ -89,6 +89,33 @@ def test_in_tool_never_claims_the_side_effect_did_not_happen() -> None:
     assert "the side effect may have happened" in nodes[0].detail
 
 
+def test_a_tool_node_that_never_closed_is_interrupted_in_tool() -> None:
+    """Defect 44: no seam writes `KIND_TOOL_REQUEST`; the hook adapters open a *tool node* instead.
+
+    The distinction is not cosmetic. Before this, a killed `PreToolUse` fell through to
+    `INTERRUPTED_BEFORE_FIRST_BYTE` — "model call started, provider never responded" or "node opened and never touched a
+    model or a tool" — which tells a reader the side effect did not happen. §14.4 says the opposite must be the
+    default: `tool invoked; outcome unknown — the side effect may have happened`.
+    """
+    from blackbox.codec import cbor
+
+    frames = [_frame(1, C.KIND_NODE_OPEN, slot=1, payload=cbor.encode({"name": "charge-card", "kind": "tool"})),
+              _frame(2, C.KIND_NODE_OPEN, slot=2, payload=cbor.encode({"name": "agent", "kind": "run"}))]
+    nodes = {n.node_slot: n for n in recovery.classify_nodes(frames)}
+    assert nodes[1].status == recovery.INTERRUPTED_IN_TOOL
+    assert "side effect may have happened" in nodes[1].detail
+    assert nodes[2].status == recovery.INTERRUPTED_BEFORE_FIRST_BYTE
+
+
+def test_a_closed_tool_node_is_not_interrupted() -> None:
+    from blackbox.codec import cbor
+
+    frames = [_frame(1, C.KIND_NODE_OPEN, slot=1, payload=cbor.encode({"name": "charge-card", "kind": "tool"})),
+              _frame(2, C.KIND_NODE_CLOSE, slot=1, payload=cbor.encode({"name": "charge-card", "kind": "tool",
+                                                                        "outcome": "ok"}))]
+    assert recovery.classify_nodes(frames) == []
+
+
 def test_seal_interrupted_is_a_run_level_status() -> None:
     frames = [_frame(1, C.KIND_RUN_START), _frame(2, C.KIND_RUN_END)]
     assert recovery.run_status(frames, sealed=False) == ("SEAL_INTERRUPTED", "SEAL_NEVER_FINISHED")

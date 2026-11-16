@@ -29,6 +29,7 @@ from typing import Any
 from blackbox import constants as C
 from blackbox.cap import format as cap
 from blackbox.cap_sdk.sink import chunk_bytes
+from blackbox.codec import cbor
 from blackbox.codec.ids import blake2b
 from blackbox.errors import bbx
 from blackbox.platform import current as _plat_current
@@ -109,6 +110,26 @@ class NodeRecord:
         return out
 
 
+def node_kind(payload: bytes) -> str | None:
+    """The `kind` field of a node's payload (`run`, `step`, `tool`, `turn`), or None if it will not decode.
+
+    Needed because the plan's §14.4 table has a `TOOL_REQUEST` row and **no seam writes that frame kind**: the hook
+    adapters open a *tool node* instead (`hooks/events.py`), so a classifier that looked only at frame kinds reported a
+    killed `PreToolUse` as `INTERRUPTED_BEFORE_FIRST_BYTE` — "never touched a model or a tool" — which asserts that a
+    side effect did not happen. That is the one thing this row must never say (defect 44).
+    """
+    if not payload:
+        return None
+    try:
+        decoded = cbor.decode_exact(payload)
+    except Exception:
+        return None
+    if not isinstance(decoded, dict):
+        return None
+    kind = decoded.get("kind")
+    return kind if isinstance(kind, str) else None
+
+
 def classify_nodes(frames: list[dict[str, Any]], *, now_wall_ns: int | None = None) -> list[NodeRecord]:
     """Apply the §14.4 table to the frames of one run.
 
@@ -131,10 +152,18 @@ def classify_nodes(frames: list[dict[str, Any]], *, now_wall_ns: int | None = No
         kind = f["kind"]
         if kind == C.KIND_NODE_CLOSE:
             closed.add(slot)
+            if node_kind(f.get("payload") or b"") == "tool":
+                rec(slot).tool_results += 1
             continue
         if kind == C.KIND_NODE_OPEN:
-            rec(slot)
-            last_kind[slot] = kind
+            r = rec(slot)
+            if node_kind(f.get("payload") or b"") == "tool":
+                # Counted as a tool invocation, because that is what it is: the node is open until its result closes
+                # it, and a tool node that never closes may have run.
+                r.tool_requests += 1
+                last_kind[slot] = C.KIND_TOOL_REQUEST
+            else:
+                last_kind[slot] = kind
             continue
         if kind == C.KIND_MODEL_REQUEST:
             r = rec(slot)

@@ -177,6 +177,14 @@ S: dict[str, tuple[str, str, str, str, str, str]] = {
     "P3B-08": ('**done**', 'HEAD', 'tests/proxy/ (15), tests/test_proxy_server.py (18), tests/test_proxy_routes.py (10), bench/bench_proxy.py',
                'bench/results/2026-11-15-proxy.json', 'self',
                'the four §15.1 rows are measured with origin, proxy and client in three separate processes: added latency p50 0.165 / p99 0.471 ms, first-byte p50 0.184 ms, 200 concurrent streams with 0 errors, RSS growth 0.0 MiB at 50 req/s; S16 (`SIGKILL` mid-stream → `INTERRUPTED_PROXY`, no terminal frame), both disconnect classes on a real tape, header stripping, the allowlist, and the curl/Node/openai-SDK client matrix; the ten cells are green in run 43767064900'),
+    "P4-17": ("done", "HEAD", "tests/test_diagnose.py (25), tests/test_ui_viewer.py (20), "
+              "tests/test_recovery.py (29)", "—", "self",
+              "`blackbox diagnose` on a capsule or a data dir reads one capsule within a frame bound, classifies what was cut short "
+              "with §14.4's own function, and writes an incident report plus a repair brief that names its unknowns, "
+              "quotes recorded application text as fenced untrusted data, and refuses to overwrite a file a human "
+              "wrote. Read-only by construction: an AST test fails the build if a socket, a subprocess or `eval` ever "
+              "appears in the package. It found and fixed defect 44 (the `INTERRUPTED_IN_TOOL` row was unreachable, "
+              "so a killed tool call was reported as 'never touched a tool')"),
     "P3B-09": ('**done**', 'HEAD', 'tests/test_attach_doc.py (14), tests/test_attach_sdks.py (7)',
                '—', 'self',
                'the two verdict tables in `docs/attach.md` are checked mechanically and the four rows this sandbox can run were run with the real clients through the exported base URL; eleven rows say **unverified** and say what is doubted. The first real client run found defect 39 (the OpenAI export lost `/v1`), fixed in `BASE_URL_SUFFIX` (D-042)'),

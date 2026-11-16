@@ -19,6 +19,8 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import signal
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -81,18 +83,32 @@ os.kill(os.getpid(), getattr(signal, "SIGKILL", signal.SIGTERM))
 
 
 def _kill_exit_code() -> int:
-    return 137 if os.name == "posix" else 1
+    """The status a self-killed child leaves, as the platform reports it.
+
+    POSIX has the 128+n convention, so `SIGKILL` is 137. Windows has neither `SIGKILL` nor the convention: `os.kill`
+    there is `TerminateProcess(handle, sig)`, so the exit code *is* the signal number — CI reported `exit 15` for the
+    `SIGTERM` fallback on all three Windows cells (run 43885473662), and that is the number used here rather than a
+    guess. The first version of this helper said `1` and was wrong in exactly the way this file exists to prevent: a
+    number that looked like a measurement.
+    """
+    return 137 if os.name == "posix" else int(getattr(signal, "SIGTERM", 15))
 
 
-def _shell_child(tmp_path: Path) -> tuple[list[str], Path]:
-    """A non-Python command that reports its own `PYTHONPATH` to a file, on either platform."""
+def _shell_child(tmp_path: Path) -> tuple[list[str], Path | None]:
+    """A non-Python command for the "no PYTHONPATH for a shell" test, and where it reports from, if it can.
+
+    On POSIX the child genuinely reads its own environment and writes it to a file — the strongest form of the check.
+    On Windows that is not worth the contortions: a quoted redirect path inside a `cmd /c` command line goes through
+    `list2cmdline`, whose backslash-escaped quotes are *not* what `cmd.exe` parses, and the file lands somewhere else
+    (that is the `FileNotFoundError` this test produced on all three Windows cells in run 43885473662). So on Windows the
+    command is a plain `cmd /c exit 0` and the assertion is made against the environment the launcher actually passes to
+    `Popen` — which is the property under test, observed directly instead of through a shell.
+    """
     out = tmp_path / "pp.txt"
     if os.name == "posix":
         script = 'printf "%s" "${PYTHONPATH-unset}" > "$1"'
         return ["/bin/sh", "-c", script, "sh", str(out)], out
-    # `%PYTHONPATH%` left unset is echoed literally by cmd.exe, which is exactly what a test for "no injection" wants:
-    # the marker the launcher would have added must not appear either way.
-    return ["cmd", "/c", f'echo [%PYTHONPATH%]> "{out}"'], out
+    return ["cmd", "/c", "exit 0"], None
 
 
 # ── the auto-import ────────────────────────────────────────────────────────────────────────────────────────────────
@@ -185,20 +201,33 @@ def test_no_sdk_leaves_the_child_exactly_as_it_found_it(tmp_path):
     assert _sdk_dirs() == before
 
 
-def test_a_shell_child_is_given_no_pythonpath_at_all(tmp_path):
+def test_a_shell_child_is_given_no_pythonpath_at_all(tmp_path, monkeypatch):
     """A `sitecustomize` is a file only Python reads; exporting it to a shell is noise and a lie about what happened.
 
-    `/bin/sh` does not exist on Windows (`FileNotFoundError: [WinError 2]`, which is what this test reported there),
-    so the non-Python command is chosen per platform while the assertion stays the same.
+    The environment handed to `Popen` is captured and checked on both platforms, and on POSIX the child's own view is
+    checked as well. Neither `/bin/sh` nor a `cmd.exe` redirect is portable, so the portable assertion is the one that
+    observes what the launcher passes, not what a shell made of it.
     """
     data_dir = tmp_path / "data"
     command, report = _shell_child(tmp_path)
+    seen: dict = {}
+    real_popen = subprocess.Popen
+
+    def spy(*args, **kwargs):
+        seen.update(kwargs)
+        return real_popen(*args, **kwargs)
+
+    monkeypatch.setattr(launcher.subprocess, "Popen", spy)
     with open(tmp_path / "out.txt", "w", encoding="utf-8") as out:
         result = launcher.launch(command, data_dir=str(data_dir), out=out, proxy=False, env=_env())
     assert result.sdk["enabled"] is False
     assert result.sdk["is_python"] is False
     assert result.sdk["reason"] == "not a Python command"
-    assert "blackbox-sdk-" not in report.read_text()
+    child_env = seen["env"]
+    assert "blackbox-sdk-" not in child_env.get("PYTHONPATH", ""), "a shell child must not be handed the SDK path"
+    assert not any("blackbox-sdk-" in str(value) for value in child_env.values())
+    if report is not None:
+        assert "blackbox-sdk-" not in report.read_text(), "and the child itself must not see it either"
 
 
 def test_the_python_command_test_itself_is_platform_neutral():

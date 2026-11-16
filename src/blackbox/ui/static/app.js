@@ -323,6 +323,92 @@
       "that were recorded."));
   }
 
+  // ── diagnosis ───────────────────────────────────────────────────────────────────────────────────────────────
+  var VERDICT_PILL = { observed: "pill-ok", likely: "pill-warn", possible: "pill-quiet", "cannot-tell": "pill-quiet" };
+
+  function renderDiagnosis() {
+    var box = $("diagnosis");
+    clear(box);
+    var diag = (data && data.diagnosis) || {};
+    if (diag.error) {
+      box.appendChild(el("p", "note", "Diagnosis unavailable for this capsule: " + diag.error +
+        " The timeline below is still the recording."));
+      return;
+    }
+    box.appendChild(el("p", "note", diag.headline || "No diagnosis was produced."));
+    (diag.findings || []).forEach(function (finding) {
+      var card = el("div", "diag-card");
+      var head = el("div", "verdict");
+      head.appendChild(el("span", "pill " + (VERDICT_PILL[finding.verdict] || "pill-quiet"),
+        finding.verdict + " · " + finding.confidence));
+      head.appendChild(el("span", "muted", finding.id));
+      card.appendChild(head);
+      card.appendChild(el("h3", null, finding.title));
+      card.appendChild(el("p", null, finding.basis));
+      if (finding.evidence && finding.evidence.length) {
+        var refs = el("ul");
+        finding.evidence.forEach(function (ref) { refs.appendChild(el("li", null, ref)); });
+        card.appendChild(refs);
+      }
+      if (finding.alternatives && finding.alternatives.length) {
+        var alts = el("ul");
+        finding.alternatives.forEach(function (alt) { alts.appendChild(el("li", null, "also fits: " + alt)); });
+        card.appendChild(alts);
+      }
+      box.appendChild(card);
+    });
+    if (!(diag.findings || []).length) {
+      box.appendChild(el("p", "note", "No finding reached observed or likely: nothing in these frames indicates an " +
+        "interruption. The limits below still apply."));
+    }
+    if ((diag.cannot_know || []).length) {
+      var limits = el("details", "brief");
+      limits.appendChild(el("summary", null, "What this cannot tell you (" + diag.cannot_know.length + ")"));
+      var list = el("ul");
+      diag.cannot_know.forEach(function (line) { list.appendChild(el("li", null, line)); });
+      limits.appendChild(list);
+      box.appendChild(limits);
+    }
+    renderBrief(diag);
+  }
+
+  function renderBrief(diag) {
+    var block = $("brief");
+    var text = diag.brief || "";
+    if (!text) { block.hidden = true; return; }
+    block.hidden = false;
+    $("brief-text").textContent = text;
+    var status = $("brief-status");
+    $("btn-copy-brief").onclick = function () {
+      // Clipboard only. There is no fetch here and nothing leaves the machine: the page is a file.
+      var done = function (ok) {
+        status.textContent = ok ? "copied" : "select the text and copy it (clipboard blocked)";
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(function () { done(true); }, function () { done(false); });
+      } else {
+        var range = document.createRange();
+        range.selectNodeContents($("brief-text"));
+        var selection = window.getSelection();
+        selection.removeAllRanges();
+        selection.addRange(range);
+        done(false);
+      }
+    };
+    $("btn-save-brief").onclick = function () {
+      var blob = new Blob([text], { type: "text/markdown" });
+      var url = URL.createObjectURL(blob);
+      var link = document.createElement("a");
+      link.href = url;
+      link.download = "repair-brief.md";
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.setTimeout(function () { URL.revokeObjectURL(url); }, 0);
+      status.textContent = "saved locally";
+    };
+  }
+
   // ── wiring ───────────────────────────────────────────────────────────────────────────────────────────────────
   function onKey(event) {
     var tag = (event.target && event.target.tagName) || "";
@@ -361,6 +447,7 @@
   renderTapes();
   renderLinks();
   renderCost();
+  renderDiagnosis();
   renderTree();
   filterInput.addEventListener("input", function () { selected = -1; renderTree(); });
   $("btn-help").addEventListener("click", openHelp);

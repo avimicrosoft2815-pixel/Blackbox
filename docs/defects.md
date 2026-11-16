@@ -366,3 +366,27 @@ plan's §10 shape, and it is append-only.
   *Tests*: `tests/test_launcher_attach.py` (20), including `test_the_python_command_test_itself_is_platform_neutral`,
   which is the test that caught the fourth bug. Verified on Linux; the Windows cells are the evidence and are quoted
   from CI, not from here.
+  **Second round, same defect (run 43885473662, commit 1009576).** The first fix was itself POSIX-shaped in two places,
+  and the Windows cells said so precisely: `AssertionError: exit 15 (os.name=nt)` and
+  `FileNotFoundError: …\test_a_shell_child_is_given_no0\pp.txt`. (a) `os.kill(pid, sig)` on Windows is
+  `TerminateProcess(handle, sig)`, so the exit status *is* the signal number — 15 for the `SIGTERM` fallback, not the
+  1 that the helper guessed. The helper now returns 137 on POSIX and `SIGTERM`'s number on Windows, and the comment
+  says where the number came from. (b) A quoted redirect path inside a `cmd /c` string is re-quoted by
+  `subprocess.list2cmdline`, whose backslash escapes `cmd.exe` does not parse as escapes: the file was created under a
+  different name, so the read failed. The test no longer round-trips through a shell on Windows at all — it captures the
+  `env` the launcher passes to `Popen` and asserts the SDK path appears nowhere in it, which is the property under test
+  observed directly. POSIX keeps the stronger child-observed check.
+
+- **defect 44 — the plan's most safety-relevant classification row was unreachable, and a killed tool call was reported
+  as if the tool had never run.** `rec/recovery.py::classify_nodes` counted `KIND_TOOL_REQUEST`/`KIND_TOOL_RESULT`
+  frames. **No seam writes those frames**: the hook adapters (`hooks/events.py:116`, `:147`) map `PreToolUse` to a
+  `NODE_OPEN` whose payload has `kind="tool"`, and `PostToolUse` to the matching `NODE_CLOSE`. So a process killed
+  between a tool's open and its close produced `INTERRUPTED_BEFORE_FIRST_BYTE` with the detail "node opened and never
+  touched a model or a tool" — a claim that the side effect did not happen, which §14.4 exists specifically to avoid.
+  The row that says *tool invoked; outcome unknown — the side effect may have happened* could not be produced by any
+  real recording. **Fix**: `classify_nodes` reads the node payload's own `kind` (new `node_kind()` helper) and counts a
+  tool node as a tool request until its close, with the close counting as the result; `ui/model.py` counts `tool_calls`
+  the same way, since it showed 0 for every hook-recorded run for the same reason. **Tests**:
+  `tests/test_recovery.py::test_a_tool_node_that_never_closed_is_interrupted_in_tool`,
+  `::test_a_closed_tool_node_is_not_interrupted`, and `tests/test_ui_viewer.py::test_a_tool_node_counts_as_a_tool_call_in_the_page`.
+  Found by the diagnosis ticket's own fixtures, which is the point of writing evidence readers against real frames.
