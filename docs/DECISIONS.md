@@ -1102,7 +1102,58 @@ any other keyword. The snapshot cannot grow a check nobody runs, which is the fa
 validator. What it does not do is implement JSON Schema; the file is a snapshot of what this build produces, not a claim
 to validate arbitrary OTLP.
 
-**The importer check is manual and was not performed.** No Phoenix/Langfuse-class importer runs in this environment, so
-the ticket's second clause is **not** ticked by evidence here: the file's shape is documented in `docs/format.md`, its
-structural conformance is tested, and whether a real importer accepts it is an open manual check recorded in
-`docs/STATE.json` (`open_blockers`). Say so plainly rather than let "schema validates" stand in for "an importer read it".
+**The importer was run, and it said 415.** A real Phoenix server was installed and started in this sandbox
+(`arize-phoenix` **21.0.0**, `phoenix serve`, with `arize-phoenix-client` 3.7.0 to read the spans back) and the capsule's
+`otlp/spans.json` was POSTed to its OTLP/HTTP receiver:
+
+| attempt | result |
+|---|---|
+| `POST /v1/traces`, `content-type: application/json`, the file as-is | **415** `Unsupported content type: application/json` |
+| the same document parsed by the official definitions (`opentelemetry-proto` **1.45.2**) into an `ExportTraceServiceRequest`, ids adapted from hex to proto3's base64, everything else untouched | parsed, 3 spans, 807 B |
+| `POST /v1/traces`, `application/x-protobuf`, that message | **200** |
+| read back with Phoenix's own client | 3 spans: `bbx.run` (parent of both), `invoke_agent support-agent`, `chat gpt-4`; trace id `50444de0…` preserved byte for byte; `bbx.*` attributes stored verbatim; Phoenix derived `llm.system`/`llm.provider`/`llm.model_name` from our `gen_ai.*` names |
+
+So the ticket's clause — *an importer accepts the file* — is **measured false for the file we ship**, and true for an
+equivalent protobuf encoding of the same spans. The content is right; the encoding is what a Phoenix-class receiver
+refuses. P4-14 therefore stays `wip`, and the fix is concrete rather than hopeful: ship `otlp/spans.pb` as a second
+derived part, produced by a stdlib-only protobuf encoder, so the capsule carries an encoding such receivers take
+(recorded as **P4-20** in `docs/STATE.json` `extra_work`). Langfuse was **not** tested — its SDK is an exporter, not a
+receiver, and no receiver could be installed offline here — and neither were the Collector's JSON receiver or Phoenix's
+gRPC port; the artifact `bench/results/2026-11-16-otlp-importer.json` lists every gap by name.
+
+## D-057 — verify reports pairs, and one check says it cannot check (2026-11-16, P4-16)
+
+`blackbox verify` is five checks behind one command with three ways to name the target (a capsule path, `--run <id>`,
+`--writer <uuid>`), and exit codes `0` / `9` / `2` as the plan fixes them: verified, a check failed, the target cannot be
+read. The decisions worth recording are about what a verifier may *say*.
+
+**Pairs, not verdicts.** Every check reports `declared` and `recomputed` side by side, so a failure shows two values rather
+than the word "mismatch". That is why the manifest had to gain fields rather than the command computing them on the fly:
+`chain_root`, `capture_seam` and `links_summary` are claims a capsule makes about itself, and a verifier that computed
+them from the same input it was checking would be comparing a value to itself.
+
+**`capture_vantage` is not checkable from a capsule, and says so.** The vantage lives on the tape's `meta` page; a capsule
+carries segments, graph, exports, `links.json` and `chain.json`, and deliberately no `meta`. So the check reports
+`ok: null, checkable: false` with the reason, `--json` carries the same two fields, and the summary prints *"declared, not
+checkable from a capsule"* beside the count of passing checks. Two things follow. First, marking it `ok: true` would be a
+check that never ran — the same failure D-056 names in a hand-rolled validator that ignores what it does not know.
+Second, it is **not a failure either**: a capsule is not wrong because it cannot answer a question about the tape it came
+from, and a command that failed on it would teach people to ignore exit 9. What a reader who *has* the tape can do is
+compare the declared number; the capsule alone cannot, and the report is the place to say so.
+
+**`--writer` recomputes, it does not look up.** The manifest carries no writer uuid, so `--writer` cannot search for one.
+Instead each capsule's id is recomputed from the writer asked about and that capsule's own run id
+(`cap.manifest.capsule_id_for`, now the single definition recovery uses too); a capsule whose *declared* id does not match
+that derivation is reported as a finding rather than silently skipped — a capsule claiming a tape it did not come from is
+exactly the thing a verifier should surface, not filter.
+
+**Absent is not wrong.** A capsule from before these fields existed passes with `ok: null` and the note *"this capsule
+predates the field"*. The compatibility rule points both ways: a new build must not call an older capsule corrupt (the
+same rule D-053's graph check follows).
+
+**What this does not establish.** Verification says the capsule is internally consistent and that its derived parts can be
+regenerated from its own bytes; it does not say the tape told the truth about the application, and it cannot reach the
+`meta` page, the writer's memory or anything outside the archive. `tests/test_verify_cli.py` (16) covers the three target
+forms, the five checks, the uncheckable one, and a tamper per part — a raw entry through the integrity root, a derived
+part through `BBX-E412`, and manifest fields through their recomputation — plus one test that a failed verification leaves
+the capsule byte-identical, because a verifier that repaired what it found would erase its own evidence.

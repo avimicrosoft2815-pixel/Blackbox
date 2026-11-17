@@ -353,7 +353,7 @@ ZIP, STORED for raw segment bodies and DEFLATE for JSON, entries sorted with `ma
 |---|---|
 | `events/seg-000001.raw` | the segment's bytes, byte-identical to the tape |
 | `chain.json` | `{chain_root, per_segment}` — what a reader needs to walk across a retention hole |
-| `manifest.json` | identity, `run` block (status, `status_cause`, completeness, `truncated_tail`, `lost_from_seq`), `gaps`, `counts`, `integrity {alg, entries, root}`, `signature: null` |
+| `manifest.json` | identity, `run` block (status, `status_cause`, completeness, `truncated_tail`, `lost_from_seq`), `gaps`, `counts`, `chain_root`, `capture_vantage`, `capture_seam`, `links_summary`, `derived_parts[]`, `integrity {alg, entries, root}`, `signature: null` (the P4-16 fields are described below) |
 | `INTEGRITY.sha256` | `<sha256>  <name>` per entry except itself and `manifest.json`, sorted |
 | `graph.json` | the run's nodes and edges, byte-identical to the run directory's copy (D-052, entry since D-053) |
 | `events/events.jsonl` | the timeline, one JSON object per frame, derived from the redacted frames (P4-13, D-054) |
@@ -366,6 +366,24 @@ while every data byte is still covered. Every entry's timestamp is `1980-01-01 0
 written as `.<id>.partial` with `O_EXCL`, fsynced, `os.replace`d, then the directory is fsynced: a visible `.bbx`
 is a complete `.bbx`. Reading validates names (absolute, `..`, backslash, NUL), case-folded duplicates, sizes,
 entry-count and ratio **before** it trusts a single entry.
+
+**What the manifest declares, and what can be checked (P4-16).** `blackbox verify` compares the manifest's claims with
+the capsule's own bytes; the table is the contract, and the last row is the one that matters:
+
+| manifest field | recomputed from | a disagreement is |
+|---|---|---|
+| `chain_root` | the `CHAIN` frames the capsule carries (last `batch` value) | `chain_root` fails |
+| `derived_parts[]` | each part re-rendered from `events/*.raw` | `BBX-E412` drift, `derived_parts` fails |
+| `capture_seam` | the `capture_seam` values on the capsule's own `MODEL_REQUEST` payloads | `capture_seam` fails |
+| `links_summary` | `links.json`'s `links`/`call_links`, counted | `links_summary` fails |
+| `capture_vantage` | **nothing** — a capsule carries no `meta` page | *not checkable*: printed as `declared`, never as a pass |
+
+`blackbox verify <capsule>`, `blackbox verify --run <id> --data DIR` and `blackbox verify --writer <uuid> --data DIR` all
+run the same five checks (plus `integrity` over every entry) and exit **0** verified, **9** a check failed, **2** the
+target cannot be read or does not exist. `--writer` is a check rather than a lookup: the manifest has no writer field, so
+each capsule's id is *recomputed* from the writer asked about and that capsule's own run id, and a capsule whose declared
+id does not match is reported rather than skipped. `--json` carries `ok: null, checkable: false` for the vantage, so a
+script cannot mistake "not checkable" for "passed".
 
 **Derived parts.** `graph.json`, `events/events.jsonl` and `otlp/spans.json` are listed in `manifest.derived_parts[]` as
 `{name, sha256, generator}` — the hash of the exact bytes written into the capsule — sorted by name so the manifest is a
@@ -443,11 +461,17 @@ re-renders and compares bytes, an edit is `BBX-E412` with the first differing li
 
 **What was and was not checked.** The document validates against `tests/schemas/otlp-spans.schema.json` (the subset of
 OTLP/JSON this build produces), checked by `tests/_schema.py` — a validator that implements that subset and raises on a
-keyword it does not implement, so the snapshot cannot grow a check nobody runs. The ticket also asks that "a
-Phoenix/Langfuse-class importer accepts the file": **that check was not performed here** — no importer of that class runs
-in this environment, and saying one accepted it would be a claim without a witness. It stays a manual step, recorded in
-`docs/STATE.json` under `open_blockers`, and the file is written to the documented OTLP/JSON shape so that the check is a
-test of an importer rather than of a bespoke format.
+keyword it does not implement, so the snapshot cannot grow a check nobody runs.
+
+The importer was then run for real: **Phoenix 21.0.0** (`arize-phoenix`, `phoenix serve`, read back with
+`arize-phoenix-client` 3.7.0) **rejected the JSON file with `415 Unsupported content type: application/json`**, and
+**accepted a protobuf encoding of the same spans with `200`** — parsed first by the official `opentelemetry-proto`
+**1.45.2** definitions (ids adapted from OTLP/JSON's hex to proto3's base64, nothing else touched). Read back through
+Phoenix's own client, the spans arrive with their names, parent chain, trace id (`50444de0…`, byte for byte), our
+`bbx.*` attributes verbatim, and Phoenix's own `llm.system`/`llm.model_name` derived from our `gen_ai.*` names. So the
+content is accepted and the *encoding we ship* is not: the ticket stays open until the capsule also carries
+`otlp/spans.pb` (proposal **P4-20**), and Langfuse, the Collector's JSON receiver and Phoenix's gRPC port were **not**
+tested. `bench/results/2026-11-16-otlp-importer.json` holds every command, status code and gap.
 
 ## 9. Conformance vectors
 

@@ -5,8 +5,8 @@
     "docs/STATUS.md",
     "bench/results/*.json"
   ],
-  "next_ticket": "P4-16",
-  "next_note": "**P4-14's code half is done, the ticket stays open** (`docs/DECISIONS.md` D-056): `otlp/spans.json` ships as the third declared derived part \u2014 the same frames as OTLP/JSON, `bbx.run` + `invoke_agent`/`execute_tool` + `{operation} {model}` CLIENT spans, `bbx.model.call` wherever the mapping has no operation, ids derived (`traceId` from the run so vantages share a trace, `spanId` from the capsule and the opening frame), and the whole document recomputable byte for byte with an edit reported as BBX-E412. It validates against `tests/schemas/otlp-spans.schema.json` via `tests/_schema.py`, a validator that raises on a keyword it does not implement. Both exports now share one semconv pin, **v1.39.0** (`gen_ai.provider.name`, replacing v1.27.0's `gen_ai.system`). **The importer half is not claimed**: no Phoenix/Langfuse-class importer was run here, so the ticket's sentence is not met and the row is `wip`, listed in `open_blockers` \u2014 not ticked. **P3B-03 and defect 58 remain open** with their limitations: a shared trace id is not a node-level edge (0 recorded) and the rebind work makes no universal 100 ms claim. Next: P4-16, `blackbox verify` over a run/writer/capsule with the manifest carrying `derived_parts[]` and BBX-E412.",
+  "next_ticket": "P4-02",
+  "next_note": "**P4-16 is done** (`docs/DECISIONS.md` D-057): `blackbox verify` (capsule path, `--run`, `--writer`) runs five checks and exits 0/9/2. The manifest now declares `chain_root`, `capture_seam`, `links_summary` and `capture_vantage`; four are recomputed from the capsule's own bytes (drift \u21d2 BBX-E412) and the vantage is **printed as declared, not checkable** \u2014 a capsule carries no meta page, and a green line there would be a check that never ran. `--writer` recomputes each capsule's id from the writer and its own run id instead of looking one up. **P4-14's importer clause was tried for real and is unmet**: Phoenix 21.0.0 answered 415 to the JSON file and 200 to an equivalent protobuf encoding, read back with the trace id, parent chain and `bbx.*` attributes intact \u2014 so the content is right and the encoding is refused. P4-14 stays `wip`; the artefact is `bench/results/2026-11-16-otlp-importer.json`. **P3B-03 and defect 58 remain open** with their limitations (0 node-level edges; no universal 100 ms claim). Next: **P4-02**, the manifest schema from \u00a713.2 with validation on write and read \u2014 the file `cap/manifest.py` now exists, and it should refuse a manifest missing a required key rather than leaving every reader to guess (P4-20, `otlp/spans.pb`, is queued in `extra_work` because it is the way P4-14's importer clause gets met).",
   "last_green_commit": "d2c0f63",
   "last_green_commit_note": "Run 44000213967 at d2c0f63: **ten of ten**, both Windows cells and all three macOS cells included. The two commits before it are recorded rather than erased: 6f131d9 (43998441767) was red on the two Windows py3.11/py3.12 cells because span order broke ties on a hashed id and Windows' coarse clock made ties common; 15679cf (43999538271) was red in nine cells on tests/test_forbidden_words.py's commit-message scan, because that commit's own message quoted the forbidden word when describing the earlier fix. The second is why the message was amended and the branch force-pushed with --force-with-lease (same branch, no history outside this increment touched).",
   "gates": {
@@ -24,7 +24,7 @@
   },
   "gate_note": "a gate flips to pass only with a reviewer-signed docs/gates/G-<name>.md (AGENT_FINAL.md \u00a74); the builder never ticks its own gate",
   "open_blockers": [
-    "**P4-14 manual check outstanding.** No Phoenix/Langfuse-class importer has been run against `otlp/spans.json`; the document validates against `tests/schemas/otlp-spans.schema.json` (checked by `tests/_schema.py`), and the importer acceptance the ticket asks for is unperformed, not passed (D-056)."
+    "**P4-14 importer clause, measured and unmet.** Phoenix 21.0.0 rejects `otlp/spans.json` with 415 (`application/json` unsupported) and accepts a protobuf encoding of the same spans with 200, read back with the trace id and parent chain intact (`bench/results/2026-11-16-otlp-importer.json`, D-056). The ticket stays `wip` until the capsule ships `otlp/spans.pb` (P4-20). Untested: Langfuse, the Collector's OTLP/JSON receiver, Phoenix's gRPC port."
   ],
   "lane_status": {
     "L0": {
@@ -137,6 +137,7 @@
         "P4-10",
         "P4-11",
         "P4-13",
+        "P4-16",
         "P4-17",
         "P4-18",
         "P4-19"
@@ -155,8 +156,7 @@
         "P4-08",
         "P4-09",
         "P4-12",
-        "P4-15",
-        "P4-16"
+        "P4-15"
       ]
     },
     "L5": {
@@ -347,6 +347,13 @@
       "measurement": "bench/results/2026-11-15-capture-overhead.json",
       "note": "the sink ignored the configured content mode (defect 30): default `hash` in Appendix A, body written anyway. Now full/hash/off with the byte count in a payload header so recovery still answers \"how much arrived\"; redaction skipped in off mode. All five \u00a715.1 rows measured on ext4 with tmpfs as a labelled second column; the content=hash worst case (a body containing `token`) is published beside the row rather than behind it",
       "label": "self"
+    },
+    {
+      "id": "P4-20",
+      "name": "otlp/spans.pb \u2014 the protobuf encoding a real OTLP receiver takes",
+      "status": "todo",
+      "tests": "-",
+      "note": "P4-14's importer clause is measured false for the file we ship: Phoenix 21.0.0 answered 415 `Unsupported content type: application/json` to otlp/spans.json and 200 to an equivalent protobuf encoding of the same spans (bench/results/2026-11-16-otlp-importer.json). The fix is a second derived part written by a stdlib-only protobuf encoder, so `capsule verify` can re-render it byte for byte like the other three"
     }
   ]
 }

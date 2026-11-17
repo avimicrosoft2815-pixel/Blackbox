@@ -31,6 +31,7 @@ from typing import Any
 from blackbox import constants as C
 from blackbox.cap import export_jsonl, export_otlp
 from blackbox.cap import format as cap
+from blackbox.cap import manifest as manifest_mod
 from blackbox.cap_sdk.sink import chunk_bytes
 from blackbox.codec import cbor
 from blackbox.codec.ids import blake2b
@@ -479,7 +480,7 @@ class Recovery:
         self.run_dir = os.path.join(data_dir, "runs", self.tape_key)
         # The capsule is per *tape*, not per run: two tapes of one run are two capsules (that is what the link is
         # for), so the id has to distinguish them or the second seal would replace the first.
-        self.capsule_id = "c_" + _hash(self.run_id, writer_uuid_hex)[:16]
+        self.capsule_id = manifest_mod.capsule_id_for(self.run_id, writer_uuid_hex)
         self.capsule_path = os.path.join(data_dir, "capsules", f"{self.capsule_id}.bbx")
         self.result = RecoveryResult(run_id=self.run_id, run_dir=self.run_dir)
         self._scan: scanner.ScanResult | None = None
@@ -722,6 +723,12 @@ class Recovery:
         # D-052: the graph's edges come from *these* bytes, in this step, so the graph and the capsule's `links.json`
         # cannot disagree. Written before the capsule, because the capsule is the thing that must not change afterwards.
         self._write_graph_edges(entries[cap.LINKS_NAME])
+        # P4-16: the manifest carries what `blackbox verify` compares, and each field is one the capsule can recompute —
+        # except the vantage, which lives on the tape's meta page and is therefore declared and reported as unverified.
+        manifest["chain_root"] = chain["chain_root"]
+        manifest["capture_vantage"] = scan.meta.get("vantage")
+        manifest["capture_seam"] = manifest_mod.seams_of(scan.frames)
+        manifest["links_summary"] = manifest_mod.links_summary_of(entries[cap.LINKS_NAME])
         # D-053, §13.1: the graph ships *inside* the capsule, and as a declared derived part — the bytes the user opens
         # are the bytes `cap.derived` can recompute from the segments, so an edited graph is a detected one (BBX-E412).
         # P4-13: the timeline as one JSON object per frame, derived from the same scan the graph is, so both are inside
