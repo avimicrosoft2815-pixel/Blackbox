@@ -743,7 +743,11 @@ own `dispatch_ms` is printed beside it instead of being silently counted as the 
 experiences from the moment the listener stops is still asserted; the test's scheduling is now visible rather than
 folded in.
 
-**Measured after the fix** (Linux 6.1, x86_64, CPython 3.11.2, this sandbox, 8 samples × 3 runs): outages
-0.0–0.75 ms, rebinds 0.14–0.40 ms, all 8 restores from the loop, tick lateness 0.0 ms. Before: outages 0.8–1.2 ms with
-the rebind at 0.24–0.49 ms and the hop included. The claim stays what it was: a budget measured on the machine that ran
-it, no universal 100 ms promise — `bench_rebind.py`'s `method.bound` string still says so.
+**Measured after the fix.** `bench/bench_rebind.py --n 60`, Linux 6.1 x86_64, CPython 3.11.2, 240 samples over four
+columns (`bench/results/2026-11-17-rebind-after-loop-restore.json`): the gate is **PASS**, worst outage 21.185 ms,
+**0 over budget, 0 port moves, 0 not restored**. The notice path, before → after on the same machine
+(`2026-11-16-rebind-detectors.json` → this file): `notice_idle` outage p50 0.919 → **0.459 ms** and rebind p50
+0.44 → **0.186 ms**; `notice_loaded` outage p50 0.721 → **0.141 ms** and rebind p50 0.226 → **0.06 ms**. The tick
+columns are unchanged (p99 20.4 / 21.2 ms) because the tick path was not touched. The claim stays what it was: a budget
+measured on the machine that ran it, no universal 100 ms promise — `bench_rebind.py`'s `method.bound` string says so, and
+defect 58's open row is about the *universal* claim, not about this one.

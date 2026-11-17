@@ -1301,6 +1301,11 @@ CI runner that round trip took **103.04 ms** of a 100 ms budget, while every oth
 thread to be scheduled. The watchdog keeps its tick, unchanged, for the listener that dies without a notice — that path
 still hops, and the test for it still passes by setting `lost_cb = None`.
 
+**Measured** (`bench/results/2026-11-17-rebind-after-loop-restore.json`, 240 samples, four columns): gate PASS, worst
+outage 21.185 ms, 0 over budget, 0 port moves. On the notice path the improvement is in the numbers a child would feel:
+`notice_idle` outage p50 0.919 → 0.459 ms (rebind p50 0.44 → 0.186), `notice_loaded` p50 0.721 → 0.141 ms (rebind p50
+0.226 → 0.06); the tick columns are unchanged.
+
 **What is not changed:** the budget (`100.0 ms`), the per-sample assertion, and the claim. A stalled machine can still
 exceed 100 ms, and the failure message prints the watchdog's own tick lateness so the cause is visible rather than
 argued about afterwards. The measurement starts when `close()` returns rather than when the test asked for it, because
