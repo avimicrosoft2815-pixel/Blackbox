@@ -1,0 +1,117 @@
+{
+  "artifact": "OTLP protobuf export accepted by a real importer",
+  "date": "2026-11-16",
+  "ticket": "P4-20 (and P4-14's importer clause)",
+  "what": "POST the capsule's own otlp/spans.pb -- the bytes the capsule ships, unmodified -- to a real Phoenix OTLP/HTTP receiver, then read the spans back through Phoenix's own client.",
+  "environment": {
+    "platform": "Linux 6.1 x86_64 (this sandbox), CPython 3.11",
+    "importer": {
+      "name": "arize-phoenix",
+      "version": "21.0.0",
+      "server": "phoenix serve --port 6124",
+      "otlp_http": "http://127.0.0.1:6124/v1/traces",
+      "client": "arize-phoenix-client 3.7.0"
+    },
+    "independent_decoder": {
+      "name": "opentelemetry-proto",
+      "version": "1.45.2",
+      "use": "the field numbers in src/blackbox/cap/export_otlp.py were read from these descriptors, and the tests decode the part with a hand-written wire reader"
+    }
+  },
+  "capsule": {
+    "id": "c_8e831989a733779a",
+    "parts": [
+      "events/events.jsonl",
+      "graph.json",
+      "otlp/spans.json",
+      "otlp/spans.pb"
+    ],
+    "trace_id": "50444de04d35c6f7240486f96a9041f8",
+    "pb_bytes": 809,
+    "pb_sha256": "88973baa32daf584db4c797a2e362066d1e8e05c044d4b3e3feec4d394bc7b48",
+    "made_by": "recovery of a 6-frame tape (RUN_START, NODE_OPEN, MODEL_REQUEST, MODEL_RESPONSE, NODE_CLOSE, RUN_END) at vantage 3; not a proxied run"
+  },
+  "results": [
+    {
+      "attempt": "POST otlp/spans.json, content-type: application/json",
+      "http_status": 415,
+      "body": "Unsupported content type: application/json",
+      "verdict": "NOT ACCEPTED -- unchanged from the P4-14 measurement: Phoenix's OTLP/HTTP receiver is protobuf-only"
+    },
+    {
+      "attempt": "POST otlp/spans.pb (the capsule's own bytes), content-type: application/x-protobuf",
+      "http_status": 200,
+      "verdict": "ACCEPTED"
+    },
+    {
+      "attempt": "read back with phoenix.client.Client(...).spans.get_spans(project_identifier='default')",
+      "spans": 3,
+      "observed": {
+        "names": [
+          "bbx.run",
+          "invoke_agent support-agent",
+          "chat gpt-4"
+        ],
+        "span_kinds": {
+          "bbx.run": "UNKNOWN",
+          "invoke_agent support-agent": "AGENT",
+          "chat gpt-4": "LLM"
+        },
+        "statuses": {
+          "bbx.run": [
+            "UNSET",
+            ""
+          ],
+          "invoke_agent support-agent": [
+            "OK",
+            "outcome ok"
+          ],
+          "chat gpt-4": [
+            "OK",
+            ""
+          ]
+        },
+        "parent_chain": "chat gpt-4 and invoke_agent support-agent both name bbx.run's span id as parent",
+        "trace_id": "50444de04d35c6f7240486f96a9041f8",
+        "chat_attributes": {
+          "bbx.call.id": "c0ffee",
+          "bbx.model.bytes_received": 8123,
+          "bbx.model.chunks_raw": 12,
+          "bbx.response.status": 200,
+          "bbx.span.source": "model",
+          "gen_ai.operation.name": "chat",
+          "gen_ai.provider.name": "openai",
+          "gen_ai.request.model": "gpt-4",
+          "llm.model_name": "gpt-4",
+          "llm.provider": "openai",
+          "llm.system": "openai"
+        },
+        "run_attributes": {
+          "bbx.run.id": "r_0123456789abcdef",
+          "bbx.span.source": "run"
+        }
+      },
+      "verdict": "ACCEPTED and READ BACK"
+    }
+  ],
+  "checks": {
+    "trace_id": "the file's trace id and the stored trace id are the same 32 hex characters",
+    "types": "bbx.model.bytes_received came back as 8123 (an int), not as text -- the wire type was right",
+    "semconv_read_by_the_importer": "Phoenix derived llm.system/llm.provider/llm.model_name from our gen_ai.* names",
+    "our_names_stored_verbatim": "every bbx.* attribute came back unchanged",
+    "byte_stability": "render twice == the shipped part; `blackbox verify` re-renders it on every CI cell (Linux, macOS, Windows) and compares bytes, so a platform-dependent encoding would fail the build"
+  },
+  "conclusions": {
+    "P4_14_importer_clause": "met by otlp/spans.pb: a Phoenix-class importer accepts the file the capsule ships and reads it back intact. The JSON part remains in the capsule for readers that want JSON, and Phoenix's 415 to it stays a documented fact about that receiver.",
+    "unsupported_or_untested": [
+      "Langfuse (its SDK is an exporter, not a receiver; no receiver installable offline here)",
+      "the OpenTelemetry Collector's OTLP/JSON receiver (not available offline)",
+      "Phoenix's gRPC receiver on 4317 (the HTTP receiver was used)",
+      "any importer other than Phoenix"
+    ],
+    "unchanged_limitations": [
+      "P3B-03: 0 node-level edges recorded; a shared trace id is not an edge",
+      "defect 58: the watchdog's rebind numbers make no universal 100 ms claim"
+    ]
+  }
+}

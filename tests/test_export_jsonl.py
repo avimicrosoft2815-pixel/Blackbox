@@ -145,7 +145,8 @@ def test_the_part_is_declared_inside_the_capsule_and_verifies(tmp_path):
     assert declared[cap.EVENTS_NAME]["sha256"] == hashlib.sha256(capsule.entry(cap.EVENTS_NAME)).hexdigest()
     report = derived.verify(capsule)
     assert report["ok"] and report["drift"] == [], report
-    assert {part["name"] for part in report["parts"]} == {cap.EVENTS_NAME, cap.GRAPH_NAME, cap.OTLP_NAME}
+    assert {part["name"] for part in report["parts"]} == {cap.EVENTS_NAME, cap.GRAPH_NAME, cap.OTLP_NAME,
+                                                         cap.OTLP_PB_NAME}
 
 
 def test_an_edited_line_is_reported_with_its_number_and_the_capsule_is_untouched(tmp_path):

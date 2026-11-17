@@ -741,6 +741,10 @@ class Recovery:
         # P4-14: the same frames as OTLP/JSON, from this capsule's own identity (the trace is the run's, the span ids are
         # this capsule's, and neither is random) so `capsule verify` can re-render it byte for byte.
         derived[cap.OTLP_NAME] = export_otlp.render(scan.frames, capsule_id=self.capsule_id, run_id=self.run_id)
+        # P4-20: the same spans as OTLP protobuf. Phoenix-class receivers speak protobuf and only protobuf (D-056's
+        # measurement: 415 to the JSON), so the capsule ships the encoding a real importer takes, from the same model.
+        derived[cap.OTLP_PB_NAME] = export_otlp.render_pb(scan.frames, capsule_id=self.capsule_id,
+                                                         run_id=self.run_id)
         for part_name, part_bytes in derived.items():
             entries[part_name] = part_bytes
         manifest["derived_parts"] = [{"name": part_name, "sha256": hashlib.sha256(part_bytes).hexdigest(),

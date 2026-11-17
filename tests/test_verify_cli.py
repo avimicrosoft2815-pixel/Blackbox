@@ -86,7 +86,7 @@ def test_the_manifest_carries_the_four_fields_p4_16_asks_for(tmp_path):
     assert capsule.manifest["chain_root"] and len(capsule.manifest["chain_root"]) == 64
     # every declared part is re-rendered by the derived-parts check, so the manifest cannot list a part it does not ship
     assert {part["name"] for part in capsule.manifest["derived_parts"]} == {cap.GRAPH_NAME, cap.EVENTS_NAME,
-                                                                          cap.OTLP_NAME}
+                                                                          cap.OTLP_NAME, cap.OTLP_PB_NAME}
 
 
 def test_the_vantage_is_declared_and_reported_as_uncheckable(tmp_path, capsys):

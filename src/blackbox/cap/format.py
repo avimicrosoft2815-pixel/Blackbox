@@ -54,6 +54,7 @@ LINKS_NAME = "links.json"
 GRAPH_NAME = "graph.json"
 EVENTS_NAME = "events/events.jsonl"      # P4-13: the timeline as one JSON object per frame
 OTLP_NAME = "otlp/spans.json"            # P4-14: the same frames as OTLP/JSON ResourceSpans
+OTLP_PB_NAME = "otlp/spans.pb"         # P4-20: and as OTLP protobuf, the encoding a receiver takes
 FIXED_DATE = (1980, 1, 1, 0, 0, 0)
 FIXED_MODE = 0o644 << 16
 MAX_ENTRIES = 5_000
@@ -101,6 +102,11 @@ def capsule_bytes(entries: dict[str, bytes], manifest: dict[str, Any]) -> tuple[
     full.setdefault("signature", None)
     full["counts"] = dict(full.get("counts") or {})
     full["counts"]["bytes"] = sum(len(v) for v in body.values())
+    # P4-02: a writer must not produce a manifest it would refuse to read. The check is after completion (format,
+    # integrity and signature are filled in above) and before a single byte is written.
+    from blackbox.cap import manifest as manifest_mod
+
+    manifest_mod.validate(full, where="capsule write")
     manifest_bytes = json.dumps(full, indent=2, sort_keys=True).encode("utf-8") + b"\n"
     all_entries = dict(body)
     all_entries[MANIFEST_NAME] = manifest_bytes
@@ -127,6 +133,9 @@ class Capsule:
     manifest: dict[str, Any]
     root_ok: bool
     problems: list[str] = field(default_factory=list)
+    #: Manifest keys this build does not know. Tolerated by design (a newer writer's fields), carried so a caller can
+    #: say "this capsule was written by something ahead of me" instead of guessing from an empty error list.
+    unknown_manifest_keys: list[str] = field(default_factory=list)
 
     def entry(self, name: str) -> bytes:
         return self.entries[name]
@@ -182,6 +191,11 @@ def read_capsule(path: str, *, max_bytes: int = 1 << 30) -> Capsule:
         raise bbx("BBX-E407", f"manifest format {manifest.get('format')!r} is not {CAPSULE_FORMAT}")
     if int(manifest.get("format_version", -1)) > CAPSULE_FORMAT_VERSION:
         raise bbx("BBX-E407", f"capsule format_version {manifest['format_version']} is newer than this reader")
+    # P4-02: required keys and their types, on the way in. Unknown keys are tolerated and remembered, not rejected —
+    # a capsule from a newer writer must open here (D-058).
+    from blackbox.cap import manifest as manifest_mod_read
+
+    unknown = manifest_mod_read.validate(manifest, where=path)
     problems: list[str] = []
     lines = entries.get(INTEGRITY_NAME, b"")
     if not lines:
@@ -199,7 +213,9 @@ def read_capsule(path: str, *, max_bytes: int = 1 << 30) -> Capsule:
             continue
         if sha256(entries[name]).hex() != digest:
             problems.append(f"{name}: sha256 does not match INTEGRITY.sha256")
-    return Capsule(entries=entries, manifest=manifest, root_ok=not problems, problems=problems)
+    capsule = Capsule(entries=entries, manifest=manifest, root_ok=not problems, problems=problems)
+    capsule.unknown_manifest_keys = unknown
+    return capsule
 
 
 def write_capsule(dest: str, entries: dict[str, bytes], manifest: dict[str, Any]) -> dict[str, Any]:

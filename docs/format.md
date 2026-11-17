@@ -358,6 +358,7 @@ ZIP, STORED for raw segment bodies and DEFLATE for JSON, entries sorted with `ma
 | `graph.json` | the run's nodes and edges, byte-identical to the run directory's copy (D-052, entry since D-053) |
 | `events/events.jsonl` | the timeline, one JSON object per frame, derived from the redacted frames (P4-13, D-054) |
 | `otlp/spans.json` | the same frames as OTLP/JSON ResourceSpans: agent, inference and tool spans (P4-14, D-056) |
+| `otlp/spans.pb` | the same spans as OTLP protobuf — the encoding a Phoenix-class receiver takes (P4-20, D-059) |
 | `links.json` | the resolved `LINK` records and, since D-053, the `call_links` |
 
 `integrity.root = sha256(INTEGRITY.sha256)` — the manifest can therefore carry the root without hashing itself,
@@ -366,6 +367,15 @@ while every data byte is still covered. Every entry's timestamp is `1980-01-01 0
 written as `.<id>.partial` with `O_EXCL`, fsynced, `os.replace`d, then the directory is fsynced: a visible `.bbx`
 is a complete `.bbx`. Reading validates names (absolute, `..`, backslash, NUL), case-folded duplicates, sizes,
 entry-count and ratio **before** it trusts a single entry.
+
+**The manifest schema (P4-02, D-058).** `cap/manifest.py` carries the schema as data (`SCHEMA`: nested `(kind,
+required)` pairs) and validates it **on write** — after `format`/`integrity`/`signature` are filled in, before a byte is
+written — and **on read**, just after the format-version gate. A missing required key or a wrong type is `BBX-E407`
+naming the dotted path (`manifest 'run.run_id' is missing`). Required means *every* capsule this format has produced
+carries it: `derived_parts` and the four P4-16 fields are **optional**, because a capsule written before a field existed
+is old, not broken. Unknown keys are **tolerated, preserved and reported** (`Capsule.unknown_manifest_keys`) — a capsule
+from a newer writer must open here. The schema checks presence and type, not meaning: that `counts.events` matches the
+frames is `derived`'s job, and that `chain_root` is the capsule's own is `blackbox verify`'s.
 
 **What the manifest declares, and what can be checked (P4-16).** `blackbox verify` compares the manifest's claims with
 the capsule's own bytes; the table is the contract, and the last row is the one that matters:
@@ -385,7 +395,7 @@ each capsule's id is *recomputed* from the writer asked about and that capsule's
 id does not match is reported rather than skipped. `--json` carries `ok: null, checkable: false` for the vantage, so a
 script cannot mistake "not checkable" for "passed".
 
-**Derived parts.** `graph.json`, `events/events.jsonl` and `otlp/spans.json` are listed in `manifest.derived_parts[]` as
+**Derived parts.** `graph.json`, `events/events.jsonl`, `otlp/spans.json` and `otlp/spans.pb` are listed in `manifest.derived_parts[]` as
 `{name, sha256, generator}` — the hash of the exact bytes written into the capsule — sorted by name so the manifest is a
 function of its inputs. `blackbox capsule verify <capsule>` recomputes each part from the capsule's own `events/*.raw`
 (`cap/derived.py`): the graph key by key (`COMPARED`: nodes, edges, counts, frames, status), each export byte for byte,
@@ -472,6 +482,25 @@ Phoenix's own client, the spans arrive with their names, parent chain, trace id 
 content is accepted and the *encoding we ship* is not: the ticket stays open until the capsule also carries
 `otlp/spans.pb` (proposal **P4-20**), and Langfuse, the Collector's JSON receiver and Phoenix's gRPC port were **not**
 tested. `bench/results/2026-11-16-otlp-importer.json` holds every command, status code and gap.
+
+#### `otlp/spans.pb` — the same spans, in the encoding a receiver takes (P4-20, D-059)
+
+The binary twin of the file above: the same span model, written as OTLP protobuf by a hand-written encoder in
+`cap/export_otlp.py` (no dependency — the package has none, and this part was not going to be the first). Field numbers
+were read from the `opentelemetry-proto` 1.45.2 descriptors and are pinned in one place; the tests decode the part with
+an independent wire reader, so a wrong number fails here rather than in someone's importer.
+
+Byte-stable: fields in ascending field-number order, attributes sorted by key, spans ordered by `(start, seq)`, integers
+with the wire type their descriptor declares. `blackbox verify` re-renders and compares **bytes** on every CI cell, and a
+drifted part is reported as `bytes (N stored, M recomputed)` with both sha256s — a binary has no lines to number. It
+carries counters, fingerprints and names only: no prompt or completion text, no `gen_ai.usage.*`, no finish reasons.
+
+**Measured, not assumed.** Phoenix **21.0.0** answered **200** to the capsule's own `otlp/spans.pb`, unmodified, and read
+back all three spans with the trace id `50444de0…` byte for byte, both children naming `bbx.run`'s span id as parent,
+`bbx.model.bytes_received` still an integer, and Phoenix's `llm.system`/`llm.model_name` derived from our `gen_ai.*`
+names. Its OTLP/HTTP receiver still answers **415** to `otlp/spans.json` — the JSON part stays for readers that want
+JSON, and the protobuf part is what a Phoenix-class receiver takes. Langfuse, the Collector's OTLP/JSON receiver and
+Phoenix's gRPC port remain **untested**; `bench/results/2026-11-16-otlp-pb-importer.json` lists them.
 
 ## 9. Conformance vectors
 

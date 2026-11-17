@@ -102,6 +102,14 @@ def recompute_otlp(capsule: cap.Capsule) -> bytes | None:
                               run_id=export_jsonl_run_id(capsule))
 
 
+def recompute_otlp_pb(capsule: cap.Capsule) -> bytes | None:
+    """The `otlp/spans.pb` this capsule's own frames imply (P4-20), or `None` when the capsule does not carry it."""
+    if cap.OTLP_PB_NAME not in capsule.entries:
+        return None
+    return export_otlp.render_pb(frames_of(capsule), capsule_id=str(capsule.manifest.get("capsule_id") or ""),
+                                 run_id=export_jsonl_run_id(capsule))
+
+
 def export_jsonl_run_id(capsule: cap.Capsule) -> str | None:
     """The run id the capsule's own manifest declares — the one thing the exports need that the frames do not repeat."""
     run = capsule.manifest.get("run")
@@ -111,7 +119,7 @@ def export_jsonl_run_id(capsule: cap.Capsule) -> str | None:
 
 #: The parts this build knows how to recompute, in the order a report lists them. A part in a capsule that is not here
 #: is not verified — and is reported as such, because "we cannot check this" must never look like "it checked out".
-PARTS = (cap.EVENTS_NAME, cap.GRAPH_NAME, cap.OTLP_NAME)
+PARTS = (cap.EVENTS_NAME, cap.GRAPH_NAME, cap.OTLP_NAME, cap.OTLP_PB_NAME)
 
 
 def verify(capsule: cap.Capsule) -> dict[str, Any]:
@@ -140,6 +148,17 @@ def verify(capsule: cap.Capsule) -> dict[str, Any]:
             report["drift"].append({"part": name, "field": "sha256", "declared": declared_sha, "actual": actual_sha})
         if name == cap.GRAPH_NAME:
             _compare_graph(capsule, stored_bytes, report)
+        elif name == cap.OTLP_PB_NAME:
+            # A protobuf is bytes, not lines: reporting "line 3" of a binary would name a byte offset as if it were
+            # text. The sha256 comparison above already catches any change; when the bytes differ, the report says
+            # which encoding disagreed, not which "line".
+            expected_pb = recompute_otlp_pb(capsule) or b""
+            if stored_bytes != expected_pb:
+                report["drift"].append({"part": name, "field": f"bytes ({len(stored_bytes)} stored, "
+                                                               f"{len(expected_pb)} recomputed)",
+                                        "stored": hashlib.sha256(stored_bytes).hexdigest()[:32],
+                                        "recomputed": hashlib.sha256(expected_pb).hexdigest()[:32],
+                                        "note": "protobuf compares as bytes; there are no lines to number"})
         else:
             expected_bytes = (recompute_events(capsule) if name == cap.EVENTS_NAME else recompute_otlp(capsule)) or b""
             difference = export_jsonl.first_difference(stored_bytes, expected_bytes)

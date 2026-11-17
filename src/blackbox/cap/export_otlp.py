@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import struct
 from typing import Any
 
 from blackbox import constants as C
@@ -116,8 +117,8 @@ class _Builder:
             attributes: dict[str, Any], status: dict[str, Any] | None = None) -> str:
         span_id = _span_id(self.capsule_id, seq)
         span: dict[str, Any] = {"traceId": self.trace, "spanId": span_id, "name": name, "kind": kind,
-                                "startTimeUnixNano": str(start), "endTimeUnixNano": str(max(start, end)),
-                                "attributes": _attributes(attributes), "status": status or _status(None)}
+                                "startTimeUnixNano": start, "endTimeUnixNano": max(start, end),
+                                "attributes": dict(attributes), "status": status or _status(None)}
         if parent:
             span["parentSpanId"] = parent
         self.spans.append(span)
@@ -156,8 +157,14 @@ def _model_span_name(payload: dict[str, Any]) -> tuple[str, dict[str, Any]]:
     return "bbx.model.call", attributes
 
 
-def render(frames: list[dict[str, Any]], *, capsule_id: str, run_id: str | None = None) -> bytes:
-    """The whole document: one `resourceSpans` entry, one scope, the spans of this capsule in frame order."""
+def spans_of(frames: list[dict[str, Any]], *, capsule_id: str,
+             run_id: str | None = None) -> tuple[dict[str, Any], dict[str, Any], list[dict[str, Any]]]:
+    """The one span model both encoders read: resource attributes, scope, and spans in chronological (start, seq) order.
+
+    Building the model once is what keeps `otlp/spans.json` and `otlp/spans.pb` from disagreeing about the same capsule:
+    they are two encodings of this, not two independent walks of the frames. Attributes here are **typed** (str, int,
+    bool, list) exactly as the frames recorded them; each encoder decides how its format spells them.
+    """
     builder = _Builder(capsule_id, run_id)
     last_ns = max((int(frame.get("wall_ns") or 0) for frame in frames), default=0)
     run_start = next((frame for frame in frames if int(frame.get("kind") or 0) == C.KIND_RUN_START), None)
@@ -172,9 +179,9 @@ def render(frames: list[dict[str, Any]], *, capsule_id: str, run_id: str | None 
         builder.seq_of[builder.root_span] = int(run_start.get("seq") or 0)
         builder.spans.append({
             "traceId": builder.trace, "spanId": builder.root_span, "name": "bbx.run", "kind": INTERNAL,
-            "startTimeUnixNano": str(start),
-            "endTimeUnixNano": str(int(run_end.get("wall_ns") or last_ns) if run_end is not None else last_ns),
-            "attributes": _attributes(attributes),
+            "startTimeUnixNano": start,
+            "endTimeUnixNano": int(run_end.get("wall_ns") or last_ns) if run_end is not None else last_ns,
+            "attributes": attributes,
             "status": _status(None if run_end is not None else False,
                               None if run_end is not None else "the run never ended: no RUN_END frame"),
         })
@@ -210,7 +217,7 @@ def render(frames: list[dict[str, Any]], *, capsule_id: str, run_id: str | None 
                                                  None if body.get("outcome") is None
                                                  else f"outcome {body.get('outcome')}"))
             if isinstance(body.get("duration_us"), int):
-                builder.spans[-1]["attributes"].extend(_attributes({"bbx.node.duration_us": body["duration_us"]}))
+                builder.spans[-1]["attributes"]["bbx.node.duration_us"] = body["duration_us"]
             node_spans.setdefault(slot, []).append((opened["seq"], span_id))
         elif kind == C.KIND_MODEL_REQUEST and isinstance(payload, dict):
             open_calls.setdefault(slot, []).append({"seq": seq, "wall": wall, "payload": payload})
@@ -259,17 +266,160 @@ def render(frames: list[dict[str, Any]], *, capsule_id: str, run_id: str | None 
 
     spans = sorted(builder.spans, key=lambda span: (int(span["startTimeUnixNano"]),
                                                     builder.seq_of.get(span["spanId"], 0)))
-    document = {
-        "resourceSpans": [{
-            "resource": {"attributes": _attributes({
-                "service.name": "blackbox",
-                "bbx.capsule.id": capsule_id,
-                **({"bbx.run.id": run_id} if run_id else {}),
-            })},
-            "scopeSpans": [{"scope": {"name": SCOPE_NAME, "version": VERSION, "attributes": []}, "spans": spans}],
-        }]
-    }
+    resource: dict[str, Any] = {"service.name": "blackbox", "bbx.capsule.id": capsule_id}
+    if run_id:
+        resource["bbx.run.id"] = run_id
+    return resource, {"name": SCOPE_NAME, "version": VERSION}, spans
+
+
+# --------------------------------------------------------------------------------------------------------------------
+# OTLP/JSON
+# --------------------------------------------------------------------------------------------------------------------
+
+def _json_span(span: dict[str, Any]) -> dict[str, Any]:
+    """One span in the proto3-JSON spelling: ids as hex, int64 as a string, the status as an object."""
+    out: dict[str, Any] = {"traceId": span["traceId"], "spanId": span["spanId"], "name": span["name"],
+                           "kind": span["kind"], "startTimeUnixNano": str(span["startTimeUnixNano"]),
+                           "endTimeUnixNano": str(span["endTimeUnixNano"]),
+                           "attributes": _attributes(span["attributes"]), "status": span["status"]}
+    if span.get("parentSpanId"):
+        out["parentSpanId"] = span["parentSpanId"]
+    return out
+
+
+def render(frames: list[dict[str, Any]], *, capsule_id: str, run_id: str | None = None) -> bytes:
+    """`otlp/spans.json`: the model as OTLP/JSON."""
+    resource, scope, spans = spans_of(frames, capsule_id=capsule_id, run_id=run_id)
+    document = {"resourceSpans": [{
+        "resource": {"attributes": _attributes(resource)},
+        "scopeSpans": [{"scope": {**scope, "attributes": []}, "spans": [_json_span(span) for span in spans]}],
+    }]}
     return json.dumps(document, indent=2, sort_keys=True, ensure_ascii=False).encode("utf-8") + b"\n"
+
+
+# --------------------------------------------------------------------------------------------------------------------
+# OTLP/protobuf — a wire-format encoder, because the package ships no dependency (P4-20)
+# --------------------------------------------------------------------------------------------------------------------
+#
+# Field numbers are not invented: they were read from the `opentelemetry-proto` 1.45.2 descriptors
+# (`ExportTraceServiceRequest.DESCRIPTOR`, and so on) and are written down here once, with the type each one uses. The
+# encoding deliberately covers only the subset this export produces — the fields a receiver needs to rebuild the trace:
+# ids, name, kind, the two fixed64 timestamps, attributes, parent and status. Absent fields are simply not emitted,
+# which proto3 reads as the default; nothing is written as an empty placeholder.
+
+_WIRE_VARINT, _WIRE_FIXED64, _WIRE_LD = 0, 1, 2
+
+#: Why the shape below matters: a protobuf encoder that emitted fields in a different order, or used a different wire
+#: type for the same field, would still be *decodable* — and would not be byte-identical across runs. `capsule verify`
+#: re-renders this part and compares bytes, so the order is fixed here (ascending field number, sorted attributes) and
+#: integers go out as the wire types the descriptors declare.
+
+
+def _varint(value: int) -> bytes:
+    if value < 0:                                     # int64 is two's complement on the wire
+        value &= (1 << 64) - 1
+    out = bytearray()
+    while True:
+        byte = value & 0x7F
+        value >>= 7
+        if value:
+            out.append(byte | 0x80)
+        else:
+            out.append(byte)
+            return bytes(out)
+
+
+def _tag(field: int, wire: int) -> bytes:
+    return _varint(field << 3 | wire)
+
+
+def _len_delimited(field: int, payload: bytes) -> bytes:
+    return _tag(field, _WIRE_LD) + _varint(len(payload)) + payload
+
+
+def _string(field: int, value: str) -> bytes:
+    return _len_delimited(field, value.encode("utf-8"))
+
+
+def _fixed64(field: int, value: int) -> bytes:
+    return _tag(field, _WIRE_FIXED64) + struct.pack("<Q", value & 0xFFFFFFFFFFFFFFFF)
+
+
+def _bool(field: int, value: bool) -> bytes:
+    return _tag(field, _WIRE_VARINT) + _varint(1 if value else 0)
+
+
+def _int64(field: int, value: int) -> bytes:
+    return _tag(field, _WIRE_VARINT) + _varint(value)
+
+
+def _any_value(value: Any) -> bytes:
+    """`AnyValue`: one of string(1) / bool(2) / int64(3) / double(4) / ArrayValue(5) / KeyValueList(6) / bytes(7)."""
+    if isinstance(value, bool):
+        return _bool(2, value)
+    if isinstance(value, int):
+        return _int64(3, value)
+    if isinstance(value, float):
+        return _tag(4, _WIRE_FIXED64) + struct.pack("<d", value)
+    if isinstance(value, (list, tuple)):
+        return _len_delimited(5, b"".join(_len_delimited(1, _any_value(item)) for item in value))
+    if isinstance(value, dict):
+        return _len_delimited(6, b"".join(
+            _len_delimited(1, _key_value(key, item)) for key, item in sorted(value.items())))
+    return _string(1, "" if value is None else str(value))
+
+
+def _key_value(key: str, value: Any) -> bytes:
+    return _string(1, key) + _len_delimited(2, _any_value(value))
+
+
+def _attributes_pb(attributes: dict[str, Any], field: int) -> bytes:
+    """Repeated `KeyValue` — at field 1 on `Resource`, field 3 on `InstrumentationScope`, field 9 on `Span`.
+
+    The field number is a parameter because getting it wrong is silent in the worst way: the attribute bytes land inside
+    whatever field the number *does* name (here it was `trace_id`, so the trace ids came back as `key\nvalue` blobs to a
+    real decoder). A passed-in number, pinned by a test that decodes with the official definitions, is cheaper than a
+    class of bug that only a real importer would find.
+    """
+    return b"".join(_len_delimited(field, _key_value(key, attributes[key])) for key in sorted(attributes))
+
+
+
+
+def _span_pb(span: dict[str, Any]) -> bytes:
+    out = bytearray()
+    out += _len_delimited(1, bytes.fromhex(span["traceId"]))                   # trace_id
+    out += _len_delimited(2, bytes.fromhex(span["spanId"]))                    # span_id
+    if span.get("parentSpanId"):
+        out += _len_delimited(4, bytes.fromhex(span["parentSpanId"]))          # parent_span_id
+    out += _string(5, span["name"])                                            # name
+    out += _int64(6, int(span["kind"]))                                        # kind
+    out += _fixed64(7, int(span["startTimeUnixNano"]))                         # start_time_unix_nano
+    out += _fixed64(8, int(span["endTimeUnixNano"]))                           # end_time_unix_nano
+    out += _attributes_pb(span["attributes"], 9)                               # attributes (field 9, repeated)
+    status = span.get("status") or {"code": UNSET}
+    body = bytearray()
+    if status.get("message"):
+        body += _string(2, str(status["message"]))                             # Status.message
+    body += _int64(3, int(status.get("code", UNSET)))                          # Status.code
+    out += _len_delimited(15, bytes(body))                                     # status
+    return bytes(out)
+
+
+def render_pb(frames: list[dict[str, Any]], *, capsule_id: str, run_id: str | None = None) -> bytes:
+    """`otlp/spans.pb`: the model as OTLP protobuf — the encoding a Phoenix-class receiver accepts (D-059).
+
+    Byte-stable by construction: every message is built by concatenating fields in ascending field-number order, every
+    repeated field is in a defined order (attributes sorted by key, spans by (start, seq)), and every integer is emitted
+    with the wire type its descriptor declares. Two platforms that read the same frames produce the same bytes — which
+    is what lets `capsule verify` re-render this part and compare it, on every cell of CI.
+    """
+    resource, scope, spans = spans_of(frames, capsule_id=capsule_id, run_id=run_id)
+    scope_pb = _string(1, str(scope["name"])) + _string(2, str(scope["version"]))
+    scope_spans = _len_delimited(1, scope_pb) + b"".join(_len_delimited(2, _span_pb(span)) for span in spans)
+    resource_pb = _attributes_pb(resource, 1)
+    resource_spans = _len_delimited(1, resource_pb) + _len_delimited(2, scope_spans)
+    return _len_delimited(1, resource_spans)
 
 
 def first_difference(stored: bytes, recomputed: bytes) -> dict[str, Any] | None:
@@ -277,4 +427,4 @@ def first_difference(stored: bytes, recomputed: bytes) -> dict[str, Any] | None:
     return export_jsonl.first_difference(stored, recomputed)
 
 
-__all__ = ["CLIENT", "INTERNAL", "SEMCONV", "SEMCONV_COMMIT", "first_difference", "render"]
+__all__ = ["CLIENT", "INTERNAL", "SEMCONV", "SEMCONV_COMMIT", "first_difference", "render", "render_pb", "spans_of"]

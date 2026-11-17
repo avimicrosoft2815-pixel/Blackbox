@@ -54,8 +54,30 @@ def _manifest(w: TapeWriter, bodies: dict[str, bytes]) -> dict:
         "capture": {"coverage": "FULL", "providers": []},
         "redaction": {"profile_id": "none", "content_mode": "full"},
         "gaps": [],
-        "counts": {"events": w.head.head_seq, "segments": len(bodies)},
+        # P4-02: the schema requires what every capsule this format has produced declares, `counts.nodes` included —
+        # the fixture writes a complete manifest rather than leaning on the writer to fill one in.
+        "counts": {"events": w.head.head_seq, "nodes": 0, "segments": len(bodies)},
     }
+
+
+def _complete(manifest: dict) -> dict:
+    """The keys the manifest schema requires (P4-02), plus whatever a test is varying.
+
+    `capsule_bytes` builds the container and validates on the way, so a container-level test that passes `{"capsule_id":
+    "c"}` is constructing a capsule its own reader would refuse. The schema is what makes that true, so the fixtures
+    complete their manifests instead of the schema relaxing.
+    """
+    base = {
+        "capsule_id": "c_test_0001",
+        "created_ns": 0,
+        "tool": {"name": "blackbox", "version": "0.1.0.dev0", "git": "test"},
+        "run": {"run_id": "r_test", "status": "recovered"},
+        "capture": {"coverage": "FULL", "providers": []},
+        "redaction": {"profile_id": "none", "content_mode": "full"},
+        "gaps": [],
+        "counts": {"events": 0, "nodes": 0},
+    }
+    return {**base, **manifest}
 
 
 def test_a_capsule_opens_and_its_root_verifies(tmp_path: Path) -> None:
@@ -177,7 +199,7 @@ def test_a_missing_or_newer_manifest_is_a_named_error(tmp_path: Path) -> None:
     assert exc.value.code == "BBX-E407"
 
     newer = tmp_path / "newer.bbx"
-    blob, _manifest = cap.capsule_bytes({"events/seg-000001.raw": b"a"}, {"capsule_id": "c"})
+    blob, _manifest = cap.capsule_bytes({"events/seg-000001.raw": b"a"}, _complete({}))
     newer.write_bytes(blob)
     assert cap.read_capsule(str(newer)).manifest["format_version"] == 0
     good = cap.read_capsule(str(newer))
@@ -198,7 +220,7 @@ def test_a_missing_or_newer_manifest_is_a_named_error(tmp_path: Path) -> None:
 def test_integrity_root_covers_every_data_entry(tmp_path: Path) -> None:
     """The root is a hash of the sorted `<sha256>  <name>` lines, so both directions can be recomputed."""
     entries = {"events/seg-000001.raw": b"one", "chain.json": b"{}"}
-    blob, manifest = cap.capsule_bytes(entries, {"capsule_id": "c"})
+    blob, manifest = cap.capsule_bytes(entries, _complete({}))
     with zipfile.ZipFile(__import__("io").BytesIO(blob)) as zf:
         lines = zf.read(cap.INTEGRITY_NAME)
     expected = ("\n".join([f"{hashlib.sha256(b'{}').hexdigest()}  chain.json",

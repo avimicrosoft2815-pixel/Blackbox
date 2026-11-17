@@ -33,6 +33,7 @@ from typing import Any
 from blackbox import constants as C
 from blackbox.cap import derived
 from blackbox.cap import format as cap
+from blackbox.errors import bbx
 
 #: The exit code the plan fixes for "a check failed" (P4-16). Distinct from 2 (bad input) on purpose: a script must be
 #: able to tell "this capsule is wrong" from "you pointed me at a file I cannot open".
@@ -182,4 +183,107 @@ def verify(capsule: cap.Capsule, *, frames: list[dict[str, Any]] | None = None) 
     return {"ok": not failed, "checks": checks, "failed": failed, "uncheckable": uncheckable}
 
 
-__all__ = ["EXIT_DRIFT", "capsule_id_for", "chain_root_of", "links_summary_of", "seams_of", "verify"]
+#: The manifest schema this build validates on write and on read (P4-02), written as data rather than as prose because a
+#: schema nobody executes is a paragraph. `(spec, required)` pairs; `spec` is a type name, or a nested dict of the same
+#: shape. `any` accepts anything (a signature, a future value we do not police), `*_or_null` accepts the type or `None`.
+#:
+#: **Required means every capsule this format has ever produced carries it.** Keys added later — `derived_parts`
+#: (P4-13), `chain_root`/`capture_vantage`/`capture_seam`/`links_summary` (P4-16) — are optional, because the
+#: compatibility rule points both ways: a new build must not call an older capsule corrupt (D-053's rule, D-057's rule,
+#: and this one). A capsule from before a field existed verifies as *absent*, never as invalid.
+SCHEMA: dict[str, tuple[object, bool]] = {
+    "format": ("str", True),
+    "format_version": ("int", True),
+    "capsule_id": ("str", True),
+    "created_ns": ("int", True),
+    "tool": ({"name": ("str", True), "version": ("str", True), "git": ("str", False)}, True),
+    "run": ({"run_id": ("str", True), "status": ("str", True), "name": ("str", False),
+             "status_cause": ("str_or_null", False), "durability_class": ("str", False),
+             "completeness": ("str", False), "truncated_tail": ("bool", False),
+             "lost_from_seq": ("int_or_null", False), "started_ns": ("int", False), "ended_ns": ("int", False)},
+            True),
+    "capture": ({"coverage": ("str", True), "providers": ("list", False), "sdk_matrix": ("str", False),
+                 "unsupported_ops": ("int", False)}, True),
+    "redaction": ({"profile_id": ("str", True), "content_mode": ("str", True), "masks": ("int", False),
+                   "failures": ("int", False), "key_included": ("bool", False)}, True),
+    "gaps": ("list", True),
+    "counts": ({"events": ("int", True), "nodes": ("int", True), "bytes": ("int", False),
+                "segments": ("int", False), "nodes_interrupted": ("int", False),
+                "model_calls": ("int", False), "tool_calls": ("int", False)}, True),
+    "integrity": ({"root": ("str", True), "alg": ("str", False), "entries": ("int", False)}, True),
+    "signature": ("any", False),
+    "min_reader": ("str", False),
+    # Added after the first capsules were written; optional for exactly that reason.
+    "derived_parts": ("list_of_parts", False),
+    "chain_root": ("str_or_null", False),
+    "capture_vantage": ("int_or_null", False),
+    "capture_seam": ("list_of_str", False),
+    "links_summary": ("dict_of_int", False),
+}
+
+#: The keys this build knows. Anything else is *tolerated* — an unknown key is a newer writer's field, not a lie — and
+#: `validate` returns them so a caller can mention them without failing.
+KNOWN_KEYS = frozenset(SCHEMA)
+
+
+def _type_ok(spec: str, value: object) -> bool:
+    if spec == "any":
+        return True
+    if spec == "str":
+        return isinstance(value, str)
+    if spec == "int":
+        return isinstance(value, int) and not isinstance(value, bool)
+    if spec == "bool":
+        return isinstance(value, bool)
+    if spec == "list":
+        return isinstance(value, list)
+    if spec == "str_or_null":
+        return value is None or isinstance(value, str)
+    if spec == "int_or_null":
+        return (value is None) or (isinstance(value, int) and not isinstance(value, bool))
+    if spec == "list_of_str":
+        return isinstance(value, list) and all(isinstance(item, str) for item in value)
+    if spec == "dict_of_int":
+        return (isinstance(value, dict)
+                and all(isinstance(k, str) and isinstance(v, int) and not isinstance(v, bool)
+                        for k, v in value.items()))
+    if spec == "list_of_parts":
+        return isinstance(value, list) and all(
+            isinstance(part, dict) and isinstance(part.get("name"), str) and isinstance(part.get("sha256"), str)
+            for part in value)
+    raise AssertionError(f"schema spec {spec!r} is not one this validator implements")
+
+
+def _walk(value: dict[str, Any], schema: dict[str, tuple[object, bool]], where: str, prefix: str = "") -> None:
+    for key, (spec, required) in schema.items():
+        path = prefix + key
+        if key not in value:
+            if required:
+                raise bbx("BBX-E407", f"{where}: manifest is missing required key {path!r}")
+            continue
+        item = value[key]
+        if isinstance(spec, dict):
+            if not isinstance(item, dict):
+                raise bbx("BBX-E407", f"{where}: manifest {path!r} must be an object, found {type(item).__name__}")
+            _walk(item, spec, where, path + ".")
+            continue
+        if not _type_ok(str(spec), item):
+            raise bbx("BBX-E407", f"{where}: manifest {path!r} must be {spec}, found {type(item).__name__}")
+
+
+def validate(manifest: dict[str, Any], *, where: str = "manifest") -> list[str]:
+    """Check a manifest against `SCHEMA`; return the unknown top-level keys (tolerated, not ignored silently).
+
+    Raises `BBX-E407` for a missing required key or a wrong type. Unknown keys are **not** an error: a capsule written
+    by a newer build must open in an older one (its extra fields are that build's business), and the reverse — refusing
+    a capsule because it carries a field this build has not learned — would make the format's forward compatibility a
+    claim instead of a property.
+    """
+    if not isinstance(manifest, dict):                                    # pragma: no cover - read_capsule parses JSON
+        raise bbx("BBX-E407", f"{where}: manifest is not an object")
+    _walk(manifest, SCHEMA, where)
+    return sorted(set(manifest) - KNOWN_KEYS)
+
+
+__all__ = ["EXIT_DRIFT", "KNOWN_KEYS", "SCHEMA", "capsule_id_for", "chain_root_of", "links_summary_of", "seams_of",
+           "validate", "verify"]

@@ -1157,3 +1157,75 @@ regenerated from its own bytes; it does not say the tape told the truth about th
 forms, the five checks, the uncheckable one, and a tamper per part — a raw entry through the integrity root, a derived
 part through `BBX-E412`, and manifest fields through their recomputation — plus one test that a failed verification leaves
 the capsule byte-identical, because a verifier that repaired what it found would erase its own evidence.
+
+## D-058 — the manifest schema is a table this build executes, and an unknown key is not damage (2026-11-16, P4-02)
+
+**The schema is data, not prose.** §13.2 prints a `manifest.json`; a paragraph nobody runs would let the writer and the
+reader drift until a capsule that this build wrote became one it could not open. `cap/manifest.py` therefore carries
+`SCHEMA` — a dict of `(kind, required)` pairs, nested — and one walker (`_walk`) that raises `BBX-E407` with the dotted
+path of the first offending key (`capsule ...: manifest 'run.run_id' is missing`, not "invalid manifest"). It is checked
+**on write**, after the writer has filled in `format`/`integrity`/`signature` and before a byte is written, so a writer
+cannot produce a manifest its own reader refuses; and **on read**, right after the format-version gate.
+
+**Required means "every capsule this format has ever produced carries it".** That is the compatibility rule pointing
+both ways. `derived_parts` (P4-13) and `chain_root`/`capture_vantage`/`capture_seam`/`links_summary` (P4-16) were added
+after the first capsules were written, so they are **optional**: refusing an older capsule would call a legitimate
+artefact corrupt, which is a worse failure than a missing check (D-053, D-057, and the `absent`-not-failed rule all say
+the same thing). A test takes a real manifest, deletes every one of those keys, and asserts the capsule still reads and
+still verifies.
+
+**An unknown key is tolerated, named, and preserved.** A capsule from a newer writer must open here; its extra fields are
+that writer's business. `validate()` returns the unknown top-level keys instead of raising, and `Capsule` carries them as
+`unknown_manifest_keys` — so a caller can say "written by something ahead of me" rather than guess from an empty error
+list. The reverse would make forward compatibility a claim rather than a property of the format.
+
+**What the schema is not.** It checks presence and type, not meaning: it cannot know that `counts.events` matches the
+frames (that is `derived`/`verify`), that `chain_root` is the capsule's own (`blackbox verify`, D-057), or that
+`run_id` is a real id (`manifests` writes what the tape said). A schema is the cheapest gate, not the last one. And like
+the OTLP snapshot validator, `_type_ok` **raises** on a spec kind it does not implement, so a future entry in `SCHEMA`
+cannot quietly pass everything it is handed.
+
+**One strictness people trip over, kept deliberately:** `True` is an `int` in Python and not in JSON Schema, so
+`format_version: true` is refused rather than read as `1`. The `bool`-is-not-`int` guard is one line and two tests.
+
+## D-059 — a hand-written protobuf encoder, and a real receiver read it back (2026-11-16, P4-20)
+
+**Why by hand.** The package had no protobuf dependency and this ticket was not going to add one: `[project].dependencies`
+is empty, and a runtime dependency for a derived part would put a library between the capsule and the evidence. The
+encoder in `cap/export_otlp.py` writes the wire format directly — varint, fixed64, length-delimited — for the subset of
+OTLP this export produces: ids, name, kind, the two timestamps, attributes, parent, status, plus the resource and scope
+wrappers.
+
+**The field numbers are read, not remembered.** They came from the `opentelemetry-proto` **1.45.2** descriptors
+(`ExportTraceServiceRequest.DESCRIPTOR`, `Span.DESCRIPTOR`, …) and are written down in one place with their types. That
+is not pedantry: the first version emitted span attributes with field number 1 — correct for `Resource.attributes`,
+wrong for `Span.attributes` (9) — and a real decoder read the attributes back as `trace_id`. Every id in the file was
+silently a key/value blob. The fix parameterises the field number, and `tests/test_export_otlp_pb.py` decodes the part
+with a **hand-written wire reader that shares no code with the encoder**, so a wrong number fails a test here rather than
+in someone's Phoenix.
+
+**Byte-stable by construction.** Fields are concatenated in ascending field-number order, repeated attributes are sorted
+by key, spans are ordered by `(start, seq)`, and integers go out with the wire type the descriptor declares. `capsule
+verify` re-renders the part and compares **bytes** — on all ten CI cells, across Linux, macOS and Windows — which is the
+cross-platform claim this export can actually make. A protobuf compares as bytes, so a drifted part reports
+`bytes (N stored, M recomputed)` and their sha256s; it does **not** invent a line number for a binary, which would name a
+byte offset as if it were text.
+
+**What it carries, and what it refuses to.** Counters and fingerprints, never content: a `MODEL_CHUNK` appears as
+`bbx.chunks_raw` and `bbx.model.bytes_received`, and a test writes a secret into a chunk and asserts the bytes appear in
+neither export. No `gen_ai.usage.*` and no finish reasons (no response decoder — P3-08 open). An attribute value whose
+type this format has no wire type for is carried as text rather than dropped: visible, and honestly typed as what it is
+to us.
+
+**The measurement.** Phoenix **21.0.0** (`arize-phoenix`, read back with `arize-phoenix-client` 3.7.0) answered **200** to
+the capsule's own `otlp/spans.pb`, unmodified, and returned all three spans with the trace id `50444de0…` byte for byte,
+both children naming `bbx.run`'s span id as parent, `bbx.model.bytes_received` still an integer, every `bbx.*` attribute
+unchanged, and Phoenix's own `llm.system`/`llm.provider`/`llm.model_name` derived from our `gen_ai.*` names. Its OTLP/HTTP
+receiver answered **415** to `otlp/spans.json` — unchanged from D-056, and the reason this part exists. So **P4-14's
+importer clause is met by the part a Phoenix-class receiver actually takes**, while the JSON part stays in the capsule for
+readers that want JSON. Artifact: `bench/results/2026-11-16-otlp-pb-importer.json`.
+
+**What is still not measured.** Langfuse (its Python SDK is an exporter, not a receiver, and no receiver installs
+offline here), the OpenTelemetry Collector's OTLP/JSON receiver, Phoenix's gRPC port 4317, and every importer other than
+Phoenix. The phrase this work supports is "a Phoenix-class receiver accepted the file and it read back intact" — not
+"OTLP is interoperable".
