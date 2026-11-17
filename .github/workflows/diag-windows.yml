@@ -18,7 +18,7 @@ jobs:
         shell: bash
         run: |
           set +e
-          python -m pytest -q -rfE --tb=line -s > diag-full.txt 2>&1
+          python -m pytest tests/test_rebind_probe.py tests/test_proxy_supervisor.py -q -rfE --tb=line -s > diag-full.txt 2>&1
           echo "pytest exit=$?"
           python - <<'PY'
           import re, pathlib

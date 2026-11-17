@@ -1315,13 +1315,14 @@ in the place a reviewer of the next change will read it. (Superseded on 2026-11-
 which starts at the first request that could not be served and therefore does not depend on when any coroutine
 returned.)
 
-**Measured by requests, not by a coroutine's return (second revision, 2026-11-17).** The clock described above starts when
-`close()` returns, and that was still an assumption: the socket stops accepting inside `close()`, so downtime can begin
-before the caller is woken, and an in-process clock cannot time an interval inside the call it is timing. The outage is
-now measured from outside our threads with `tools/rebind_probe.py` — a real request loop on the child's port — and it
-covers that window by construction (`tests/test_rebind_probe.py` makes the window 60 ms wide and asserts the clock
-contains it: 60.86 ms measured, against ~0 ms from a post-`close()` clock). The gate stays 100 ms per sample, now
-asserted on the conservative bound from the last served request before the break, so a gap can never be hidden by having
-no request refused in it. Outage numbers are therefore larger than the previous revision's on the tick columns (10 ms p50
-instead of 9.5 ms — the same 20 ms tick, seen by requests rather than deduced from `rebind()`), which is the point: the
-number is now the one a child experiences.
+**Measured by requests, not by a coroutine's return (second revision, 2026-11-17).** The clock described above starts
+when `close()` returns, and that was still an assumption: the socket stops accepting inside `close()`, so downtime can
+begin before the caller is woken, and an in-process clock cannot time an interval inside the call it is timing. The
+outage is now measured from outside our threads with `tools/rebind_probe.py` — a real request loop on the child's port —
+and it covers that window by construction (`tests/test_rebind_probe.py` makes the window 60 ms wide and asserts the
+clock contains it, while a post-`close()` clock reports ~0 ms of it). The gate stays 100 ms per sample, now asserted on
+the conservative bound from the last request served before the break, so a gap can never be hidden by having no request
+refused in it. Two tempting shortcuts were measured and rejected: a connect-only probe, because a closed listening
+socket keeps completing handshakes from its accept queue (46 ms of a 60 ms stall looked like service), and a fixed 10 ms
+answer timeout, because every attempt on a Windows runner answers in ~16 ms and then reads as a timeout. The answer cap
+is therefore calibrated on the machine at start-up and recorded with each sample.

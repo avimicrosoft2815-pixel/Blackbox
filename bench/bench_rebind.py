@@ -111,6 +111,7 @@ def _outage_once(proxy: ProxyThread, probe: ServingProbe, *, notify: bool = True
         "refused_requests": int(sampled["refused_requests"]),
         "observed_failure": bool(sampled["observed_failure"]),
         "probe_cycle_ms": round(float(sampled["probe_cycle_ms"]), 4),
+        "probe_answer_timeout_ms": round(float(sampled["probe_answer_timeout_ms"]), 3),
     }
 
 
@@ -169,6 +170,8 @@ def _column(trials: int, *, supervise_ms: float, loaded: bool, notify: bool = Tr
         "outage_ms": summary(outages),
         "outage_upper_ms": summary(uppers),
         "probe_cycle_ms": summary([s["probe_cycle_ms"] for s in samples if s.get("probe_cycle_ms") is not None]),
+        "probe_answer_timeout_ms": max((s["probe_answer_timeout_ms"] for s in samples
+                                        if s.get("probe_answer_timeout_ms") is not None), default=None),
         "refused_requests": sum(int(s.get("refused_requests") or 0) for s in samples),
         "rebind_ms": summary(rebinds),
         # Two independent views of detection, reported side by side and never merged: the external one (outage minus
@@ -226,7 +229,10 @@ def run(trials: int, *, supervise_ms: float = 20.0) -> dict[str, Any]:
                                "served after it. The gate is on this one; it is never smaller than outage_ms",
             "probe_cycle_ms": "resolution of the request probe (median served request). Every outage number is "
                               "bounded by it, so it is recorded beside them",
-            "request_timeout_ms": "50 ms: a request accepted and never answered is charged at most half the budget",
+            "probe_answer_timeout_ms": "the answer cap, measured on the machine that ran this file (calibrate): 3x "
+                                       "its median answered request, never below 10 ms and never above the 50 ms "
+                                       "attempt budget. A request accepted and never answered is charged at most this, "
+                                       "so it is the resolution of the outage tail, and it is recorded",
             "rebind_ms": "ProxyThread.rebinds: inside rebind(), excluding detection and excluding the requests' queueing",
             "detection_ms": "outage_ms - rebind_ms, every sample: what was not the rebind",
             "noticed_ms": "the supervisor's own detection time (lost_cb -> watchdog saw it); defined only when the "
