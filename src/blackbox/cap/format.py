@@ -53,6 +53,7 @@ LINKS_NAME = "links.json"
 # the raw segments (plus `links.json`) by `cap.derived`, declared in `manifest.derived_parts[]`, and drift is BBX-E412.
 GRAPH_NAME = "graph.json"
 EVENTS_NAME = "events/events.jsonl"      # P4-13: the timeline as one JSON object per frame
+OTLP_NAME = "otlp/spans.json"            # P4-14: the same frames as OTLP/JSON ResourceSpans
 FIXED_DATE = (1980, 1, 1, 0, 0, 0)
 FIXED_MODE = 0o644 << 16
 MAX_ENTRIES = 5_000

@@ -973,20 +973,25 @@ these edges node-level.
 is that it dresses our guesses in a standards namespace. So the rule is one sentence — **a `gen_ai.*` name is used only
 where the pinned semantic conventions have one for the thing we actually recorded** — and the rest follows from it.
 
-**The pin.** OpenTelemetry semantic conventions **v1.27.0**, read from the upstream repository when this was written. At
-that tag the system attribute is `gen_ai.system` (the later `gen_ai.provider.name` is a different name for a later
-version, and using it here would be a claim about a release we did not read), and `gen_ai.operation.name`'s well-known
-values are `chat` and `text_completion`. The tag is in the code (`export_jsonl.SEMCONV`) and in `format.md`, because a
-name without a version is a name that means something else next year.
+**The pin.** OpenTelemetry semantic conventions **v1.39.0** (`6d05e92`), read from the upstream repository when this was
+written: the provider attribute is `gen_ai.provider.name` (it was `gen_ai.system` before, and the first draft of this
+export used that older name against v1.27.0 — changed before release rather than shipped, because P4-14's OTLP export
+needs the same tag for `invoke_agent`/`execute_tool`, and two exports of one capsule in two vocabularies is worse than
+one export). `gen_ai.operation.name`'s well-known values are `chat`, `text_completion`, `embeddings`, `invoke_agent`,
+`execute_tool`, `generate_content`, `create_agent`. The tag and its commit are in the code (`export_jsonl.SEMCONV`,
+`SEMCONV_COMMIT`) and in `format.md`, because a name without a version is a name that means something else next year.
 
 **What is mapped, and from what.** `gen_ai.operation.name` from the recorded request path, only for the APIs the
 mapping lists (`/chat/completions`, `/messages`, `/api/chat` → `chat`; `/completions`, `/api/generate` →
-`text_completion`). `gen_ai.system` from the recorded provider host, only for a host we can name. `gen_ai.request.model`
-from the model the frame recorded. Nothing else: this build has no response decoder yet (P3-08 is still open), so there
+`text_completion`). `gen_ai.provider.name` from the recorded provider host, only for a host in an explicit table
+(`api.openai.com` → `openai`, `api.anthropic.com` → `anthropic`, `generativelanguage.googleapis.com` → `gcp.gemini`,
+`aiplatform.googleapis.com` → `gcp.vertex_ai`, and the handful of others in `SYSTEMS`) — explicit rather than a suffix
+match, because a suffix match would turn `not-openai.example` into `openai`. `gen_ai.request.model` from the model the
+frame recorded. Nothing else: this build has no response decoder yet (P3-08 is still open), so there
 are no usage or finish-reason attributes to map, and inventing them from a byte count would be exactly the failure this
 record exists to prevent.
 
-**What is deliberately absent.** A provider we cannot name gets no `gen_ai.system` (the host goes to
+**What is deliberately absent.** A provider we cannot name gets no `gen_ai.provider.name` (the host goes to
 `bbx.provider.host`); an API we cannot name gets no `gen_ai.operation.name`; and there is no `error.type`, because the
 tape stores an error *message* and semconv defines a low-cardinality *type* — the message is carried as `bbx.model.error`
 instead of being relabelled into a namespace that promises more. Payloads for kinds the mapping says nothing about are
@@ -1047,3 +1052,57 @@ it), which is where the 20 ms — and on that runner the 113 ms — was being sp
 one measured: **a rebind is 0.2–1.8 ms of work**, and an outage is that plus however long the machine takes to run a
 thread that has been woken. `bench/bench_rebind.py` writes both columns and its own `method.bound` string says so, so a
 reader does not have to find this paragraph to learn it.
+
+## D-056 — one pin, one trace, and two exports that cannot disagree (2026-11-16, P4-14)
+
+**The ticket** asks for `otlp/spans.json`: spans that validate against a schema snapshot, and a file a
+Phoenix/Langfuse-class importer accepts. The second half is a *manual* check by construction, and it was not performed
+here (see the end of this entry). The first half is what the code and the tests own.
+
+**One pin.** P4-13 pinned the JSONL export to semconv **v1.27.0** and used `gen_ai.system`. The OTLP export needs
+`invoke_agent` and `execute_tool`, which v1.27.0 does not define, and their page defines `gen_ai.provider.name` where
+v1.27.0 had `gen_ai.system`. Carrying two pins would mean one capsule described in two vocabularies — the exact kind of
+disagreement a verifiable format exists to prevent — so the pin moved to **v1.39.0** (`6d05e92`) everywhere, the JSONL
+attribute was renamed, and the host table was rewritten against v1.39.0's well-known values
+(`generativelanguage.googleapis.com` → `gcp.gemini`, `aiplatform.googleapis.com` → `gcp.vertex_ai`, no bare
+`vertex_ai`). This is a pre-release format change, recorded rather than shipped: nothing outside this repository has read
+`events.jsonl` yet, and one pin is a smaller lie surface than two.
+
+**The mapping is the semconv's, or it is ours.** A node whose recorded kind is `tool` becomes
+`execute_tool {gen_ai.tool.name}`; any other node becomes `invoke_agent {gen_ai.agent.name}`, or `invoke_agent` when it
+has no name; a model call becomes `{gen_ai.operation.name} {gen_ai.request.model}`, each half present only if the frame
+had it. A call whose path the mapping does not know has no operation to name, so it is called `bbx.model.call` — the
+same rule as D-054, one level up: a semconv name is a claim, and we only make it where the vocabulary has an entry.
+
+**Ids are derived, not drawn.** `traceId = sha256(run_id)[:32]` makes **two vantages of one run share a trace**, which is
+the property P3B-03 wants and still does not have at node level (D-052, `docs/node-edges.md`). This is not evidence for
+P3B-03 and must not be read as any: an edge joins two *nodes*, a shared trace says only that the tool believes both taps
+saw the same run id. `spanId = sha256(capsule_id:seq)[:16]` keeps capsules of one run apart while keeping each capsule's
+own rendering stable, so `capsule verify` can compare bytes. The writer's uuid is deliberately not used — the capsule
+does not carry it, and a derived part must be recomputable from what the capsule holds.
+
+**Response frames now repeat the call's identity.** Pairing a response with its request used to be a matter of tape order
+per node slot, which is right when the tape is intact and a guess when it is not. The response payload therefore gains
+`call_id` and `linked_run` (additive: a response written before this carries neither, and the exporter falls back to
+order per slot, which is what it did before). Pairing never spans a slot, so two concurrent calls cannot merge into one
+span.
+
+**What is absent, and why.** No `gen_ai.usage.*`, no `gen_ai.response.finish_reasons`, no request parameters: this build
+does not decode response bodies (P3-08 is open), and a token count derived from `bytes_received` would be an invention
+wearing a semconv name. No prompt or completion text, by the rule that keeps it out of `events.jsonl` too — spans carry
+`bbx.model.chunks_raw`, `bbx.model.bytes_received` and fingerprints, never content. An unclosed node or call gets a span
+that ends at the last frame, `bbx.span.truncated: true`, and an error status naming the frame that never came: dropping
+it would lose the node, and inventing a close would be worse.
+
+**The schema snapshot is checked by a validator that refuses what it does not know.** `jsonschema` is not installed
+here, and adding a library to check a snapshot would make the snapshot's meaning depend on that library's version. So
+`tests/_schema.py` implements the subset the snapshot uses (`$ref` into `#/definitions`, `type`, `required`,
+`properties`, `items`, `pattern`, `enum`, `minItems`, `minProperties`, `maxProperties`, `minLength`) and **raises** on
+any other keyword. The snapshot cannot grow a check nobody runs, which is the failure mode of every hand-rolled
+validator. What it does not do is implement JSON Schema; the file is a snapshot of what this build produces, not a claim
+to validate arbitrary OTLP.
+
+**The importer check is manual and was not performed.** No Phoenix/Langfuse-class importer runs in this environment, so
+the ticket's second clause is **not** ticked by evidence here: the file's shape is documented in `docs/format.md`, its
+structural conformance is tested, and whether a real importer accepts it is an open manual check recorded in
+`docs/STATE.json` (`open_blockers`). Say so plainly rather than let "schema validates" stand in for "an importer read it".

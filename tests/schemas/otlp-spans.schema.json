@@ -1,0 +1,102 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$comment": "P4-14: the subset of the OTLP/JSON trace document that blackbox's otlp/spans.json claims to produce. Validated by tests/_schema.py, which implements exactly the keywords used here and nothing more.",
+  "title": "ExportTraceServiceRequest (OTLP/JSON, subset)",
+  "type": "object",
+  "required": ["resourceSpans"],
+  "properties": {
+    "resourceSpans": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["resource", "scopeSpans"],
+        "properties": {
+          "resource": {
+            "type": "object",
+            "required": ["attributes"],
+            "properties": {"attributes": {"$ref": "#/definitions/attributes"}}
+          },
+          "scopeSpans": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "required": ["scope", "spans"],
+              "properties": {
+                "scope": {
+                  "type": "object",
+                  "required": ["name"],
+                  "properties": {"name": {"type": "string", "minLength": 1}, "version": {"type": "string"}}
+                },
+                "spans": {"type": "array", "items": {"$ref": "#/definitions/span"}}
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "definitions": {
+    "attributes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["key", "value"],
+        "properties": {
+          "key": {"type": "string", "pattern": "^(gen_ai|bbx|service)\\.[A-Za-z0-9_.]+$"},
+          "value": {"$ref": "#/definitions/anyValue"}
+        }
+      }
+    },
+    "anyValue": {
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 1,
+      "properties": {
+        "stringValue": {"type": "string"},
+        "intValue": {"type": "string", "pattern": "^-?[0-9]+$"},
+        "doubleValue": {"type": "number"},
+        "boolValue": {"type": "boolean"},
+        "arrayValue": {
+          "type": "object",
+          "required": ["values"],
+          "properties": {"values": {"type": "array", "items": {"$ref": "#/definitions/anyValue"}}}
+        },
+        "kvlistValue": {
+          "type": "object",
+          "required": ["values"],
+          "properties": {
+            "values": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["key", "value"],
+                "properties": {"key": {"type": "string"}, "value": {"$ref": "#/definitions/anyValue"}}
+              }
+            }
+          }
+        }
+      }
+    },
+    "span": {
+      "type": "object",
+      "required": ["traceId", "spanId", "name", "kind", "startTimeUnixNano", "endTimeUnixNano", "attributes", "status"],
+      "properties": {
+        "traceId": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+        "spanId": {"type": "string", "pattern": "^[0-9a-f]{16}$"},
+        "parentSpanId": {"type": "string", "pattern": "^[0-9a-f]{16}$"},
+        "name": {"type": "string", "minLength": 1},
+        "kind": {"type": "integer", "enum": [0, 1, 2, 3, 4, 5]},
+        "startTimeUnixNano": {"type": "string", "pattern": "^[0-9]+$"},
+        "endTimeUnixNano": {"type": "string", "pattern": "^[0-9]+$"},
+        "attributes": {"$ref": "#/definitions/attributes"},
+        "status": {
+          "type": "object",
+          "required": ["code"],
+          "properties": {"code": {"type": "integer", "enum": [0, 1, 2]}, "message": {"type": "string"}}
+        }
+      }
+    }
+  }
+}

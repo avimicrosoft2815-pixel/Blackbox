@@ -29,7 +29,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from blackbox import constants as C
-from blackbox.cap import export_jsonl
+from blackbox.cap import export_jsonl, export_otlp
 from blackbox.cap import format as cap
 from blackbox.cap_sdk.sink import chunk_bytes
 from blackbox.codec import cbor
@@ -731,6 +731,9 @@ class Recovery:
         if graph_bytes is not None:
             derived[cap.GRAPH_NAME] = graph_bytes
         derived[cap.EVENTS_NAME] = export_jsonl.render(scan.frames)
+        # P4-14: the same frames as OTLP/JSON, from this capsule's own identity (the trace is the run's, the span ids are
+        # this capsule's, and neither is random) so `capsule verify` can re-render it byte for byte.
+        derived[cap.OTLP_NAME] = export_otlp.render(scan.frames, capsule_id=self.capsule_id, run_id=self.run_id)
         for part_name, part_bytes in derived.items():
             entries[part_name] = part_bytes
         manifest["derived_parts"] = [{"name": part_name, "sha256": hashlib.sha256(part_bytes).hexdigest(),

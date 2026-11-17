@@ -5,8 +5,8 @@
     "docs/STATUS.md",
     "bench/results/*.json"
   ],
-  "next_ticket": "P4-14",
-  "next_note": "**P4-13 is done** (`docs/DECISIONS.md` D-054): `events/events.jsonl` ships inside the capsule as a declared derived part (sha256 in `manifest.derived_parts[]`), one JSON object per frame, a pure function of the frames so a re-render of a sealed capsule is byte-identical; `blackbox capsule verify` recomputes it from the capsule's own segments and reports an edited line by number as BBX-E412 while leaving the capsule untouched, an old capsule as `absent`, and a part this build cannot recompute as `unknown` (printed, never a pass). Names are the pinned OpenTelemetry semconv **v1.27.0** (`gen_ai.operation.name`, `gen_ai.system`, `gen_ai.request.model`) and everything else is `bbx.*`, asserted for every attribute of every line; a provider or API the mapping does not know gets no `gen_ai.*` key, there is no `error.type` (the tape has a message, not a type), and chunk content is never copied \u2014 a byte count and the `[bbx-\u2026]` tag instead. **Defect 58 is open and improved, not closed** (D-055): `ProxyServer.close()` now notifies the supervisor through a one-shot `lost_cb` and the watchdog waits on an event instead of sleeping out the tick, so a close is detected in microseconds; the tick stays as the backstop for a silent death, with a test that removes the notice to prove that path. Measured `bench/results/2026-11-16-rebind-detectors.json` (n=40 per column, Linux 6.1 x86_64, CPython 3.11.2, 2 CPUs; idle and one busy process per CPU): 160 samples, 0 over the 100 ms budget, notice columns outage p50 0.72\u20130.92 ms / max 3.30 ms, tick columns p50 11.9\u201312.7 ms / max 21.1 ms, and the gate is still the end-to-end outage per sample. No universal 100 ms bound is claimed: the macOS failure was 113 ms of thread lateness. **P3B-03 stays open** until genuine node-to-node evidence exists (`docs/node-edges.md`). Next ticket: P4-14 (`otlp/spans.json`).",
+  "next_ticket": "P4-16",
+  "next_note": "**P4-14's code half is done, the ticket stays open** (`docs/DECISIONS.md` D-056): `otlp/spans.json` ships as the third declared derived part \u2014 the same frames as OTLP/JSON, `bbx.run` + `invoke_agent`/`execute_tool` + `{operation} {model}` CLIENT spans, `bbx.model.call` wherever the mapping has no operation, ids derived (`traceId` from the run so vantages share a trace, `spanId` from the capsule and the opening frame), and the whole document recomputable byte for byte with an edit reported as BBX-E412. It validates against `tests/schemas/otlp-spans.schema.json` via `tests/_schema.py`, a validator that raises on a keyword it does not implement. Both exports now share one semconv pin, **v1.39.0** (`gen_ai.provider.name`, replacing v1.27.0's `gen_ai.system`). **The importer half is not claimed**: no Phoenix/Langfuse-class importer was run here, so the ticket's sentence is not met and the row is `wip`, listed in `open_blockers` \u2014 not ticked. **P3B-03 and defect 58 remain open** with their limitations: a shared trace id is not a node-level edge (0 recorded) and the rebind work makes no universal 100 ms claim. Next: P4-16, `blackbox verify` over a run/writer/capsule with the manifest carrying `derived_parts[]` and BBX-E412.",
   "last_green_commit": "9a734d8",
   "last_green_commit_note": "Run 43982217122 (`9a734d8`, P4-13 + the CI test fix): **ten of ten jobs succeeded, all three macOS cells included**, so `events.jsonl` is measured on every OS the branch builds for. The run before it (`dc92e72`, run 43981020970) was red on seven cells for one reason and it was the test's, not the product's: the edited line in tests/test_export_jsonl.py::test_an_edited_line_is_reported_with_its_number_and_the_capsule_is_untouched was hard-coded as index 2, which is the MODEL_REQUEST here and a NODE_OPEN on the runners. Locally the tree is green: 1072 tests collected, 1071 pass and 1 is skipped on POSIX, ruff 0.17.5 and mypy 2.4.1 --strict clean over 89 files. `b70baa5` (run 43979400673) was also ten of ten.",
   "gates": {
@@ -23,7 +23,9 @@
     "G-Release": "pending"
   },
   "gate_note": "a gate flips to pass only with a reviewer-signed docs/gates/G-<name>.md (AGENT_FINAL.md \u00a74); the builder never ticks its own gate",
-  "open_blockers": [],
+  "open_blockers": [
+    "**P4-14 manual check outstanding.** No Phoenix/Langfuse-class importer has been run against `otlp/spans.json`; the document validates against `tests/schemas/otlp-spans.schema.json` (checked by `tests/_schema.py`), and the importer acceptance the ticket asks for is unperformed, not passed (D-056)."
+  ],
   "lane_status": {
     "L0": {
       "done": [
@@ -139,7 +141,9 @@
         "P4-18",
         "P4-19"
       ],
-      "wip": [],
+      "wip": [
+        "P4-14"
+      ],
       "todo": [
         "P4-01",
         "P4-02",
@@ -151,7 +155,6 @@
         "P4-08",
         "P4-09",
         "P4-12",
-        "P4-14",
         "P4-15",
         "P4-16"
       ]

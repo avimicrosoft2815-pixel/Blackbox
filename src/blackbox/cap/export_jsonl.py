@@ -8,10 +8,12 @@ from the segments and reports drift as `BBX-E412`, and nothing ever rewrites it.
 Three rules govern what a line may say.
 
 1. **A name is used only where it exists.** The `gen_ai.*` names come from OpenTelemetry's semantic conventions, pinned
-   here to **v1.27.0** (the tag this file was written against, read from the upstream repository). At that tag the system
-   name is `gen_ai.system` — not the later `gen_ai.provider.name` — and `gen_ai.operation.name`'s well-known values are
-   `chat` and `text_completion`. Nothing else is invented: a frame whose payload does not carry a model, or whose path is
-   not one of the APIs the mapping knows, gets no `gen_ai.*` key at all rather than a plausible-looking guess.
+   here to **v1.39.0** (`6d05e92`, read from the upstream repository): the provider attribute is `gen_ai.provider.name`
+   (it was `gen_ai.system` before v1.33), and `gen_ai.operation.name`'s well-known values include `chat`,
+   `text_completion`, `embeddings`, `invoke_agent` and `execute_tool`. Nothing else is invented: a frame whose payload
+   does not carry a model, or whose path is not one of the APIs the mapping knows, gets no `gen_ai.*` key at all rather
+   than a plausible-looking guess. `cap/export_otlp.py` is pinned to the same tag, so the two exports cannot describe the
+   same run with two different vocabularies.
 2. **Everything else is `bbx.`.** Every attribute is either a pinned semconv name or a name this project owns, so a
    reader can tell at a glance which claims are standardised and which are ours.
 3. **The export is a timeline, not a second tape.** Chunk *content* is not copied into it: a `MODEL_CHUNK` line carries
@@ -32,9 +34,10 @@ from typing import Any
 from blackbox import constants as C
 from blackbox.codec import cbor
 
-#: The semantic-conventions tag these names were read from. Recorded in the export's own docs and in `format.md`, because
-#: a name without a version is a name that will mean something else next year.
-SEMCONV = "v1.27.0"
+#: The semantic-conventions tag these names were read from, and the commit it points at. Recorded in the export's own docs
+#: and in `format.md`, because a name without a version is a name that will mean something else next year.
+SEMCONV = "v1.39.0"
+SEMCONV_COMMIT = "6d05e92070f0a5c9a5bbcd396d2ebe2103377f8c"
 
 #: Path suffix -> `gen_ai.operation.name`. Only the APIs the mapping actually knows; a path that is not here gets no
 #: operation name, which is a fact the reader can see.
@@ -46,14 +49,21 @@ OPERATIONS: tuple[tuple[str, str], ...] = (
     ("/api/generate", "text_completion"),   # Ollama generate
 )
 
-#: Host -> `gen_ai.system` (v1.27.0's well-known values: `anthropic`, `cohere`, `openai`, `vertex_ai`). A host that is
-#: not a provider we can name gets no `gen_ai.system`: the recorder knows the address it dialled, not who answers there.
+#: Host -> `gen_ai.provider.name` (v1.39.0's well-known values). A host that is not a provider we can name gets no
+#: `gen_ai.provider.name`: the recorder knows the address it dialled, not who answers there. The list is explicit
+#: because it must be — a suffix match would turn `not-openai.example` into `openai`.
 SYSTEMS: dict[str, str] = {
     "api.openai.com": "openai",
     "api.anthropic.com": "anthropic",
     "api.cohere.ai": "cohere",
     "api.cohere.com": "cohere",
-    "aiplatform.googleapis.com": "vertex_ai",
+    "api.groq.com": "groq",
+    "api.deepseek.com": "deepseek",
+    "api.mistral.ai": "mistral_ai",
+    "api.x.ai": "x_ai",
+    "api.perplexity.ai": "perplexity",
+    "generativelanguage.googleapis.com": "gcp.gemini",
+    "aiplatform.googleapis.com": "gcp.vertex_ai",
 }
 
 #: Kinds whose payload is decoded into attributes. Everything else keeps its payload under `bbx.payload`.
@@ -71,7 +81,7 @@ def operation_of(path: str | None) -> str | None:
 
 
 def system_of(provider: str | None) -> str | None:
-    """The semconv system name for a recorded provider host, or `None` — never a guess."""
+    """The semconv `gen_ai.provider.name` for a recorded host, or `None` — never a guess."""
     host = str(provider or "").split(":", 1)[0].strip().lower()
     return SYSTEMS.get(host)
 
@@ -102,7 +112,7 @@ def _model_attributes(payload: Any, kind: int) -> dict[str, Any]:
         out["gen_ai.operation.name"] = operation
     system = system_of(provider if isinstance(provider, str) else None)
     if system:
-        out["gen_ai.system"] = system
+        out["gen_ai.provider.name"] = system
     if isinstance(model, str) and model:
         out["gen_ai.request.model"] = model
     # Ours, because the mapping has no name for them: the vantages, the id, the fingerprints and the counters.
@@ -218,4 +228,4 @@ def first_difference(stored: bytes, recomputed: bytes) -> dict[str, Any] | None:
             "note": f"{len(left)} lines stored, {len(right)} recomputed"}
 
 
-__all__ = ["SEMCONV", "first_difference", "line", "operation_of", "render", "system_of"]
+__all__ = ["SEMCONV", "SEMCONV_COMMIT", "first_difference", "line", "operation_of", "render", "system_of"]

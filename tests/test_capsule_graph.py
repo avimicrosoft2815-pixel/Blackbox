@@ -49,10 +49,10 @@ def test_the_capsule_carries_its_graph_as_a_declared_derived_part(tmp_path):
     assert [node["name"] for node in graph["nodes"]] == ["agent"]
     assert graph["nodes"][0]["status"] == "closed"
     parts = manifest["derived_parts"]
-    # Two derived parts since P4-13, declared in name order so the manifest is a function of its inputs only.
-    assert [part["name"] for part in parts] == sorted([cap.EVENTS_NAME, cap.GRAPH_NAME])
+    # Three derived parts since P4-14, declared in name order so the manifest is a function of its inputs only.
+    assert [part["name"] for part in parts] == sorted([cap.EVENTS_NAME, cap.GRAPH_NAME, cap.OTLP_NAME])
     declared = {part["name"]: part for part in parts}
-    for name in (cap.EVENTS_NAME, cap.GRAPH_NAME):
+    for name in (cap.EVENTS_NAME, cap.GRAPH_NAME, cap.OTLP_NAME):
         assert declared[name]["sha256"] == __import__("hashlib").sha256(capsule.entry(name)).hexdigest(), name
         assert declared[name]["generator"].startswith("blackbox "), name
     report = derived.verify(capsule)
@@ -87,7 +87,8 @@ def test_a_capsule_written_before_the_graph_existed_still_verifies(tmp_path):
     path, manifest = _capsule(tmp_path)
     capsule = cap.read_capsule(str(path))
     entries = {name: blob for name, blob in capsule.entries.items()
-               if name not in (cap.MANIFEST_NAME, cap.INTEGRITY_NAME, cap.GRAPH_NAME, cap.EVENTS_NAME)}
+               if name not in (cap.MANIFEST_NAME, cap.INTEGRITY_NAME, cap.GRAPH_NAME, cap.EVENTS_NAME,
+                               cap.OTLP_NAME)}
     old_manifest = {key: value for key, value in manifest.items() if key != "derived_parts"}
     older = tmp_path / "older.bbx"
     cap.write_capsule(str(older), entries, old_manifest)
@@ -123,7 +124,7 @@ def test_json_output_carries_the_report(tmp_path, capsys):
     assert capsule_main(["verify", str(path), "--json"]) == 0
     body = json.loads(capsys.readouterr().out)
     names = [part["name"] for part in body["parts"]]
-    assert body["ok"] is True and names == sorted([cap.EVENTS_NAME, cap.GRAPH_NAME]), names
+    assert body["ok"] is True and names == sorted([cap.EVENTS_NAME, cap.GRAPH_NAME, cap.OTLP_NAME]), names
 
 
 @pytest.mark.parametrize("field", ["nodes", "edges", "edge_summary", "open_nodes", "frames"])

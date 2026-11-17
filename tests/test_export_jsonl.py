@@ -6,7 +6,8 @@ Four claims, each with its own test and its own way of failing honestly:
   so rendering the same frames twice gives the same bytes (`capsule verify` compares bytes, so this is the load-bearing
   property, not a nicety);
 * **the `gen_ai.*` names are the pinned ones, and only where the mapping has a name** — OpenTelemetry semantic
-  conventions v1.27.0, where the system attribute is `gen_ai.system`; a host and a path the mapping does not know get no
+  conventions v1.39.0 (`6d05e92`), where the provider attribute is `gen_ai.provider.name`; a host and a path the mapping
+  does not know get no
   `gen_ai.*` key at all, because a plausible-looking guess in a standards namespace is worse than an honest absence;
 * **everything else is `bbx.`** — asserted over every attribute of every line, so a future export cannot quietly add an
   un-namespaced claim;
@@ -84,17 +85,18 @@ def test_the_gen_ai_names_are_the_pinned_semconv_and_nothing_else(tmp_path):
     request = next(line for line in _lines(capsule.entry(cap.EVENTS_NAME)) if line["kind"] == "MODEL_REQUEST")
     attributes = request["attributes"]
     assert attributes["gen_ai.operation.name"] == "chat"
-    assert attributes["gen_ai.system"] == "openai", "v1.27.0 calls it gen_ai.system, not gen_ai.provider.name"
+    assert attributes["gen_ai.provider.name"] == "openai", "v1.39.0 calls it gen_ai.provider.name"
     assert attributes["gen_ai.request.model"] == "gpt-4"
     assert attributes["bbx.model.call_id"] == "c0ffee" and attributes["bbx.model.linked_run"] == "r_0123456789abcdef"
-    assert export_jsonl.SEMCONV == "v1.27.0"
+    assert export_jsonl.SEMCONV == "v1.39.0" and export_jsonl.SEMCONV_COMMIT.startswith("6d05e92")
 
 
 @pytest.mark.parametrize("provider,path,system,operation", [
     ("127.0.0.1:8123", "/v1/chat/completions", None, "chat"),     # the recorder knows the socket, not the provider
     ("api.openai.com", "/v1/unknown", "openai", None),             # a provider we can name, an API we cannot
     ("api.anthropic.com", "/v1/messages", "anthropic", "chat"),
-    ("generativelanguage.googleapis.com", "/v1beta/models/x", None, None),
+    ("generativelanguage.googleapis.com", "/v1beta/models/x", "gcp.gemini", None),
+    ("not-openai.example", "/v1/chat/completions", None, "chat"),      # a suffix match would be a lie
 ])
 def test_a_name_is_used_only_where_the_mapping_has_one(provider, path, system, operation):
     """Two independent mappings: who answers (`gen_ai.system`) and which API was called (`gen_ai.operation.name`).
@@ -105,7 +107,7 @@ def test_a_name_is_used_only_where_the_mapping_has_one(provider, path, system, o
     frame = {"seq": 1, "kind": C.KIND_MODEL_REQUEST, "wall_ns": 1, "mono_ns": 2, "node_slot": 0, "run_slot": 0,
              "payload": _request(provider=provider, path=path)}
     attributes = export_jsonl.line(frame)["attributes"]
-    assert attributes.get("gen_ai.system") == system
+    assert attributes.get("gen_ai.provider.name") == system
     assert attributes.get("gen_ai.operation.name") == operation
     assert attributes["bbx.provider.host"] == provider
 
@@ -143,7 +145,7 @@ def test_the_part_is_declared_inside_the_capsule_and_verifies(tmp_path):
     assert declared[cap.EVENTS_NAME]["sha256"] == hashlib.sha256(capsule.entry(cap.EVENTS_NAME)).hexdigest()
     report = derived.verify(capsule)
     assert report["ok"] and report["drift"] == [], report
-    assert {part["name"] for part in report["parts"]} == {cap.EVENTS_NAME, cap.GRAPH_NAME}
+    assert {part["name"] for part in report["parts"]} == {cap.EVENTS_NAME, cap.GRAPH_NAME, cap.OTLP_NAME}
 
 
 def test_an_edited_line_is_reported_with_its_number_and_the_capsule_is_untouched(tmp_path):

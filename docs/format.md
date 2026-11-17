@@ -357,6 +357,7 @@ ZIP, STORED for raw segment bodies and DEFLATE for JSON, entries sorted with `ma
 | `INTEGRITY.sha256` | `<sha256>  <name>` per entry except itself and `manifest.json`, sorted |
 | `graph.json` | the run's nodes and edges, byte-identical to the run directory's copy (D-052, entry since D-053) |
 | `events/events.jsonl` | the timeline, one JSON object per frame, derived from the redacted frames (P4-13, D-054) |
+| `otlp/spans.json` | the same frames as OTLP/JSON ResourceSpans: agent, inference and tool spans (P4-14, D-056) |
 | `links.json` | the resolved `LINK` records and, since D-053, the `call_links` |
 
 `integrity.root = sha256(INTEGRITY.sha256)` — the manifest can therefore carry the root without hashing itself,
@@ -366,10 +367,10 @@ written as `.<id>.partial` with `O_EXCL`, fsynced, `os.replace`d, then the direc
 is a complete `.bbx`. Reading validates names (absolute, `..`, backslash, NUL), case-folded duplicates, sizes,
 entry-count and ratio **before** it trusts a single entry.
 
-**Derived parts.** `graph.json` and `events/events.jsonl` are listed in `manifest.derived_parts[]` as
+**Derived parts.** `graph.json`, `events/events.jsonl` and `otlp/spans.json` are listed in `manifest.derived_parts[]` as
 `{name, sha256, generator}` — the hash of the exact bytes written into the capsule — sorted by name so the manifest is a
 function of its inputs. `blackbox capsule verify <capsule>` recomputes each part from the capsule's own `events/*.raw`
-(`cap/derived.py`): the graph key by key (`COMPARED`: nodes, edges, counts, frames, status), the export byte for byte,
+(`cap/derived.py`): the graph key by key (`COMPARED`: nodes, edges, counts, frames, status), each export byte for byte,
 reporting the first line that differs. A mismatch is `BBX-E412` and exits 1, an unreadable capsule exits 2, a capsule
 that declares no derived parts verifies as `absent` and exits 0, and a part this build cannot recompute is listed as
 `unknown` — printed, never counted as a pass. Verification never rewrites anything: a capsule whose part has drifted is
@@ -386,18 +387,67 @@ and every attribute name is either a **pinned OpenTelemetry semconv name** or on
 
 | attribute | when | source |
 |---|---|---|
-| `gen_ai.operation.name` | a `MODEL_REQUEST` whose path is an API the mapping knows (`chat`, `text_completion`) | semconv **v1.27.0** |
-| `gen_ai.system` | the recorded provider host is one we can name (`api.openai.com` → `openai`, `api.anthropic.com` → `anthropic`, `api.cohere.*` → `cohere`, `aiplatform.googleapis.com` → `vertex_ai`) | semconv **v1.27.0** |
-| `gen_ai.request.model` | the frame recorded a model | semconv **v1.27.0** |
+| `gen_ai.operation.name` | a `MODEL_REQUEST` whose path is an API the mapping knows (`chat`, `text_completion`) | semconv **v1.39.0** (`6d05e92`) |
+| `gen_ai.provider.name` | the recorded provider host is in the explicit table (`api.openai.com` → `openai`, `api.anthropic.com` → `anthropic`, `generativelanguage.googleapis.com` → `gcp.gemini`, `aiplatform.googleapis.com` → `gcp.vertex_ai`, and the others in `export_jsonl.SYSTEMS`) | semconv **v1.39.0** (`6d05e92`) |
+| `gen_ai.request.model` | the frame recorded a model | semconv **v1.39.0** (`6d05e92`) |
 | `bbx.model.*`, `bbx.node.*`, `bbx.run.*`, `bbx.gap.*`, `bbx.chain.*`, `bbx.chunk.*`, `bbx.payload`, `bbx.redaction` | everything else | this project |
 
 Three things it deliberately does not do. It does not **guess a provider**: an address that is not a known provider gets
-no `gen_ai.system`, and the host it dialled is still written as `bbx.provider.host`. It does not **copy content**: a
+no `gen_ai.provider.name`, and the host it dialled is still written as `bbx.provider.host`. It does not **copy content**: a
 `MODEL_CHUNK` line carries its byte count, and the `[bbx-hash …]`/`[bbx-off …]` tag when the sink wrote one, never the
 bytes — the export is a timeline, and the bytes stay in the segments under the content policy. And it does not **emit
 `error.type`**: the tape records an error *message*, and a message is not a type, so the string is carried as
 `bbx.model.error` rather than dressed as a semconv value. Payloads of kinds the mapping says nothing about are carried
 under `bbx.payload`, or as a digest and a length when they exceed 2 KiB.
+
+#### `otlp/spans.json` — the same frames as OTLP/JSON (P4-14, D-056)
+
+One `ExportTraceServiceRequest` in proto3 JSON: `resourceSpans[0].resource.attributes` names the capsule
+(`service.name = "blackbox"`, `bbx.capsule.id`), `scopeSpans[0].scope` is `blackbox 0.1.0.dev0`, and `spans` holds the
+run. Kinds are OTLP's (`1` INTERNAL, `3` CLIENT), status codes are `0`/`1`/`2`, int64 values are strings, ids are
+lower-case hex. The same **semconv v1.39.0** pin as the JSONL export, because two exports of one capsule must not
+describe one run in two vocabularies.
+
+| frames | span | name | kind |
+|---|---|---|---|
+| `RUN_START` … `RUN_END` | the root | `bbx.run` | INTERNAL |
+| `NODE_OPEN` … `NODE_CLOSE`, kind `tool` | tool | `execute_tool {gen_ai.tool.name}` | INTERNAL |
+| any other node pair | agent | `invoke_agent {gen_ai.agent.name}`, or `invoke_agent` when the node has no name | INTERNAL |
+| `MODEL_REQUEST` … `MODEL_RESPONSE`/`MODEL_ERROR` | inference | `{gen_ai.operation.name} {gen_ai.request.model}`, each half optional | CLIENT |
+| a call whose path is not in the mapping | inference | `bbx.model.call` — no semconv name, because there is no operation to name | CLIENT |
+
+Span attributes are the same two families as the JSONL file: the pinned `gen_ai.*` names, and ours
+(`bbx.node.slot/kind/duration_us`, `bbx.call.id`, `bbx.model.*` counters, `bbx.request.fp`, `bbx.response.fp`,
+`bbx.response.status`, `bbx.span.source`, `bbx.span.truncated`, `bbx.span.partial`, `bbx.model.error`). Parents follow
+the recording: a model call's parent is the node span of its slot, a node's parent is the span of its `parent` slot, and
+the root is `bbx.run`.
+
+**Ids are derived, not drawn.** `traceId = sha256(run_id)[:32]`, so two vantages of one run share a trace — the property
+P3B-03 wants and does not yet have at node level (`docs/node-edges.md`). `spanId = sha256(capsule_id:seq)[:16]` for the
+frame that opened the span, so two capsules of one run cannot collide and the same capsule always renders the same ids.
+The writer's uuid is deliberately unused: the capsule does not carry it, and a derived part must be recomputable from what
+the capsule holds.
+
+**Pairing.** A response is paired with its request by `bbx.call.id` when both carry it — the response frame repeats the
+call id and linked run since P4-14 — and by tape order per node slot when they do not (a tape written before that change).
+A pair that never closes gets a span that ends at the tape's last frame with `bbx.span.truncated: true` and an error
+status that says which frame is missing: a node with no close is a fact about the run, and dropping its span would lose
+it.
+
+**Absent on purpose.** No token counts, no `gen_ai.response.finish_reasons`, no request parameters: this build does not
+decode response bodies (P3-08 is open), and a number invented from a byte count would be the over-claim everything else
+here refuses. No prompt or completion text — counters only, by the same rule as the JSONL export.
+
+**Declared and recomputed** like the other derived parts: sha256 in `manifest.derived_parts[]`, `capsule verify`
+re-renders and compares bytes, an edit is `BBX-E412` with the first differing line, and nothing is rewritten.
+
+**What was and was not checked.** The document validates against `tests/schemas/otlp-spans.schema.json` (the subset of
+OTLP/JSON this build produces), checked by `tests/_schema.py` — a validator that implements that subset and raises on a
+keyword it does not implement, so the snapshot cannot grow a check nobody runs. The ticket also asks that "a
+Phoenix/Langfuse-class importer accepts the file": **that check was not performed here** — no importer of that class runs
+in this environment, and saying one accepted it would be a claim without a witness. It stays a manual step, recorded in
+`docs/STATE.json` under `open_blockers`, and the file is written to the documented OTLP/JSON shape so that the check is a
+test of an importer rather than of a bespoke format.
 
 ## 9. Conformance vectors
 

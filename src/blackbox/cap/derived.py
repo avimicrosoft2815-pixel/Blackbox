@@ -1,4 +1,4 @@
-"""Derived capsule parts, recomputed and compared (D-053, P4-13, §13.1a) — `graph.json` and `events.jsonl`.
+"""Derived capsule parts, recomputed and compared (D-053, P4-13, P4-14, §13.1a) — the graph and the two exports.
 
 The raw frames are the only authoritative part of a capsule; `graph.json` is a *derived* one: nodes come from the
 `NODE_*`/`MODEL_*` frames and edges come from `links.json`, both of which the capsule already carries. That is what makes
@@ -21,7 +21,7 @@ import json
 from typing import Any
 
 from blackbox import constants as C
-from blackbox.cap import export_jsonl
+from blackbox.cap import export_jsonl, export_otlp
 from blackbox.cap import format as cap
 from blackbox.errors import bbx
 from blackbox.rec import recovery
@@ -94,9 +94,24 @@ def recompute_events(capsule: cap.Capsule) -> bytes | None:
     return export_jsonl.render(frames_of(capsule))
 
 
+def recompute_otlp(capsule: cap.Capsule) -> bytes | None:
+    """The `otlp/spans.json` this capsule's own frames imply, or `None` when the capsule does not carry the part."""
+    if cap.OTLP_NAME not in capsule.entries:
+        return None
+    return export_otlp.render(frames_of(capsule), capsule_id=str(capsule.manifest.get("capsule_id") or ""),
+                              run_id=export_jsonl_run_id(capsule))
+
+
+def export_jsonl_run_id(capsule: cap.Capsule) -> str | None:
+    """The run id the capsule's own manifest declares — the one thing the exports need that the frames do not repeat."""
+    run = capsule.manifest.get("run")
+    run_id = run.get("run_id") if isinstance(run, dict) else None
+    return run_id if isinstance(run_id, str) and run_id else None
+
+
 #: The parts this build knows how to recompute, in the order a report lists them. A part in a capsule that is not here
 #: is not verified — and is reported as such, because "we cannot check this" must never look like "it checked out".
-PARTS = (cap.EVENTS_NAME, cap.GRAPH_NAME)
+PARTS = (cap.EVENTS_NAME, cap.GRAPH_NAME, cap.OTLP_NAME)
 
 
 def verify(capsule: cap.Capsule) -> dict[str, Any]:
@@ -126,7 +141,7 @@ def verify(capsule: cap.Capsule) -> dict[str, Any]:
         if name == cap.GRAPH_NAME:
             _compare_graph(capsule, stored_bytes, report)
         else:
-            expected_bytes = recompute_events(capsule) or b""
+            expected_bytes = (recompute_events(capsule) if name == cap.EVENTS_NAME else recompute_otlp(capsule)) or b""
             difference = export_jsonl.first_difference(stored_bytes, expected_bytes)
             if difference is not None:
                 report["drift"].append({"part": name, "field": f"line {difference['line']}",
