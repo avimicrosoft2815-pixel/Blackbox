@@ -30,15 +30,16 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "tools"))
 
-from rebind_probe import ServingProbe, measure_outage, try_serve
+from rebind_probe import Attempt, LocalUpstream, ServingProbe, measure_outage, try_serve
 
 from blackbox.proxy.routes import Route, Routes
 from blackbox.proxy.server import ProxyServer
 from blackbox.proxy.supervisor import ProxyThread
 
 
-def _table() -> Routes:
-    return Routes([Route(name="openai", base="http://127.0.0.1:9", prefix="/openai")], default="openai")
+def _table(base: str) -> Routes:
+    """A route to a *live* upstream: a closed port is answered slowly enough on Windows to look like a hang."""
+    return Routes([Route(name="openai", base=base, prefix="/openai")], default="openai")
 
 
 def _probe(port: int) -> ServingProbe:
@@ -47,11 +48,11 @@ def _probe(port: int) -> ServingProbe:
 
 
 def test_an_answered_request_is_served_and_a_refused_one_is_not() -> None:
-    with ProxyThread(_table()) as proxy:
+    with LocalUpstream() as upstream, ProxyThread(_table(upstream.base)) as proxy:
         served = try_serve(proxy.port)
         assert served.served is True, served
-        assert served.detail.startswith("HTTP 5"), (
-            f"the upstream is a closed port; any answer from the proxy is service, and it said {served.detail}")
+        assert served.detail.startswith("HTTP 2"), (
+            f"the upstream is live; the proxy must forward and answer, and it said {served.detail}")
         port = proxy.port
     refused = try_serve(port, timeout=0.2)
     assert refused.served is False, "after the listener is gone the port must refuse"
@@ -70,7 +71,7 @@ def test_the_clock_counts_downtime_inside_close_before_it_returns(monkeypatch: p
             stalled["done"] = True
             time.sleep(stall_s)      # the listener is already closed here; the caller is still waiting
 
-    with ProxyThread(_table()) as proxy, _probe(proxy.port) as probe:
+    with LocalUpstream() as upstream, ProxyThread(_table(upstream.base)) as proxy, _probe(proxy.port) as probe:
         server, loop = proxy.server, proxy._loop
         assert server is not None and loop is not None
         time.sleep(0.02)                                  # let the probes see a serving listener first
@@ -98,7 +99,7 @@ def test_the_clock_counts_downtime_inside_close_before_it_returns(monkeypatch: p
 
 def test_no_outage_is_reported_when_nothing_is_refused() -> None:
     """A measurement that invents downtime is as useless as one that hides it."""
-    with ProxyThread(_table()) as proxy, _probe(proxy.port) as probe:
+    with LocalUpstream() as upstream, ProxyThread(_table(upstream.base)) as proxy, _probe(proxy.port) as probe:
         time.sleep(0.02)
         sampled = measure_outage(probe, lambda: time.sleep(0.01), timeout=2.0)
         cycle = float(sampled["probe_cycle_ms"])
@@ -112,7 +113,7 @@ def test_no_outage_is_reported_when_nothing_is_refused() -> None:
 
 
 def test_the_upper_bound_is_the_conservative_one() -> None:
-    with ProxyThread(_table()) as proxy, _probe(proxy.port) as probe:
+    with LocalUpstream() as upstream, ProxyThread(_table(upstream.base)) as proxy, _probe(proxy.port) as probe:
         server, loop = proxy.server, proxy._loop
         assert server is not None and loop is not None
         time.sleep(0.02)
@@ -124,15 +125,44 @@ def test_the_upper_bound_is_the_conservative_one() -> None:
     assert sampled["outage_upper_ms"] < 100.0, f"a loopback rebind took {sampled['outage_upper_ms']:.1f} ms"
 
 
+class _FakeProbe:
+    """A probe that answers from a script, so the timeout branch can be tested without a race.
+
+    A real "listener that never comes back" test was tried and is not deterministic: the OS hands the freed port to the
+    next thing that asks for one, and when a `LocalUpstream` in a later test got it the probe was answered by a socket
+    the proxy never opened. This is the same claim with no sockets in it.
+    """
+
+    def __init__(self, script: list[Attempt]) -> None:
+        self.script = script
+        self.answer_timeout_s = 0.05
+        self._at = 0
+
+    def calibrate(self, **kwargs: object) -> float:
+        return 50.0
+
+    def mark(self) -> int:
+        return 0
+
+    def recent(self, mark: int) -> list[Attempt]:
+        # Every poll reveals one more attempt, exactly as a live probe would.
+        self._at = min(len(self.script), self._at + 1)
+        return self.script[: self._at]
+
+    def cycle_ms(self, sample: int = 200) -> float:
+        return 0.5
+
+    def alive(self) -> bool:
+        return True
+
+
 def test_a_listener_that_never_comes_back_is_an_error_not_a_zero() -> None:
-    with ProxyThread(_table()) as proxy, _probe(proxy.port) as probe:
-        server, loop = proxy.server, proxy._loop
-        assert server is not None and loop is not None
-        time.sleep(0.02)
-        proxy._stopping.set()               # the loop will refuse to repair; nothing comes back
-        with pytest.raises(RuntimeError, match="did not come back"):
-            measure_outage(probe, lambda: asyncio.run_coroutine_threadsafe(server.close(), loop).result(5),
-                           timeout=0.4)
+    now = time.perf_counter()
+    served = Attempt(now, now + 0.001, True, True, "HTTP 200")
+    refused = [Attempt(now + 0.001 + 0.001 * i, now + 0.0012 + 0.001 * i, False, False, "refused")
+               for i in range(50)]
+    with pytest.raises(RuntimeError, match="did not come back"):
+        measure_outage(_FakeProbe([served, *refused]), lambda: None, timeout=0.4)   # type: ignore[arg-type]
 
 
 def test_a_probe_on_a_port_nobody_serves_cannot_measure_an_outage() -> None:
@@ -146,7 +176,7 @@ def test_a_probe_on_a_port_nobody_serves_cannot_measure_an_outage() -> None:
 
 def test_the_probe_reports_its_own_resolution() -> None:
     """Every number out of this module is bounded by the probe's cycle, and the cycle is printed beside it."""
-    with ProxyThread(_table()) as proxy, ServingProbe(proxy.port) as probe:
+    with LocalUpstream() as upstream, ProxyThread(_table(upstream.base)) as proxy, ServingProbe(proxy.port) as probe:
         time.sleep(0.05)
         cycle = probe.cycle_ms()
         attempts = probe.since(0)

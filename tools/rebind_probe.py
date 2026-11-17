@@ -39,6 +39,7 @@ numbers, because a measurement whose resolution is not stated is a number preten
 """
 from __future__ import annotations
 
+import http.server
 import socket
 import threading
 import time
@@ -87,6 +88,57 @@ def try_serve(port: int, *, path: str = REQUEST_PATH, timeout: float = 0.05,
         return Attempt(started, time.perf_counter(), True, False, "timeout")
     except OSError as exc:                      # reset, unreachable, and anything else the kernel says
         return Attempt(started, time.perf_counter(), False, False, type(exc).__name__)
+
+
+class LocalUpstream:
+    """A tiny local HTTP server that answers 200 to anything: the probe's upstream, so a probe request is *served*.
+
+    Pointing the proxy's route at a closed port looks like a shortcut and is not one: the proxy answers such a request
+    with its own 504, and on a Windows runner that path takes longer than the probe's attempt budget (the SYN to a dead
+    port is retried rather than refused there), so every probe attempt reads as a timeout and the measurement turns
+    into a measurement of the failure path. A live upstream answers in the machine's own floor (~16 ms on Windows,
+    ~0.5 ms on Linux loopback), which is exactly what `calibrate` needs to see.
+    """
+
+    def __init__(self) -> None:
+        self._httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), self._handler)
+        self._httpd.daemon_threads = True
+        self.port = int(self._httpd.server_address[1])
+        self._thread = threading.Thread(target=self._httpd.serve_forever, name="blackbox-probe-upstream", daemon=True)
+
+    @property
+    def base(self) -> str:
+        return f"http://127.0.0.1:{self.port}"
+
+    def start(self) -> LocalUpstream:
+        self._thread.start()
+        return self
+
+    def stop(self) -> None:
+        self._httpd.shutdown()
+        self._httpd.server_close()
+        self._thread.join(5)
+
+    def __enter__(self) -> LocalUpstream:
+        return self.start()
+
+    def __exit__(self, *exc: object) -> None:
+        self.stop()
+
+    class _handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            body = b"{}"
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_POST(self) -> None:
+            self.do_GET()
+
+        def log_message(self, *args: object) -> None:
+            """Silent: the probe issues thousands of requests."""
 
 
 class ServingProbe:
@@ -139,7 +191,8 @@ class ServingProbe:
                 raise RuntimeError(f"the serving probe stopped: {self._error!r}")
             time.sleep(0.0005)
         measured = self.cycle_ms(self.CALIBRATION_SAMPLE)
-        self.answer_timeout_s = min(self.timeout, max(self.MIN_ANSWER_TIMEOUT_S, 3 * measured / 1000.0))
+        if measured > 0.0:                      # never *lower* the cap on a machine that has not answered yet
+            self.answer_timeout_s = min(self.timeout, max(self.MIN_ANSWER_TIMEOUT_S, 3 * measured / 1000.0))
         return self.answer_timeout_s * 1000.0
 
     def stop(self) -> None:
@@ -266,7 +319,8 @@ def measure_outage(probe: ServingProbe, break_listener: Callable[[], object], *,
 
     start = max(unserved.started, started_break) if unserved is not None else last_served_before.started
     window = probe.recent(mark)
-    failed = [a for a in window if not a.served and start <= a.started <= served_again.started]
+    first_failure = unserved.started if unserved is not None else start
+    failed = [a for a in window if not a.served and first_failure <= a.started <= served_again.started]
     return {
         "outage_ms": max(0.0, (served_again.started - start) * 1000.0),
         "outage_upper_ms": max(0.0, (served_again.started - last_served_before.started) * 1000.0),
@@ -297,4 +351,4 @@ def _wait_for(probe: ServingProbe, mark: int, keep: Callable[[Attempt], bool], w
                        f"(last attempts: {details})")
 
 
-__all__ = ["Attempt", "ServingProbe", "measure_outage", "try_serve"]
+__all__ = ["Attempt", "LocalUpstream", "ServingProbe", "measure_outage", "try_serve"]

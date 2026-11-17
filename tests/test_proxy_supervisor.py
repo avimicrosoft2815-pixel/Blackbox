@@ -11,12 +11,15 @@ from __future__ import annotations
 
 import sys
 import time
+from collections.abc import Iterator
 from pathlib import Path
+
+import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 
-from rebind_probe import ServingProbe, measure_outage
+from rebind_probe import LocalUpstream, ServingProbe, measure_outage
 
 from blackbox.proxy.routes import Route, Routes
 from blackbox.proxy.supervisor import (
@@ -29,10 +32,18 @@ from blackbox.proxy.supervisor import (
 )
 
 
-def _table() -> Routes:
-    return Routes([Route(name="openai", base="http://127.0.0.1:9", prefix="/openai"),
-                   Route(name="anthropic", base="http://127.0.0.1:9", prefix="/anthropic")],
+def _table(base: str = "http://127.0.0.1:9") -> Routes:
+    """A route to `base`. The probe tests pass a live upstream: the proxy's 504 path is slow enough on Windows to read
+    as a hang, and a probe that is never answered measures the failure path instead of service."""
+    return Routes([Route(name="openai", base=base, prefix="/openai"),
+                   Route(name="anthropic", base=base, prefix="/anthropic")],
                   default="openai")
+
+
+@pytest.fixture(scope="module")
+def upstream() -> Iterator[LocalUpstream]:
+    with LocalUpstream() as server:
+        yield server
 
 
 def test_an_unset_variable_is_exported_and_names_the_proxy():
@@ -147,9 +158,9 @@ def _break_and_wait(proxy: ProxyThread, probe: ServingProbe, timeout: float = 5.
     }
 
 
-def test_the_watchdog_brings_a_dead_listener_back_without_being_asked():
+def test_the_watchdog_brings_a_dead_listener_back_without_being_asked(upstream: LocalUpstream) -> None:
     """Structural, not statistical: the watchdog is what restored service, and it kept the port the child was told."""
-    with ProxyThread(_table()) as proxy, ServingProbe(proxy.port) as probe:
+    with ProxyThread(_table(upstream.base)) as proxy, ServingProbe(proxy.port) as probe:
         time.sleep(0.02)                                  # the probe must see a serving listener first
         port = proxy.port
         sample = _break_and_wait(proxy, probe)
@@ -159,7 +170,7 @@ def test_the_watchdog_brings_a_dead_listener_back_without_being_asked():
         assert round(proxy.rebinds[0], 3) == sample["rebind_ms"]
 
 
-def test_every_watchdog_rebind_lands_inside_the_budget_not_the_median_of_them():
+def test_every_watchdog_rebind_lands_inside_the_budget_not_the_median_of_them(upstream: LocalUpstream) -> None:
     """P3B-03 / §11.8, measured as the requirement is written: **every** watchdog-triggered rebind, per sample.
 
     The earlier version of this test took the median of five samples, four of which were manual `rebind()` calls. That
@@ -169,7 +180,7 @@ def test_every_watchdog_rebind_lands_inside_the_budget_not_the_median_of_them():
     gated row and its outliers are visible in the same failure message.
     """
     samples: list[dict] = []
-    with ProxyThread(_table()) as proxy, ServingProbe(proxy.port) as probe:
+    with ProxyThread(_table(upstream.base)) as proxy, ServingProbe(proxy.port) as probe:
         time.sleep(0.02)                                  # the probe must see a serving listener first
         port = proxy.port
         assert proxy._supervise_ms == SUPERVISE_MS, "this test measures the tick that ships"
@@ -201,7 +212,7 @@ def test_every_watchdog_rebind_lands_inside_the_budget_not_the_median_of_them():
         f"worst watchdog tick lateness {max(lateness, default=0.0):.1f} ms over {len(lateness)} ticks")
 
 
-def test_a_listener_that_dies_without_saying_so_is_still_restored_on_the_tick():
+def test_a_listener_that_dies_without_saying_so_is_still_restored_on_the_tick(upstream: LocalUpstream) -> None:
     """The early notice is an optimisation of detection, not a replacement for the watchdog (defect 58).
 
     A close says so and is noticed in microseconds; a listener that dies for any other reason — an OS error, a socket
@@ -209,7 +220,7 @@ def test_a_listener_that_dies_without_saying_so_is_still_restored_on_the_tick():
     left. This test removes the notice and asserts the old behaviour survives, because a fast path that is the *only*
     path is a new way to lose the listener entirely.
     """
-    with ProxyThread(_table()) as proxy, ServingProbe(proxy.port) as probe:
+    with ProxyThread(_table(upstream.base)) as proxy, ServingProbe(proxy.port) as probe:
         time.sleep(0.02)
         listener = proxy.server
         assert listener is not None
@@ -221,7 +232,7 @@ def test_a_listener_that_dies_without_saying_so_is_still_restored_on_the_tick():
     assert sample["port_after"] == sample["port_before"], "a backstop rebind keeps the port the child was told"
 
 
-def test_a_fast_tick_never_moves_the_port_and_never_double_restores() -> None:
+def test_a_fast_tick_never_moves_the_port_and_never_double_restores(upstream: LocalUpstream) -> None:
     """The race a full-suite run found (defect 60): two owners, one port.
 
     With the fix in place the notice repairs the listener on the loop *and* wakes the watchdog, so for a moment two
@@ -230,7 +241,7 @@ def test_a_fast_tick_never_moves_the_port_and_never_double_restores() -> None:
     a port of its own, which breaks every child that was told the old one. A 1 ms tick makes that window wide instead of
     theoretical, and 25 breaks are enough for it to happen on a loaded machine if it still can.
     """
-    with ProxyThread(_table(), supervise_ms=1.0) as proxy, ServingProbe(proxy.port) as probe:
+    with ProxyThread(_table(upstream.base), supervise_ms=1.0) as proxy, ServingProbe(proxy.port) as probe:
         time.sleep(0.02)
         port = proxy.port
         for index in range(25):

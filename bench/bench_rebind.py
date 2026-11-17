@@ -47,7 +47,7 @@ sys.path.insert(0, str(ROOT / "bench"))
 sys.path.insert(0, str(ROOT / "tools"))
 
 from _stats import summary
-from rebind_probe import ServingProbe, measure_outage
+from rebind_probe import LocalUpstream, ServingProbe, measure_outage
 
 from blackbox.proxy.routes import Route, Routes
 from blackbox.proxy.supervisor import REBIND_BUDGET_MS, ProxyThread
@@ -55,9 +55,10 @@ from blackbox.proxy.supervisor import REBIND_BUDGET_MS, ProxyThread
 POLL_S = 0.0005          # the old in-process poll; kept in the JSON so an older file can still be read
 
 
-def _table() -> Routes:
-    return Routes([Route(name="openai", base="http://127.0.0.1:9", prefix="/openai"),
-                   Route(name="anthropic", base="http://127.0.0.1:9", prefix="/anthropic")],
+def _table(base: str) -> Routes:
+    """A route to a live local upstream, so a probe request is *served* (see `LocalUpstream`)."""
+    return Routes([Route(name="openai", base=base, prefix="/openai"),
+                   Route(name="anthropic", base=base, prefix="/anthropic")],
                   default="openai")
 
 
@@ -127,7 +128,8 @@ def _column(trials: int, *, supervise_ms: float, loaded: bool, notify: bool = Tr
             stoppers.append(stop)
             busy.append(process)
     samples: list[dict[str, Any]] = []
-    proxy = ProxyThread(_table(), supervise_ms=supervise_ms)
+    upstream = LocalUpstream().start()          # a live upstream: a dead one is answered slowly on Windows
+    proxy = ProxyThread(_table(upstream.base), supervise_ms=supervise_ms)
     probe: ServingProbe | None = None
     rng = random.Random(seed)
     try:
@@ -146,6 +148,8 @@ def _column(trials: int, *, supervise_ms: float, loaded: bool, notify: bool = Tr
         if probe is not None:
             with contextlib.suppress(Exception):
                 probe.stop()
+        with contextlib.suppress(Exception):
+            upstream.stop()
         with contextlib.suppress(Exception):
             proxy.stop()
         for stop in stoppers:
