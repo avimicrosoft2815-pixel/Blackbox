@@ -751,3 +751,42 @@ columns (`bench/results/2026-11-17-rebind-after-loop-restore.json`): the gate is
 columns are unchanged (p99 20.4 / 21.2 ms) because the tick path was not touched. The claim stays what it was: a budget
 measured on the machine that ran it, no universal 100 ms promise — `bench_rebind.py`'s `method.bound` string says so, and
 defect 58's open row is about the *universal* claim, not about this one.
+
+**The clock, second revision (2026-11-17): it is now measured by requests.** The revised clock above starts when
+`close()` returns, which fixes the harness's hop but is optimistic in the other direction: the listening socket stops
+accepting *inside* `close()`, so a request is already refused while the coroutine is still running — in `wait_closed()`,
+in a pool drain, or after the loop thread was descheduled before the caller was woken. An in-process clock cannot see
+that interval, because it is inside the call whose return it is timing.
+
+`tools/rebind_probe.py` measures it from outside our threads: one raw-socket request in a tight loop through the proxy
+on the port the child was told, from the **first request that was not served** to the first one that was. Refused, or
+accepted-with-no-answer, counts as not served; any HTTP status line counts as served, including the proxy's own 504 for
+an unreachable upstream. A raw socket rather than `http.client` for a measured reason: `http.client` can block for its
+whole timeout on a connection accepted just before the listener went away, so the probe sleeps through the outage it is
+supposed to be measuring and reports "no failure observed".
+
+**What the unit test pins down.** `tests/test_rebind_probe.py` stalls `close()` for **60 ms after the socket has already
+stopped accepting**, then measures the same break with both clocks: the request clock reports **60.86 ms** of outage
+(`outage_upper_ms` 62.14 ms, 0.03 ms of it after `close()` returned), and the post-`close()` clock would have reported
+**~0 ms**. The test asserts the request clock contains at least 80% of the stall and that the post-`close()` clock misses
+at least half of it — a red test says which of the two claims broke.
+
+**The probe has a resolution, and it is reported.** One attempt is 0.2–0.6 ms on loopback (median of *served* attempts —
+refusals return in microseconds and would fake a 0.01 ms resolution exactly when the number matters). `cycle_ms()` is
+printed beside every outage, and `outage_upper_ms` — last request served before the break to first served after it — is
+the number the budget is asserted on, because it still covers the gap when no request happened to be refused.
+
+**A defect in the first version of the probe, found by the bench.** With a 50 ms answer timeout, `notice_idle` p95 came
+out at 50.2 ms on a rebind whose own work was 0.4 ms: a request accepted just before the listener closed sits in the
+backlog, is never answered, and the client waits out the probe's patience. That is a real casualty — a child's in-flight
+connection — but it is not the rebind, and letting it into the outage number puts the probe's own timeout into the
+product's budget. The answer phase now has its own cap (`ANSWER_TIMEOUT_S = 10 ms`, twenty times the p50 loopback answer
+and a tenth of the budget) while the connect keeps 50 ms, and the p95 lands where it belongs.
+
+**Measured after the fix, request-level** (`bench/bench_rebind.py --n 60`,
+`bench/results/2026-11-17-rebind-request-level.json`, Linux 6.1 x86_64, CPython 3.11.2, 240 samples over four columns):
+gate **PASS**, worst upper bound **29.481 ms**, 0 over budget, 0 port moves, 0 not restored. Outage p50 / max by column:
+`notice_idle` 0.666 / 10.841 ms, `notice_loaded` 0.964 / 13.232 ms, `tick_idle` 9.584 / 20.830 ms, `tick_loaded`
+10.567 / 23.790 ms. The budget (`100.0 ms`), the per-sample assertion and the limits of the claim are unchanged: this
+is a gate on the machine that ran it, not a promise that any machine keeps 100 ms (defect 58), and the tick columns'
+10 ms p50 is the tick, not the rebind.

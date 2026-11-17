@@ -44,13 +44,15 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "bench"))
+sys.path.insert(0, str(ROOT / "tools"))
 
 from _stats import summary
+from rebind_probe import ServingProbe, measure_outage
 
 from blackbox.proxy.routes import Route, Routes
 from blackbox.proxy.supervisor import REBIND_BUDGET_MS, ProxyThread
 
-POLL_S = 0.0005          # the measurement's own granularity; recorded in the JSON because it bounds the answer
+POLL_S = 0.0005          # the old in-process poll; kept in the JSON so an older file can still be read
 
 
 def _table() -> Routes:
@@ -67,12 +69,17 @@ def _burn(stop: Any) -> None:
             value = (value * 1103515245 + 12345) & 0x7FFFFFFF
 
 
-def _outage_once(proxy: ProxyThread, *, notify: bool = True) -> dict[str, Any]:
-    """Break the listener and wait for the supervisor to bring it back. Returns one sample.
+def _outage_once(proxy: ProxyThread, probe: ServingProbe, *, notify: bool = True) -> dict[str, Any]:
+    """Break the listener and measure the outage **a request** experiences. Returns one sample.
 
     `notify=False` removes the listener's own notice before closing it, so the loss is the kind nothing announces (an
-    OS-level death, a socket pulled out from under the loop): the watchdog tick is then the only detector, and the
-    column measures the backstop rather than the fast path.
+    OS-level death, a socket pulled from under the loop): the watchdog tick is then the only detector, and the column
+    measures the backstop rather than the fast path.
+
+    The clock is `tools/rebind_probe.py`: a real request in a tight loop on the port the child was told, from the first
+    refusal to the first answer. It is the only definition that covers the interval inside `close()` before the coroutine
+    returns — the socket stops accepting before the caller is woken, and an in-process clock cannot see that (defect 60's
+    second revision; `tests/test_rebind_probe.py` makes the interval 60 ms wide and asserts the clock contains it).
     """
     server = proxy.server
     loop = proxy._loop
@@ -83,31 +90,27 @@ def _outage_once(proxy: ProxyThread, *, notify: bool = True) -> dict[str, Any]:
     port_before = proxy.port
     rebinds_before = len(proxy.rebinds)
     noticed_before = len(proxy.noticed_ms)
-    signalled_ns = time.perf_counter_ns()
-    started = signalled_ns
-    asyncio.run_coroutine_threadsafe(server.close(), loop).result(5)
-    deadline = time.monotonic() + 5.0
-    restored = False
-    while time.monotonic() < deadline:
-        current = proxy.server
-        if (current is not None and current is not server and current.is_serving
-                and len(proxy.rebinds) > rebinds_before):
-            restored = True
-            break
-        time.sleep(POLL_S)
-    ended = time.perf_counter_ns()
+    try:
+        sampled = measure_outage(probe, lambda: asyncio.run_coroutine_threadsafe(server.close(), loop).result(5))
+    except RuntimeError as exc:
+        return {"outage_ms": None, "outage_upper_ms": None, "restored": False, "error": str(exc),
+                "rebind_ms": None, "noticed_ms": None, "port_before": port_before, "port_after": proxy.port,
+                "port_kept": proxy.port == port_before, "refused_requests": 0, "observed_failure": False,
+                "probe_cycle_ms": probe.cycle_ms()}
     rebind_ms = proxy.rebinds[rebinds_before] if len(proxy.rebinds) > rebinds_before else None
     noticed = proxy.noticed_ms[len(proxy.noticed_ms) - 1] if len(proxy.noticed_ms) > noticed_before else None
     return {
-        "outage_ms": round((ended - started) / 1_000_000, 3),
+        "outage_ms": round(float(sampled["outage_ms"]), 3),
+        "outage_upper_ms": round(float(sampled["outage_upper_ms"]), 3),
         "rebind_ms": None if rebind_ms is None else round(rebind_ms, 3),
-        # The supervisor's own view of detection (notify -> noticed), which is only defined when the listener said so.
-        # `detection_ms` below is the external one (outage - rebind) and does not depend on that.
         "noticed_ms": None if noticed is None else round(noticed, 3),
-        "restored": restored,
+        "restored": True,
         "port_before": port_before,
         "port_after": proxy.port,
         "port_kept": proxy.port == port_before,
+        "refused_requests": int(sampled["refused_requests"]),
+        "observed_failure": bool(sampled["observed_failure"]),
+        "probe_cycle_ms": round(float(sampled["probe_cycle_ms"]), 4),
     }
 
 
@@ -124,9 +127,11 @@ def _column(trials: int, *, supervise_ms: float, loaded: bool, notify: bool = Tr
             busy.append(process)
     samples: list[dict[str, Any]] = []
     proxy = ProxyThread(_table(), supervise_ms=supervise_ms)
+    probe: ServingProbe | None = None
     rng = random.Random(seed)
     try:
         proxy.start()
+        probe = ServingProbe(proxy.port).start()
         time.sleep(0.05)                        # let the watchdog arm before the first break
         for _ in range(trials):
             # Phase matters: a listener that dies just after a tick waits a whole tick, one that dies just before a
@@ -135,21 +140,26 @@ def _column(trials: int, *, supervise_ms: float, loaded: bool, notify: bool = Tr
             # distribution). Sleeping a random fraction of a tick samples the whole space; the max over these samples
             # is the number the budget must survive.
             time.sleep(rng.uniform(0.0, supervise_ms / 1000.0))
-            samples.append(_outage_once(proxy, notify=notify))
+            samples.append(_outage_once(proxy, probe, notify=notify))
     finally:
+        if probe is not None:
+            with contextlib.suppress(Exception):
+                probe.stop()
         with contextlib.suppress(Exception):
             proxy.stop()
         for stop in stoppers:
             stop.set()
         for process in busy:
             process.join(5)
-    outages = [s["outage_ms"] for s in samples if s["restored"]]
+    outages = [s["outage_ms"] for s in samples if s["restored"] and s["outage_ms"] is not None]
+    uppers = [s["outage_upper_ms"] for s in samples if s["restored"] and s["outage_upper_ms"] is not None]
     rebinds = [s["rebind_ms"] for s in samples if s["rebind_ms"] is not None]
     noticed = [s["noticed_ms"] for s in samples if s["noticed_ms"] is not None]
     not_restored = [s for s in samples if not s["restored"]]
     moved = [s for s in samples if not s["port_kept"]]
     detection = [round(o - r, 3) for o, r in zip(outages, rebinds, strict=False) if r is not None]
-    over = [o for o in outages if o > REBIND_BUDGET_MS]
+    # The gate is on the conservative bound: it covers the whole gap even when no request happened to be refused.
+    over = [o for o in uppers if o > REBIND_BUDGET_MS]
     return {
         "supervise_ms": supervise_ms,
         "phase_seed": seed,
@@ -157,6 +167,9 @@ def _column(trials: int, *, supervise_ms: float, loaded: bool, notify: bool = Tr
         "detection": "listener-notice" if notify else "watchdog-tick",
         "n": len(samples),
         "outage_ms": summary(outages),
+        "outage_upper_ms": summary(uppers),
+        "probe_cycle_ms": summary([s["probe_cycle_ms"] for s in samples if s.get("probe_cycle_ms") is not None]),
+        "refused_requests": sum(int(s.get("refused_requests") or 0) for s in samples),
         "rebind_ms": summary(rebinds),
         # Two independent views of detection, reported side by side and never merged: the external one (outage minus
         # rebind, defined for every sample) and the supervisor's own (notify -> noticed, defined only for a listener
@@ -188,15 +201,15 @@ def run(trials: int, *, supervise_ms: float = 20.0) -> dict[str, Any]:
     }
     total = sum(column["n"] for column in columns.values())
     over = sum(column["over_budget"]["count"] for column in columns.values())
-    worst = max(column["outage_ms"].get("max") or 0.0 for column in columns.values())
+    worst = max(column["outage_upper_ms"].get("max") or 0.0 for column in columns.values())
     gate = {
         "watchdog_rebind_ms": {
             "n": total,
             "budget": REBIND_BUDGET_MS,
             # The gate is the end-to-end outage, per sample, in all four columns — the number a child experiences.
             # Nothing here relaxes it; the columns only say which part of it was detection and which was the rebind.
-            "worst_outage_ms": worst,
-            "by_condition": {name: column["outage_ms"].get("max") for name, column in columns.items()},
+            "worst_outage_upper_ms": worst,
+            "by_condition": {name: column["outage_upper_ms"].get("max") for name, column in columns.items()},
             "over_budget_samples": over,
             "pass": over == 0 and all(column["not_restored"] == 0 and column["port_moved"] == 0
                                       for column in columns.values()),
@@ -206,9 +219,15 @@ def run(trials: int, *, supervise_ms: float = 20.0) -> dict[str, Any]:
         "gate": gate,
         **columns,
         "method": {
-            "outage_ms": "from the listener being closed to a new listener serving on the same port: what a child "
-                         "experiences, and the only number the gate is on",
-            "rebind_ms": "ProxyThread.rebinds: inside rebind(), excluding detection",
+            "outage_ms": "measured by a real request on the child's port (tools/rebind_probe.py): from the first "
+                         "request that was not served to the first one that was. It covers the interval inside "
+                         "close() before the coroutine returns, which an in-process clock cannot see (defect 60)",
+            "outage_upper_ms": "the conservative bound: from the last request served before the break to the first "
+                               "served after it. The gate is on this one; it is never smaller than outage_ms",
+            "probe_cycle_ms": "resolution of the request probe (median served request). Every outage number is "
+                              "bounded by it, so it is recorded beside them",
+            "request_timeout_ms": "50 ms: a request accepted and never answered is charged at most half the budget",
+            "rebind_ms": "ProxyThread.rebinds: inside rebind(), excluding detection and excluding the requests' queueing",
             "detection_ms": "outage_ms - rebind_ms, every sample: what was not the rebind",
             "noticed_ms": "the supervisor's own detection time (lost_cb -> watchdog saw it); defined only when the "
                           "listener notified, so `noticed_n` may be smaller than `n`",

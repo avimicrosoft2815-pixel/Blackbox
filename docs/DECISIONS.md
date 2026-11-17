@@ -1311,4 +1311,17 @@ exceed 100 ms, and the failure message prints the watchdog's own tick lateness s
 argued about afterwards. The measurement starts when `close()` returns rather than when the test asked for it, because
 until the close runs the listener is still accepting and a child experiences nothing; the harness's own
 `dispatch_ms` is printed beside the outage instead of being counted as product latency. The test's docstring says this
-in the place a reviewer of the next change will read it.
+in the place a reviewer of the next change will read it. (Superseded on 2026-11-17 by the request-level clock below,
+which starts at the first request that could not be served and therefore does not depend on when any coroutine
+returned.)
+
+**Measured by requests, not by a coroutine's return (second revision, 2026-11-17).** The clock described above starts when
+`close()` returns, and that was still an assumption: the socket stops accepting inside `close()`, so downtime can begin
+before the caller is woken, and an in-process clock cannot time an interval inside the call it is timing. The outage is
+now measured from outside our threads with `tools/rebind_probe.py` — a real request loop on the child's port — and it
+covers that window by construction (`tests/test_rebind_probe.py` makes the window 60 ms wide and asserts the clock
+contains it: 60.86 ms measured, against ~0 ms from a post-`close()` clock). The gate stays 100 ms per sample, now
+asserted on the conservative bound from the last served request before the break, so a gap can never be hidden by having
+no request refused in it. Outage numbers are therefore larger than the previous revision's on the tick columns (10 ms p50
+instead of 9.5 ms — the same 20 ms tick, seen by requests rather than deduced from `rebind()`), which is the point: the
+number is now the one a child experiences.
