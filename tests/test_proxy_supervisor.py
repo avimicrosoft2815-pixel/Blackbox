@@ -92,9 +92,17 @@ def _break_and_wait(proxy: ProxyThread, timeout: float = 5.0) -> dict:
     """Close the listener behind the supervisor's back and time how long the child would have waited.
 
     The number that matters is the **outage**: from the listener stopping to a new listener serving on the same port.
-    Three numbers are returned, and they answer different questions: `outage_ms` is what a child experiences,
-    `rebind_ms` is the work inside `rebind()`, and `noticed_ms` is how long the supervisor took to *see* the loss —
-    present only when the listener said so (`lost_cb`, defect 58), absent when detection was the tick.
+    Four numbers are returned, and they answer different questions: `outage_ms` is what a child experiences,
+    `rebind_ms` is the work inside the rebind, `dispatch_ms` is how long *this test's* request to close took to reach
+    the loop thread, and `noticed_ms` is how long the supervisor took to *see* the loss — present only when the
+    listener said so (`lost_cb`, defect 58), absent when detection was the tick.
+
+    `outage_ms` starts when `close()` has **returned**, not when it was asked for. Until the coroutine runs, the
+    listener is still accepting, so a child sees no outage at all — and charging the test's own cross-thread hop to
+    the product is how a 103.2 ms reading appeared on a CI runner whose watchdog and loop threads the OS had both
+    descheduled (defect 60: the rebind waited 103.04 ms inside `run_coroutine_threadsafe(...).result()`, with 86.2 ms
+    of measured tick lateness in the same run). `dispatch_ms` is reported beside the outage so the harness's share is
+    visible and cannot be argued about afterwards. The budget is still asserted on **every** sample.
     """
     import asyncio
 
@@ -104,15 +112,17 @@ def _break_and_wait(proxy: ProxyThread, timeout: float = 5.0) -> dict:
     port_before = proxy.port
     before = len(proxy.rebinds)
     noticed_before = len(proxy.noticed_ms)
-    started = time.monotonic()
+    asked = time.monotonic()
     asyncio.run_coroutine_threadsafe(server.close(), loop).result(5)
+    dispatch_ms = (time.monotonic() - asked) * 1000.0
+    started = time.monotonic()                        # the listener is down from here, not from `asked`
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         current = proxy.server
         if (current is not None and current is not server and current.is_serving
                 and len(proxy.rebinds) > before):
             return {"outage_ms": (time.monotonic() - started) * 1000.0,
-                    "rebind_ms": proxy.rebinds[before], "port_before": port_before,
+                    "rebind_ms": proxy.rebinds[before], "dispatch_ms": dispatch_ms, "port_before": port_before,
                     "port_after": proxy.port, "watchdog": True,
                     "noticed_ms": (proxy.noticed_ms[len(proxy.noticed_ms) - 1]
                                    if len(proxy.noticed_ms) > noticed_before else None)}
@@ -164,6 +174,8 @@ def test_every_watchdog_rebind_lands_inside_the_budget_not_the_median_of_them():
     assert worst <= REBIND_BUDGET_MS, (
         f"worst watchdog outage {worst:.1f} ms over the {REBIND_BUDGET_MS} ms budget; "
         f"outages {[round(o, 1) for o in outages]} ms, rebinds {[round(s['rebind_ms'], 2) for s in samples]} ms, "
+        f"dispatch {[round(s['dispatch_ms'], 2) for s in samples]} ms, "
+        f"restores from the loop {proxy.restores_from_loop}, "
         f"worst watchdog tick lateness {max(lateness, default=0.0):.1f} ms over {len(lateness)} ticks")
 
 
@@ -184,3 +196,22 @@ def test_a_listener_that_dies_without_saying_so_is_still_restored_on_the_tick():
         assert proxy.noticed_ms == [], proxy.noticed_ms
     assert sample["outage_ms"] > 0
     assert sample["port_after"] == sample["port_before"], "a backstop rebind keeps the port the child was told"
+
+
+def test_a_fast_tick_never_moves_the_port_and_never_double_restores() -> None:
+    """The race a full-suite run found (defect 60): two owners, one port.
+
+    With the fix in place the notice repairs the listener on the loop *and* wakes the watchdog, so for a moment two
+    paths can both see "no listener": the loop's task and the tick. Before `_restore_pending` was set synchronously by
+    the notice, the tick could get there first, call `rebind()`, and race the loop for the port — the loser fell back to
+    a port of its own, which breaks every child that was told the old one. A 1 ms tick makes that window wide instead of
+    theoretical, and 25 breaks are enough for it to happen on a loaded machine if it still can.
+    """
+    with ProxyThread(_table(), supervise_ms=1.0) as proxy:
+        port = proxy.port
+        for index in range(25):
+            sample = _break_and_wait(proxy)
+            assert sample["port_after"] == port, f"break {index} moved the port: {sample}"
+        assert not proxy.port_changed, "a rebind gave up the port the child was told"
+        assert len(proxy.rebinds) == 25, f"25 breaks, {len(proxy.rebinds)} rebinds: something restored twice"
+

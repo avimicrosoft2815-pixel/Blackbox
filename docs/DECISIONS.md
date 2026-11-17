@@ -1273,3 +1273,37 @@ Four things were true of the documented path and none of them worked:
 `tests/test_readme.py` holds the line: every command in a console block must exist in the front door, the entry point must
 be declared, the version line must match the package, the read-only commands must share the default directory, and the
 limits section must keep saying 0 node-level edges, macOS 3.13 unmeasured, the untested importers and no universal 100 ms.
+
+## D-062 — the pinned test count belongs to a dependency environment, and says which one (2026-11-17)
+
+`docs/STATUS.md` said "Total: 1146 tests" and CI said 1162, so every cell went red on
+`test_the_test_count_line_matches_the_suite_size` — the first red this branch produced that was entirely the document's
+fault. The 16 are behind `anthropic`: CI installs `.[dev,capture,capture-sdks]`, the sentence was measured in a venv
+with `httpx` and `openai` and no `anthropic`, and collection is a function of what is importable.
+
+Two changes, and the second is the one that matters. The sentence now says 1162 and names the environment it belongs to,
+with the 1146 that the lighter venv collects. The test, when an optional client is missing, **skips with the package's
+name** instead of comparing against a number it cannot check — with every extra present it still asserts equality, so the
+CI environment remains the one that holds the line.
+
+A count without an environment is not a measurement. The rule generalises: any number a document pins is only meaningful
+with the command and the environment that produced it (`docs/README.md` §8 already says this for benchmarks; the suite
+count was the one place it was not applied).
+
+## D-063 — the loop repairs its own listener; the tick is for the deaths that say nothing (2026-11-17, defect 60)
+
+The watchdog rebind went watchdog-thread → `run_coroutine_threadsafe(close).result()` → loop thread → back. On a loaded
+CI runner that round trip took **103.04 ms** of a 100 ms budget, while every other sample on the same runner took
+0.3 ms: the time was the OS not scheduling the loop thread, paid twice because the work hopped threads twice.
+
+`lost_cb` already fires **on the loop thread**. So the notice now schedules the repair there directly
+(`call_soon` when it is on that thread, `call_soon_threadsafe` otherwise), which removes one hop and the wait for a
+thread to be scheduled. The watchdog keeps its tick, unchanged, for the listener that dies without a notice — that path
+still hops, and the test for it still passes by setting `lost_cb = None`.
+
+**What is not changed:** the budget (`100.0 ms`), the per-sample assertion, and the claim. A stalled machine can still
+exceed 100 ms, and the failure message prints the watchdog's own tick lateness so the cause is visible rather than
+argued about afterwards. The measurement starts when `close()` returns rather than when the test asked for it, because
+until the close runs the listener is still accepting and a child experiences nothing; the harness's own
+`dispatch_ms` is printed beside the outage instead of being counted as product latency. The test's docstring says this
+in the place a reviewer of the next change will read it.

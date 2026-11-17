@@ -702,3 +702,48 @@ not verified anything.
 
 **Not the same class, checked deliberately.** The *existing* `capsule verify` prints `…` and is left alone: cp1252 can
 encode it, so it is not a defect, and changing a working command to satisfy a rule about a different one would be churn.
+
+## Defect 60 — the watchdog spent its budget waiting for its own loop thread (2026-11-17, P3B-03/resubmission of PR #17)
+
+**Found by** CI run `44132154945` at `127d187` (push) and `44132192208` (pull request), ubuntu py3.11:
+
+```
+FAILED tests/test_proxy_supervisor.py::test_every_watchdog_rebind_lands_inside_the_budget_not_the_median_of_them
+AssertionError: worst watchdog outage 103.2 ms over the 100.0 ms budget;
+outages [103.2, 0.8, 0.7, 0.8, 0.7, 0.7, 0.8, 0.7] ms,
+rebinds [103.04, 0.36, 0.33, 0.34, 0.35, 0.33, 0.42, 0.26] ms,
+worst watchdog tick lateness 86.2 ms over 9 ticks
+```
+
+**What the numbers say.** The outage and the rebind are the same 103 ms: the time was inside `rebind()`, not in the
+tick that precedes it (the 86.2 ms lateness is a different, earlier tick, recorded by the same run). Inside `rebind()`
+there is exactly one thing that can take 100 ms on an idle proxy: `asyncio.run_coroutine_threadsafe(old.close(),
+loop).result(5)` — a **cross-thread round trip** from the watchdog thread to the loop thread and back. Every other
+sample on the same runner took 0.26–0.42 ms, so this is not the socket work; it is the OS not scheduling the loop
+thread for ~100 ms while the watchdog waited on it. The machine is also visibly loaded: 86.2 ms of tick lateness.
+
+**Why it is a defect and not a runner story.** A design that needs *two* thread hops to repair a listener charges the
+machine's scheduling jitter twice: once to wake the watchdog, once to get back onto the loop. The second hop is
+avoidable, because the early notice (`lost_cb`, defect 58) already fires **on the loop thread**, which is running and
+which is the thread that must serve the child anyway.
+
+**Fix.** `ProxyThread._listener_lost` now schedules the repair on the loop (`loop.call_soon` when it is already on that
+thread, `call_soon_threadsafe` otherwise) and `_restore_on_loop` closes and re-binds there, with `_restoring` keeping
+the watchdog's tick off a second, racing rebind. The port is remembered in `_port` rather than read off a listener that
+has just been closed — that was the first attempt's bug: `_server` was `None` at that point, `port` fell back to `0`,
+and the restore took a fresh port (`every rebind must keep the port` caught it in one run). The watchdog tick is
+unchanged and still the only path for a listener that dies **without** saying so
+(`test_a_listener_that_dies_without_saying_so_is_still_restored_on_the_tick` sets `lost_cb = None` and asserts the
+tick restores it).
+
+**The gate is not weakened.** `REBIND_BUDGET_MS` is still 100.0 and still asserted on **every** sample, not a median or
+a p95. Two things did change in the *measurement*, both stated in the test's docstring: `outage_ms` now starts when
+`close()` has **returned** (before that the listener was still accepting, so a child saw no outage), and the harness's
+own `dispatch_ms` is printed beside it instead of being silently counted as the product's latency. What the child
+experiences from the moment the listener stops is still asserted; the test's scheduling is now visible rather than
+folded in.
+
+**Measured after the fix** (Linux 6.1, x86_64, CPython 3.11.2, this sandbox, 8 samples × 3 runs): outages
+0.0–0.75 ms, rebinds 0.14–0.40 ms, all 8 restores from the loop, tick lateness 0.0 ms. Before: outages 0.8–1.2 ms with
+the rebind at 0.24–0.49 ms and the hop included. The claim stays what it was: a budget measured on the machine that ran
+it, no universal 100 ms promise — `bench_rebind.py`'s `method.bound` string still says so.

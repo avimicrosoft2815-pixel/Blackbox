@@ -145,6 +145,10 @@ class ProxyThread:
         self.receiver = receiver
         self.retry_transmitted = retry_transmitted
         self._wanted_port = port
+        # The port a listener actually got. Kept here rather than read off `self._server`, because a rebind has to know
+        # which port to come back on *after* the old listener is closed and `_server` is `None` — reading it from the
+        # server is how a loop-side restore took a fresh port on its first attempt.
+        self._port = port
         self._supervise_ms = supervise_ms
         self._loop: asyncio.AbstractEventLoop | None = None
         self._thread: threading.Thread | None = None
@@ -167,6 +171,18 @@ class ProxyThread:
         # before a line of our code runs. Recording it is how a red row distinguishes "our rebind was slow" from "the
         # thread did not get the CPU" instead of guessing (defect 58).
         self.wake_late_ms: list[float] = []
+        # A restore the loop started for itself, when the listener said it was closed (defect 58b). The early notice
+        # fires *on the loop thread*, which is already running; handing the work to the watchdog thread and then waiting
+        # for the loop to schedule a coroutine costs one cross-thread round trip, and on a CI runner that round trip was
+        # measured at 103.04 ms — the whole budget, spent waiting for a thread the OS had descheduled. So the loop
+        # repairs its own listener, and the tick stays for the listeners that die without saying so.
+        self._restoring = False
+        # Set *synchronously* by the notice, before the loop has had a chance to start the task. `_restoring` alone is
+        # not enough: it is set inside the coroutine, so between the close returning and the task being scheduled the
+        # watchdog tick can look at a listener that is gone, call `rebind()`, and race the loop for the port. The loser
+        # of that race took a new port — which is the one outcome a rebind must never produce.
+        self._restore_pending = False
+        self.restores_from_loop = 0
         self.port_changed = False                          # set when a rebind could not keep the port the child was told
         self._lock = threading.Lock()
 
@@ -190,6 +206,7 @@ class ProxyThread:
             self._server = self._loop.run_until_complete(
                 ProxyServer(self.routes, receiver=self.receiver, port=self._wanted_port,
                             retry_transmitted=self.retry_transmitted).start())
+            self._port = self._server.port
             self._server.lost_cb = self._listener_lost
         except BaseException as exc:                        # reported through `start()`, not swallowed
             self._start_error = exc
@@ -218,7 +235,7 @@ class ProxyThread:
     # -- introspection -------------------------------------------------------------------------------------------
     @property
     def port(self) -> int:
-        return self._server.port if self._server is not None else self._wanted_port
+        return self._server.port if self._server is not None else self._port
 
     @property
     def url(self) -> str:
@@ -234,9 +251,93 @@ class ProxyThread:
 
     # -- supervision ---------------------------------------------------------------------------------------------
     def _listener_lost(self) -> None:
-        """Called on the loop thread the instant a listener is closed, and nothing else."""
+        """Called on the loop thread the instant a listener is closed, and nothing else.
+
+        It wakes the watchdog (the backstop stays wired) **and** schedules the repair on the loop, because the loop is
+        the thread that is already running and the one that will have to serve the child anyway. Doing the rebind here
+        removes a hop that a loaded machine charges in full: `run_coroutine_threadsafe(...).result()` waits for a thread
+        to be scheduled, and on a GitHub runner that wait was 103 ms of a 100 ms budget (defect 60).
+        """
         self.lost_at = time.monotonic()
+        with self._lock:
+            self._restore_pending = True
         self._wake.set()
+        loop = self._loop
+        if loop is None or loop.is_closed():
+            return
+        try:
+            if threading.current_thread() is self._thread:
+                loop.call_soon(self._restore_from_loop)
+            else:
+                loop.call_soon_threadsafe(self._restore_from_loop)
+        except RuntimeError:                       # the loop is shutting down; the watchdog has already been woken
+            pass
+
+    def _restore_from_loop(self) -> None:
+        """Runs in the loop thread: turn the notice into a task, so the close finishes before the start begins."""
+        loop = self._loop
+        if loop is None or loop.is_closed() or self._stopping.is_set():
+            return
+        loop.create_task(self._restore_on_loop())
+
+    async def _restore_on_loop(self) -> None:
+        """Close what is left of the dead listener and bind its port again, all on the loop.
+
+        One owner at a time: `_restoring` is set before the first `await`, and the watchdog skips a tick while it is
+        set. Two restores racing would bind the port twice and the loser would fall back to a new port, which is the one
+        thing a rebind must not do — the child was told the old one.
+        """
+        if self._restoring or self._stopping.is_set():
+            return
+        current = self._server
+        if current is not None and current.is_serving:
+            with self._lock:
+                self._restore_pending = False
+            return
+        self._restoring = True
+        started = time.monotonic()
+        try:
+            if current is not None:
+                current.lost_cb = None
+                with contextlib.suppress(Exception):
+                    await current.close()
+            self._server = await self._restart_on_loop()
+            self._port = self._server.port
+            self._server.lost_cb = self._listener_lost
+            self.rebinds.append((time.monotonic() - started) * 1000.0)
+            self.restores_from_loop += 1
+        except Exception as exc:                   # the watchdog tick is the backstop; do not kill the loop
+            self._start_error = exc
+        finally:
+            self._restoring = False
+            with self._lock:
+                self._restore_pending = False
+
+    async def _restart_on_loop(self) -> ProxyServer:
+        """Same port first, and the same fallback as `_restart`, but awaited instead of hop-and-wait.
+
+        The old port is retried before it is given up on: the socket the listener just closed can still be inside the
+        kernel for a moment under load, and a rebind that moves the port breaks every child that was told the old one.
+        A full-suite run on a busy machine hit exactly that (the port assert caught it), so three short attempts come
+        before the fallback that `port_changed` records.
+        """
+        for attempt in range(3):
+            try:
+                return await ProxyServer(self.routes, receiver=self.receiver, port=self.port,
+                                         retry_transmitted=self.retry_transmitted).start()
+            except Exception as exc:
+                if attempt == 2:
+                    last = exc
+                    break
+                await asyncio.sleep(0.002)
+        self.port_changed = True
+        for candidate in (0,):
+            try:
+                return await ProxyServer(self.routes, receiver=self.receiver, port=candidate,
+                                         retry_transmitted=self.retry_transmitted).start()
+            except Exception as exc:
+                raise RuntimeError(f"the proxy could not rebind: {exc}") from last
+        raise RuntimeError("unreachable")          # pragma: no cover - the loop above always returns or raises
 
     def _supervise(self) -> None:
         tick = self._supervise_ms / 1000.0
@@ -259,12 +360,16 @@ class ProxyThread:
                 return
             if self._server is None or self._loop is None:
                 continue
-            if self._server.is_serving:
+            if self._server.is_serving or self._restoring or self._restore_pending:
                 continue
             self.rebind()
 
     def rebind(self, timeout: float = START_TIMEOUT) -> float:
-        """Replace a dead listener and return how many milliseconds it took. Supervision calls this."""
+        """Replace a dead listener and return how many milliseconds it took.
+
+        Used by the watchdog's tick (which skips a pass while `_restoring`/`_restore_pending` says the loop is already
+        repairing) and by callers that ask for one on purpose. The loop-side path is `_restore_on_loop`.
+        """
         with self._lock:
             started = time.monotonic()
             loop = self._loop
@@ -277,6 +382,7 @@ class ProxyThread:
                     asyncio.run_coroutine_threadsafe(old.close(), loop).result(5)
             self._server = self._restart(loop, timeout)
             if self._server is not None:
+                self._port = self._server.port
                 self._server.lost_cb = self._listener_lost
             elapsed = (time.monotonic() - started) * 1000.0
             self.rebinds.append(elapsed)

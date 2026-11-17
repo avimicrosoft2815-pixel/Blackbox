@@ -51,13 +51,15 @@ built is named there rather than implied: the graph's edges reach the *call* and
 "linked nodes" is a call edge that names the slot on one side and `null` on the other, not a node-to-node edge;
 `docs/node-edges.md` is the owner-requested proposal for what two genuinely recorded nodes and the evidence joining
 them would require, and the owner's decision (2026-11-16) is that P3B-03 and defect 55 stay open until that exists.**
-Suite: **Total: 1146 tests** — 1145 pass here and 1 is skipped on POSIX by name
+Suite: **Total: 1163 tests** — 1162 pass here and 1 is skipped on POSIX by name
 (`test_an_open_view_blocks_the_unlink_only_on_windows`: POSIX permits unlinking a file another fd still holds, so
-the open-view case exists only on Windows). Measured in this sandbox the same run gives 1140 pass, 1 skipped and
-**4 that cannot run in a depth-1 clone** (`test_forbidden_words`'s `git log` scan, `test_state_consistency`'s
-ancestry check and two in `test_status_doc` all call `tools/git_history.commit_count()`, which refuses rather than
-inspect one commit and call it a history; CI checks out with `fetch-depth: 0`). ruff 0.17.5 and mypy 2.4.1
-(`strict = true`, nothing disabled): 0 findings.
+the open-view case exists only on Windows). The number is for the dependency set CI installs,
+`.[dev,capture,capture-sdks]`: sixteen tests live behind `anthropic`, so a venv with only `httpx` and `openai`
+collects 1146 (D-062 — the 1146 in this sentence was measured in exactly that lighter venv, and CI said 1162).
+Measured in a depth-1 clone, 4 tests cannot run (`test_forbidden_words`'s `git log` scan, `test_state_consistency`'s
+ancestry check and two in `test_status_doc` call `tools/git_history.commit_count()`, which refuses rather than inspect
+one commit and call it a history; CI checks out with `fetch-depth: 0`). ruff 0.17.5 and mypy 2.4.1 (`strict = true`,
+nothing disabled): 0 findings.
 
 **The demo path, run end to end on 2026-11-17 (D-060, D-061).** `pip install -e .` now produces a `blackbox` command
 (it declared no entry point before), `blackbox ls` and `verify --data` look where `blackbox run` writes instead of in a
@@ -69,7 +71,8 @@ were recovered (23 and 17 events, `recovered/PROCESS_DEATH`), `ls` listed both, 
 declared-not-checkable, `diagnose` wrote a report whose one finding is `observed` ("this run is named by 2 different
 identifiers"), `view` wrote a 56 606 B page, and `repair preview` -> `apply --approve <token>` -> `verify --test` applied
 a one-file proposal and printed `PASS`. What that run does **not** show is unchanged and still listed below: 0 node-level
-edges, no importer other than Phoenix, macOS 3.13 unmeasured, and no universal 100 ms rebind claim.
+edges, no importer other than Phoenix, **every macOS cell unmeasured on this commit** (all three were cancelled before
+the first step), and no universal 100 ms rebind claim.
 
 
 **What `repair` does not guarantee, in one place.** The gate is documented at length in D-049/D-050 and in the P4-18

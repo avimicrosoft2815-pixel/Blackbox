@@ -18,6 +18,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "tools"))
@@ -138,7 +140,18 @@ def test_every_state_baseline_key_appears_in_status() -> None:
 
 
 def test_the_test_count_line_matches_the_suite_size() -> None:
-    """The header states a total; it is checked by running the collection, not by trusting the sentence."""
+    """The header states a total; it is checked by running the collection, not by trusting the sentence.
+
+    The pinned number belongs to one **dependency environment**: the one CI installs, `.[dev,capture,capture-sdks]`.
+    Sixteen tests live behind `anthropic`, so a checkout with only `httpx` and `openai` collects 1146 and would "fail" a
+    comparison against a 1162-test sentence — which is what happened on `127d187` for the opposite reason: the sentence
+    said 1146 (measured in a lighter venv) and CI collected 1162. A missing extra means the number cannot be checked
+    here, so this skips and names the missing package; with every extra present it still asserts equality.
+    """
+    import importlib.util
+    missing = [name for name in ("httpx", "openai", "anthropic") if importlib.util.find_spec(name) is None]
+    if missing:
+        pytest.skip(f"the pinned count is the CI dependency set; no {', '.join(missing)} in this environment")
     match = re.search(r"\*\*Total: (\d+) tests\*\* — (\d+) pass here", _text())
     assert match, "STATUS must state the suite size"
     total, passed = int(match.group(1)), int(match.group(2))

@@ -77,7 +77,7 @@ def test_the_front_page_keeps_the_limits() -> None:
     limits = README.split("## What this does not do", 1)
     assert len(limits) == 2, "the README lost its limits section"
     body = limits[1].text if hasattr(limits[1], "text") else limits[1]
-    for phrase in ("0 node-level\n  edges", "macOS 3.13 is unmeasured", "untested", "no universal 100 ms"):
+    for phrase in ("0 node-level\n  edges", "Every macOS cell is", "untested", "no universal 100 ms"):
         assert phrase.replace("\n  ", " ") in body.replace("\n  ", " "), f"the README no longer says: {phrase!r}"
 
 
