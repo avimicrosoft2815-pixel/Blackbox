@@ -36,6 +36,7 @@ import multiprocessing
 import os
 import platform
 import random
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -47,7 +48,7 @@ sys.path.insert(0, str(ROOT / "bench"))
 sys.path.insert(0, str(ROOT / "tools"))
 
 from _stats import summary
-from rebind_probe import LocalUpstream, ServingProbe, measure_outage
+from rebind_probe import ServingProbe, measure_outage
 
 from blackbox.proxy.routes import Route, Routes
 from blackbox.proxy.supervisor import REBIND_BUDGET_MS, ProxyThread
@@ -60,6 +61,41 @@ def _table(base: str) -> Routes:
     return Routes([Route(name="openai", base=base, prefix="/openai"),
                    Route(name="anthropic", base=base, prefix="/anthropic")],
                   default="openai")
+
+
+UPSTREAM_SOURCE = """
+import http.server, sys
+
+class Handler(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        body = b"{}"
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+    do_POST = do_GET
+    def log_message(self, *args):
+        pass
+
+server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+server.daemon_threads = True
+print(server.server_address[1], flush=True)
+server.serve_forever()
+"""
+
+
+def _upstream() -> tuple[subprocess.Popen[str], str]:
+    """A live upstream in **its own process**, and the base URL to route to it.
+
+    In its own process for the same reason as `_burn`: in this one it would take the GIL from the proxy and the probe
+    threads, and the columns would measure interpreter contention instead of a rebind. Live rather than a dead port
+    because the proxy's 504 path costs more than one attempt budget on Windows (defect 60).
+    """
+    proc = subprocess.Popen([sys.executable, "-c", UPSTREAM_SOURCE], stdout=subprocess.PIPE, text=True)
+    assert proc.stdout is not None
+    port = int(proc.stdout.readline().strip())
+    return proc, f"http://127.0.0.1:{port}"
 
 
 def _burn(stop: Any) -> None:
@@ -128,8 +164,8 @@ def _column(trials: int, *, supervise_ms: float, loaded: bool, notify: bool = Tr
             stoppers.append(stop)
             busy.append(process)
     samples: list[dict[str, Any]] = []
-    upstream = LocalUpstream().start()          # a live upstream: a dead one is answered slowly on Windows
-    proxy = ProxyThread(_table(upstream.base), supervise_ms=supervise_ms)
+    upstream_proc, upstream_base = _upstream()
+    proxy = ProxyThread(_table(upstream_base), supervise_ms=supervise_ms)
     probe: ServingProbe | None = None
     rng = random.Random(seed)
     try:
@@ -148,8 +184,9 @@ def _column(trials: int, *, supervise_ms: float, loaded: bool, notify: bool = Tr
         if probe is not None:
             with contextlib.suppress(Exception):
                 probe.stop()
+        upstream_proc.terminate()
         with contextlib.suppress(Exception):
-            upstream.stop()
+            upstream_proc.wait(5)
         with contextlib.suppress(Exception):
             proxy.stop()
         for stop in stoppers:

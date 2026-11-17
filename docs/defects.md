@@ -796,12 +796,19 @@ one attempt budget, so the probe measured the failure path and read every attemp
 *lower* the answer cap before the machine has answered anything — its first version did, which set the 10 ms floor on
 exactly the runner that needed the generous value.
 
-**Measured after the fix, request-level** (`bench/bench_rebind.py --n 60`,
-`bench/results/2026-11-17-rebind-request-level.json`, Linux 6.1 x86_64, CPython 3.11.2, 240 samples over four columns):
-gate **PASS**, worst upper bound **63.3 ms**, 0 over budget, 0 port moves, 0 not restored. Outage p50 / max by column:
-`notice_idle` 1.788 / 10.640 ms, `notice_loaded` 0.351 / 19.396 ms, `tick_idle` 7.427 / 21.556 ms, `tick_loaded`
-10.949 / 24.414 ms — larger than the previous revision's `rebind_ms` rows, which is the point: this is the number a
-child experiences, including a request that was in flight when the listener went away and the queueing in front of the
-rebind. The budget (`100.0 ms`), the per-sample assertion and the limits of the claim are unchanged: this is a gate on
-the machine that ran it, not a promise that any machine keeps 100 ms (defect 58), and the tick columns' ~7–11 ms p50 is
-the tick, not the rebind.
+**Measured after the fix, request-level — and the gate fails on this machine, which is the honest result**
+(`bench/bench_rebind.py --n 60`, `bench/results/2026-11-17-rebind-request-level.json`, Linux 6.1 x86_64, CPython 3.11.2,
+240 samples over four columns): outage p50 by column `notice_idle` 1.710 ms, `notice_loaded` 0.410 ms, `tick_idle`
+11.191 ms, `tick_loaded` 10.922 ms; **3 of 240 samples over the 100 ms budget**, all in `tick_loaded`, worst 3319.604 ms;
+0 port moves. The three bad samples are not the probe losing the plot: the worst one recorded **1965 refused requests**
+during those 3.3 s, so the listener really was gone, and its own `rebind_ms` was **0.204 ms** when the tick finally ran.
+The time went entirely to the watchdog thread not being scheduled while one busy process per CPU ran on a 2-vCPU box.
+
+That is defect 58's claim, arriving where it was predicted: a sleeping-thread design cannot bound what the OS will not
+schedule, and the notice path (which repairs on the loop thread) is what keeps the common case inside the budget. It is
+also why the *previous* revision's `PASS` (worst 21.185 ms) must be read as optimistic: its clock could end the gap on a
+request that had been issued **before** the break, so a starved tick could look like a fast recovery. Requiring the
+answer that ends the gap to come from a request issued after the break is what exposed it.
+
+The budget (`100.0 ms`), the per-sample assertion and its limits are unchanged. This entry does not claim 100 ms on any
+machine; it claims that the number is now measured from the child's side, that the measurement can fail, and that it did.

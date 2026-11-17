@@ -287,6 +287,7 @@ def measure_outage(probe: ServingProbe, break_listener: Callable[[], object], *,
 
     unserved: Attempt | None = None
     served_again: Attempt | None = None
+    start_floor = max(started_break, 0.0)
     cursor = mark
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -300,7 +301,11 @@ def measure_outage(probe: ServingProbe, break_listener: Callable[[], object], *,
             if unserved is None:
                 if not attempt.served:
                     unserved = attempt
-            elif served_again is None and attempt.served and attempt.started > unserved.started:
+            elif served_again is None and attempt.served and attempt.started >= start_floor:
+                # Only a request **issued after the break** can prove the listener is serving again. A request that was
+                # in flight when the break was asked for is answered by the old listener — its answer can arrive after
+                # the socket is gone — and taking that as the end of the outage reports zero downtime for an outage
+                # that lasted the whole stall (measured on a Windows runner, where it did).
                 served_again = attempt
         if served_again is not None:
             break
@@ -308,7 +313,7 @@ def measure_outage(probe: ServingProbe, break_listener: Callable[[], object], *,
             # Nothing was unserved inside the settle window: the outage was shorter than the probe can see, and the
             # first answer after the window is where the measurement ends rather than where service returned.
             served_again = next((a for a in sorted(probe.recent(mark), key=lambda a: a.started)
-                                 if a.served and a.started >= started_break + settle), None)
+                                 if a.served and a.started >= max(start_floor, started_break + settle)), None)
             if served_again is not None:
                 break
         if not probe.alive():

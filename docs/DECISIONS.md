@@ -1328,4 +1328,10 @@ answer timeout, because every attempt on a Windows runner answers in ~16 ms and 
 is therefore calibrated on the machine at start-up and recorded with each sample — and it is only lowered *after* the
 machine has answered something, because lowering it first is how the Windows runner ended up with every attempt
 recorded as a timeout. The probe also needs a live upstream: the proxy's 504 for a dead port costs more than one
-attempt budget there, so a probe aimed at a dead port measures the failure path instead of service.
+attempt budget there, so a probe aimed at a dead port measures the failure path instead of service. The end of the gap
+must come from a request **issued after the break**: a request that was in flight when the break was asked for is
+answered by the old listener, and accepting that answer as the end of the outage reports zero downtime for an outage
+that lasted the whole stall (a Windows runner did exactly that). With that rule in place the request-level bench
+**fails** on the machine that ran it — 3 of 240 samples over budget, worst 3319.604 ms, all on the watchdog-tick column
+under one busy process per CPU, with 1965 refused requests in the worst sample and `rebind_ms` 0.204 ms — which is
+defect 58's claim arriving on schedule rather than a reason to relax the gate.
