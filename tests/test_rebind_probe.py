@@ -55,8 +55,10 @@ def test_an_answered_request_is_served_and_a_refused_one_is_not() -> None:
             f"the upstream is live; the proxy must forward and answer, and it said {served.detail}")
         port = proxy.port
     refused = try_serve(port, timeout=0.2)
-    assert refused.served is False, "after the listener is gone the port must refuse"
-    assert refused.connected is False, "a refused connect is not even a connection"
+    assert refused.served is False, "after the listener is gone the port must not be served"
+    # The connect itself may be refused *or* accepted and never answered: a listening socket that has just been closed
+    # keeps completing handshakes from its accept queue for a moment (measured on Windows; it is why this module probes
+    # with requests rather than connections). Both are "not served", and that is the only claim here.
 
 
 def test_the_clock_counts_downtime_inside_close_before_it_returns(monkeypatch: pytest.MonkeyPatch) -> None:
