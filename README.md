@@ -5,8 +5,9 @@ already on disk, and you can read back what it was doing — offline, with no ac
 
 **pre-alpha.** One person built this with an agent in a sandbox, and the honest status is in
 [`docs/STATUS.md`](docs/STATUS.md): what is green, what is pending, and what could not be tested here. Nobody has run this
-on a Mac by hand; on the current commit all three macOS CI cells were **cancelled before the first step**, so macOS is
-*unmeasured* here, not passing.
+on a Mac by hand; on the current commit the three macOS CI jobs **never reached a runner** — GitHub answered
+"The job was not acquired by Runner of type hosted even after multiple attempts", with its own capacity notice — so
+macOS is *unmeasured* here, not passing.
 
 ## Install
 
@@ -97,9 +98,10 @@ Data lives where you ran the app (`./tape/`, `./capsules/`); `--data-dir` puts i
 - **Importers:** only Phoenix has been tried, and it accepts `otlp/spans.pb` (200, read back intact) while rejecting
   `otlp/spans.json` (415). Langfuse, the OpenTelemetry Collector's OTLP/JSON receiver and Phoenix's gRPC port 4317 are
   **untested**.
-- **Platforms:** Linux is measured here. Windows cells run in CI and passed on `f624c6b`. **Every macOS cell is
-  unmeasured** on the current commit — the runners were cancelled before the first step — and nobody has run this on a
-  Mac by hand; the last macOS result this repository holds is from `66ece0f` (3.11, 3.12 and 3.13 green).
+- **Platforms:** Linux is measured here. All three Windows cells and all three Linux cells pass in CI on this branch.
+  **Every macOS cell is unmeasured**: the jobs were never acquired by a runner (GitHub's macOS arm64 capacity limit), and
+  nobody has run this on a Mac by hand. The last macOS result this repository holds is from `66ece0f`, where 3.11, 3.12
+  and 3.13 passed.
 - **Durability is per failure class, not universal.** Process death is tested (500 randomized `SIGKILL` trials, 0
   violations); power loss is not claimed. See [`docs/guarantees.md`](docs/guarantees.md).
 - **The watchdog is best-effort.** If the proxy dies, the listener comes back in p50 0.76 ms and the measured worst

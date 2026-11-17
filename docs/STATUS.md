@@ -71,8 +71,9 @@ were recovered (23 and 17 events, `recovered/PROCESS_DEATH`), `ls` listed both, 
 declared-not-checkable, `diagnose` wrote a report whose one finding is `observed` ("this run is named by 2 different
 identifiers"), `view` wrote a 56 606 B page, and `repair preview` -> `apply --approve <token>` -> `verify --test` applied
 a one-file proposal and printed `PASS`. What that run does **not** show is unchanged and still listed below: 0 node-level
-edges, no importer other than Phoenix, **every macOS cell unmeasured on this commit** (all three were cancelled before
-the first step), and no universal 100 ms rebind claim.
+edges, no importer other than Phoenix, **every macOS cell unmeasured on this commit** (GitHub never acquired a runner for
+any of the three: "The job was not acquired by Runner of type hosted even after multiple attempts", 0 steps), and no
+universal 100 ms rebind claim.
 
 
 **What `repair` does not guarantee, in one place.** The gate is documented at length in D-049/D-050 and in the P4-18

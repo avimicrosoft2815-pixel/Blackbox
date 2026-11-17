@@ -26,7 +26,7 @@
   "open_blockers": [
     "**Importers other than Phoenix are untested.** Phoenix 21.0.0 accepts `otlp/spans.pb` (200, read back intact) and rejects `otlp/spans.json` (415, protobuf-only receiver) — both measured, both in `bench/results/2026-11-16-otlp-pb-importer.json`. Langfuse, the OpenTelemetry Collector's OTLP/JSON receiver and Phoenix's gRPC port 4317 were not exercised; none of them can be installed offline here.",
     "**P3B-03 stays open.** 0 node-level edges recorded; a shared trace id is not an edge (`bench/results/2026-11-16-p3b03-acceptance.json`).",
-    "**macOS is unmeasured on `127d187`.** All three macOS cells (3.11, 3.12, 3.13) were `cancelled` before the first step in both runs on that commit (`44132154945`, `44132192208`), so no macOS result exists for this branch. The last macOS result the repository holds is `66ece0f`, where all three passed."
+    "**macOS is unmeasured on this branch.** On `8cb6924` the Linux and Windows cells all passed (six of six) and the docs job passed, while the three macOS jobs were **never acquired by a runner**: GitHub reported \"The job was not acquired by Runner of type hosted even after multiple attempts\" with a macOS arm64 capacity notice, 0 steps executed. That is infrastructure, not a result — no macOS cell has run on this branch. The last macOS results the repository holds are `66ece0f` (3.11, 3.12, 3.13 green)."
   ],
   "lane_status": {
     "L0": {
