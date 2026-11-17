@@ -77,11 +77,16 @@ def test_a_childs_hooks_land_in_their_own_tape_and_the_capsule_links_it(tmp_path
     prompt = cbor.decode_exact(next(f for f in frames if f["kind"] == C.KIND_MARK)["payload"])
     assert "find the bug" not in json.dumps(prompt), "the prompt's text is never on the tape"
 
-    # The claim the reviewer asked about: two tapes, one run, and the class of the link written down.
+    # The claim the reviewer asked about: the tapes of one run, and the class of the link written down. The child here
+    # is a Python process, so since P3B-03's auto-import there are *three* tapes — launcher, SDK and this hook vantage
+    # — and the resolver links the hook tape to both, each by run id. The assertion is therefore "every other tape of
+    # the run, all `exact`", which is the invariant; the old `== ["exact"]` was counting tapes, not classes.
     links = correlate.resolve_one(str(data_dir), tape)
-    assert [link.klass for link in links] == ["exact"], links
-    assert links[0].right_writer == result.writer_uuid
-    assert links[0].evidence["carried_by"] == "x-blackbox-run"
+    assert {link.klass for link in links} == {"exact"}, links
+    writers = {link.right_writer for link in links}
+    assert result.writer_uuid in writers
+    assert all(link.evidence["carried_by"] == "x-blackbox-run" for link in links)
+    assert len(writers) == len(result.capsules) - 1, "every other tape of the run is linked, and no tape twice"
 
     capsule = cap.read_capsule(result.recovered["capsule_path"])
     document = json.loads(capsule.entries["links.json"].decode())

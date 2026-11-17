@@ -45,11 +45,24 @@ DECLARED_NAME = "links.declared.json"
 
 # ── tapes → views ───────────────────────────────────────────────────────────────
 def _payload(frame: dict[str, Any]) -> dict[str, Any]:
+    """A frame's payload as a dict, CBOR first and JSON second.
+
+    Defect 57: this decoded CBOR only, and `MODEL_REQUEST` payloads are **JSON** (format.md §4.0) — so every call the
+    resolver looked at had no fingerprint, no `linked_run` and no `call_id`, and two empty fingerprints compared equal,
+    which made every pair of calls an `inferred` candidate. The fallback is second rather than first because the other
+    frame kinds this reads (`RUN_START`) are CBOR, and a JSON-looking CBOR blob must keep decoding as CBOR.
+    """
+    raw = frame.get("payload") or b""
     try:
-        body = cbor.decode_exact(frame.get("payload") or b"")
+        body = cbor.decode_exact(raw)
+        return body if isinstance(body, dict) else {}
+    except Exception:
+        pass
+    try:
+        decoded = json.loads(raw.decode("utf-8"))
     except Exception:
         return {}
-    return body if isinstance(body, dict) else {}
+    return decoded if isinstance(decoded, dict) else {}
 
 
 def _vantage_name(meta: dict[str, Any]) -> str:
@@ -78,11 +91,13 @@ def view_of(scan: scanner.ScanResult) -> links.RunView:
             linked_run = body.get("linked_run")
             if isinstance(linked_run, str) and linked_run:
                 linked.add(linked_run)
+            call_id = body.get("call_id")
             calls.append(links.CallView(
                 writer_uuid=scan.writer_uuid, vantage=vantage, wall_ns=int(frame.get("wall_ns") or 0),
                 fingerprint=fingerprint if isinstance(fingerprint, str) else "",
                 run_id=linked_run if isinstance(linked_run, str) else None,
-                node_slot=frame.get("node_slot") if isinstance(frame.get("node_slot"), int) else None))
+                node_slot=frame.get("node_slot") if isinstance(frame.get("node_slot"), int) else None,
+                call_id=call_id if isinstance(call_id, str) and call_id else None))
     if run_id is None and len(linked) == 1:
         # The proxy's case: no `RUN_START` of its own, one run id named on every call it recorded.
         run_id = next(iter(linked))
@@ -209,6 +224,20 @@ def resolve_across(directories: Sequence[str], *, window_ns: int = links.DEFAULT
     return resolve_views(views(directories), window_ns=window_ns, declared=pairs)
 
 
+def resolve_one_calls(data_dir: str, writer_uuid: str) -> list[links.CallLink]:
+    """The calls of *this* tape that another tape in the same directory also recorded, matched by id (D-053)."""
+    everything = views(data_dir)
+    mine = [view for view in everything if view.writer_uuid == writer_uuid]
+    if not mine:
+        return []
+    out: list[links.CallLink] = []
+    for other in everything:
+        if other.writer_uuid == writer_uuid:
+            continue
+        out.extend(links.resolve_calls(mine[0], other))
+    return out
+
+
 def resolve_one(data_dir: str, writer_uuid: str, *, window_ns: int = links.DEFAULT_WINDOW_NS) -> list[links.Link]:
     """The links that involve *this* tape — the question a capsule prepared from it has to answer."""
     everything = views(data_dir)
@@ -226,13 +255,21 @@ def resolve_one(data_dir: str, writer_uuid: str, *, window_ns: int = links.DEFAU
 
 # ── the artifact ───────────────────────────────────────────────────────────────
 def document(records: Sequence[links.Link], *, window_ns: int = links.DEFAULT_WINDOW_NS,
-             extra: dict[str, Any] | None = None) -> bytes:
-    """The bytes of `links.json`: byte-stable across runs, sorted, with every class counted even at zero."""
+             extra: dict[str, Any] | None = None,
+             call_links: Sequence[links.CallLink] = ()) -> bytes:
+    """The bytes of `links.json`: byte-stable across runs, sorted, with every class counted even at zero.
+
+    `call_links` is additive (D-053): a reader that knows only `links`/`summary` sees exactly what it saw before, and the
+    per-call records sit beside them with their own summary. A call link and a tape link answer different questions —
+    "these are one call" versus "these tapes are one run" — so they are two lists, not one list with a flag.
+    """
     body: dict[str, Any] = {
         "version": 1,
         "window_ns": window_ns,
         "links": [record.as_dict() for record in records],
         "summary": links.summary(records),
+        "call_links": [record.as_dict() for record in call_links],
+        "call_summary": links.call_summary(call_links),
     }
     if extra:
         body.update(extra)
@@ -242,4 +279,5 @@ def document(records: Sequence[links.Link], *, window_ns: int = links.DEFAULT_WI
 def for_capsule(data_dir: str, writer_uuid: str, *,
                 window_ns: int = links.DEFAULT_WINDOW_NS) -> bytes:
     """The `links.json` a capsule gets: this tape's links, or the honest record that there were none."""
-    return document(resolve_one(data_dir, writer_uuid, window_ns=window_ns), window_ns=window_ns)
+    return document(resolve_one(data_dir, writer_uuid, window_ns=window_ns), window_ns=window_ns,
+                    call_links=resolve_one_calls(data_dir, writer_uuid))

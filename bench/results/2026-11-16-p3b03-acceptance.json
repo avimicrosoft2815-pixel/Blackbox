@@ -1,0 +1,573 @@
+{
+  "host": {
+    "node": "v22.22.3",
+    "openai": "3.51.0",
+    "platform": "Linux-6.1.158+-x86_64-with-glibc2.36",
+    "python": "3.11.2"
+  },
+  "question": "does `blackbox run -- node app.js` / `-- python app.py` yield one run with linked nodes?",
+  "results": [
+    {
+      "capsule_count": 2,
+      "capsules": [
+        {
+          "capsule": "c_a9040e3403399fe3.bbx",
+          "counts": {
+            "bytes": 16780632,
+            "events": 5,
+            "nodes": 0,
+            "nodes_interrupted": 0,
+            "segments": 1
+          },
+          "frames": {
+            "CHAIN": 2,
+            "RUN_END": 1,
+            "RUN_START": 1,
+            "SEG_END": 1
+          },
+          "has_proxy_vantage": false,
+          "link_pairs": [
+            {
+              "class": "exact",
+              "left_run": "r_f289cfc178b4e340",
+              "right_run": "r_f289cfc178b4e340"
+            }
+          ],
+          "links": {
+            "declared": 0,
+            "exact": 1,
+            "inferred": 0
+          },
+          "nodes": 0,
+          "root_ok": true,
+          "run_id": "r_f289cfc178b4e340",
+          "run_status": "recovered"
+        },
+        {
+          "capsule": "c_f92cf07bac04711d.bbx",
+          "counts": {
+            "bytes": 16782894,
+            "events": 11,
+            "nodes": 0,
+            "nodes_interrupted": 0,
+            "segments": 1
+          },
+          "frames": {
+            "CHAIN": 5,
+            "MODEL_CHUNK": 1,
+            "MODEL_REQUEST": 1,
+            "MODEL_RESPONSE": 1,
+            "RUN_END": 1,
+            "RUN_START": 1,
+            "SEG_END": 1
+          },
+          "has_proxy_vantage": true,
+          "link_pairs": [
+            {
+              "class": "exact",
+              "left_run": "r_f289cfc178b4e340",
+              "right_run": "r_f289cfc178b4e340"
+            }
+          ],
+          "links": {
+            "declared": 0,
+            "exact": 1,
+            "inferred": 0
+          },
+          "nodes": 0,
+          "root_ok": true,
+          "run_id": "r_f289cfc178b4e340",
+          "run_status": "recovered"
+        }
+      ],
+      "client": "python",
+      "command": [
+        "/home/user/Blackbox/.venv/bin/python",
+        "client.py"
+      ],
+      "duration_ms": 723.6,
+      "every_root_ok": true,
+      "exact_pairs": [
+        {
+          "class": "exact",
+          "left_run": "r_f289cfc178b4e340",
+          "right_run": "r_f289cfc178b4e340"
+        },
+        {
+          "class": "exact",
+          "left_run": "r_f289cfc178b4e340",
+          "right_run": "r_f289cfc178b4e340"
+        }
+      ],
+      "exit_code": 0,
+      "graphs": [
+        {
+          "edge_levels": [
+            "run"
+          ],
+          "edge_nodes_named": 0,
+          "graph_edges": 1,
+          "graph_nodes": 0,
+          "node_level_edges": 0,
+          "node_slots": [],
+          "node_statuses": [],
+          "open_nodes": 0,
+          "run_dir": "r_a56dedc6f48ccd22",
+          "run_id": "r_f289cfc178b4e340",
+          "writer_uuid": "2a04dddb836c8a66437e055c29ea9d87"
+        },
+        {
+          "edge_levels": [
+            "run"
+          ],
+          "edge_nodes_named": 0,
+          "graph_edges": 1,
+          "graph_nodes": 0,
+          "node_level_edges": 0,
+          "node_slots": [],
+          "node_statuses": [],
+          "open_nodes": 0,
+          "run_dir": "r_f289cfc178b4e340",
+          "run_id": "r_f289cfc178b4e340",
+          "writer_uuid": "7b777dffbdba9a1a1c042b9374614be5"
+        }
+      ],
+      "links": [
+        {
+          "class": "exact",
+          "left_run": "r_f289cfc178b4e340",
+          "right_run": "r_f289cfc178b4e340"
+        },
+        {
+          "class": "exact",
+          "left_run": "r_f289cfc178b4e340",
+          "right_run": "r_f289cfc178b4e340"
+        }
+      ],
+      "one_run_id_across_capsules": true,
+      "proxy_vantage_recorded": true,
+      "run_ids_seen": [
+        "r_f289cfc178b4e340"
+      ],
+      "stderr_tail": [
+        "blackbox: python child gets a temporary sitecustomize (/tmp/blackbox-sdk-i7yrzu6h); removed when it exits",
+        "blackbox: run r_f289cfc178b4e340 \u00b7 exit 0 \u00b7 proxy http://127.0.0.1:38677 (5 vars exported) \u00b7 sdk auto-import (sitecustomize) \u00b7 recovered r_f289cfc178b4e340 \u2192 /tmp/bbx-accept-7brsjrn5/data-python/capsules/c_f92cf07bac04711d.bbx (recovered, root a7f9fc6a49ba) and 1 more tape (sdk)"
+      ],
+      "stdout": [
+        "python ok"
+      ],
+      "total_nodes": 0
+    },
+    {
+      "capsule_count": 1,
+      "capsules": [
+        {
+          "capsule": "c_d401309a1d679ad8.bbx",
+          "counts": {
+            "bytes": 16781847,
+            "events": 11,
+            "nodes": 0,
+            "nodes_interrupted": 0,
+            "segments": 1
+          },
+          "frames": {
+            "CHAIN": 5,
+            "MODEL_CHUNK": 1,
+            "MODEL_REQUEST": 1,
+            "MODEL_RESPONSE": 1,
+            "RUN_END": 1,
+            "RUN_START": 1,
+            "SEG_END": 1
+          },
+          "has_proxy_vantage": true,
+          "link_pairs": [],
+          "links": {
+            "declared": 0,
+            "exact": 0,
+            "inferred": 0
+          },
+          "nodes": 0,
+          "root_ok": true,
+          "run_id": "r_71b246350f029da0",
+          "run_status": "recovered"
+        }
+      ],
+      "client": "node",
+      "command": [
+        "/usr/local/bin/node",
+        "client.js"
+      ],
+      "duration_ms": 423.1,
+      "every_root_ok": true,
+      "exact_pairs": [],
+      "exit_code": 0,
+      "graphs": [
+        {
+          "edge_levels": [],
+          "edge_nodes_named": 0,
+          "graph_edges": 0,
+          "graph_nodes": 0,
+          "node_level_edges": 0,
+          "node_slots": [],
+          "node_statuses": [],
+          "open_nodes": 0,
+          "run_dir": "r_71b246350f029da0",
+          "run_id": "r_71b246350f029da0",
+          "writer_uuid": "1d7dacbaa5f5de2f073f49770e246d6e"
+        }
+      ],
+      "links": [],
+      "one_run_id_across_capsules": true,
+      "proxy_vantage_recorded": true,
+      "run_ids_seen": [
+        "r_71b246350f029da0"
+      ],
+      "stderr_tail": [
+        "blackbox: run r_71b246350f029da0 \u00b7 exit 0 \u00b7 proxy http://127.0.0.1:36393 (5 vars exported) \u00b7 recovered r_71b246350f029da0 \u2192 /tmp/bbx-accept-7brsjrn5/data-node/capsules/c_d401309a1d679ad8.bbx (recovered, root 684b91471688)"
+      ],
+      "stdout": [
+        "node ok"
+      ],
+      "total_nodes": 0
+    },
+    {
+      "capsule_count": 2,
+      "capsules": [
+        {
+          "capsule": "c_8284a378ca70ef2b.bbx",
+          "counts": {
+            "bytes": 16783896,
+            "events": 11,
+            "nodes": 0,
+            "nodes_interrupted": 0,
+            "segments": 1
+          },
+          "frames": {
+            "CHAIN": 5,
+            "MODEL_CHUNK": 1,
+            "MODEL_REQUEST": 1,
+            "MODEL_RESPONSE": 1,
+            "RUN_END": 1,
+            "RUN_START": 1,
+            "SEG_END": 1
+          },
+          "has_proxy_vantage": true,
+          "link_pairs": [
+            {
+              "class": "exact",
+              "left_run": "r_9dbae4675746049e",
+              "right_run": "r_9dbae4675746049e"
+            }
+          ],
+          "links": {
+            "declared": 0,
+            "exact": 1,
+            "inferred": 0
+          },
+          "nodes": 0,
+          "root_ok": true,
+          "run_id": "r_9dbae4675746049e",
+          "run_status": "recovered"
+        },
+        {
+          "capsule": "c_a4e688de4e15fbbb.bbx",
+          "counts": {
+            "bytes": 16784044,
+            "events": 11,
+            "nodes": 0,
+            "nodes_interrupted": 0,
+            "segments": 1
+          },
+          "frames": {
+            "CHAIN": 5,
+            "MODEL_CHUNK": 1,
+            "MODEL_REQUEST": 1,
+            "MODEL_RESPONSE": 1,
+            "RUN_END": 1,
+            "RUN_START": 1,
+            "SEG_END": 1
+          },
+          "has_proxy_vantage": true,
+          "link_pairs": [
+            {
+              "class": "exact",
+              "left_run": "r_9dbae4675746049e",
+              "right_run": "r_9dbae4675746049e"
+            }
+          ],
+          "links": {
+            "declared": 0,
+            "exact": 1,
+            "inferred": 0
+          },
+          "nodes": 0,
+          "root_ok": true,
+          "run_id": "r_9dbae4675746049e",
+          "run_status": "recovered"
+        }
+      ],
+      "client": "sdk",
+      "command": [
+        "/home/user/Blackbox/.venv/bin/python",
+        "sdk_client.py"
+      ],
+      "duration_ms": 1244.7,
+      "every_root_ok": true,
+      "exact_pairs": [
+        {
+          "class": "exact",
+          "left_run": "r_9dbae4675746049e",
+          "right_run": "r_9dbae4675746049e"
+        },
+        {
+          "class": "exact",
+          "left_run": "r_9dbae4675746049e",
+          "right_run": "r_9dbae4675746049e"
+        }
+      ],
+      "exit_code": 0,
+      "graphs": [
+        {
+          "edge_levels": [
+            "call",
+            "run"
+          ],
+          "edge_nodes_named": 0,
+          "graph_edges": 2,
+          "graph_nodes": 0,
+          "node_level_edges": 0,
+          "node_slots": [],
+          "node_statuses": [],
+          "open_nodes": 0,
+          "run_dir": "r_84b3f4477a988473",
+          "run_id": "r_9dbae4675746049e",
+          "writer_uuid": "74fa0a988c57118f9f8e508d16b24d9a"
+        },
+        {
+          "edge_levels": [
+            "call",
+            "run"
+          ],
+          "edge_nodes_named": 0,
+          "graph_edges": 2,
+          "graph_nodes": 0,
+          "node_level_edges": 0,
+          "node_slots": [],
+          "node_statuses": [],
+          "open_nodes": 0,
+          "run_dir": "r_9dbae4675746049e",
+          "run_id": "r_9dbae4675746049e",
+          "writer_uuid": "12878f8a129ca8dfb5df6028559e4378"
+        }
+      ],
+      "links": [
+        {
+          "class": "exact",
+          "left_run": "r_9dbae4675746049e",
+          "right_run": "r_9dbae4675746049e"
+        },
+        {
+          "class": "exact",
+          "left_run": "r_9dbae4675746049e",
+          "right_run": "r_9dbae4675746049e"
+        }
+      ],
+      "one_run_id_across_capsules": true,
+      "proxy_vantage_recorded": true,
+      "run_ids_seen": [
+        "r_9dbae4675746049e"
+      ],
+      "stderr_tail": [
+        "blackbox: python child gets a temporary sitecustomize (/tmp/blackbox-sdk-mq_2qdeh); removed when it exits",
+        "blackbox: run r_9dbae4675746049e \u00b7 exit 0 \u00b7 proxy http://127.0.0.1:38933 (5 vars exported) \u00b7 sdk auto-import (sitecustomize) \u00b7 recovered r_9dbae4675746049e \u2192 /tmp/bbx-accept-7brsjrn5/data-sdk/capsules/c_8284a378ca70ef2b.bbx (recovered, root 3e09eb5fc4f5) and 1 more tape (sdk)"
+      ],
+      "stdout": [
+        "sdk ok"
+      ],
+      "total_nodes": 0
+    },
+    {
+      "capsule_count": 2,
+      "capsules": [
+        {
+          "capsule": "c_db1b0608120ff61b.bbx",
+          "counts": {
+            "bytes": 16784982,
+            "events": 14,
+            "nodes": 1,
+            "nodes_interrupted": 0,
+            "segments": 1
+          },
+          "frames": {
+            "CHAIN": 6,
+            "MODEL_CHUNK": 1,
+            "MODEL_REQUEST": 1,
+            "MODEL_RESPONSE": 1,
+            "NODE_CLOSE": 1,
+            "NODE_OPEN": 1,
+            "RUN_END": 1,
+            "RUN_START": 1,
+            "SEG_END": 1
+          },
+          "has_proxy_vantage": true,
+          "link_pairs": [
+            {
+              "class": "exact",
+              "left_run": "r_d0b5a9020771806c",
+              "right_run": "r_d0b5a9020771806c"
+            }
+          ],
+          "links": {
+            "declared": 0,
+            "exact": 1,
+            "inferred": 0
+          },
+          "nodes": 1,
+          "root_ok": true,
+          "run_id": "r_d0b5a9020771806c",
+          "run_status": "recovered"
+        },
+        {
+          "capsule": "c_fbff6c0e5fd5ccc6.bbx",
+          "counts": {
+            "bytes": 16783797,
+            "events": 11,
+            "nodes": 0,
+            "nodes_interrupted": 0,
+            "segments": 1
+          },
+          "frames": {
+            "CHAIN": 5,
+            "MODEL_CHUNK": 1,
+            "MODEL_REQUEST": 1,
+            "MODEL_RESPONSE": 1,
+            "RUN_END": 1,
+            "RUN_START": 1,
+            "SEG_END": 1
+          },
+          "has_proxy_vantage": true,
+          "link_pairs": [
+            {
+              "class": "exact",
+              "left_run": "r_d0b5a9020771806c",
+              "right_run": "r_d0b5a9020771806c"
+            }
+          ],
+          "links": {
+            "declared": 0,
+            "exact": 1,
+            "inferred": 0
+          },
+          "nodes": 0,
+          "root_ok": true,
+          "run_id": "r_d0b5a9020771806c",
+          "run_status": "recovered"
+        }
+      ],
+      "client": "sdk-nodes",
+      "command": [
+        "/home/user/Blackbox/.venv/bin/python",
+        "sdk_node_client.py"
+      ],
+      "duration_ms": 1347.0,
+      "every_root_ok": true,
+      "exact_pairs": [
+        {
+          "class": "exact",
+          "left_run": "r_d0b5a9020771806c",
+          "right_run": "r_d0b5a9020771806c"
+        },
+        {
+          "class": "exact",
+          "left_run": "r_d0b5a9020771806c",
+          "right_run": "r_d0b5a9020771806c"
+        }
+      ],
+      "exit_code": 0,
+      "graphs": [
+        {
+          "edge_levels": [
+            "call",
+            "run"
+          ],
+          "edge_nodes_named": 1,
+          "graph_edges": 2,
+          "graph_nodes": 1,
+          "node_level_edges": 0,
+          "node_slots": [
+            1
+          ],
+          "node_statuses": [
+            "closed"
+          ],
+          "open_nodes": 0,
+          "run_dir": "r_c06a7fbb653c97ea",
+          "run_id": "r_d0b5a9020771806c",
+          "writer_uuid": "aa72bf499e574fcb0d797e1f19ed9baa"
+        },
+        {
+          "edge_levels": [
+            "call",
+            "run"
+          ],
+          "edge_nodes_named": 1,
+          "graph_edges": 2,
+          "graph_nodes": 0,
+          "node_level_edges": 0,
+          "node_slots": [],
+          "node_statuses": [],
+          "open_nodes": 0,
+          "run_dir": "r_d0b5a9020771806c",
+          "run_id": "r_d0b5a9020771806c",
+          "writer_uuid": "2f16611cffce23fb5e93a1d908100c1f"
+        }
+      ],
+      "links": [
+        {
+          "class": "exact",
+          "left_run": "r_d0b5a9020771806c",
+          "right_run": "r_d0b5a9020771806c"
+        },
+        {
+          "class": "exact",
+          "left_run": "r_d0b5a9020771806c",
+          "right_run": "r_d0b5a9020771806c"
+        }
+      ],
+      "one_run_id_across_capsules": true,
+      "proxy_vantage_recorded": true,
+      "run_ids_seen": [
+        "r_d0b5a9020771806c"
+      ],
+      "stderr_tail": [
+        "blackbox: python child gets a temporary sitecustomize (/tmp/blackbox-sdk-27v942bw); removed when it exits",
+        "blackbox: run r_d0b5a9020771806c \u00b7 exit 0 \u00b7 proxy http://127.0.0.1:40001 (5 vars exported) \u00b7 sdk auto-import (sitecustomize) \u00b7 recovered r_d0b5a9020771806c \u2192 /tmp/bbx-accept-7brsjrn5/data-sdk-nodes/capsules/c_fbff6c0e5fd5ccc6.bbx (recovered, root 5d991c011b96) and 1 more tape (sdk)"
+      ],
+      "stdout": [
+        "sdk-nodes ok"
+      ],
+      "total_nodes": 1
+    }
+  ],
+  "ticket": "P3B-03",
+  "upstream": "http://127.0.0.1:46195",
+  "verdict": {
+    "app_nodes_are_in_the_graph": {
+      "node": 0,
+      "python": 0,
+      "sdk": 0,
+      "sdk-nodes": 1
+    },
+    "both_clients_exit_zero": true,
+    "clean_runs_are_not_reported_as_interrupted": true,
+    "edges_naming_a_node": 2,
+    "every_capsule_root_ok": true,
+    "exact_links_join_every_run_with_two_capsules": true,
+    "node_available": true,
+    "node_level_edges_recorded": 0,
+    "one_run_id_across_capsules": true,
+    "proxy_vantage_recorded": true,
+    "run_level_edges_recorded": 10
+  },
+  "when": "2026-11-16T23:38:14Z"
+}

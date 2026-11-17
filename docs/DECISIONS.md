@@ -495,3 +495,737 @@ README is not evidence.
 **One consequence for the suite**: `tests/test_attach_doc.py` fails if any verdict row stops carrying either a version
 and a date or the word **unverified**, and it is checked against a doctored document in the same session that wrote it
 — the check refuses a row with a `**verified**` verdict and no evidence, which is the failure mode that matters here.
+
+## D-043 — the rebind budget is spent by the tick, so the tick is 20 ms and every sample is asserted
+
+*Date: 2026-11-16. Plan refs: §11.8, P3B-03 (supervision clause). Supersedes the median-of-five in defect 40; the
+measurement is ADR-006.*
+
+**The decision**: §11.8's "re-bound within 100 ms" is measured as an outage — from the listener stopping to a listener
+serving on the same port — because that is what a child waits through, and it therefore includes the supervisor's tick.
+The default tick drops from 50 ms to 20 ms (`SUPERVISE_MS`), and `tests/test_proxy_supervisor.py` asserts **every**
+watchdog-triggered sample, not a median of samples that were mostly manual.
+
+**Why the tick had to move, rather than the number being quoted harder**: measured on 2026-11-16, the rebind itself is
+p50 0.80–0.82 ms and max 2.90 ms — the budget was almost entirely being spent waiting for a watchdog to look. At a 50 ms tick
+the worst observed outage was 51.9 ms, which is inside 100 ms and leaves 48 ms for a thread that loses the CPU. Defect 40
+is what happens next: one shared macOS runner spent 107.9 ms, and the row failed on a number that was still, in the
+invariant sense, correct. At 20 ms the worst observed outage is 21.86 ms over 240 samples in two runs, and 78 ms is left for the same stall. The tick
+costs one attribute read on a thread already blocked in `Event.wait()`; there is nothing to trade away for a coarser one.
+
+**A decision about the measurement that will look pedantic and is not**: the first run of the new bench reported
+`min 50.35 / p50 50.95 / max 51.88` at n=40. A 50 ms *minimum* is not a distribution of a uniformly phased outage — the
+trials were back-to-back, each repaired exactly at a tick, so every break landed just after the next tick. The bench now
+randomises the phase per trial (seeded, recorded) and the JSON keeps every sample, because the alternative is a table
+whose rows look measured and are one repeated worst case.
+
+**What this does not claim**: ADR-006 §6 lists the four things the row still does not cover — one machine, a frozen
+container, a C extension holding the GIL on the in-process attach path, and the measurement's own 0.5 ms granularity. The
+macOS cell becomes the second data point when CI next runs; until then the 4.7× margin is the argument, and it is an
+argument, not a result.
+
+## D-044 — the auto-import is a `sitecustomize`, and a child's tape names the run it belongs to
+
+*Date: 2026-11-16. Plan refs: §11.9 step 4 and step 6, §11.10, P3B-03. Supersedes nothing; corrects the plan's two
+spellings of one mechanism. Tests: `tests/test_launcher_attach.py` (20).*
+
+**The plan says "a `.pth` in a temp site dir / `PYTHONPATH`", and those are not the same thing in Python.** `site`
+processes `.pth` files only for directories it registered with `addsitedir`; a `.pth` that reached `sys.path` through
+`PYTHONPATH` is never opened. The first implementation did exactly what the sentence says and the test said
+`autoimport_ran is False`: a silent no-op that would have shipped as "Python attach works" and been found by a user with
+no captured calls. The mechanism that does run is a `sitecustomize.py` on `PYTHONPATH` — the one
+`opentelemetry-instrument` uses, and therefore the one the plan's parenthetical was pointing at. So the build writes
+`sitecustomize.py`, the run result names the mechanism, and `docs/attach.md` §1.1 says so in the same words a user
+would read.
+
+**The cost of that mechanism is one name, and it is shared.** Only one module called `sitecustomize` is imported, so a
+distro hook or another instrumenter would be shadowed by a launcher that simply took the name. The written file
+therefore **chains**: it runs the next `sitecustomize` on `sys.path` first and then installs, guarded against re-entering
+itself. A test builds a decoy hook in a temp directory and requires both effects.
+
+**The second half is about tape identity.** Under `blackbox run`, the SDK used to suppress its own `RUN_START` because
+"the launcher owns the run boundary". That is true of the launcher's tape and false of the child's: the SDK opens a
+*different* tape, and `correlate` reads a tape's run id from its own `RUN_START`, so the child's tape resolved to `None`
+and nothing could link. Measured on `blackbox run -- python app.py`: two tapes, one capsule, the child's frames in no
+capsule at all, `links: []`. The SDK now writes `RUN_START{run_id: $BLACKBOX_RUN_ID, source: "sdk", attached: true}`
+into **its own** tape and closes it with `RUN_END`; the launcher recovers **every** tape of the run (§11.9 step 6)
+rather than only its own, and each capsule carries an `exact` link to the others because the run id matches.
+
+**What did not change**: every tape keeps its own capsule. `Recovery.run_id` stays derived from the tape (writer uuid +
+creation time), because it names `runs/<id>/` and the capsule file, and two tapes sharing a directory would collide on
+markers — a resumed recovery would read the other tape's steps. "One run" is therefore expressed as **a set of capsules
+joined by `links.json`**, which is where §11.10 puts a relation, and `merges_runs` remains `False` by construction.
+
+**One number was wrong while this was being measured**: the capsule's `counts.nodes` was filled from
+`len(node_statuses)`, and `classify_nodes` returns only the *unclosed* nodes (its job is the §14.4 "what was
+interrupted" table). Every clean run therefore reported `nodes: 0` while its `graph.json` listed the nodes. The plan's
+own example manifest has `"nodes": 44` for a run that finished. Fixed: `counts.nodes` counts `NODE_OPEN` slots, and the
+interrupted count moved to `counts.nodes_interrupted`, where it can be read for what it is (defect 41).
+
+## D-045 — the viewer is one offline file, black and gold, and every capsule value reaches the DOM as text
+
+*Date: 2026-11-16. Plan refs: §13.5 (viewer), P4-10, P4-11. Built: `src/blackbox/ui/` + `blackbox view`. Tests:
+`tests/test_ui_viewer.py` (17).*
+
+**One file, opened from disk.** P4-10 says "no framework, no CDN" and the product constraints say "offline, no egress".
+A static document is the only shape that satisfies both *by construction*: there is no port, no token, no CORS policy,
+and no request that could be made by accident. `blackbox view <capsule>` writes `viewer.html` beside the capsule (or
+`viewer.html` inside a data directory) with the stylesheet, the script and the capsule's summary **inlined**. The tests
+assert it from the built page rather than from the template: no `http://`, no `<link>`, no `fetch(`, and every
+`href`/`src` in the document is a fragment.
+
+**The theme is black and gold glass, and "readable" is a number.** The panels are translucent over a
+near-black ground with gold radial glows behind them, `backdrop-filter` blur, 1px gold hairline borders, and one
+opaque `--panel-solid` behind everything so contrast does not depend on what is behind the glass. The suite computes
+WCAG ratios from the stylesheet's **own** colour tokens — body text ≥ 4.5:1, secondary ≥ 4.5:1, gold and status
+accents ≥ 4.5:1 — so a later "prettier" palette fails a test instead of shipping. `prefers-contrast: more` raises the
+muted tokens and removes the translucency.
+
+**Motion is opt-in.** One `prefers-reduced-motion: reduce` block neutralises transitions, animations and smooth
+scrolling, and the script reads the same media query before asking for `behavior: "smooth"`, so a keyboard user who
+asked for less motion does not get a scrolling animation from a page that "handled" the CSS query.
+
+**The keyboard is the primary interface, not a fallback.** The timeline is a flat row list with `role="treeitem"`,
+`aria-selected`, `aria-level` and `aria-expanded`; `↑`/`↓` move, `→`/`Enter` expand, `←` collapses, `Home`/`End` jump,
+`/` filters, `?` opens the shortcut dialog, `Esc` closes it or clears the filter. Roving `tabindex` keeps the tab order
+at one element, there is a skip link, and focus is always visible (`:focus-visible`, 2px, gold).
+
+**The rule that matters for security: capsule data never reaches the DOM as markup.** `app.js` contains no
+`innerHTML`, `outerHTML`, `insertAdjacentHTML` or `document.write` — the test greps for all four — and every value is
+written with `textContent`. The JSON payload escapes `<` to `\u003c`, so a prompt containing `</script><script>` is
+characters in a data block, not script. The XSS corpus (six payloads, including `</script>`, `<img onerror=…>`,
+`javascript:` and a `\u2028`) survives a build → parse round-trip unchanged.
+
+**What the page refuses to invent.** A capsule that fails its own integrity root is a red banner and a `problems` list,
+not a timeline; a torn tail names `lost_from_seq`; a node with no close frame is shown as "never (the process ended
+first)" with a note that the viewer will not claim an outcome the tape does not contain; an empty data directory is a
+`BBX-E220` error rather than a blank page that looks like a clean run. And the tape shown first is the one with the
+most events — on `blackbox run -- python app.py` that is the child's SDK tape, not the launcher's five-frame boundary,
+because a page that opened on the boundary would look like a run in which nothing happened.
+
+**Not built, and not claimed**: P4-11's loopback server with a fragment token. The static file makes a server
+unnecessary for the primary path; the server is for re-rendering from disk on demand, and it is on the P4 remainder list
+rather than half-present here.
+
+## D-046 — the ticket ledger is generated, so a status that lives only in the file is a status waiting to be lost
+
+*Date: 2026-11-16. Plan refs: A1 (the ledger must not drift), `tools/gen_progress.py`, `docs/progress.md`,
+`docs/STATE.json`. Test: `tests/test_state_consistency.py::test_state_and_progress_agree_in_both_directions`.*
+
+**What happened.** `docs/progress.md` is generated from the plan's ticket table by `tools/gen_progress.py`, and the
+statuses come from a dict `S` inside that script. Six finished rows — P3B-04, -05, -06, -08, -09 and the wip P3B-07 —
+had been written straight into the generated file at some point and never into `S`. Everything agreed, because nothing
+regenerated the file. Adding P4-10 to `S` and running the generator reverted all six to **todo**: the file was correct
+and the source of truth was empty.
+
+**How it was caught, which is the useful part.** `test_state_and_progress_agree_in_both_directions` compares the ticks
+in both ledgers and failed immediately with *"done in STATE but not ticked in progress.md: P3B-04, P3B-05, P3B-06,
+P3B-08, P3B-09"*. The guard existed and worked; what it proved is that the *generator* is the place a status must live.
+
+**The repair.** The six (now nine, including the three P3B rows that were legitimately todo) rows are in `S`, with the
+statuses, commits, tests, measurements and notes copied verbatim from the previous file by a script rather than retyped,
+and a comment in `S` says why they are there. The generator's ticket filter now includes `P4-`, so the viewer rows are
+in the ledger instead of being absent from it while `STATE.json` listed them — the same class of drift, in the
+direction of silence.
+
+**The rule that follows**: a row's status is edited in `tools/gen_progress.py` and regenerated, never in
+`docs/progress.md`. A hand-edit of the generated file is a change that survives until the next regeneration, which is
+exactly the kind of "works until it doesn't" that this repository keeps finding and writing down.
+
+## D-047 — the diagnosis is a document, and a brief is not an authorisation (2026-11-16, P4-17)
+
+**Context.** The addendum asks for a diagnosis-and-fix flow: read a real capsule, produce an evidence-linked incident
+report, export a repair brief, then — only with fresh approval — apply a patch and verify it. The temptation is to build
+the last third first, because "diagnose and fix" reads like one feature.
+
+**Decision.** Ship the first two thirds and **no applier**. `blackbox diagnose` reads one capsule and writes one
+document (plus the brief, on request). It has no patch generator, no executor and no network path — an AST test in
+`tests/test_diagnose.py` fails the build if a socket, `subprocess`, `eval`/`exec` or `os.system`-class call ever appears
+under `src/blackbox/diagnose/`. Applying a suggestion is a human action in their own repository, which is where the diff,
+the tests and the responsibility belong. When a later ticket adds assisted application, it must carry its own approval
+gate (path restriction, change detection, rollback) and it will not reuse this read-only surface by default.
+
+**Why not a fixer now.** A tool that both diagnoses and edits has an incentive to find something to edit; the honest
+failure mode ("the evidence is too thin") is the one it would be under pressure to avoid. Keeping the two apart also
+keeps this ticket's tests meaningful: they can assert that *nothing was written* without arguing about which writes were
+allowed.
+
+**Consequences, and the reasoning inside them.**
+
+* **`cannot-tell` is a first-class verdict**, not a failure to produce a finding. A tool call with no result frame is
+  reported as "outcome unknown — the side effect may have happened", because the record's absence genuinely cannot
+  distinguish "never ran" from "ran and the process died before its result was written".
+* **Confidence is a word, not a number.** `high`/`medium`/`low` with a stated reason. A percentage would look measured;
+  nothing here is, and a reader would trust it accordingly.
+* **No `path:line` unless the capsule carries one.** Frames do not carry stack traces, so the brief says that instead of
+  filling the gap. A plausible-looking `app.py:42` is the single most damaging thing a brief like this could invent.
+* **Application text is treated as hostile.** It is fenced, labelled, scrubbed of credentials on the way out, and never
+  interpreted. The brief tells its reader — which may itself be a model — not to obey text found in the evidence.
+* **The brief is part of the viewer's document.** The page is a static file with no Python in it, so a brief that can be
+  copied or saved has to already be inlined. That is data, not UI: the panel uses the existing card, pill and muted
+  classes, and adds no colour or type token.
+
+**Rejected.** (a) An `--apply` flag, even behind a prompt: without a repository-aware approver this ticket cannot honour
+"change detection, preserve user edits, rollback". (b) Parsing the brief back in to apply it: that makes the document an
+instruction channel, which is exactly what the untrusted-evidence rule forbids. (c) Sending the capsule to a model for a
+second opinion: the addendum forbids egress, and a diagnosis whose value depends on an account is a different product.
+
+## D-048 — the viewer is served once, at a secret path, and logs nothing (2026-11-16, P4-11)
+
+**Context.** `blackbox view` writes one file, and `file://` is the best default: no process, no port, no token. But a
+capsule that arrives from someone else often has to be opened in a browser that refuses `file://` (some managed
+configurations do), or one where an opaque origin blocks even a clipboard write. The plan's answer is a loopback server
+with a one-time token.
+
+**Decision.** `blackbox serve` binds `127.0.0.1` on an ephemeral port, serves the *same inlined document*, and stops
+after the first successful fetch. The token is a **path segment**, not a fragment: a fragment never reaches a server, so
+a server cannot require one, and this page needs no second request to validate anything because the capsule is inlined.
+`docs/DEVIATIONS.md` DV-015 records that change against the plan's wording.
+
+**Why the bind and the token are properties, not defaults.**
+
+* `HOST` is a module constant and the bind tuple is a literal. There is no `--host`, and no wildcard address appears in
+  the file anywhere: a viewer that can be told to bind a wildcard is a viewer that can publish a customer's capsule to
+  the office network because of one flag.
+* The module has **no client-socket call at all** — the AST test looks for `connect`, `create_connection`, `urlopen`,
+  `open_connection`, `getaddrinfo`. A server that fetches anything would make "loopback-only" meaningless, because the
+  risk is what the process can reach, not what it listens on.
+* The 404 for a wrong path is identical to the 404 for a well-formed guess, and the body never echoes the token: the
+  only way to learn the secret is to have been given it.
+* `log_message` is silenced. The request line contains the token, so the default access log would write a capability
+  into stderr, a CI log, or a screenshot — and it would do so on the very first request.
+
+**Consequences.** A user who needs to look at the page twice runs `--keep-open` (the URL stays valid while the process
+runs, which the command says out loud). `--keep-open` is a deliberate second mode, not a default, because "the server
+you forgot you started" is the usual way a local tool becomes an exposure.
+
+**Rejected.** (a) A token in a cookie or a header set by JS: it needs the page to make a request, which means the page
+must fetch its own data, which means the offline single-file property is lost for the served mode and the two modes
+drift. (b) Auto-opening a browser: `webbrowser` is on the forbidden-import list, opening a browser is a side effect a
+caller did not ask for, and printing the URL is enough. (c) Serving on a fixed port: an ephemeral one avoids colliding
+with whatever the user already runs, and the URL is printed anyway.
+
+## D-049 — the applier exists, and it applies *your* proposal, not its own (2026-11-16, P4-18)
+
+**Context.** D-047 shipped the diagnosis without an applier and recorded why: a tool that both finds the problem and
+edits the code has an incentive to find something to edit. The addendum still wants the second half of the workflow —
+"show exact paths, before/after diff, risk, expected tests, scope; apply only after fresh explicit approval". Those two
+positions are only in conflict if the applier has to author the patch.
+
+**Decision.** It does not. `blackbox repair` reviews and applies a **proposal written by a human or an agent**, and the
+product contributes only the gate. `diagnose` keeps producing evidence and a brief that names no file (D-047); the
+proposal is where a `path:line` comes from, and it comes from someone with the code in front of them.
+
+**The gate, in the order it refuses.**
+
+1. **`preview` writes nothing** and prints what a reviewer needs: exact paths with the current hash, a unified diff, risk
+   notes, the suggested tests *labelled as not run*, and the scope in files/lines/directories.
+2. **The approval token is bound to state, not to intent.** It hashes the proposal's bytes, the repository root, and the
+   reviewed hash of every target. `apply` recomputes it from the *current* tree, so a file that moved after the preview,
+   or a proposal edited after approval, is refused before a byte is written — and the message names the file that moved.
+3. **Paths cannot escape**: relative only, no `..`, no absolute, no symlink in any component, resolved inside the repo,
+   parent directory must already exist. Deletion is not in the format, because a proposal that can delete has a failure
+   mode the proposal cannot undo.
+4. **Writes are atomic and reversible**: temp file + `os.replace`, mode preserved, originals copied to
+   `.blackbox-repair/backup-<time>-<token>/`, and any failure restores every file already written and removes the ones it
+   created. A half-applied repair is worse than none.
+5. **Nothing from the proposal is executed.** Its `tests` list is displayed as a suggestion. `verify --test CMD` runs
+   only commands a human typed at that moment, reports each exit code and output tail, and says in the report that the
+   suggested tests were *not* executed. With no commands it exits 3 and calls the change unverified.
+
+**Consequences.** `repair` is a separate command from `diagnose`, in a separate package, and the diagnosis package still
+has no write path at all (its AST test is unchanged). A proposal is a file, so it can be reviewed, diffed, committed to a
+ticket and thrown away — and a rejected one costs nothing.
+
+**Rejected.** (a) Generating a proposal from the brief: the brief has no locations, so the generator would invent them —
+the exact failure D-047 forbids. (b) A `--yes` flag on `apply` that skips the token: an approval that is not bound to
+state is a confirmation dialog, not a decision. (c) Running the proposal's tests automatically: the tests come from the
+same untrusted document as the patch, and "run whatever the evidence says" is how a traced string becomes a command.
+(d) Auto-commit after apply: the diff and the tests are the reviewer's evidence, and a commit message written by the
+tool would claim a verification it did not perform.
+
+## D-050 — the applier's guarantees are write-time, and two of them are weaker on Windows (2026-11-16, P4-18)
+
+**Context.** D-049 shipped the gate: a token bound to the reviewed state, atomic per-file writes, a rollback. Then the
+gate was attacked in the way it would actually be attacked — not by a user typing nonsense, but by the tree moving
+underneath it. Every check in D-049 happened while the proposal was being *read*. Between that read and the write there
+is a window, and the thing on the other side of the window is a file nobody reviewed: swap the target for a symlink to
+`~/.ssh/authorized_keys`, or replace the parent directory with a link, and a reader-time check is a check of a file that
+no longer exists. Four questions had no answer, and a fifth turned out not to be a question about Unix at all.
+
+**Decided.**
+
+1. **Every check that matters runs again per file, immediately before that file's write.** Still inside the repository
+   (by `realpath`, not by string prefix), no link at the target or its parent, still the reviewed hash, and the bytes
+   are read back and compared after the write. A swap in the window is refused at the moment it matters.
+2. **Descriptors never follow a link**, and originals are read that way too: `O_NOFOLLOW` on the read, `O_CREAT|O_EXCL|
+   O_NOFOLLOW` on the temporary, `os.replace` to rename *over* the target rather than through it.
+3. **A manifest is written before the first mutation.** `apply-manifest.json` records the planned paths, their approved
+   hashes and the backup directory, then flips to `applied` or `rolled_back`. A process killed mid-apply cannot roll
+   back — there was no chance — but it can be audited, and "the tree is in an unknown state" is then a claim with
+   evidence rather than a guess.
+4. **Rollback does not use the mechanism that failed.** Restores take their own plain truncating write with retries, run
+   in reverse order, attempt *every* file instead of stopping at the first that will not come back, and the error names
+   the files still wrong and says manual intervention is required. A rollback that reports success while a file is still
+   wrong is the worst outcome available to this feature, worse than an apply that refuses to start.
+5. **Backups live inside the repository**, at `<repo>/.blackbox-repair/backup-<UTC>-<token8>/`, mode `0700`, refused if
+   it or any parent is a symlink, and every copy is re-hashed after it is written. Inside, because the alternative —
+   `/tmp` or a cache directory — puts the only copy of the user's file somewhere that may not exist tomorrow, may be on
+   another filesystem, and is readable by other accounts on a shared machine. `0700` because these are the user's source
+   files in plain text. The cost is that a repair leaves a directory in the tree, which is why the manifest is in it and
+   the path is in every message.
+
+**The Windows limit, stated rather than closed.** `O_NOFOLLOW` does not exist there (`os.O_NOFOLLOW` is absent and the
+constant here is 0), so point 2 holds only through the `islink` checks of point 1. On Windows the guarantee is therefore
+*check-then-write*, and a swap landing inside that window is not detected. Closing it means opening by handle with
+`FILE_FLAG_OPEN_REPARSE_POINT` and writing through that handle, which is a different implementation of `_atomic_write`
+per platform. Not done, and P4-18 does not claim otherwise.
+
+**The fifth question was not about links at all.** Guard C29 in `tests/test_platform_dispatch.py` exists because a bare
+`os.open` yields a **text-mode** descriptor on Windows, and the first revision of this file used three of them — for the
+read, the temporary, and the restore. That is not a style violation on this path: the file being read is the one that is
+hashed for approval and copied into the backup, so a translated read makes the approved hash unreachable (the apply
+refuses a file nobody touched), and a translated restore silently rewrites every line ending in the file it just put
+back. All three now go through `platform().open_fd`, which sets `O_BINARY`, and two tests hold a CRLF-and-NUL file to a
+byte-for-byte comparison across both the apply and the rollback. The guard was right and the code was wrong.
+
+**`verify --test` executes the command.** Worth recording because the wording had drifted: "verifies the change" reads
+like a check, and the command a user passes is run through the platform shell, in their repository, with their
+privileges. The banner, the `--help` text and the epilog now say *executes*, and a test asserts the warning is printed
+before the command's output rather than after it — an announcement made afterwards is a receipt, not a warning.
+
+**Rejected.** (a) Silencing C29 for `repair/` with a `noqa`: the guard was describing a real corruption. (b) Treating
+the `O_RDONLY` exemption in C29 as covering the read path: that exemption is for directory handles used for `fsync`,
+which are never written through, and `_read_nofollow` reads content. (c) A best-effort rollback that raises on the first
+failure: it loses the information about which other files are still wrong, which is the only thing the user needs.
+(d) Storing backups outside the repo as the default: cheaper to write, and it makes the one artifact a rollback depends
+on the least durable thing in the system.
+
+**Postscript — the same mistake, one level out, found by CI.** The symlink check above originally walked the *absolute*
+path looking for links, which refuses every repository whose own ancestors contain one: `/tmp` is a symlink on macOS, and
+the Windows temp directory sits behind a junction. Three repair tests failed on Windows with "involves a symlink at
+`C:\Users\runneradmin\AppData\Local\Temp\...`" — the refusal was correct about the platform and wrong about the
+proposal, since the user named that root themselves. The check now stops at the repository root and inspects only the
+proposal's own relative components. Doing that surfaced a second gap in the same function: the parent's symlink check
+resolved the parent with `realpath` before testing it, so a directory swapped for a link one level up was invisible —
+`realpath` erases exactly the link being looked for. The walk is lexical now, and a test swaps an intermediate directory
+for one pointing at a decoy *inside* the repository, where the escape check cannot help. Both fixes are the same lesson
+from opposite directions: check the path the user's files will actually be written through, not the path that has already
+been normalised.
+
+**Postscript — the two things Windows could not do, found by the first run that had Windows cells for this code.** Both
+were claims in this decision that the platform does not support. `O_NOFOLLOW` is absent there, so "descriptors never
+follow a link" was true of the write and false of the read: `os.open` followed the link and the function returned the
+bytes behind it (defect 50). The read now refuses explicitly when the flag is missing — still check-then-open, but a
+refusal rather than a silent success — and `sha256_file` uses the same reader, because a hash taken by a different rule
+from the write is not a guarantee about the same file. And `0700` is not expressible: `os.chmod` toggles the read-only
+attribute and `os.stat` synthesises `0o777` from the ACL, so the "private backup directory" was private only to the
+extent the repository is (defect 51). Rather than relax the test, the guarantee shrank to what is true:
+`_private_dir` enforces and **re-reads** the mode where modes exist — refusing on a filesystem that ignores `chmod` —
+and where they do not it reports `private_by_mode: false` through the result, the manifest and one line of stderr. A
+guarantee that is conditional on the platform has to say so at every point a user reads it, or the document is the lie
+rather than the code.
+
+---
+
+## D-051 — the child captures its own traffic, and a process gets one seam (2026-11-16, P3B-03/P4-18)
+
+`api.install()` opened the child's tape and installed no seam, so the auto-import bought a capsule with a bootstrap
+frame set and nothing else (defect 49). The proxy's vantage still recorded the call, which is exactly why the gap
+survived: the run *looked* captured, and only the frame kinds said which vantage produced them. `install()` now asks
+`preflight.choose()` for a seam once the tape exists, resolving the node slot per event rather than once at install
+time, because a seam outlives any one `with api.run(...)` — a seam that captured the slot at install would book every
+later call to the node that happened to be open then, or to none.
+
+The interesting part is what happened to callers that had already done this themselves. Two hooks on one client class
+fire the recorder twice, and a stream consulted twice is a stream closed twice: with `install()` patching and
+`tests/_day14_child.py` patching on top, `openai` raised *Attempted to call a sync close on an async stream* before
+reading a byte. The naive fix — "the product's seam wins, throw ours away" — leaves the second caller without a
+recorder. So the module keeps the seam it installed, and `choose()` hands that seam back with attempt status
+`already-installed`. Invariant: **one seam per client class per process**, announced rather than assumed, and everyone
+who asks gets a working recorder. The alternative, letting each caller wrap the last, is a stack whose failure mode is
+an SDK-internal error in the app's first model call — the worst place to learn that recording was installed twice.
+
+Costs accepted, and stated because they are easy to over-read. Adoption is process-global and keyed on the seam, not on
+the recorder, so `capture_status()["installed"]` with `attempts[0]["status"] == "already-installed"` means *the process
+is captured*, not *this tape is receiving the frames*: the adopted seam writes to whatever sink its installer chose. In
+the product's own path the question is asked exactly once — `install()` is refcounted, so a second caller refs the
+existing lifecycle instead of installing — and `release()` only undoes the seam `install()` adopted, because adoption is
+the product's private bookkeeping and no third party registers with it. A general "attach to someone else's seam"
+protocol is deliberately not built here; the invariant only has to hold for the two parties that exist. Proven by
+`tests/test_launcher_attach.py`'s three capture tests, red with `install_capture()` disabled.
+
+---
+
+## D-052 — an edge says what it actually knows: run-level by default, node-level only with per-call evidence (2026-11-16, P3B-03/defect 55)
+
+`graph.json` has written `edges: []` since P3-06, while the cross-vantage relation lived in `links.json`. The ticket's
+sentence is "one run with linked nodes", and the plan (§13.1, §11.10) describes `linked_exact`/`linked_declared`/
+`linked_inferred` edges joining nodes recorded by different vantage points. The temptation is to turn each `LINK` record
+into a node-to-node edge and call the sentence met. That would be a lie with a precise shape: **a run-level `exact` link
+says two tapes belong to one run; it says nothing about which node on one tape corresponds to which node on the other.**
+Two nodes with model calls, one on each tape, are the normal case of a run — mapping them to each other because they are
+the only candidates is guessing with extra steps, and it is exactly the class of claim (§14.4) that this product refuses
+to make elsewhere.
+
+So the edge carries its own level, and the default is the weaker true statement:
+
+| field | meaning |
+|---|---|
+| `level: "run"` | both ends name a run and the link's class says they are the same run (`exact`, or `declared` by the user) |
+| `level: "tape"` | at least one end names no run; the link joins two tapes, not two runs |
+| `level: "node"` | **not written in this build** — it requires a per-call identifier recorded on *both* sides |
+| `nodes: {from: null, to: null}` | no node is named, because none is justified |
+| `node_join: "unknown"` | with `node_join_reason`, so a reader sees the gap rather than an absence |
+
+Rules this fixes, in the order they matter:
+
+1. **A slot is not an id.** `node_slot` numbers nodes inside one tape; every tape numbers from 1. Even the header the SDK
+   injects carries `<run>/<node>`, and the proxy records only the run half (`linked_run`). Two concurrent calls from one
+   node would share every one of those fields, so a node-level edge built from them would be ambiguous exactly when it
+   matters most. Node-level edges therefore wait for a call id written by the seam and read back by the proxy — a new
+   frame field, i.e. its own decision, not a by-product of this one.
+2. **No invented nodes.** A proxied call with no node slot (slot 0 is the run itself) is not attached to an app node, and
+   no synthetic node is created to give an edge an end. An edge with no node says `null`.
+3. **Ambiguity is recorded, not resolved.** If a future per-call id matches more than one candidate on either side, the
+   edge stays at run level and carries `node_join: "ambiguous"`; it never picks one.
+4. **The graph and the capsule cannot disagree.** Edges are derived at seal time from the *same bytes* that go into the
+   capsule as `links.json`, in the same step, and written to `graph.json` before the capsule is written. There is no
+   second resolver and no second pass that could see a different set of tapes.
+5. **Additive only.** `graph.json` gains `edges` (with the fields above) and `edge_summary`; nothing is renamed, and a
+   capsule written before this change reads exactly as it did (`edges` was `[]`). `graph.json` is still not a capsule
+   entry: the plan's `derived_parts[]` + `capsule verify` recomputation (BBX-E412) is the contract for derived parts, and
+   adding an entry without that machinery would put an unverified artefact inside the hashed container. That is the next
+   ticket, named here so this decision does not imply it happened.
+
+Consequence, stated plainly: **P3B-03 is not ticked.** Its sentence asks for linked *nodes*; this record produces linked
+*runs* and says so in the artefact. Defect 55 stays open until a run exists whose `graph.json` carries a `level: "node"`
+edge that a per-call id justifies. What this decision buys is that the gap is now visible in the graph, measured in the
+acceptance harness (`graph_edges_run_level`, `graph_edges_node_level`), and covered by tests for the three cases that
+would tempt a guesser: several nodes in one run, a proxied call with no node, and two links whose nodes could be paired
+in more than one way.
+
+## D-053 — a call that crosses a vantage carries its own id, and the capsule can prove its graph (2026-11-16, P3B-03/defect 55)
+
+D-052 left defect 55 open with one named precondition: node-level edges wait for "a call id written by the seam and
+read back by the proxy — a new frame field, i.e. its own decision". This is that decision, and it is deliberately
+narrower than "node-level edges": what it adds is **per-call identity on the wire**, an edge class that uses it, and
+a way to check that the graph in a capsule is the graph the tape produces. It does not manufacture a node where the
+proxy records none (D-052 rule 2 still holds), so what it makes possible is a *call-level* edge between two vantages,
+named on one side, and it says `partial` rather than `exact` when only one end has a slot.
+
+**The wire.** `headers.py` gains `x-blackbox-call`, minted per outbound request by seam A (`secrets.token_hex(8)`) and
+injected beside `x-blackbox-run` under the same gate: only when the launcher said a proxy is in front
+(`inject_call` returns `False` otherwise, and the seam then records no id at all rather than an id nobody will read).
+The proxy parses it, records it as `call_id` on **its own** `MODEL_REQUEST` frame, and strips every `x-blackbox-*`
+header before the upstream — asserted against a mock origin that saw neither header. An id that never leaves the
+process (no proxy) is `null`, not a fresh one: `null` means "this call has no second vantage", which a reader can tell
+apart from "the id was lost".
+
+**The frame.** `ModelCall.call_id` and the `MODEL_REQUEST` payload key `call_id` are additive. `Receiver.open_call`
+gains a keyword-only `call_id` hint, and the reason is the one already written on that method: a sink writes the
+request frame *inside* `open_call`, so a hint delivered afterwards would leave a durable frame saying `null` for a call
+that had an id. That is a change to an implementable interface, so `FailOpenReceiver` asks the callee's signature once
+and withholds the keyword from a receiver written before this record: such a receiver keeps recording (its frames say
+`call_id: null`) instead of raising `TypeError` into a failure counter while its capture silently stops. Two tests pin
+both halves — `tests/test_capture_failopen.py::test_a_receiver_written_before_d053_still_records_its_calls` and
+`::test_a_receiver_that_does_take_the_hint_is_given_it`.
+
+**The edge.** `rec/links.py` resolves call pairs by id (`resolve_calls`), and `rec/correlate.py` emits them side by
+side with the run-level links as `call_links` + `call_summary` in `links.json`; `rec/recovery.py` turns them into
+`graph.json` edges:
+
+| field | values |
+|---|---|
+| `class` | `exact` — the same call id, nothing else |
+| `level` | `call` |
+| `nodes` | `{from, to}`; a side names a slot only when the call's frames actually sit inside that node's span |
+| `node_join` | `exact` when both sides name a node, `partial` when exactly one does, `ambiguous` when a side's slot is not decidable, `unknown` when neither does |
+| `candidates` | the slots a side could have meant, when the join is ambiguous |
+| `evidence` | `{"rule": "same call id", "carried_by": "x-blackbox-call"}` |
+
+`empty_edge_summary()` gains `call_level` and `ambiguous` so a run with no call edges and a run whose joins were
+ambiguous are different rows. **A run-level `exact` link is never promoted to `call`**, and a call id never produces a
+`level: "node"` edge: an id the proxy read is evidence that two *records* are one call, not that a node of one tape is
+a node of the other, and in this build the proxy's vantage has no node slot to name (slot 0 is the run itself).
+
+**The capsule.** `graph.json` becomes a capsule entry and a declared derived part:
+`manifest.derived_parts[] = [{name: "graph.json", sha256, generator}]`, with the hash over the exact bytes written into
+the capsule. `cap/derived.py` recomputes the graph from the capsule's own raw segments (`recompute`), compares the
+declared and actual hashes plus the node and edge counts (`verify`, `COMPARED`), and never repairs anything;
+`blackbox capsule verify <capsule> [--json]` reports it: exit 0 when every declared part matches, exit 1 with
+`BBX-E412` and the drifted fields when one does not, exit 2 when the capsule cannot be read. A capsule written before
+this record declares no derived parts, verifies with `absent`, and is not rewritten — the readers that predate the key
+ignore it, and no old capsule is invalidated by a new one existing.
+
+**What this does not do, stated so the ticket is not ticked by it.** P3B-03's sentence is "one run with linked
+**nodes**". After this record the acceptance report (`bench/results/2026-11-16-p3b03-acceptance.json`) reads
+`run_level_edges_recorded: 10`, `node_level_edges_recorded: 0`, `edges_naming_a_node: 2`: the call edges exist, they
+name the slot the call ran in on the seam's side, and the other end is `null` because that writer recorded no node.
+`node_join` is therefore `partial` in every real case measured, and the `exact` branch has no real-client witness yet.
+Defect 55 stays open with the residual narrowed to exactly that: a node identity both vantages can write (the SDK knows
+its slot; the proxy would have to be told it on the wire) is the next decision, and until it exists no test may call
+these edges node-level.
+
+## D-054 — the export names only what the mapping names (2026-11-16, P4-13)
+
+`events.jsonl` exists so a capsule can be read by tools this project does not ship, and the risk of a "standard" export
+is that it dresses our guesses in a standards namespace. So the rule is one sentence — **a `gen_ai.*` name is used only
+where the pinned semantic conventions have one for the thing we actually recorded** — and the rest follows from it.
+
+**The pin.** OpenTelemetry semantic conventions **v1.39.0** (`6d05e92`), read from the upstream repository when this was
+written: the provider attribute is `gen_ai.provider.name` (it was `gen_ai.system` before, and the first draft of this
+export used that older name against v1.27.0 — changed before release rather than shipped, because P4-14's OTLP export
+needs the same tag for `invoke_agent`/`execute_tool`, and two exports of one capsule in two vocabularies is worse than
+one export). `gen_ai.operation.name`'s well-known values are `chat`, `text_completion`, `embeddings`, `invoke_agent`,
+`execute_tool`, `generate_content`, `create_agent`. The tag and its commit are in the code (`export_jsonl.SEMCONV`,
+`SEMCONV_COMMIT`) and in `format.md`, because a name without a version is a name that means something else next year.
+
+**What is mapped, and from what.** `gen_ai.operation.name` from the recorded request path, only for the APIs the
+mapping lists (`/chat/completions`, `/messages`, `/api/chat` → `chat`; `/completions`, `/api/generate` →
+`text_completion`). `gen_ai.provider.name` from the recorded provider host, only for a host in an explicit table
+(`api.openai.com` → `openai`, `api.anthropic.com` → `anthropic`, `generativelanguage.googleapis.com` → `gcp.gemini`,
+`aiplatform.googleapis.com` → `gcp.vertex_ai`, and the handful of others in `SYSTEMS`) — explicit rather than a suffix
+match, because a suffix match would turn `not-openai.example` into `openai`. `gen_ai.request.model` from the model the
+frame recorded. Nothing else: this build has no response decoder yet (P3-08 is still open), so there
+are no usage or finish-reason attributes to map, and inventing them from a byte count would be exactly the failure this
+record exists to prevent.
+
+**What is deliberately absent.** A provider we cannot name gets no `gen_ai.provider.name` (the host goes to
+`bbx.provider.host`); an API we cannot name gets no `gen_ai.operation.name`; and there is no `error.type`, because the
+tape stores an error *message* and semconv defines a low-cardinality *type* — the message is carried as `bbx.model.error`
+instead of being relabelled into a namespace that promises more. Payloads for kinds the mapping says nothing about are
+carried verbatim under `bbx.payload` below 2 KiB and as `{bytes, sha256, truncated}` above it.
+
+**Content is not copied.** A `MODEL_CHUNK` line carries a byte count and, when the sink wrote one, the `[bbx-…]` tag —
+never the bytes. A derived file that duplicated the model's text would be a second copy of the thing the content policy
+was written to protect, in a file whose whole purpose is to be handed to other tools.
+
+**It is a derived part, checked the same way as the graph.** `manifest.derived_parts[]` carries its sha256, `capsule
+verify` re-renders it from the capsule's own segments and compares bytes, and a mismatch is `BBX-E412` naming the first
+line that differs. The file is a pure function of the frames (sorted keys, no timestamp, LF, final newline), which is
+what makes that comparison meaningful. An edited line is reported and the capsule is left alone; a capsule written
+before the part existed verifies as `absent`; a part this build cannot recompute is listed as `unknown` and never
+printed as a pass — an old binary must not call a newer capsule corrupt, and a newer one must not call an unverified
+part checked.
+
+Consequence, stated plainly: the export is a **timeline with standards-compliant names where they exist**, not an
+OTLP export. P4-14 (`otlp/spans.json`) is the ticket that turns nodes and calls into spans, and it will need the same
+discipline: a pinned semconv commit, a schema snapshot, and no attribute this build cannot justify.
+
+## D-055 — a close says it happened; the tick stays for everything else (2026-11-16, P3B-03/defect 58)
+
+Defect 58 measured the watchdog's outage on a starved macOS runner: 104.7 ms and 113.5 ms worst samples against a 100 ms
+budget, with **every rebind between 0.5 and 1.8 ms** and, from the field added in `37f5fbf`, a **113.2 ms worst tick
+lateness** on the same run — the outage was the supervisor thread not being scheduled, not the rebind.
+
+Two ways out, and only one of them is honest. The dishonest one is to relax the assertion until the runner stops
+failing it, which is what defect 40 was: a median quoted over an experiment that did not measure the thing the plan
+asks. The honest one is to notice earlier, because most of the 20 ms tick was being spent waiting for news that the
+listener could have sent: `ProxyServer.close()` now calls a `lost_cb`, `ProxyThread` sets a `threading.Event` from it,
+and the watchdog waits on that event with the tick as a timeout. A close is therefore detected in **microseconds**
+instead of up to a tick.
+
+Measured, in `bench/results/2026-11-16-rebind-detectors.json` (n=40 per column, one interpreter hosting the proxy and the
+measuring client, Linux 6.1 x86_64, CPython 3.11.2, 2 CPUs, idle and one busy process per CPU):
+
+| column | outage p50 / max | rebind max | detection p50 | supervisor's own `noticed` |
+|---|---|---|---|---|
+| notice / idle | 0.92 / 1.70 ms | 0.97 ms | 0.50 ms | 0.076 ms (n=40) |
+| notice / loaded | 0.72 / 3.30 ms | 0.56 ms | 0.50 ms | 0.022 ms (n=40) |
+| tick / idle | 12.73 / 21.10 ms | 1.14 ms | 11.67 ms | none (n=0) |
+| tick / loaded | 11.91 / 20.52 ms | 0.59 ms | 11.33 ms | none (n=0) |
+
+160 samples, zero over budget, and the gate is still the **end-to-end outage per sample** — the number a child waits on,
+not a component. What the table adds is the attribution: which part was detection and which was the rebind.
+
+**The tick stays, and it is not decoration.** A listener that dies without closing — an OS-level error, a socket pulled
+out from under the loop, a close that happened before the callback was attached — says nothing, and the watchdog is the
+only detector left. `tests/test_proxy_supervisor.py::test_a_listener_that_dies_without_saying_so_is_still_restored_on_the_tick`
+removes the notice and asserts the old path still restores service on the same port, with `noticed` empty so nothing
+claims an early notice it did not get.
+
+**What this does not claim.** Not a universal 100 ms bound. A thread the OS does not schedule cannot be bounded by this
+or any sleeping-thread design: the macOS failure was 113 ms of *lateness*, and no amount of notice helps if the process
+is not running. What the notice does is remove the tick from the common case (a listener closed by the process that owns
+it), which is where the 20 ms — and on that runner the 113 ms — was being spent. The bound that can be promised is the
+one measured: **a rebind is 0.2–1.8 ms of work**, and an outage is that plus however long the machine takes to run a
+thread that has been woken. `bench/bench_rebind.py` writes both columns and its own `method.bound` string says so, so a
+reader does not have to find this paragraph to learn it.
+
+## D-056 — one pin, one trace, and two exports that cannot disagree (2026-11-16, P4-14)
+
+**The ticket** asks for `otlp/spans.json`: spans that validate against a schema snapshot, and a file a
+Phoenix/Langfuse-class importer accepts. The second half is a *manual* check by construction, and it was not performed
+here (see the end of this entry). The first half is what the code and the tests own.
+
+**One pin.** P4-13 pinned the JSONL export to semconv **v1.27.0** and used `gen_ai.system`. The OTLP export needs
+`invoke_agent` and `execute_tool`, which v1.27.0 does not define, and their page defines `gen_ai.provider.name` where
+v1.27.0 had `gen_ai.system`. Carrying two pins would mean one capsule described in two vocabularies — the exact kind of
+disagreement a verifiable format exists to prevent — so the pin moved to **v1.39.0** (`6d05e92`) everywhere, the JSONL
+attribute was renamed, and the host table was rewritten against v1.39.0's well-known values
+(`generativelanguage.googleapis.com` → `gcp.gemini`, `aiplatform.googleapis.com` → `gcp.vertex_ai`, no bare
+`vertex_ai`). This is a pre-release format change, recorded rather than shipped: nothing outside this repository has read
+`events.jsonl` yet, and one pin is a smaller lie surface than two.
+
+**The mapping is the semconv's, or it is ours.** A node whose recorded kind is `tool` becomes
+`execute_tool {gen_ai.tool.name}`; any other node becomes `invoke_agent {gen_ai.agent.name}`, or `invoke_agent` when it
+has no name; a model call becomes `{gen_ai.operation.name} {gen_ai.request.model}`, each half present only if the frame
+had it. A call whose path the mapping does not know has no operation to name, so it is called `bbx.model.call` — the
+same rule as D-054, one level up: a semconv name is a claim, and we only make it where the vocabulary has an entry.
+
+**Ids are derived, not drawn.** `traceId = sha256(run_id)[:32]` makes **two vantages of one run share a trace**, which is
+the property P3B-03 wants and still does not have at node level (D-052, `docs/node-edges.md`). This is not evidence for
+P3B-03 and must not be read as any: an edge joins two *nodes*, a shared trace says only that the tool believes both taps
+saw the same run id. `spanId = sha256(capsule_id:seq)[:16]` keeps capsules of one run apart while keeping each capsule's
+own rendering stable, so `capsule verify` can compare bytes. The writer's uuid is deliberately not used — the capsule
+does not carry it, and a derived part must be recomputable from what the capsule holds.
+
+**Response frames now repeat the call's identity.** Pairing a response with its request used to be a matter of tape order
+per node slot, which is right when the tape is intact and a guess when it is not. The response payload therefore gains
+`call_id` and `linked_run` (additive: a response written before this carries neither, and the exporter falls back to
+order per slot, which is what it did before). Pairing never spans a slot, so two concurrent calls cannot merge into one
+span.
+
+**What is absent, and why.** No `gen_ai.usage.*`, no `gen_ai.response.finish_reasons`, no request parameters: this build
+does not decode response bodies (P3-08 is open), and a token count derived from `bytes_received` would be an invention
+wearing a semconv name. No prompt or completion text, by the rule that keeps it out of `events.jsonl` too — spans carry
+`bbx.model.chunks_raw`, `bbx.model.bytes_received` and fingerprints, never content. An unclosed node or call gets a span
+that ends at the last frame, `bbx.span.truncated: true`, and an error status naming the frame that never came: dropping
+it would lose the node, and inventing a close would be worse.
+
+**The schema snapshot is checked by a validator that refuses what it does not know.** `jsonschema` is not installed
+here, and adding a library to check a snapshot would make the snapshot's meaning depend on that library's version. So
+`tests/_schema.py` implements the subset the snapshot uses (`$ref` into `#/definitions`, `type`, `required`,
+`properties`, `items`, `pattern`, `enum`, `minItems`, `minProperties`, `maxProperties`, `minLength`) and **raises** on
+any other keyword. The snapshot cannot grow a check nobody runs, which is the failure mode of every hand-rolled
+validator. What it does not do is implement JSON Schema; the file is a snapshot of what this build produces, not a claim
+to validate arbitrary OTLP.
+
+**The importer was run, and it said 415.** A real Phoenix server was installed and started in this sandbox
+(`arize-phoenix` **21.0.0**, `phoenix serve`, with `arize-phoenix-client` 3.7.0 to read the spans back) and the capsule's
+`otlp/spans.json` was POSTed to its OTLP/HTTP receiver:
+
+| attempt | result |
+|---|---|
+| `POST /v1/traces`, `content-type: application/json`, the file as-is | **415** `Unsupported content type: application/json` |
+| the same document parsed by the official definitions (`opentelemetry-proto` **1.45.2**) into an `ExportTraceServiceRequest`, ids adapted from hex to proto3's base64, everything else untouched | parsed, 3 spans, 807 B |
+| `POST /v1/traces`, `application/x-protobuf`, that message | **200** |
+| read back with Phoenix's own client | 3 spans: `bbx.run` (parent of both), `invoke_agent support-agent`, `chat gpt-4`; trace id `50444de0…` preserved byte for byte; `bbx.*` attributes stored verbatim; Phoenix derived `llm.system`/`llm.provider`/`llm.model_name` from our `gen_ai.*` names |
+
+So the ticket's clause — *an importer accepts the file* — is **measured false for the file we ship**, and true for an
+equivalent protobuf encoding of the same spans. The content is right; the encoding is what a Phoenix-class receiver
+refuses. P4-14 therefore stays `wip`, and the fix is concrete rather than hopeful: ship `otlp/spans.pb` as a second
+derived part, produced by a stdlib-only protobuf encoder, so the capsule carries an encoding such receivers take
+(recorded as **P4-20** in `docs/STATE.json` `extra_work`). Langfuse was **not** tested — its SDK is an exporter, not a
+receiver, and no receiver could be installed offline here — and neither were the Collector's JSON receiver or Phoenix's
+gRPC port; the artifact `bench/results/2026-11-16-otlp-importer.json` lists every gap by name.
+
+## D-057 — verify reports pairs, and one check says it cannot check (2026-11-16, P4-16)
+
+`blackbox verify` is five checks behind one command with three ways to name the target (a capsule path, `--run <id>`,
+`--writer <uuid>`), and exit codes `0` / `9` / `2` as the plan fixes them: verified, a check failed, the target cannot be
+read. The decisions worth recording are about what a verifier may *say*.
+
+**Pairs, not verdicts.** Every check reports `declared` and `recomputed` side by side, so a failure shows two values rather
+than the word "mismatch". That is why the manifest had to gain fields rather than the command computing them on the fly:
+`chain_root`, `capture_seam` and `links_summary` are claims a capsule makes about itself, and a verifier that computed
+them from the same input it was checking would be comparing a value to itself.
+
+**`capture_vantage` is not checkable from a capsule, and says so.** The vantage lives on the tape's `meta` page; a capsule
+carries segments, graph, exports, `links.json` and `chain.json`, and deliberately no `meta`. So the check reports
+`ok: null, checkable: false` with the reason, `--json` carries the same two fields, and the summary prints *"declared, not
+checkable from a capsule"* beside the count of passing checks. Two things follow. First, marking it `ok: true` would be a
+check that never ran — the same failure D-056 names in a hand-rolled validator that ignores what it does not know.
+Second, it is **not a failure either**: a capsule is not wrong because it cannot answer a question about the tape it came
+from, and a command that failed on it would teach people to ignore exit 9. What a reader who *has* the tape can do is
+compare the declared number; the capsule alone cannot, and the report is the place to say so.
+
+**`--writer` recomputes, it does not look up.** The manifest carries no writer uuid, so `--writer` cannot search for one.
+Instead each capsule's id is recomputed from the writer asked about and that capsule's own run id
+(`cap.manifest.capsule_id_for`, now the single definition recovery uses too); a capsule whose *declared* id does not match
+that derivation is reported as a finding rather than silently skipped — a capsule claiming a tape it did not come from is
+exactly the thing a verifier should surface, not filter.
+
+**Absent is not wrong.** A capsule from before these fields existed passes with `ok: null` and the note *"this capsule
+predates the field"*. The compatibility rule points both ways: a new build must not call an older capsule corrupt (the
+same rule D-053's graph check follows).
+
+**What this does not establish.** Verification says the capsule is internally consistent and that its derived parts can be
+regenerated from its own bytes; it does not say the tape told the truth about the application, and it cannot reach the
+`meta` page, the writer's memory or anything outside the archive. `tests/test_verify_cli.py` (16) covers the three target
+forms, the five checks, the uncheckable one, and a tamper per part — a raw entry through the integrity root, a derived
+part through `BBX-E412`, and manifest fields through their recomputation — plus one test that a failed verification leaves
+the capsule byte-identical, because a verifier that repaired what it found would erase its own evidence.
+
+## D-058 — the manifest schema is a table this build executes, and an unknown key is not damage (2026-11-16, P4-02)
+
+**The schema is data, not prose.** §13.2 prints a `manifest.json`; a paragraph nobody runs would let the writer and the
+reader drift until a capsule that this build wrote became one it could not open. `cap/manifest.py` therefore carries
+`SCHEMA` — a dict of `(kind, required)` pairs, nested — and one walker (`_walk`) that raises `BBX-E407` with the dotted
+path of the first offending key (`capsule ...: manifest 'run.run_id' is missing`, not "invalid manifest"). It is checked
+**on write**, after the writer has filled in `format`/`integrity`/`signature` and before a byte is written, so a writer
+cannot produce a manifest its own reader refuses; and **on read**, right after the format-version gate.
+
+**Required means "every capsule this format has ever produced carries it".** That is the compatibility rule pointing
+both ways. `derived_parts` (P4-13) and `chain_root`/`capture_vantage`/`capture_seam`/`links_summary` (P4-16) were added
+after the first capsules were written, so they are **optional**: refusing an older capsule would call a legitimate
+artefact corrupt, which is a worse failure than a missing check (D-053, D-057, and the `absent`-not-failed rule all say
+the same thing). A test takes a real manifest, deletes every one of those keys, and asserts the capsule still reads and
+still verifies.
+
+**An unknown key is tolerated, named, and preserved.** A capsule from a newer writer must open here; its extra fields are
+that writer's business. `validate()` returns the unknown top-level keys instead of raising, and `Capsule` carries them as
+`unknown_manifest_keys` — so a caller can say "written by something ahead of me" rather than guess from an empty error
+list. The reverse would make forward compatibility a claim rather than a property of the format.
+
+**What the schema is not.** It checks presence and type, not meaning: it cannot know that `counts.events` matches the
+frames (that is `derived`/`verify`), that `chain_root` is the capsule's own (`blackbox verify`, D-057), or that
+`run_id` is a real id (`manifests` writes what the tape said). A schema is the cheapest gate, not the last one. And like
+the OTLP snapshot validator, `_type_ok` **raises** on a spec kind it does not implement, so a future entry in `SCHEMA`
+cannot quietly pass everything it is handed.
+
+**One strictness people trip over, kept deliberately:** `True` is an `int` in Python and not in JSON Schema, so
+`format_version: true` is refused rather than read as `1`. The `bool`-is-not-`int` guard is one line and two tests.
+
+## D-059 — a hand-written protobuf encoder, and a real receiver read it back (2026-11-16, P4-20)
+
+**Why by hand.** The package had no protobuf dependency and this ticket was not going to add one: `[project].dependencies`
+is empty, and a runtime dependency for a derived part would put a library between the capsule and the evidence. The
+encoder in `cap/export_otlp.py` writes the wire format directly — varint, fixed64, length-delimited — for the subset of
+OTLP this export produces: ids, name, kind, the two timestamps, attributes, parent, status, plus the resource and scope
+wrappers.
+
+**The field numbers are read, not remembered.** They came from the `opentelemetry-proto` **1.45.2** descriptors
+(`ExportTraceServiceRequest.DESCRIPTOR`, `Span.DESCRIPTOR`, …) and are written down in one place with their types. That
+is not pedantry: the first version emitted span attributes with field number 1 — correct for `Resource.attributes`,
+wrong for `Span.attributes` (9) — and a real decoder read the attributes back as `trace_id`. Every id in the file was
+silently a key/value blob. The fix parameterises the field number, and `tests/test_export_otlp_pb.py` decodes the part
+with a **hand-written wire reader that shares no code with the encoder**, so a wrong number fails a test here rather than
+in someone's Phoenix.
+
+**Byte-stable by construction.** Fields are concatenated in ascending field-number order, repeated attributes are sorted
+by key, spans are ordered by `(start, seq)`, and integers go out with the wire type the descriptor declares. `capsule
+verify` re-renders the part and compares **bytes** — on all ten CI cells, across Linux, macOS and Windows — which is the
+cross-platform claim this export can actually make. A protobuf compares as bytes, so a drifted part reports
+`bytes (N stored, M recomputed)` and their sha256s; it does **not** invent a line number for a binary, which would name a
+byte offset as if it were text.
+
+**What it carries, and what it refuses to.** Counters and fingerprints, never content: a `MODEL_CHUNK` appears as
+`bbx.chunks_raw` and `bbx.model.bytes_received`, and a test writes a secret into a chunk and asserts the bytes appear in
+neither export. No `gen_ai.usage.*` and no finish reasons (no response decoder — P3-08 open). An attribute value whose
+type this format has no wire type for is carried as text rather than dropped: visible, and honestly typed as what it is
+to us.
+
+**The measurement.** Phoenix **21.0.0** (`arize-phoenix`, read back with `arize-phoenix-client` 3.7.0) answered **200** to
+the capsule's own `otlp/spans.pb`, unmodified, and returned all three spans with the trace id `50444de0…` byte for byte,
+both children naming `bbx.run`'s span id as parent, `bbx.model.bytes_received` still an integer, every `bbx.*` attribute
+unchanged, and Phoenix's own `llm.system`/`llm.provider`/`llm.model_name` derived from our `gen_ai.*` names. Its OTLP/HTTP
+receiver answered **415** to `otlp/spans.json` — unchanged from D-056, and the reason this part exists. So **P4-14's
+importer clause is met by the part a Phoenix-class receiver actually takes**, while the JSON part stays in the capsule for
+readers that want JSON. Artifact: `bench/results/2026-11-16-otlp-pb-importer.json`.
+
+**What is still not measured.** Langfuse (its Python SDK is an exporter, not a receiver, and no receiver installs
+offline here), the OpenTelemetry Collector's OTLP/JSON receiver, Phoenix's gRPC port 4317, and every importer other than
+Phoenix. The phrase this work supports is "a Phoenix-class receiver accepted the file and it read back intact" — not
+"OTLP is interoperable".

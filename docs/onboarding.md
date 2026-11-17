@@ -28,10 +28,23 @@ Then answer, in your own words, without looking at any other file:
 
 ```
 ls capsules/ && .venv/bin/blackbox verify capsules/*.bbx
+.venv/bin/blackbox view capsules/
+.venv/bin/blackbox diagnose capsules/ --brief repair-brief.md
 ```
 
 Answer: does the tool tell you *which* step was interrupted, or only that something was? Is the answer specific
 enough to act on?
+
+Then read the brief, and check it against the standard this build holds itself to:
+
+1. Does it claim anything the capsule cannot support — a file and line, a cause with no alternative, "the tool did not
+   run"? It should not: it prints `observed` / `likely` / `cannot-tell`, and it says which check would settle a `likely`.
+2. Does it show you the exact command it cannot reproduce? It should say the command line was **not recorded** rather
+   than guessing one.
+3. Does anything in it look like a credential? It should not: every quoted string is scrubbed with the same pattern
+   table the writer redacts with.
+4. Did it change anything? It should not have. `git status` in your repository is the check, and the brief is a
+   document — applying it is your edit, made with your tests.
 
 ## Task 3 — do it again and break it on purpose
 

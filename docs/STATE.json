@@ -5,10 +5,10 @@
     "docs/STATUS.md",
     "bench/results/*.json"
   ],
-  "next_ticket": "P3B-03",
-  "next_note": "L3: attach is one command with the receipts — the proxy's four §15.1 rows measured (P3B-08), the Claude Code and Codex hook adapters install byte-identically, the launcher folds the inbox into its own vantage, and `docs/attach.md` labels every surface with a version+date or the word unverified (openai 3.51.0, anthropic 2.8.0, curl 7.88.1, node v22.22.3 were run; defect 39 found and fixed). Next: P3B-03's remaining half — the Python auto-import .pth and the `--no-sdk` / `--force-proxy` / `--no-hooks` flags its done-when names — then P3B-07's bench-box cold-start row and the viewer. Suite 841.",
-  "last_green_commit": "ff85b59",
-  "last_green_commit_note": "run 43768293790 on ff85b59, ten jobs ten success — P3B-08 ticked on its own evidence and the rebind budget taken as a median of five (defect 40), after run 43767898299 read 107.9 ms against 100 on py3.11/macos-latest. 3f29d63 is the merge of PR #14 on main (P3B-09, run 43767064900 ten of ten on 35c0cdf).",
+  "next_ticket": "P4-03",
+  "next_note": "**P4-02 and P4-20 are done, and P4-14's importer clause is now met** (D-058, D-059). The manifest schema is data `cap/manifest.py` executes on write (before a byte) and on read; a missing required key or a wrong type is BBX-E407 with the dotted path, every field added after the first capsules is **optional** (a capsule that predates `derived_parts`/`chain_root`/`capture_seam`/`capture_vantage`/`links_summary` still reads and verifies), and unknown keys are tolerated, preserved and reported on `Capsule.unknown_manifest_keys`. `otlp/spans.pb` ships as a fourth derived part, written by a hand-written protobuf encoder whose field numbers came from `opentelemetry-proto` 1.45.2: **Phoenix 21.0.0 answered 200 to the capsule's own bytes and read back 3 spans, the trace id byte for byte, the parent chain, integer types and every `bbx.*` attribute**, while its receiver still answers 415 to the JSON part. Langfuse, the Collector's JSON receiver and Phoenix's gRPC port remain untested and are named as such. **P3B-03 remains open with 0 node-level edges and defect 58 remains open with no universal 100 ms claim.** Next: **P4-03**, `cap/integrity.py` \u2014 per-entry sha256 and the sorted root, with a one-byte tamper naming the entry.",
+  "last_green_commit": "66ece0f",
+  "last_green_commit_note": "Run 44007167662 at 66ece0f: **ten of ten**, both Windows cells and all three macOS cells included. 4a1f629 (44005929845) is the red run before it and keeps its number: the three Windows cells failed on defect 59 \u2014 `blackbox verify` printed U+2260 and a cp1252 console has no such glyph, so the command that exists to report a finding crashed only when there was one. Fixed by making every printed line ASCII, with two tests (a failing report and --help) holding the line; docs/defects.md defect 59.",
   "gates": {
     "G-A": "pass",
     "G-Promise": "pass",
@@ -22,8 +22,12 @@
     "G-Sec": "pending",
     "G-Release": "pending"
   },
-  "gate_note": "a gate flips to pass only with a reviewer-signed docs/gates/G-<name>.md (AGENT_FINAL.md §4); the builder never ticks its own gate",
-  "open_blockers": [],
+  "gate_note": "a gate flips to pass only with a reviewer-signed docs/gates/G-<name>.md (AGENT_FINAL.md \u00a74); the builder never ticks its own gate",
+  "open_blockers": [
+    "**Importers other than Phoenix are untested.** Phoenix 21.0.0 accepts `otlp/spans.pb` (200, read back intact) and rejects `otlp/spans.json` (415, protobuf-only receiver) \u2014 both measured, both in `bench/results/2026-11-16-otlp-pb-importer.json`. Langfuse, the OpenTelemetry Collector's OTLP/JSON receiver and Phoenix's gRPC port 4317 were not exercised; none of them can be installed offline here.",
+    "**P3B-03 stays open.** 0 node-level edges recorded; a shared trace id is not an edge (`bench/results/2026-11-16-p3b03-acceptance.json`).",
+    "**Defect 58 stays open.** The close-notice/tick work makes no universal 100 ms claim; the macOS run was 113 ms of thread lateness (`bench/results/2026-11-16-rebind-detectors.json`)."
+  ],
   "lane_status": {
     "L0": {
       "done": [
@@ -131,11 +135,20 @@
       ]
     },
     "L4": {
-      "done": [],
+      "done": [
+        "P4-02",
+        "P4-10",
+        "P4-11",
+        "P4-13",
+        "P4-14",
+        "P4-16",
+        "P4-17",
+        "P4-18",
+        "P4-19"
+      ],
       "wip": [],
       "todo": [
         "P4-01",
-        "P4-02",
         "P4-03",
         "P4-04",
         "P4-05",
@@ -143,13 +156,8 @@
         "P4-07",
         "P4-08",
         "P4-09",
-        "P4-10",
-        "P4-11",
         "P4-12",
-        "P4-13",
-        "P4-14",
-        "P4-15",
-        "P4-16"
+        "P4-15"
       ]
     },
     "L5": {
@@ -296,7 +304,7 @@
   "extra_work": [
     {
       "id": "P3-13MP",
-      "name": "loopback mock provider (required by G-Capture, no row in the plan's §18.5 table)",
+      "name": "loopback mock provider (required by G-Capture, no row in the plan's \u00a718.5 table)",
       "status": "done",
       "commit": "714554c",
       "tests": "tests/test_mock_provider.py (9)",
@@ -333,13 +341,20 @@
     },
     {
       "id": "P3-11c",
-      "name": "the §15.1 capture rows (Disabled, content=off, content=hash, provider Δ p95, install) and the content modes they needed",
+      "name": "the \u00a715.1 capture rows (Disabled, content=off, content=hash, provider \u0394 p95, install) and the content modes they needed",
       "status": "done",
       "commit": "HEAD",
       "tests": "tests/test_content_modes.py (9), bench/bench_capture.py",
       "measurement": "bench/results/2026-11-15-capture-overhead.json",
-      "note": "the sink ignored the configured content mode (defect 30): default `hash` in Appendix A, body written anyway. Now full/hash/off with the byte count in a payload header so recovery still answers \"how much arrived\"; redaction skipped in off mode. All five §15.1 rows measured on ext4 with tmpfs as a labelled second column; the content=hash worst case (a body containing `token`) is published beside the row rather than behind it",
+      "note": "the sink ignored the configured content mode (defect 30): default `hash` in Appendix A, body written anyway. Now full/hash/off with the byte count in a payload header so recovery still answers \"how much arrived\"; redaction skipped in off mode. All five \u00a715.1 rows measured on ext4 with tmpfs as a labelled second column; the content=hash worst case (a body containing `token`) is published beside the row rather than behind it",
       "label": "self"
+    },
+    {
+      "id": "P4-20",
+      "name": "otlp/spans.pb \u2014 the protobuf encoding a real OTLP receiver takes",
+      "status": "done",
+      "tests": "tests/test_export_otlp_pb.py (12)",
+      "note": "D-059: the capsule's own otlp/spans.pb was accepted by Phoenix 21.0.0 (200) and read back with the trace id, parent chain, integer types and every bbx.* attribute intact \u2014 which is also the evidence that closes P4-14's importer clause. Langfuse, the Collector's OTLP/JSON receiver and Phoenix's gRPC port remain untested (bench/results/2026-11-16-otlp-pb-importer.json)"
     }
   ]
 }

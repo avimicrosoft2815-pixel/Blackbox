@@ -298,3 +298,407 @@ plan's §10 shape, and it is append-only.
   averaged away. A genuinely slow rebind still fails, on every sample; one scheduling pause no longer does.
   *Test*: `test_the_watchdog_brings_a_dead_listener_back_without_being_asked`; green at `19d831e`+ locally and in the
   re-run, and the number that a reader should quote is still the recorded median, not a rounding of the budget.
+- **defect 40, superseded 2026-11-16 — the median was a second measurement of the wrong quantity.** Closer reading of the
+  sentence the row implements (§11.8: *"the listener is re-bound within 100 ms"*) says the subject is the listener coming
+  back, so the quantity is an **outage** — detection (a tick) plus the rebind — and the tick is the larger of the two. The
+  median of five was wrong in three ways at once: it measured `rebind()` and called it the budget, four of its five
+  samples were manual `rebind()` calls no child experiences, and a median of a distribution is not the one outage a child
+  waits through.
+  *Fix*: `bench/bench_rebind.py` measures watchdog-triggered outages only, alternating idle and loaded columns, with the
+  phase randomised per trial and every sample kept, run twice and both committed
+  (`bench/results/2026-11-16-rebind-a.json`, `-b.json`); the default tick moved from
+  50 ms to 20 ms so the budget is not spent waiting for a watchdog to look (`SUPERVISE_MS`, D-043, ADR-006); and
+  `test_every_watchdog_rebind_lands_inside_the_budget_not_the_median_of_them` asserts **every** sample of 8 watchdog
+  rebinds against `REBIND_BUDGET_MS`, printing the worst one.
+  *Measured*: 240 samples over two runs — idle worst 21.86 / p50 11.58–12.39 / p95 20.53–20.77, loaded worst 21.47 /
+  p50 11.52–11.77, **0 of 240 samples over budget, 0 port moves**; rebind alone p50 0.80–0.82 / max 2.90 ms. Gate
+  **PASS** in both runs on a 2 vCPU Linux container.
+  *Still open*: the macOS arm64 cell that produced the 107.9 ms sample has not re-run since, so it is the second data
+  point, not a confirmation; and ADR-006 §6 records what no in-process watchdog can promise (a frozen container, or a C
+  extension holding the GIL past the tick on the in-process attach path). The 107.9 ms sample is retained here as the
+  reason the margin matters, not as a number that has been explained away.
+
+- **defect 41 — every clean run's capsule said `counts.nodes: 0`, while its `graph.json` listed the nodes.** The count
+  was `len(result.node_statuses)`, and `recovery.classify_nodes` deliberately returns only the **unclosed** nodes,
+  because its job is the §14.4 table ("what was interrupted, and what may have happened"). The plan's example manifest
+  (§13.2) has `"nodes": 44` for a run whose nodes all finished, so the two disagreed and the code was the one that was
+  wrong: a reader, and later the viewer, would have read "no nodes" off a run that had a dozen.
+  *Cause*: one function answering two different questions, and the answer to the rarer one used for the common one.
+  *Fix*: `recovery.node_count(frames)` counts distinct `NODE_OPEN` slots (slot 0 is the run itself, not a node);
+  `counts.nodes` uses it, and the interrupted count is kept beside it as `counts.nodes_interrupted`.
+  *Test*: `tests/test_launcher_attach.py::test_one_run_is_one_set_of_linked_tapes_not_one_tape` asserts the child's
+  capsule reports its node, and `tests/test_recovery.py` still asserts the interrupted table on the runs that have one.
+  *Found by*: measuring P3B-03's "one run with linked nodes" rather than assuming it — the capsule was the thing being
+  read at the time, and the zero was next to a `graph.json` that said otherwise.
+
+- **defect 42 — six finished ticket rows existed only in the generated ledger, and one regeneration reverted them.**
+  `docs/progress.md` is written by `tools/gen_progress.py` from the plan plus a dict of statuses in that script. P3B-04,
+  -05, -06, -08, -09 (done) and P3B-07 (wip) had been edited straight into the markdown at some point and never added to
+  the dict. Nothing noticed, because nothing regenerated the file — until P4-10's row was added and the generator ran,
+  at which point six finished tickets became `todo` in the ledger while `STATE.json` still had them done.
+  *Cause*: two sources of truth for one field, with the weaker one (a generated file) holding the real value.
+  *Caught by*: `tests/test_state_consistency.py::test_state_and_progress_agree_in_both_directions`, on the first
+  regeneration after the drift — the guard was already there and did its job.
+  *Fix*: the rows are in `tools/gen_progress.py`'s status map, copied from the previous file by a script rather than
+  retyped, and the generator's ticket filter now includes `P4-` so the viewer rows appear in the ledger at all
+  (they were silently absent while `STATE.json` listed them). D-046 records the rule: a status is edited in the
+  generator and regenerated, never in the file it generates.
+  *Test*: the consistency test above, plus a regenerated `docs/progress.md` in this commit whose diff is the P4 rows and
+  the restored P3B rows and nothing else.
+
+- **defect 43 — two of the new launcher tests were POSIX-only and failed all three Windows cells.** Run `43880930567`
+  on `66830f2`: `py3.11`, `py3.12` and `py3.13 / windows-latest` each failed
+  `test_the_temp_dir_is_removed_even_when_the_child_is_killed` (exit 1, expected 137) and
+  `test_a_shell_child_is_given_no_pythonpath_at_all` (`FileNotFoundError: [WinError 2]`). The other seven cells passed
+  (one macOS cell and three Ubuntu cells green; two macOS cells cancelled with no runner).
+  *Cause*, two of them, and only one is the test's: (a) the kill script used `signal.SIGKILL`, which **does not exist on
+  Windows** — merely accessing it raises `AttributeError`, so the child exited 1 and the `137` expectation was a POSIX
+  convention asserted everywhere; (b) `/bin/sh` does not exist on Windows. (c) A third problem was in the **product**:
+  `cleanup_sdk()` set `removed: True` after `shutil.rmtree(..., ignore_errors=True)` without checking, so on a Windows
+  host where the directory is briefly locked the record would have claimed a cleanup that did not happen.
+  *Fix*: the kill script picks `SIGKILL` where it exists and `SIGTERM` otherwise, and the expected code follows the
+  platform (`137` on POSIX, the platform's own status on Windows); the shell child is `cmd /c echo [%PYTHONPATH%]` on
+  Windows and `/bin/sh -c printf` on POSIX, with the same assertion; `cleanup_sdk()` retries three times and reports
+  `removed` from `os.path.exists`, with `cleanup_error` naming the path when it survives.
+  *A fourth bug, found while making the decision testable*: `_is_python_command`'s regex ended in `[a-z]*`, so
+  `pythonista` matched — the launcher would have shipped a `sitecustomize` to a text editor and reported `sdk: enabled`.
+  The pattern is now `python(\d+(\.\d+)*)?w?`, plus `py.exe`/`pyw.exe` on Windows only when the name resolves.
+  *Tests*: `tests/test_launcher_attach.py` (20), including `test_the_python_command_test_itself_is_platform_neutral`,
+  which is the test that caught the fourth bug. Verified on Linux; the Windows cells are the evidence and are quoted
+  from CI, not from here.
+  **Second round, same defect (run 43885473662, commit 1009576).** The first fix was itself POSIX-shaped in two places,
+  and the Windows cells said so precisely: `AssertionError: exit 15 (os.name=nt)` and
+  `FileNotFoundError: …\test_a_shell_child_is_given_no0\pp.txt`. (a) `os.kill(pid, sig)` on Windows is
+  `TerminateProcess(handle, sig)`, so the exit status *is* the signal number — 15 for the `SIGTERM` fallback, not the
+  1 that the helper guessed. The helper now returns 137 on POSIX and `SIGTERM`'s number on Windows, and the comment
+  says where the number came from. (b) A quoted redirect path inside a `cmd /c` string is re-quoted by
+  `subprocess.list2cmdline`, whose backslash escapes `cmd.exe` does not parse as escapes: the file was created under a
+  different name, so the read failed. The test no longer round-trips through a shell on Windows at all — it captures the
+  `env` the launcher passes to `Popen` and asserts the SDK path appears nowhere in it, which is the property under test
+  observed directly. POSIX keeps the stronger child-observed check.
+
+- **defect 44 — the plan's most safety-relevant classification row was unreachable, and a killed tool call was reported
+  as if the tool had never run.** `rec/recovery.py::classify_nodes` counted `KIND_TOOL_REQUEST`/`KIND_TOOL_RESULT`
+  frames. **No seam writes those frames**: the hook adapters (`hooks/events.py:116`, `:147`) map `PreToolUse` to a
+  `NODE_OPEN` whose payload has `kind="tool"`, and `PostToolUse` to the matching `NODE_CLOSE`. So a process killed
+  between a tool's open and its close produced `INTERRUPTED_BEFORE_FIRST_BYTE` with the detail "node opened and never
+  touched a model or a tool" — a claim that the side effect did not happen, which §14.4 exists specifically to avoid.
+  The row that says *tool invoked; outcome unknown — the side effect may have happened* could not be produced by any
+  real recording. **Fix**: `classify_nodes` reads the node payload's own `kind` (new `node_kind()` helper) and counts a
+  tool node as a tool request until its close, with the close counting as the result; `ui/model.py` counts `tool_calls`
+  the same way, since it showed 0 for every hook-recorded run for the same reason. **Tests**:
+  `tests/test_recovery.py::test_a_tool_node_that_never_closed_is_interrupted_in_tool`,
+  `::test_a_closed_tool_node_is_not_interrupted`, and `tests/test_ui_viewer.py::test_a_tool_node_counts_as_a_tool_call_in_the_page`.
+  Found by the diagnosis ticket's own fixtures, which is the point of writing evidence readers against real frames.
+
+- **defect 43 is closed (2026-11-16, run 43888826452).** All three Windows cells pass on `724f1b4`, and `283554f`
+  repeats it (7 success, 3 macOS cancelled). The two fixes it needed are recorded above; the third one — the product's
+  `cleanup_sdk` claiming a removal it had not checked — is covered by the same run, since
+  `test_the_temp_dir_is_removed_even_when_the_child_is_killed` asserts `removed` against `os.path.exists`.
+
+- **defect 45 — the proxy forwarded the traffic and recorded none of it, so `blackbox run` produced a capsule with no
+  request in it.** `rec/launcher.py::_start_proxy` took a `receiver` and the CLI never passed one, so `ProxyServer`
+  ran with `receiver=None`: `_call_open`/`_call_chunk`/`_call_close` returned immediately and the listener was a
+  relay. Every `blackbox run -- python app.py` therefore recovered a capsule with `events: 5` (bootstrap frames only)
+  and `nodes: 0`, while `result.proxy["stats"]["requests"]` said `1` — the run's *only* model call was absent from the
+  artefact, and nothing in the summary line hinted at it. `tests/test_launcher_proxy.py` asserted the request reached
+  the upstream, which it did; no test asserted the request reached the *tape*. **Fix**: `launch()` builds the
+  receiver itself when the caller supplies none (`_default_proxy_receiver`, a `SinkRecorder(TapeSink(writer.emit))` on
+  the launcher's own writer — `TapeWriter.emit` is lock-guarded, so the proxy's loop thread and the launcher's
+  main thread share one frame chain safely), and `proxy_receiver` stays an override for tests that want their own
+  sink. **Tests**: `::test_the_proxy_vantage_lands_on_the_launchers_tape`. Found by running P3B-03's acceptance line
+  against real clients instead of trusting the flag, `bench/accept_p3b03.py`.
+
+- **defect 46 — a model call outside any node was reported as an interrupted node, in the run that worked.**
+  `rec/recovery.py::classify_nodes` created a node record for whatever slot a `MODEL_REQUEST` named, including slot 0,
+  and slot 0 is *the run itself* — `node_count` says so in as many words and skips it. So a run that ended normally,
+  with its response fully recorded, reported `nodes_interrupted: 1` and the detail *"response fully recorded; the crash
+  happened in the app's handling"*: a claim about a crash that never happened, in the diagnosis a user reads first.
+  The manifest said `nodes: 0` and `nodes_interrupted: 1` in the same breath. **Fix**: when the frames carry a
+  `RUN_END`, an unclosed slot-0 call is complete and is not reported; with no `RUN_END` the slot-0 call is the only
+  evidence of what was in flight and is still classified (mid-stream, before-first-byte), and an unclosed node *of the
+  app's own* is unaffected either way. **Tests**: `tests/test_recovery.py::test_a_completed_call_outside_a_node_is_not_an_interrupted_node`,
+  `::test_a_call_outside_a_node_is_still_reported_when_the_run_never_ended`, `::test_a_clean_end_does_not_silence_a_real_node`,
+  and `tests/test_launcher_proxy.py::test_a_completed_proxied_call_is_not_reported_as_an_interrupted_node`.
+
+- **defect 47 — two capsules of one run name two different run ids, and the link between them says otherwise.**
+  **Open.** `rec/recovery.py::Recovery.__init__` derives the run id from `(writer_uuid, meta.created_wall_ns)` and never
+  reads the tape's own `RUN_START`. The launcher's tape agrees with that derivation because the launcher *computed*
+  `BLACKBOX_RUN_ID` from `run_id_for()`, but a child tape that attached to the launcher's run (`RUN_START` with
+  `attached: true`) carries the launcher's id and gets a capsule whose manifest names the derived one instead. Measured
+  with `bench/accept_p3b03.py` (real `urllib` child, real loopback upstream): one `blackbox run`, two capsules,
+  `r_3fb2a3e364a6255f` and `r_f090ee72bdc2cbf6`, while both tapes' `RUN_START` payloads named the same id — and both
+  capsules' `links.json` describe the same pair as `exact` with `run_id` set to the *declared* id. So a capsule
+  contradicts its own tape and its sibling, and any consumer grouping capsules by `run.run_id` sees two runs where the
+  link says one. P3B-03's "one run with linked nodes" is **not** ticked on this evidence. The fix is not a one-liner:
+  the run id is also the run *directory* name and the capsule id (`"c_" + _hash(run_id)`), so two attached tapes sharing
+  a run id would collide on one capsule path unless capsule identity is derived from the writer too, and the
+  `recovery.done.<STEP>` resumability markers are keyed on it. That is a ticket, not a patch at the end of a session.
+  **Closed 2026-11-16**: the two identities were separated instead of merged. A tape now has a `tape_key` (derived from
+  its writer and creation time) that names its *work directory*, where every file belongs to that tape alone — nothing is
+  shared, so nothing can be overwritten; and a `run_id` that is the run its own `RUN_START` declares, falling back to
+  `tape_key` when the tape names nothing (or names something that is not a run id, like the writer uuid an unattached SDK
+  tape writes). The capsule is per *tape* — `c_` + hash(run id, writer) — so two tapes of one run are two capsules and
+  the second seal cannot replace the first, while both manifests and both links now name one run. Verified end to end
+  with real clients (`bench/accept_p3b03.py`, `bench/results/2026-11-16-p3b03-acceptance.json`): `python` (urllib),
+  `node` 22.22.3 and a real `openai` 3.51.0 client each exit 0 with every capsule root intact and one run id across the
+  capsules. Tests: `tests/test_recovery.py::test_two_tapes_of_one_run_share_the_run_id_and_keep_separate_capsules`,
+  `::test_a_tape_that_names_no_run_keeps_its_own_id`, `::test_a_declaration_that_is_not_a_run_id_is_ignored`,
+  `::test_the_capsule_id_changes_with_the_writer_not_only_the_run`, and the assertion added to
+  `tests/test_launcher_attach.py::test_one_run_is_one_set_of_linked_tapes_not_one_tape`.
+
+- **defect 48 — the repair tests hashed `\n` and wrote `\r\n`, so the applier's own guard failed them on Windows.**
+  Run 43916957036 (5663879) fixed the symlink-root refusal and the Windows cells still failed, on
+  `test_the_right_token_applies_exactly_the_approved_bytes_and_keeps_a_backup` and two neighbours, with
+  *"src/app.py changed after it was approved (reviewed b912ea56, now f9c84e02)"*. Nothing had changed: `Path.write_text`
+  opens in text mode and translates `0x0A` to `0x0D 0x0A` on Windows, while the fixture's `_sha(text)` hashed the
+  untranslated string. The product was right — a file whose bytes differ from the reviewed hash is exactly what the
+  write-time re-check exists to refuse — and the fixture was the thing that was wrong, on the platform where nobody had
+  run it. **Fix**: every fixture write goes through `_write()` (`write_bytes`), `_change()` hashes `read_bytes()`, and the
+  tree snapshot compares hex bytes rather than text, so a CRLF difference can no longer hide inside `read_text`'s
+  translation on either side. This is the third defect in this family (C29, D-050, and now the tests): text mode on
+  Windows is not a detail of this feature, it is a way for a byte-exact guarantee to be silently untrue.
+
+- **defect 49 — the auto-import makes a tape and installs no seam, so an unmodified SDK script records nothing itself.**
+  **Closed 2026-11-16.** `cap_sdk/autoimport.py::activate()` calls `api.install()`, which opens the child's tape and writes
+  `RUN_START`/`RUN_END` — and nothing else. The three capture seams are installed by `cap_sdk/preflight.py::choose()`,
+  and **no module in `src/` calls `choose()`**: the seams are exercised by tests and by the day-14 lab, which wires them
+  by hand (`SinkRecorder(TapeSink(api.emit))`). Measured under `blackbox run`: a child using the real `openai` 3.51.0
+  client, with the banner saying `sdk auto-import (sitecustomize)` and `BLACKBOX_VERBOSE=1` saying
+  `blackbox sdk: installed`, leaves a capsule with `{RUN_START, CHAIN, RUN_END, SEG_END}` and **no `MODEL_*` frame**.
+  The call is still recorded — by the proxy's vantage, on the launcher's tape — so nothing is lost, but the child's own
+  vantage is empty and the summary line implies otherwise. This is why P3B-03's "one run with linked nodes" is not
+  claimed as met: with no seam and no `NODE_OPEN`, both vantages report `nodes: 0` and the graphs have no nodes to link.
+  Found by adding the SDK client to the acceptance harness rather than by reading the flag.
+  **Fix**: `api.install()` calls `api.install_capture()` once the child's tape exists — after `RUN_START` and the
+  Keeper, so a recording that fails is still a run — and that builds `SinkRecorder(TapeSink(_emit_at_current_node))` over
+  the same writer the launcher's tape uses, then asks `preflight.choose()`. The node slot is resolved per *event*
+  (`rec.context.current()`, slot 0 when no node is open), not once at install time, because a seam outlives any one
+  `with api.run(...)`. `capture_status()` and `status()["capture"]` report `{installed, seam, attempts}` without the
+  handle or the recorder, and `_close_locked()` releases the seam before the writer goes away, so a later close cannot
+  emit into a dead tape. Installing a seam from `install()` exposed the second half of the defect: a product that had
+  installed its own seam (`tests/_day14_child.py` does exactly that, as the day-14 lab's examples do) got the client
+  class patched **twice**, and `openai` then raised *Attempted to call a sync close on an async stream* before reading a
+  byte — reproduced here, not theorised. So `preflight` gained `adopt()`/`release()`: when the product has
+  already installed a seam, `choose()` returns that seam with attempt status `already-installed` and the reason *the
+  product installed this seam; a second patch would double it*, instead of patching again. One seam per process, and
+  the second caller still gets a working recorder. **Tests**: `tests/test_launcher_attach.py::test_a_childs_own_model_call_lands_on_its_own_tape`
+  (proxy **off**, real `httpx` child, `MODEL_REQUEST` present, `counts.nodes == 1`, `nodes_interrupted == 0`),
+  `::test_the_same_capture_works_for_an_unmodified_openai_client` (real `openai` client, same assertions) and
+  `::test_one_seam_per_process_even_when_the_app_installs_its_own` (the second `choose()` returns `httpx-hooks` with
+  `already-installed`, and one request writes exactly one `MODEL_REQUEST`). All three are red with `install_capture()`
+  disabled — the child's capsule then holds `{RUN_START, NODE_OPEN, NODE_CLOSE, RUN_END, SEG_END}` and the second
+  decision says `installed` — and green with it, which is the check that these tests are about the defect and not about
+  the harness. This closes *recording nothing on the child's own tape*; it does not by itself tick P3B-03's "one run
+  with linked nodes", which still needs a run whose `graph.json` shows nodes and `exact` links between the vantages.
+
+- **defect 50 — `_read_nofollow` followed the link on the one platform where the flag is missing.** Run 43922055318
+  (HEAD `081fac5`) failed `test_reading_an_original_does_not_follow_a_link` on all three Windows cells with *DID NOT
+  RAISE*. The cause was not the test: `NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)` is `0` on Windows, so `os.open` followed
+  the link and the function returned the bytes on the other side — the one thing its name promises it will not do, and
+  the read `_prepare` uses for the originals it hashes for approval and copies into the backup. The POSIX cells cannot
+  see this, which is why it survived every run here. **Fix**: when the platform has no flag, refuse with an explicit
+  `islink` check before the open, raising the same `OSError` so callers do not branch. The remaining exposure is the
+  check-then-open window, which D-050 already records and which this does not close. The reader also moved to
+  `proposal.read_nofollow` and `sha256_file` now uses it, because the hash of the file that was approved and the hash
+  of the file about to be replaced were being taken by two different rules — the write path nofollow, the hash path
+  follow. **Tests**: `tests/test_repair_workflow.py::test_reading_an_original_does_not_follow_a_link` (asserts *which*
+  mechanism refused) and `::test_without_the_descriptor_flag_the_refusal_is_a_check`, which takes the flag away on any
+  platform and therefore runs the Windows path in CI's Linux cells too.
+
+- **defect 51 — the applier promised a private backup directory on a platform that cannot express one.** Same run, same
+  three cells: `test_the_backup_directory_is_inside_the_repository_and_private` failed on
+  `(os.stat(root).st_mode & 0o777) == 0o700`. The product was not lying by accident — `_backup_root` chmodded to `0700`
+  and did not re-check — but on Windows `os.chmod` only toggles the read-only attribute and `os.stat` synthesises
+  `0o666`/`0o777` from the ACL, so the directory the product called private was whatever the repository's ACLs make it.
+  That is a privacy claim the platform cannot support, and the honest answer is to stop making it rather than to relax
+  the test. **Fix**: `_private_dir()` enforces 0700 only where mode bits mean something, re-reads the mode after
+  `chmod` and **refuses** when a filesystem that has modes ignores the change — a place this feature cannot keep its
+  promise is not a place to put the user's source code. Where modes do not exist it returns `False`, which flows into
+  `Applied.private_by_mode`, a `backup` block in `apply-manifest.json` naming the weaker guarantee, and one line of
+  stderr from `repair apply`. `MODES_ARE_REAL` is the capability flag, and the Windows branch is exercised on POSIX by
+  clearing it. **Tests**: `::test_the_backup_directory_is_inside_the_repository_and_private` (platform-true),
+  `::test_a_platform_without_modes_says_so_instead_of_claiming_0700`,
+  `::test_a_filesystem_that_ignores_chmod_is_refused_rather_than_trusted`.
+
+- **defect 52 — the rollback test could not index its own snapshot on Windows.** Same run: `KeyError: 'src/b.py'`. This
+  one *is* a fixture, and the evidence is that the assertions before it passed: the apply failed, the message contained
+  `COULD NOT restore` and `app.py`, and `manual intervention required` was present — the rollback did what it promises.
+  `_snapshot` keyed its dictionary with `str(p.relative_to(root))`, which is `src\\b.py` on Windows, while the test
+  looked the file up as `src/b.py`. **Fix**: `.as_posix()` in the helper, so the comparison is about bytes and not about
+  a separator. Worth recording precisely because it looks like the two above: a Windows red cell is not evidence of a
+  product bug until the failure line says so.
+
+- **defect 53 — every cleanly sealed run was reported `SEAL_INTERRUPTED`, in its capsule and in the summary line.**
+  Found while measuring P3B-03's acceptance line: all four cells of a fresh `bench/accept_p3b03.py` run exited 0 and every
+  capsule still said `run.status: SEAL_INTERRUPTED, status_cause: SEAL_NEVER_FINISHED`. The cause was one line of the
+  scanner: `sealed_segments` was filled only by the loop over the segments *before* the active one (`n < n_active` by
+  construction), so the seal that `TapeWriter.close()` writes for the last segment — the normal end of every run — was
+  never read. Measured directly: a tape written and closed in one process has `00000001.seal` on disk,
+  `seal.read()` returns a valid record for it, and `scanner.scan(...).sealed_segments` was `[]`. §14.4's rule is
+  "`RUN_END` present but no seal ⇒ `SEAL_INTERRUPTED`", so every clean run told the user its capsule build had been
+  interrupted and was "safe to re-run" — the one sentence a re-run would change nothing about. **Fix**: the scanner also
+  reads the active segment's seal and counts it when `seal["segment_no"] == n_active` **and**
+  `seal["end_seq"] == head.head_seq`, i.e. only when the seal describes exactly the bytes the committed head names; a
+  seal left over from before a later append does not match and is ignored, so a reopened tape cannot inherit a clean
+  verdict. **Two tests had the behaviour written down as a rule**:
+  `tests/test_tape.py::test_roll_produces_two_sealed_segments_and_a_full_scan` asserted `sealed_segments == segs[:-1]`
+  *after* calling `w.close()`, and `tests/test_launcher.py::test_the_plan_acceptance_line_leaves_a_recovered_run`
+  asserted `SEAL_INTERRUPTED` for `sh -c 'kill -9 $$'` — where the *child* dies and the launcher's own tape closes
+  cleanly, so the assertion was about the scanner's blind spot and not about the killed child (whose death is
+  `exit_code: 137`/`signaled: 9` in the same test). Both now assert the contract. **New test**:
+  `tests/test_tape.py::test_a_clean_close_is_sealed_and_a_cut_off_tape_is_not` writes one tape with `close()` and one in
+  a child that `os._exit`s after `publish()`, and asserts `[1]` against `[]` — so `SEAL_INTERRUPTED` stays reachable and
+  is still what a genuinely cut-off writer (the SDK's tape under `SIGKILL`, `tests/test_day14_kill.py`) reports.
+
+- **defect 54 — a clean run's `graph.json` listed no nodes while the same tape's manifest counted one.** `step_graphed`
+  built `graph["nodes"]` from `classify_nodes`, which answers §14.4's question and therefore returns *only unclosed*
+  nodes; the manifest's `counts.nodes` is `node_count`, which counts `NODE_OPEN` slots. Defect 41 fixed exactly this
+  disagreement for the manifest and left the graph holding the other half, so after the seam was installed (defect 49)
+  the two artefacts described different runs: capsule `counts.nodes: 1`, `graph.json` `nodes: []`, `open_nodes: 0`.
+  Nothing in `src/` reads `graph.json`, which is why no test caught it. **Fix**: `graph_nodes()` writes one entry per
+  `NODE_OPEN` slot — `node_slot`, `name`, `kind`, `parent`, `opened_ns`, and a status taken from the `NODE_CLOSE`
+  payload (`outcome`, `duration_us`) or, for a node that never closed, from the interrupted classification — sorted by
+  slot; a `NODE_CLOSE` whose `NODE_OPEN` is not in the scan keeps its slot and says so rather than being dropped.
+  `open_nodes` keeps its meaning: the number still open. **Tests**:
+  `tests/test_recovery.py::test_the_graph_lists_every_node_the_run_had_not_only_the_unclosed_ones` (a closed node and an
+  interrupted one in one graph, and the count agrees with `node_count`),
+  `::test_the_capsule_of_a_clean_run_does_not_call_itself_interrupted`. Measured end to end in the acceptance report:
+  the `sdk-nodes` case now has `graph_nodes: 1` next to `counts.nodes: 1`.
+
+- **defect 55 — `graph.json` carries no edges, so "linked nodes" cannot be read from the graph the ticket names.**
+  **Narrowed 2026-11-16 by D-053; still open, and the residual is one sentence.** `step_graphed` used to write
+  `"edges": []` unconditionally, and the cross-vantage relation lived only in `links.json`. D-052 then wrote the edges
+  it could *justify* — run and tape level — and refused the node-level claim for want of a per-call identifier. D-053
+  supplies that identifier: the seam mints `x-blackbox-call` per outbound request, records it as `call_id` on its own
+  `MODEL_REQUEST`, and the proxy reads the header, records the same id on its own frame, and strips it before the
+  upstream; `rec/links.py::resolve_calls` matches records by that id alone, and `rec/recovery.py::graph_edges` writes
+  them as `level: "call"` edges whose `evidence` says `same call id` / `carried_by: x-blackbox-call`. The graph is now
+  a declared capsule part, so what it says can be re-derived from the raw frames and checked (`blackbox capsule
+  verify`, `BBX-E412`). Measured with real clients in
+  `bench/results/2026-11-16-p3b03-acceptance.json`: `run_level_edges_recorded: 10`, call-level edges present in both
+  the `sdk` and `sdk-nodes` cases, `edges_naming_a_node: 2` — the two call edges in the capsule that recorded a node
+  name the slot the call ran in (`nodes.from: 1`) — and `node_level_edges_recorded: 0`.
+
+  **What is still missing, and why it is not a bug to patch but a decision to take.** Every one of those call edges is
+  `node_join: "partial"`: the proxy's vantage records no node, because slot 0 on its tape is the run itself and D-052
+  rule 2 forbids inventing one for a proxied call. So no edge joins two *nodes*, and `CallLink.level` — which returns
+  `node` only when both ends name a slot — has no real-client witness, only the synthetic one in
+  `tests/test_call_links.py`. Closing that needs a node identity both vantages can write: the seam knows which node it
+  is inside, so the wire can carry it (`x-blackbox-node`, the plan's own header name) and the proxy can record what it
+  was told instead of a slot it guessed. That is defect 55's remainder, and it is a decision record first.
+
+  **Evidence for the fix, named so a reader can check it**: `tests/test_call_links.py::test_two_concurrent_calls_stay_two_links_each_with_its_own_node`
+  and `::test_a_node_to_node_edge_appears_only_when_both_sides_have_a_node` (the resolver: the second is the branch with
+  no real-client witness, and it says so), `tests/test_launcher_proxy.py::test_two_concurrent_calls_get_two_ids_and_two_graph_edges_each_naming_its_own_node`
+  (a real proxied child, two concurrent calls, two ids, two edges naming the slot each call ran in) and
+  `::test_the_call_id_lands_on_both_tapes_and_never_reaches_the_upstream`,
+  `tests/test_recovery.py` (the merge into `edges`, the `call_level`/`ambiguous` counters),
+  `tests/test_capsule_graph.py` (the part is inside the capsule, its hash matches, an edited graph is reported and not
+  repaired, an old capsule verifies as `absent`). `tests/test_capture_failopen.py` pins the interface half: a receiver
+  written before the new `call_id` hint keeps recording instead of failing quietly.
+
+- **defect 56 — two repair tests gave `verify` a POSIX command and read the shell's refusal as the product's.** Run
+  `43931027526` (`e007259`, the first run with defects 50–52 fixed): the three Windows cells failed
+  `tests/test_repair_workflow.py::test_verify_reports_that_it_executes_the_command_it_was_given` and
+  `::test_the_banner_comes_before_anything_runs` with `assert 3 == 0`, and nothing else. Exit 3 from `repair verify`
+  means one sentence: *the command you gave me exited non-zero* (`return 0 if report["verified"] else 3`), and the
+  command was `echo ran > '<tmp>/executed.txt'`. `verify_change` runs it with `subprocess.run(..., shell=True)`, which is
+  `cmd.exe /c` on Windows, and cmd does not strip single quotes: the redirect target became a token beginning with `'`
+  and containing `:` — a name Windows rejects (*"The filename, directory name, or volume label syntax is incorrect"*),
+  so `echo` failed and the product reported `FAIL exit 1` exactly as it should. **The product was right and the fixture
+  was writing a command for a different shell**; the failure is the same family as C29/defect 48 (text mode) and
+  defects 50–52, one level out: a test that pins behaviour by asking a platform to do something only another platform
+  does. **Fix**: `_shell_echo()` builds the command for the shell that will run it — `echo ran> "<path>"` and
+  `echo run>> "<path>"` on Windows (no space before the redirect, or cmd writes it into the file), the old
+  single-quoted form on POSIX — and `::test_the_verify_command_is_quoted_for_the_platform_shell` pins both forms by
+  patching `os.name`, so the POSIX-only form cannot come back. **Uncertainty, stated**: the job log for this run is not
+  reachable from this sandbox (GitHub redirects it to a blob host), so the cause above is read from the exit code, the
+  command text and cmd's quoting rules. **Closed 2026-11-16 by a controlled pair, which is the check that settles it**:
+  `f3fd801` (the same tree without the fix, run `43935414757`) failed **exactly** those two tests on all three Windows
+  cells, and `7d55ba1` (run `43935889831`) has all three Windows cells **green** with every other executed job green
+  too — so the two tests were the only Windows failure on the branch and are now not. The macOS jobs in both runs were
+  `cancelled` with `steps: 0` (*"The job was not acquired by Runner of type hosted"*), i.e. runner capacity, not a test
+  result; that is why those runs are red at all, and macOS stays unmeasured.
+
+- **defect 57 — the resolver decoded the tape's model frames as CBOR, so the call-link fields it was written to read did
+  not exist.** Found while measuring D-053, by a probe that ran two concurrent calls through a real proxy and got *no*
+  call links back: not an ambiguous link, none at all. `correlate._payload()` called `cbor.decode_exact()` on every
+  frame payload, and a `MODEL_REQUEST` payload is **JSON** (§4.0, D-030) — so the decode raised
+  `CBORError: text string too large` for every model frame, the except branch returned `{}`, and every field read off it
+  (`call_id`, `request_fp`, `linked_run`) came back `None`/absent. That is the shape of a quiet failure this project has
+  a name for: the code said "looked and found nothing" while it had never looked. Two consequences, both real: the new
+  call links could never appear on a real run (the first measurement would have been a false zero), and
+  `links.resolve`'s fingerprint path compared two empty strings, which match each other — so two unrelated calls with
+  no fingerprints were one `inferred` link away from being joined by the *absence* of evidence. **Fix**: `_payload()`
+  tries CBOR and falls back to `json.loads` (the same order `rec/recovery.py` uses for the same reason), and
+  `links.resolve` refuses to compare an empty fingerprint before comparing any. **Tests**:
+  `tests/test_call_links.py::test_the_resolver_reads_json_model_request_payloads` builds a tape whose `MODEL_REQUEST`
+  is JSON and asserts the id and fingerprint arrive, and `::test_two_calls_with_no_ids_are_not_matched_by_fingerprint_or_time`
+  asserts two id-less, fingerprint-less calls are **not** linked. Measured after the fix: two concurrent calls →
+  `2` ids, `2` call edges, `node_join: partial`, `call_level: 2` in `edge_summary` (before: `0` and `0`).
+
+- **defect 58 — the first macOS cell that actually ran failed the watchdog budget by 4.7 ms, and the message could not
+  say whose 4.7 ms they were.** Run `43973451998` (`823d08a`) is the first run in this branch's history where a macOS
+  runner was *acquired*: `py3.12 / macos-latest` executed (11 steps, not the `steps: 0` cancellation of the earlier
+  runs) and failed
+  `tests/test_proxy_supervisor.py::test_every_watchdog_rebind_lands_inside_the_budget_not_the_median_of_them` with
+  `worst watchdog outage 104.7 ms over the 100.0 ms budget; outages [96.5, 76.7, 29.4, 100.7, 44.2, 14.4, 104.7, 22.1]
+  ms, rebinds [1.49, 1.55, 1.52, 1.5, 1.11, 1.57, 1.18, 1.34] ms`. Two of eight samples are near the whole budget and
+  **every rebind took between 1.1 and 1.6 ms**, so the product's own work is two orders of magnitude inside the budget
+  and the outage is detection: a watchdog tick that woke 80–100 ms late on a shared, capacity-constrained arm64 runner
+  (GitHub's own annotation on that job says "Due to capacity constraints, jobs targeting macOS arm64 runners may
+  experience longer queue times"). The failure message could not distinguish that from a slow rebind, which is the part
+  worth fixing first: a row that reports one number for two different things invites the answer defect 40 got (quote a
+  median until it is green). **Fix (measurement, not a relaxed gate)**: `ProxyThread.wake_late_ms` records how late each
+  watchdog tick woke, and the failure message now prints the worst lateness over the number of ticks, beside the
+  outages and the rebinds. **The assertion is unchanged** — 100 ms, every sample — so the gate stays red on this commit
+  and macOS stays unmeasured for the *product's* latency until a run on a runner that is not starved passes it. The
+  open question, for the owner, is whether §11.8's promise is "a rebind is repaired within 100 ms" (which the rebinds
+  column already shows, by 60x) or "the *outage* is under 100 ms on any machine", which no sleeping thread can promise
+  and which would need detection that does not depend on being scheduled — an event-driven watch on the listener's
+  socket rather than a 20 ms tick. Both readings are written down here rather than resolved by editing the test.
+  **Second measurement, which is the one that settles what the first one meant** (run `43977497614` at `37f5fbf`): all
+  ten jobs were scheduled, **both the `py3.11` and the `py3.13` macOS cells passed**, and only `py3.12 / macos-latest`
+  failed — with `outages [75.5, 29.4, 33.3, 113.5, 65.9, 91.6, 17.6, 18.7] ms`, `rebinds [1.27, 1.08, 1.23, 0.46, 1.78,
+  1.25, 0.64, 0.76] ms` and, from the field this fix added, **`worst watchdog tick lateness 113.2 ms over 13 ticks`**.
+  The outage and the lateness are the same number to within 0.3 ms: the watchdog thread did not run for 113 ms, and the
+  rebind it then did took 1.78 ms. So macOS is measured now, twice, on two different commits; the product's own rebind
+  there is 0.5–1.8 ms, and the only red assertion on the branch is a wall-clock bound on a thread the runner stopped
+  scheduling. That is also why this entry is open: the bound may be the right one to keep and the test may need to
+  measure the machine's share separately, and that choice belongs to the owner, not to a green build.
+  **Fix, in two parts, and the gate is untouched** (D-055). (1) *Measure the three components separately*: the failure
+  message prints the rebinds and the worst tick lateness beside the outage, so a red row says which half was ours; the
+  bench writes `outage_ms`, `rebind_ms`, `detection_ms` (outage − rebind, every sample) and the supervisor's own
+  `noticed_ms` with its own `n`, per column. (2) *Notice earlier*: `ProxyServer.close()` now calls a one-shot `lost_cb`,
+  `ProxyThread` turns it into a `threading.Event` the watchdog waits on instead of sleeping out the whole tick, and a
+  close is detected in microseconds. The tick remains as the **backstop** for a listener that dies without saying so,
+  and `tests/test_proxy_supervisor.py::test_a_listener_that_dies_without_saying_so_is_still_restored_on_the_tick`
+  removes the notice to prove that path still restores service on the same port. Measured on this box
+  (`bench/results/2026-11-16-rebind-detectors.json`, n=40 per column, Linux 6.1 x86_64, CPython 3.11.2, 2 CPUs, idle and
+  one busy process per CPU): notice columns outage p50 0.72–0.92 ms / max 1.70–3.30 ms with `noticed` p50 0.02–0.08 ms;
+  tick columns outage p50 11.9–12.7 ms / max 20.5–21.1 ms with `noticed` n=0. **160 samples, zero over the 100 ms
+  budget, and the assertion is still per-sample on the end-to-end outage.** **Still open**, deliberately: what the macOS
+  runner did to this branch is 113 ms of *lateness*, and no notice helps a thread that is not scheduled — so the entry
+  stays open until a run of the four-column bench on a runner that starves threads shows the notice columns inside the
+  budget while the tick columns show the stall. The universal-100 ms claim is not made anywhere: `bench_rebind.py`'s own
+  `method.bound` string says the budget is a gate on the machine that ran the file, not a promise about any machine.
+
+## Defect 59 — the verifier's own report died on a Windows console (2026-11-16, P4-16)
+
+**Found by** CI run `44005929845` at `4a1f629`: three Windows cells red, all on
+`tests/test_verify_cli.py::test_nothing_is_written_by_a_failed_verification`, with
+`UnicodeEncodeError: 'charmap' codec can't encode character '\u2260'`.
+
+**Cause.** `blackbox verify` printed `≠` between the declared and recomputed values of a failed check. A Windows console
+is cp1252 and cp1252 has no `≠`, so the command that exists to report a finding crashed while reporting one — on the
+platform where the report is most likely to be read by a human. The failure only appeared in the *failure* path: a green
+report never prints that glyph, which is why the other Windows tests stayed green.
+
+**Fix.** Every line the command prints is ASCII (`!=` in place of `≠`, and the em dashes in the argparse description
+replaced), and two tests hold the line: one asserts a failing report's stdout is ASCII, the other asserts `--help` is
+too. `docs/DECISIONS.md` D-057 records the rule — a verifier that cannot print a finding on the platform it runs on has
+not verified anything.
+
+**Not the same class, checked deliberately.** The *existing* `capsule verify` prints `…` and is left alone: cp1252 can
+encode it, so it is not a defect, and changing a working command to satisfy a rule about a different one would be churn.

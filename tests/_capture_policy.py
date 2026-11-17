@@ -5,7 +5,7 @@ tape, recovery, capsule, replay, CLI. It cannot be true of the capture layer, wh
 people's* HTTP clients and to serve a loopback mock provider for tests. Rather than weaken those invariants to
 "almost always", the exception is a list, in one file, with the tests enforcing three things about it:
 
-1. **Nothing outside `cap_sdk/` and `proxy/` may be exempt.** A new network-using module has to come here and add a line, and this
+1. **Nothing outside `cap_sdk/`, `proxy/` and `ui/server.py` may be exempt.** A new network-using module has to come here and add a line, and this
    file is in the diff a reviewer reads.
 2. **`httpx` may only ever be imported inside a function.** That is what makes it an *optional* integration: the
    package imports, the suite passes and `pip install blackbox-recorder` stays stdlib-only when httpx is absent.
@@ -33,6 +33,13 @@ OPTIONAL_HTTP = (
 # Files allowed to `import socket` / `http.server`: the loopback fixture only.
 LOOPBACK = ("cap_sdk/mock_provider.py",)
 
+# The viewer's loopback server (P4-11). It exists so a capsule can be opened in a browser that refuses `file://`; it is
+# allowed `http.server`/`socket`/`socketserver` and NOTHING else — no `ssl`, no `urllib`, no client socket call. The
+# scope is asserted, not assumed: `tests/test_ui_server.py` checks the bind tuple is a loopback literal, that the module
+# has no `connect`/`create_connection`/`urlopen` call at all, and that no `0.0.0.0` appears in it.
+SERVERS = ("ui/server.py",)
+SERVER_MODULES = frozenset({"http", "socket", "socketserver"})
+
 # The proxy (P3B-01/02) is a server *and* a client by design: it listens on loopback and connects to a configured
 # upstream. It is exempt for `asyncio` and `ssl` — and for nothing else — because its reachable destinations are
 # asserted to be exactly `Routes.destinations()`, in `tests/test_proxy_server.py` and `tests/test_no_egress.py`.
@@ -45,6 +52,18 @@ PROXY_DOTTED = frozenset({"urllib.parse"})
 def proxy_paths() -> set[Path]:
     """The proxy package's files, which exist on disk."""
     return {SRC / "blackbox" / "proxy" / name for name in PROXY if (SRC / "blackbox" / "proxy" / name).exists()}
+
+
+def server_paths() -> set[Path]:
+    """The viewer server files, which exist on disk."""
+    return {SRC / "blackbox" / rel for rel in SERVERS if (SRC / "blackbox" / rel).exists()}
+
+
+def is_server(path: Path) -> bool:
+    try:
+        return path.resolve() in {p.resolve() for p in server_paths()}
+    except OSError:                                    # pragma: no cover - a vanished file
+        return False
 
 
 def exempt_paths() -> set[Path]:

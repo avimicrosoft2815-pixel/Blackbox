@@ -64,7 +64,12 @@ def test_the_plan_acceptance_line_leaves_a_recovered_run(tmp_path):
     assert result.signaled == 9
     assert result.recovered, f"no recovery happened: {result.recovery_error}"
     assert result.recovered["capsule_path"] and os.path.exists(result.recovered["capsule_path"])
-    assert result.recovered["run_status"] == "SEAL_INTERRUPTED"
+    # The *launcher's* tape is sealed by the launcher's own clean close even when its child is killed: the run ended,
+    # the launcher wrote `RUN_END`, and `close()` sealed the segment. `SEAL_INTERRUPTED` here used to pass for the wrong
+    # reason — the scanner never looked at the active segment's seal, so *every* run reported it (defect 53). The claim
+    # this line is making is about the capsule, not about the child: the child's death is `exit_code`/`signaled` above,
+    # and a tape that really was cut off mid-write (the SDK's, under `SIGKILL`) still scans unsealed.
+    assert result.recovered["run_status"] == "recovered", result.recovered
     assert "recovered" in out.read_text()
 
 

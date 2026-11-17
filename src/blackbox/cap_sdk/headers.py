@@ -23,6 +23,10 @@ from collections.abc import Mapping
 from typing import Any
 
 HEADER = "x-blackbox-run"
+#: The per-call id (D-053). Same rules as `HEADER`: injected only when a proxy is configured, stripped before the
+#: upstream, never touching an unproxied request. It is what makes a node-to-call edge evidence rather than a guess: the
+#: same id on the SDK's `MODEL_REQUEST` and on the proxy's record of that request identifies one call.
+CALL_HEADER = "x-blackbox-call"
 PREFIX = "x-blackbox-"
 ENV_PROXY = "BLACKBOX_PROXY"
 ENV_RUN = "BLACKBOX_RUN_ID"
@@ -68,6 +72,33 @@ def inject(headers: Any, environ: Mapping[str, str] | None = None, *, node: int 
     except Exception:
         return False
     return True
+
+
+def call_value(call_id: str | None, environ: Mapping[str, str] | None = None) -> str | None:
+    """The value for `CALL_HEADER`, or `None` when this process must not send one (same rule as `value`)."""
+    if not proxy_configured(environ) or not call_id:
+        return None
+    return call_id
+
+
+def inject_call(headers: Any, call_id: str | None, environ: Mapping[str, str] | None = None) -> bool:
+    """Add the per-call id to an outgoing request. Fail-open, for the same reason `inject` is."""
+    chosen = call_value(call_id, environ)
+    if chosen is None:
+        return False
+    try:
+        headers[CALL_HEADER] = chosen
+    except Exception:
+        return False
+    return True
+
+
+def parse_call(raw: str | None) -> str | None:
+    """The call id from a header value; anything that is not a plausible id is `None` rather than a half-link."""
+    if not raw:
+        return None
+    value = raw.strip()
+    return value if 0 < len(value) <= 128 else None
 
 
 def strip(headers: Any) -> list[str]:

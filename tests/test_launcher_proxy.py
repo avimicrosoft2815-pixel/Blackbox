@@ -25,8 +25,12 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
+from blackbox import constants as C
+from blackbox.cap import format as cap
 from blackbox.proxy.routes import Route, Routes
 from blackbox.rec import launcher
+from blackbox.tape import frame as frame_mod
+from blackbox.tape import scanner
 
 posix = pytest.mark.skipif(os.name != "posix", reason="the launcher's process-level tests are POSIX-only")
 pytestmark = posix
@@ -42,7 +46,9 @@ class _Origin(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         length = int(self.headers.get("content-length") or 0)
         self.rfile.read(length)
-        type(self).seen.append({"path": self.path, "host": self.headers.get("host", "")})
+        # the headers are kept so a test can assert what did *not* arrive here: our own `x-blackbox-*` names
+        type(self).seen.append({"path": self.path, "host": self.headers.get("host", ""),
+                                "headers": {name.lower(): value for name, value in self.headers.items()}})
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(BODY)))
@@ -179,3 +185,182 @@ def test_the_summary_line_says_the_proxy_ran(tmp_path, origin):
     text = log.read_text()
     assert f"proxy {result.proxy['url']}" in text
     assert "5 vars exported" in text, text
+
+
+def test_the_proxy_vantage_lands_on_the_launchers_tape(tmp_path, origin, capfd):
+    """A request that passes through the proxy must be *recorded*, not merely forwarded.
+
+    Without a receiver the listener relays bytes and writes nothing, so the capsule came back with `events: 5` — the
+    bootstrap frames and no request — while `proxy.stats.requests` said 1. The traffic was invisible in the artefact the
+    user would read, which is the one failure this recorder exists to prevent.
+    """
+    argv, _script = _child(tmp_path)
+    log = tmp_path / "log.txt"
+    env = {"PATH": os.environ.get("PATH", ""), "PYTHONPATH": str(ROOT / "src")}
+    with open(log, "w") as handle:
+        launcher.launch(argv, data_dir=str(tmp_path / "data"), out=handle, proxy=True,
+                        proxy_routes=_routes(origin), env=env)
+    assert _printed(capfd)["status"] == 200
+    kinds: set[str] = set()
+    for path in (tmp_path / "data" / "capsules").glob("*.bbx"):
+        raw = cap.read_capsule(str(path)).frames_of(1)
+        off = C.SEGMENT_HEADER_BYTES
+        while off < len(raw):
+            try:                                 # the segment is padded after the last frame; padding is not a frame
+                frame, off = frame_mod.decode(raw, off)
+            except Exception:
+                break
+            kinds.add(C.KIND_NAMES[frame["kind"]])
+    assert {"MODEL_REQUEST", "MODEL_CHUNK", "MODEL_RESPONSE"} <= kinds, sorted(kinds)
+
+
+def test_a_completed_proxied_call_is_not_reported_as_an_interrupted_node(tmp_path, origin, capfd):
+    """The counts a diagnosis reads: `nodes_interrupted` must not claim a crash that did not happen."""
+    argv, _script = _child(tmp_path)
+    log = tmp_path / "log.txt"
+    env = {"PATH": os.environ.get("PATH", ""), "PYTHONPATH": str(ROOT / "src")}
+    with open(log, "w") as handle:
+        launcher.launch(argv, data_dir=str(tmp_path / "data"), out=handle, proxy=True,
+                        proxy_routes=_routes(origin), env=env)
+    assert _printed(capfd)["status"] == 200
+    counts = [cap.read_capsule(str(p)).manifest["counts"]
+              for p in (tmp_path / "data" / "capsules").glob("*.bbx")]
+    recorded = [c for c in counts if c["events"] > 5]
+    assert recorded, "the tape with the request on it is the one these counts describe"
+    assert all(c["nodes_interrupted"] == 0 for c in counts), counts
+
+
+# ── D-053: per-call correlation, measured through a real child, a real proxy and a real origin ────────────────────
+CONCURRENT_CHILD = r"""
+import asyncio, os, httpx
+from blackbox import api
+
+BASE = os.environ["OPENAI_BASE_URL"].rstrip("/")
+PAYLOAD = {"model": "m", "messages": [{"role": "user", "content": "hi"}]}
+
+
+async def one(name):
+    async with httpx.AsyncClient(timeout=10) as client:
+        with api.run(name):
+            response = await client.post(BASE + "/chat/completions", json=PAYLOAD)
+            print("CHILD", name, response.status_code, flush=True)
+
+
+async def main():
+    await asyncio.gather(one("first"), one("second"))
+
+
+asyncio.run(main())
+"""
+
+
+def _calls_on_tape(data_dir: Path) -> list[dict]:
+    """Every `MODEL_REQUEST` payload in the data directory, with the vantage that wrote it."""
+    out: list[dict] = []
+    for tape in sorted((data_dir / "tape").iterdir()):
+        scan = scanner.scan(str(data_dir), tape.name)
+        for frame in scan.frames:
+            if frame["kind"] == C.KIND_MODEL_REQUEST:
+                out.append({**json.loads(frame["payload"]), "vantage": scan.meta.get("vantage"),
+                            "node_slot": frame.get("node_slot")})
+    return out
+
+
+def _run_starts(data_dir: Path) -> list[dict]:
+    """Every `RUN_START` payload in the data directory — the identity a tape declares for itself."""
+    from blackbox.codec import cbor
+
+    out: list[dict] = []
+    for tape in sorted((data_dir / "tape").iterdir()):
+        scan = scanner.scan(str(data_dir), tape.name)
+        for frame in scan.frames:
+            if frame["kind"] == C.KIND_RUN_START:
+                out.append(cbor.decode_exact(frame["payload"]))
+    return out
+
+
+def _graph_with_nodes(data_dir: Path) -> dict:
+    graphs = [json.loads(path.read_text(encoding="utf-8")) for path in sorted((data_dir / "runs").glob("*/graph.json"))]
+    with_nodes = [graph for graph in graphs if graph.get("nodes")]
+    assert len(with_nodes) == 1, [graph.get("nodes") for graph in graphs]
+    return with_nodes[0]
+
+
+def test_the_call_id_lands_on_both_tapes_and_never_reaches_the_upstream(tmp_path, origin, capfd):
+    """One request, one id, two records — and the id is ours, so the origin must not see it."""
+    script = tmp_path / "child.py"
+    script.write_text(CONCURRENT_CHILD.replace("asyncio.gather(one(\"first\"), one(\"second\"))", "one(\"solo\")"),
+                      encoding="utf-8")
+    log = tmp_path / "log.txt"
+    env = {"PATH": os.environ.get("PATH", ""), "PYTHONPATH": str(ROOT / "src")}
+    with open(log, "w") as handle:
+        result = launcher.launch([sys.executable, str(script)], data_dir=str(tmp_path / "data"), out=handle,
+                                 proxy=True, proxy_routes=_routes(origin), env=env)
+    assert result.exit_code == 0, result.exit_code
+    calls = _calls_on_tape(tmp_path / "data")
+    assert len(calls) == 2, f"the SDK writes one record and the proxy writes one: {calls}"
+    ids = {call["call_id"] for call in calls}
+    assert len(ids) == 1 and None not in ids, calls
+    proxy_call = next(call for call in calls if call["linked_run"] == result.run_id)
+    assert proxy_call["call_id"] == ids.pop(), "both sides carry one id for one call"
+    assert _Origin.seen and _Origin.seen[0]["path"] == "/v1/chat/completions"
+    assert not any(name.lower().startswith("x-blackbox-") for name in _Origin.seen[0].get("headers", {})), \
+        "the call id is ours: it must be stripped before the upstream"
+
+
+def test_two_concurrent_calls_get_two_ids_and_two_graph_edges_each_naming_its_own_node(tmp_path, origin, capfd):
+    """The acceptance case for D-053: concurrency, two nodes, and no crossing over in the graph."""
+    script = tmp_path / "child.py"
+    script.write_text(CONCURRENT_CHILD, encoding="utf-8")
+    log = tmp_path / "log.txt"
+    env = {"PATH": os.environ.get("PATH", ""), "PYTHONPATH": str(ROOT / "src")}
+    with open(log, "w") as handle:
+        result = launcher.launch([sys.executable, str(script)], data_dir=str(tmp_path / "data"), out=handle,
+                                 proxy=True, proxy_routes=_routes(origin), env=env)
+    assert result.exit_code == 0, result.exit_code
+    graph = _graph_with_nodes(tmp_path / "data")
+    nodes = {node["name"]: node["node_slot"] for node in graph["nodes"]}
+    assert sorted(nodes) == ["first", "second"], graph["nodes"]
+    call_edges = [edge for edge in graph["edges"] if edge["level"] == "call"]
+    assert len(call_edges) == 2, graph["edges"]
+    assert len({edge["from"]["call_id"] for edge in call_edges}) == 2, "two calls, two ids"
+    named = sorted(edge["nodes"]["from"] for edge in call_edges)
+    assert named == sorted(nodes.values()), "each edge names the node its own call was inside"
+    assert all(edge["nodes"]["to"] is None for edge in call_edges), "the proxy records calls, not the app's nodes"
+    assert graph["edge_summary"]["call_level"] == 2 and graph["edge_summary"]["node_level"] == 0
+    assert graph["edge_summary"]["node_join"] == "partial"
+
+
+def test_an_uninstrumented_child_leaves_no_node_and_no_call_edge(tmp_path, origin, capfd):
+    """Missing instrumentation is a *fact about the run*, not a gap to paper over (docs/node-edges.md).
+
+    The child here is plain `urllib`: no SDK, no seam, no `x-blackbox-call` on the wire. The proxy still records the
+    request — that is its job and its vantage — but it must record it with `call_id: null`, and the run's graph must
+    have no node and no call edge. A recorder that manufactured an id here would give the graph an edge whose other end
+    it had invented, which is the one thing D-052 forbids.
+    """
+    argv, _script = _child(tmp_path)
+    log = tmp_path / "log.txt"
+    env = {"PATH": os.environ.get("PATH", ""), "PYTHONPATH": str(ROOT / "src")}
+    with open(log, "w") as handle:
+        result = launcher.launch(argv, data_dir=str(tmp_path / "data"), out=handle,
+                                 proxy=True, proxy_routes=_routes(origin), env=env)
+    assert result.exit_code == 0, result.exit_code
+    calls = _calls_on_tape(tmp_path / "data")
+    assert len(calls) == 1, f"one request, one record: {calls}"
+    assert calls[0]["call_id"] is None, "an uninstrumented child was never given an id, so none may be recorded"
+    assert calls[0]["linked_run"] is None, "no header arrived, so the record must not claim a run it was not told"
+    # The record is still the run's own: the launcher's tape writes it, and that tape's `RUN_START` names the run.
+    starts = _run_starts(tmp_path / "data")
+    assert starts and {start["run_id"] for start in starts} == {result.run_id}, starts
+
+    graphs = [json.loads(path.read_text(encoding="utf-8"))
+              for path in sorted((tmp_path / "data" / "runs").glob("*/graph.json"))]
+    assert graphs, "the run left a graph"
+    for graph in graphs:
+        assert graph["nodes"] == [], "no instrumented writer opened a node, so the graph must list none"
+        # The run may still hold run-level links between its own tapes (the auto-imported interpreter writes one even
+        # when the app makes no model call). What must be absent is a *call* edge: there is no id to justify one.
+        assert [edge for edge in graph["edges"] if edge["level"] != "run"] == [], graph["edges"]
+        assert graph["edge_summary"]["call_level"] == 0
+        assert graph["edge_summary"]["node_level"] == 0

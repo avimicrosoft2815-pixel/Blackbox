@@ -56,6 +56,10 @@ class _Lifecycle:
         self.runs_started = 0
         self.owns_run = False        # True when *this* process wrote RUN_START and therefore owes a RUN_END
         self.closed = 0
+        # The capture seam (P3-05): `handle` is what uninstall calls, `recorder` is what it writes through, and the
+        # rest is the decision a reader gets to see. Never serialised with the handle in it.
+        self.capture: dict[str, Any] = {"installed": False, "seam": None, "attempts": [], "handle": None,
+                                        "recorder": None}
         self._stall: dict[str, Any] = {"installed": False, "signal": None, "path": None, "stacks": False,
                                        "reason": None}
         self._stall_handle: Any = None
@@ -73,6 +77,7 @@ class _Lifecycle:
                 "closed": self.closed,
                 "writer_uuid": None if self.writer is None else self.writer.writer_uuid.hex(),
                 "stall": dict(self._stall),
+                "capture": capture_status(),
             }
 
 
@@ -116,18 +121,28 @@ def install(*, data_dir: str | None = None, signal_number: int | None = None,
             writer = TapeWriter(root, mode=mode, **writer_kw).open()
             _STATE.writer = writer
             _STATE.data_dir = root
-            # Under `blackbox run` the launcher owns the run boundary and sets BLACKBOX_RUN_ID in the child's
-            # environment; the SDK must not write a second RUN_START into that tape. Standalone, it must.
-            if not os.environ.get("BLACKBOX_RUN_ID"):
-                from blackbox.codec import cbor
+            # Under `blackbox run` the launcher sets BLACKBOX_RUN_ID in the child's environment. The obvious reading
+            # of that is "the launcher owns the run boundary, so the SDK writes no RUN_START" — and that reading is
+            # what made `blackbox run -- python app.py` leave two tapes that nothing joined: `correlate` reads a
+            # tape's run id from its own RUN_START, so a child tape without one resolves to `None` and cannot link to
+            # the launcher's run by run id (P3B-03's "one run with linked nodes", measured 2026-11-16). The SDK's tape
+            # is a *different* tape from the launcher's, so naming the run in it is not a second RUN_START in the
+            # launcher's tape — it is this tape saying which run it belongs to, which is exactly what §11.10 links on.
+            # `attached` distinguishes the two cases for a reader; `owns_run` is per tape, so this tape also closes
+            # itself with RUN_END instead of leaving recovery to classify a finished process as interrupted.
+            from blackbox.codec import cbor
 
-                writer.emit(C.KIND_RUN_START, cbor.encode({"run_id": writer.writer_uuid.hex(), "argv": None,
-                                                           "pid": os.getpid(), "source": "sdk"}))
-                writer.flush()
-                _STATE.runs_started += 1
-                _STATE.owns_run = True
+            attached_run = (os.environ.get("BLACKBOX_RUN_ID") or "").strip() or None
+            writer.emit(C.KIND_RUN_START, cbor.encode({"run_id": attached_run or writer.writer_uuid.hex(),
+                                                       "argv": None, "pid": os.getpid(), "source": "sdk",
+                                                       "attached": attached_run is not None}))
+            writer.flush()
+            _STATE.runs_started += 1
+            _STATE.owns_run = True
             if keeper:
                 _STATE.keeper = Keeper(writer).start()
+            # The seam goes on *after* the tape exists, so the first thing a captured call can do is write a frame.
+            install_capture()
         except Exception as exc:                      # fail-open: the app keeps running, unrecorded and told why
             _STATE.writer = None
             _STATE.keeper = None
@@ -156,7 +171,23 @@ def shutdown() -> dict[str, Any]:
         return _STATE.status()
 
 
+def _drop_capture() -> None:
+    """Put the SDK classes back. Order matters: the seam must stop writing before the writer it writes to goes away."""
+    handle = _STATE.capture.get("handle")
+    _STATE.capture = {"installed": False, "seam": None, "attempts": [], "handle": None, "recorder": None}
+    try:
+        from blackbox.cap_sdk import preflight
+
+        preflight.release()
+    except Exception:
+        pass
+    if handle is not None:
+        with contextlib.suppress(Exception):
+            handle.uninstall()
+
+
 def _close_locked() -> None:
+    _drop_capture()
     keeper, writer = _STATE.keeper, _STATE.writer
     owns_run = _STATE.owns_run
     _STATE.keeper = None
@@ -191,6 +222,65 @@ def recording() -> Any:
             _STATE.inflight -= 1
             if _STATE.refs == 0 and _STATE.inflight == 0 and _STATE.writer is not None:
                 _close_locked()
+
+
+def install_capture() -> dict[str, Any]:
+    """Put a capture seam on this process's SDK clients. Idempotent, fail-open, never raises.
+
+    Until this existed, `blackbox run -- python app.py` opened a *tape* and installed no *seam*: the three seams in
+    `cap_sdk` were installed by `preflight.choose()`, and nothing in the product called it (defect 49). An unmodified
+    SDK script therefore recorded nothing of its own model calls — the call reached the tape only through the proxy's
+    vantage, on the launcher's tape — while the run summary said `sdk auto-import (sitecustomize)`.
+
+    The frames are attributed to the node that is open when the call happens, resolved per event rather than fixed at
+    install time, because that is what makes a model call part of the node the application labelled it with.
+    """
+    with _STATE.lock:
+        if _STATE.writer is None:
+            return capture_status()
+        if _STATE.capture.get("installed"):
+            return capture_status()
+        try:
+            from blackbox.cap_sdk import preflight
+            from blackbox.cap_sdk.sink import SinkRecorder, TapeSink
+
+            recorder = SinkRecorder(TapeSink(_emit_at_current_node))
+            decision = preflight.choose(recorder)
+            if decision.handle is not None:
+                preflight.adopt(decision.seam, decision.handle)
+            _STATE.capture = {"installed": decision.capturing, "seam": decision.seam,
+                              "attempts": [attempt.as_dict() for attempt in decision.attempts],
+                              "handle": decision.handle, "recorder": recorder}
+        except Exception as exc:                      # a seam that cannot install must not cost the app its run
+            _STATE.capture = {"installed": False, "seam": None, "handle": None, "recorder": None,
+                              "attempts": [{"seam": "-", "status": "error",
+                                            "reason": f"{type(exc).__name__}: {exc}"}]}
+        return capture_status()
+
+
+def capture_status() -> dict[str, Any]:
+    """The decision, without the handle: what a reader can be told and a JSON document can hold.
+
+    `installed` with an attempt status of `already-installed` says the *process* is captured, not that this tape is
+    receiving the frames: that seam writes to the sink its own installer chose. The attempt carries the distinction so a
+    reader is not told a seam was installed here when one was merely found.
+    """
+    state = _STATE.capture
+    return {"installed": bool(state.get("installed")), "seam": state.get("seam"),
+            "attempts": list(state.get("attempts") or [])}
+
+
+def _emit_at_current_node(kind: int, payload: bytes = b"", **kw: Any) -> int:
+    """`emit()` with the *current* node slot — the seam writes outside any `with api.run(...)` too, and slot 0 is then
+    the run itself, which is the honest answer."""
+    try:
+        from blackbox.rec import context
+
+        node = context.current()
+        kw["node_slot"] = 0 if node is None else node.slot
+    except Exception:                                 # no context is not a reason to lose the frame
+        pass
+    return emit(kind, payload, **kw)
 
 
 def emit(kind: int, payload: bytes = b"", **kw: Any) -> int:

@@ -45,6 +45,10 @@ where = ["src"]
 [tool.setuptools.package-data]
 # The provider base URLs are data, not code (D-034): `tests/test_no_egress.py` forbids URL literals inside `proxy/`.
 "blackbox.proxy" = ["*.json"]
+# The viewer is three static files that `blackbox view` inlines into one HTML page (P4-10). They have to travel with
+# the package or an installed wheel would build a page from a template it does not have — the failure would appear
+# only after `pip install`, which is the worst place to find it.
+"blackbox.ui" = ["static/*.html", "static/*.css", "static/*.js"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -71,7 +75,8 @@ select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF", "S", "PIE"]
 ignore = ["BLE001", "S110", "S112", "SIM115", "EXE001", "E501", "RUF001", "RUF002", "RUF003", "B007", "S101"]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/*" = ["S101", "S108", "E402", "S603", "S607"]
+# S310: tests fetch the loopback URL they just bound, which is the assertion rather than a habit
+"tests/*" = ["S101", "S108", "E402", "S603", "S607", "S310"]
 "bench/*" = ["S", "E402"]
 # one-shot measurement recipes: terse is the point, their JSON output is what is reviewed
 "bench/probes/*" = ["S", "E402", "E701", "E702", "E741", "UP031", "SIM105", "RUF046"]

@@ -38,6 +38,45 @@ not serve. The suffix per variable now lives in `BASE_URL_SUFFIX`, and
 `tests/test_attach_sdks.py::test_the_exported_base_plus_the_clients_own_path_is_the_documented_provider_path` is what
 keeps it honest.
 
+### 1.1 A Python child needs no code change
+
+If the command is a Python interpreter, the launcher puts a **temporary** directory on the child's `PYTHONPATH`
+containing a `sitecustomize.py`, which `site` imports before `__main__`. The capture layer is therefore installed before
+your first statement and your source is untouched:
+
+```bash
+blackbox run -- python app.py      # app.py contains no blackbox import and is recorded
+```
+
+Three facts about that, because each one is a promise rather than an implementation detail:
+
+* **temporary.** The directory is created per run and deleted when the child exits, including when it was killed.
+  Nothing is written to `site-packages`, `~/.local/lib`, or any interpreter's own directories — there is nothing to
+  uninstall, and `tests/test_launcher_attach.py` fails if a `blackbox-sdk-*` directory outlives its child.
+* **chained, not replaced.** Only one module named `sitecustomize` can win, so if one was already on `PYTHONPATH` (a
+  distro hook, another instrumenter) the launcher's file runs it first and then installs. Both effects happen.
+* **the plan says `.pth`, and a `.pth` is not what runs.** `site` reads `.pth` files only inside known *site*
+  directories; a `.pth` on `PYTHONPATH` is never opened. This build writes `sitecustomize.py`, which is the mechanism
+  `opentelemetry-instrument` actually uses. The first version of this file's implementation used a `.pth` and the test
+  caught it (`docs/DECISIONS.md`, D-044).
+
+A non-Python command gets none of this: no `PYTHONPATH` entry, no file, nothing to explain.
+
+### 1.2 The four flags, and what each one turns off
+
+| flag | effect | why it exists |
+|---|---|---|
+| `--no-proxy` | no listener, no base-URL exports | you want a tape of your own code and nothing in your traffic path |
+| `--force-proxy` | exports the base URLs **even where you had set them**, naming every variable it displaced on stderr and in the run result (`proxy.overridden`) | the one case where the recorder *does* move your traffic; it must never be silent |
+| `--no-sdk` | no temporary `sitecustomize`, so a Python child runs exactly as it would have | you want the child untouched, e.g. to compare with and without |
+| `--no-hooks` | `BLACKBOX_INBOX` is not exported and no inbox is folded | you have hooks installed and do not want this run's events folded into this tape |
+
+`blackbox run -- python app.py` therefore leaves **three tapes** when hooks are installed: the launcher's run boundary,
+the child's SDK tape, and the hook vantage — one run id, each tape recovered into its own capsule, and every pair joined
+by an `exact` link in `links.json` because the child's tape carries the run id the launcher gave it. A link describes a
+relation; it never folds two recordings into one file, so the capsules stay separate
+(`tests/test_launcher_attach.py::test_one_run_is_one_set_of_linked_tapes_not_one_tape`).
+
 ## 2. Clients that take a base URL
 
 "How to point it" is the value a user sets by hand when they are not using `blackbox run`; the verified column is what

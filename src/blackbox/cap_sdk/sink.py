@@ -134,6 +134,7 @@ class TapeSink:
             "provider": call.provider, "path": call.path, "model": call.model,
             "request_fp": call.request_fp, "stream": call.stream, "partial": call.partial,
             "capture_seam": seam, "content": self.content, "linked_run": call.linked_run,
+            "call_id": call.call_id,
             "coalesce_bytes": self.coalesce_bytes, "coalesce_ms": self.coalesce_ms,
         })
         self.groups[id(call)] = _Group(first_ns=self._clock())
@@ -195,6 +196,10 @@ class TapeSink:
                 self.stored[id(call)] = (stored_count + 1, stored_bytes + len(tail))
         self._flush(call, group, self._clock())
         summary = {
+            # The call's identity, repeated on the close frame so a reader pairing a response with its request does not
+            # have to guess from tape order (P4-14). Additive: a response frame written before this change has neither
+            # key, and a reader that finds one missing falls back to the order it has (D-056).
+            "call_id": call.call_id, "linked_run": call.linked_run,
             "provider": call.provider, "path": call.path, "model": call.model, "status": call.status,
             "chunks_events": call.chunks, "chunks_raw": self.raw_chunks.pop(id(call), 0),
             "chunks_stored": self.stored.get(id(call), (0, 0))[0],
@@ -255,9 +260,10 @@ class SinkRecorder(Receiver):
         return self._recorder.calls
 
     def open_call(self, provider: str, path: str, request: Any, *, model: str | None = None,
-                  stream: bool = False, partial: bool = False, linked_run: str | None = None) -> ModelCall:
+                  stream: bool = False, partial: bool = False, linked_run: str | None = None,
+                  call_id: str | None = None) -> ModelCall:
         call = self._recorder.open_call(provider, path, request, model=model, stream=stream, partial=partial,
-                                        linked_run=linked_run)
+                                        linked_run=linked_run, call_id=call_id)
         self._forward("on_open", call, self.installed_seam)
         return call
 

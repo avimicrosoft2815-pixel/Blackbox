@@ -27,6 +27,7 @@ Everything is inside a `try/except`: a capture seam that raises into the applica
 """
 from __future__ import annotations
 
+import secrets
 import time
 from typing import Any
 
@@ -108,6 +109,10 @@ def install(recorder: Receiver, *, hook_name: str = "response",
                                         # substitute for guarding the callbacks it hands to the stream
     scope = scope or CaptureScope.from_config()
     starts: dict[int, int] = {}
+    # D-053: one id per outbound request, on the request and on our own record of it. The proxy reads it back and writes
+    # the same id, which is what turns "these two records are one call" into evidence instead of a time-window guess.
+    # Only for in-scope requests and only when a proxy is in front: an unproxied app's bytes are the app's business.
+    ids: dict[int, str] = {}
 
     def on_request(request: Any) -> None:
         try:
@@ -117,10 +122,16 @@ def install(recorder: Receiver, *, hook_name: str = "response",
             if not scope.allows(request.url.host):
                 scope.skip()
                 return
+            call_id = secrets.token_hex(8)
+            if not run_header.inject_call(request.headers, call_id):
+                call_id = ""                          # no proxy in front: nothing to correlate with, nothing to send
             if len(starts) > 256:                     # a request that never got a response must not leak
                 for stale in list(starts)[: len(starts) - 256]:
                     starts.pop(stale, None)
+                    ids.pop(stale, None)
             starts[id(request)] = time.perf_counter_ns()
+            if call_id:
+                ids[id(request)] = call_id
         except Exception:
             return
 
@@ -132,11 +143,12 @@ def install(recorder: Receiver, *, hook_name: str = "response",
                 starts.pop(id(request), None)
                 return
             started = starts.pop(id(request), time.perf_counter_ns())
+            call_id = ids.pop(id(request), None) or None
             body = request.content or b""
             status = int(response.status_code)
             is_stream = "text/event-stream" in response.headers.get("content-type", "")
             call: ModelCall = recorder.open_call(request.url.host or "unknown", request.url.path or "/", body,
-                                                 model=_model_of(body), stream=is_stream)
+                                                 model=_model_of(body), stream=is_stream, call_id=call_id)
             if response.is_closed:
                 # The body is already gone (replayed, or a hook added late). Record the sighting and say so — a zero
                 # here must never be mistaken for "the model returned nothing".

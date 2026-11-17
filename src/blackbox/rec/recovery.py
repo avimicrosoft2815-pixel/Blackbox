@@ -20,15 +20,20 @@ replaces is its own state.
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import json
 import os
+import re
 import time
 from dataclasses import dataclass, field
 from typing import Any
 
 from blackbox import constants as C
+from blackbox.cap import export_jsonl, export_otlp
 from blackbox.cap import format as cap
+from blackbox.cap import manifest as manifest_mod
 from blackbox.cap_sdk.sink import chunk_bytes
+from blackbox.codec import cbor
 from blackbox.codec.ids import blake2b
 from blackbox.errors import bbx
 from blackbox.platform import current as _plat_current
@@ -109,6 +114,26 @@ class NodeRecord:
         return out
 
 
+def node_kind(payload: bytes) -> str | None:
+    """The `kind` field of a node's payload (`run`, `step`, `tool`, `turn`), or None if it will not decode.
+
+    Needed because the plan's §14.4 table has a `TOOL_REQUEST` row and **no seam writes that frame kind**: the hook
+    adapters open a *tool node* instead (`hooks/events.py`), so a classifier that looked only at frame kinds reported a
+    killed `PreToolUse` as `INTERRUPTED_BEFORE_FIRST_BYTE` — "never touched a model or a tool" — which asserts that a
+    side effect did not happen. That is the one thing this row must never say (defect 44).
+    """
+    if not payload:
+        return None
+    try:
+        decoded = cbor.decode_exact(payload)
+    except Exception:
+        return None
+    if not isinstance(decoded, dict):
+        return None
+    kind = decoded.get("kind")
+    return kind if isinstance(kind, str) else None
+
+
 def classify_nodes(frames: list[dict[str, Any]], *, now_wall_ns: int | None = None) -> list[NodeRecord]:
     """Apply the §14.4 table to the frames of one run.
 
@@ -131,10 +156,18 @@ def classify_nodes(frames: list[dict[str, Any]], *, now_wall_ns: int | None = No
         kind = f["kind"]
         if kind == C.KIND_NODE_CLOSE:
             closed.add(slot)
+            if node_kind(f.get("payload") or b"") == "tool":
+                rec(slot).tool_results += 1
             continue
         if kind == C.KIND_NODE_OPEN:
-            rec(slot)
-            last_kind[slot] = kind
+            r = rec(slot)
+            if node_kind(f.get("payload") or b"") == "tool":
+                # Counted as a tool invocation, because that is what it is: the node is open until its result closes
+                # it, and a tool node that never closes may have run.
+                r.tool_requests += 1
+                last_kind[slot] = C.KIND_TOOL_REQUEST
+            else:
+                last_kind[slot] = kind
             continue
         if kind == C.KIND_MODEL_REQUEST:
             r = rec(slot)
@@ -159,9 +192,15 @@ def classify_nodes(frames: list[dict[str, Any]], *, now_wall_ns: int | None = No
             r.tool_results += 1
             last_kind[slot] = kind
 
+    # Slot 0 is the run itself, not a node (`node_count` says so in as many words). A model call made outside any
+    # explicit node lands there, and it used to be reported as an interrupted node wherever it appeared — so a run that
+    # ended normally, with its response fully recorded, was described as "the crash happened in the app's handling".
+    # A clean `RUN_END` is the launcher's word that the child exited: the call is then complete, and there is nothing
+    # interrupted to report. With no `RUN_END` the slot-0 call is the only evidence there is, and it stays.
+    run_ended = any(f["kind"] == C.KIND_RUN_END for f in frames)
     out: list[NodeRecord] = []
     for slot, r in sorted(nodes.items()):
-        if slot in closed:
+        if slot in closed or (slot == 0 and run_ended):
             continue
         seen = last_kind.get(slot)
         if seen == C.KIND_TOOL_REQUEST and r.tool_requests > 0:
@@ -192,12 +231,203 @@ def classify_nodes(frames: list[dict[str, Any]], *, now_wall_ns: int | None = No
     return out
 
 
+def node_count(frames: list[dict[str, Any]]) -> int:
+    """How many nodes the run *had*, which is not how many are still open.
+
+    `classify_nodes` returns only the **unclosed** nodes, because its job is the §14.4 question ("what was interrupted,
+    and what may have happened"). The capsule's `counts.nodes` is the other question — the plan's example manifest says
+    `"nodes": 44` for a run whose nodes all finished — and it was being filled from the interrupted list, so every
+    clean run reported `nodes: 0` while its `graph.json` listed the nodes one directory away. Slot 0 is the run itself,
+    not a node.
+    """
+    slots: set[int] = set()
+    for f in frames:
+        if f["kind"] == C.KIND_NODE_OPEN:
+            slot = int(f.get("node_slot") or 0)
+            if slot:
+                slots.add(slot)
+    return len(slots)
+
+
+def graph_nodes(frames: list[dict[str, Any]], *, interrupted: list[NodeRecord] | None = None) -> list[dict[str, Any]]:
+    """Every node the tape opened, with the status each one ended in — the list `graph.json` is supposed to hold.
+
+    `classify_nodes` answers §14.4's question ("what was interrupted, and what may have happened") and therefore
+    returns *only* unclosed nodes; using it for the graph made a clean run's `graph.json` list no nodes at all while the
+    same tape's manifest said `nodes: 1` (defect 54). A node that closed carries the outcome its `NODE_CLOSE` recorded;
+    a node that did not carries the interrupted classification that `classify_nodes` produced for it.
+    """
+    by_slot = {record.node_slot: record for record in (interrupted or [])}
+    nodes: dict[int, dict[str, Any]] = {}
+    for f in frames:
+        slot = int(f.get("node_slot") or 0)
+        kind = f["kind"]
+        if kind == C.KIND_NODE_OPEN:
+            if not slot:
+                continue                              # slot 0 is the run itself, not a node
+            payload = _payload(f.get("payload") or b"")
+            nodes[slot] = {"node_slot": slot, "name": payload.get("name"), "kind": payload.get("kind"),
+                           "parent": payload.get("parent"), "opened_ns": payload.get("opened_ns"),
+                           "status": "unclosed", "outcome": None, "detail": ""}
+        elif kind == C.KIND_NODE_CLOSE:
+            node = nodes.get(slot)
+            payload = _payload(f.get("payload") or b"")
+            if node is None:
+                # A close with no open in this scan: the segment holding the open was retained away. Say so instead of
+                # inventing a status, and keep the slot because a reader can still see *a* node existed.
+                node = nodes[slot] = {"node_slot": slot, "name": payload.get("name"), "kind": payload.get("kind"),
+                                      "parent": None, "opened_ns": None, "status": "closed", "outcome": None,
+                                      "detail": "NODE_OPEN is not in this scan"}
+            node["status"] = "closed"
+            node["outcome"] = payload.get("outcome")
+            node["duration_us"] = payload.get("duration_us")
+    for slot, node in nodes.items():
+        record = by_slot.get(slot)
+        if record is not None and node["status"] != "closed":
+            node["status"] = record.status
+            node["detail"] = record.detail
+    return [nodes[slot] for slot in sorted(nodes)]
+
+
+#: Why no edge in this build names a node. Kept as one constant so the graph, the tests and D-052 cannot drift apart.
+NODE_JOIN_REASON = ("no per-call identifier is recorded on both sides: `node_slot` numbers nodes inside one tape and "
+                    "the injected header carries only <run>/<node>, so two calls from one node are indistinguishable")
+
+
+def graph_edges(links_document: bytes, writer_uuid: str) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """`graph.json`'s `edges`, derived from the exact `links.json` bytes the capsule is about to carry (D-052).
+
+    Two kinds of record go in. A `LINK` joins two *tapes* (one run, or one pair of tapes) and names no node. A
+    `call_link` joins two records of *one call*, matched by the id both sides wrote (D-053), so it names the call and,
+    where that tape recorded the call inside a node, that node's slot. A node-to-node edge appears only when both ends
+    recorded the call inside a node — an `exact` tape link never produces one, and neither does an ambiguous id, which
+    is written down with its candidate count instead of being resolved by picking the first pair.
+    """
+    if not links_document.strip():
+        records: list[dict[str, Any]] = []
+        unreadable = False
+    else:
+        try:
+            parsed = json.loads(links_document.decode("utf-8"))
+            raw_records = parsed.get("links") if isinstance(parsed, dict) else None
+            records = [r for r in raw_records if isinstance(r, dict)] if isinstance(raw_records, list) else []
+            unreadable = not isinstance(parsed, dict)
+        except Exception:
+            records, unreadable = [], True
+    call_records: list[dict[str, Any]] = []
+    if links_document.strip():
+        try:
+            parsed_for_calls = json.loads(links_document.decode("utf-8"))
+            raw_calls = parsed_for_calls.get("call_links") if isinstance(parsed_for_calls, dict) else None
+            call_records = [r for r in raw_calls if isinstance(r, dict)] if isinstance(raw_calls, list) else []
+        except Exception:
+            call_records = []
+    edges: list[dict[str, Any]] = []
+    for record in records:
+        left = str(record.get("left_writer") or "")
+        right = str(record.get("right_writer") or "")
+        left_run = record.get("left_run")
+        right_run = record.get("right_run")
+        mine = left == writer_uuid and right != writer_uuid
+        my_run, their_run = (left_run, right_run) if mine else (right_run, left_run)
+        edges.append({
+            "class": record.get("class"),
+            # "run" when both ends name a run (the link says they are one run); "tape" when one of them does not.
+            "level": "run" if (my_run and their_run) else "tape",
+            "from": {"writer": left if mine else right, "run_id": my_run, "node": None},
+            "to": {"writer": right if mine else left, "run_id": their_run, "node": None},
+            "nodes": {"from": None, "to": None},
+            "node_join": "unknown",
+            "node_join_reason": NODE_JOIN_REASON,
+            "confidence": record.get("confidence"),
+            "evidence": dict(record.get("evidence") or {}),
+        })
+    for record in call_records:
+        left = str(record.get("left_writer") or "")
+        right = str(record.get("right_writer") or "")
+        mine = left == writer_uuid and right != writer_uuid
+        left_node = record.get("left_node")
+        right_node = record.get("right_node")
+        ambiguous = bool(record.get("ambiguous"))
+        my_node, their_node = (left_node, right_node) if mine else (right_node, left_node)
+        level = "call" if ambiguous or not (my_node and their_node) else "node"
+        edges.append({
+            "class": "exact",
+            "level": level,
+            "from": {"writer": left if mine else right, "run_id": record.get("left_run") if mine else record.get("right_run"),
+                     "call_id": record.get("call_id"), "node": None if ambiguous else my_node},
+            "to": {"writer": right if mine else left, "run_id": record.get("right_run") if mine else record.get("left_run"),
+                   "call_id": record.get("call_id"), "node": None if ambiguous else their_node},
+            "nodes": {"from": None if ambiguous else my_node, "to": None if ambiguous else their_node},
+            "node_join": "ambiguous" if ambiguous else "exact",
+            # the number of candidate pairings, because "ambiguous" without a count is a shrug
+            "candidates": int(record.get("candidates") or 1),
+            "confidence": 1.0,
+            "evidence": dict(record.get("evidence") or {"rule": "same call id"}),
+        })
+    named = [e for e in edges if (e["nodes"]["from"] or e["nodes"]["to"])]
+    node_level = sum(1 for e in edges if e["level"] == "node")
+    node_join = "exact" if node_level else ("partial" if named else "unknown")
+    reason = NODE_JOIN_REASON if not named else (
+        "the call is inside a node on one tape only: the proxy vantage records calls, not the app's nodes")
+    summary: dict[str, Any] = {
+        "total": len(edges),
+        "run_level": sum(1 for e in edges if e["level"] == "run"),
+        "tape_level": sum(1 for e in edges if e["level"] == "tape"),
+        "call_level": sum(1 for e in edges if e["level"] == "call"),
+        "node_level": node_level,
+        "ambiguous": sum(1 for e in edges if e["node_join"] == "ambiguous"),
+        "node_join": node_join, "node_join_reason": reason}
+    if unreadable:
+        summary["links_unreadable"] = True
+    return edges, summary
+
+
+def empty_edge_summary() -> dict[str, Any]:
+    """The summary a graph carries before seal: no links have been resolved yet, and it says why the count is zero."""
+    return {"total": 0, "run_level": 0, "tape_level": 0, "call_level": 0, "node_level": 0, "ambiguous": 0,
+            "node_join": "unknown", "node_join_reason": NODE_JOIN_REASON}
+
+
+def _payload(raw: bytes) -> dict[str, Any]:
+    """A frame payload as a dict, or an empty dict when it will not decode: a graph entry is not worth an exception."""
+    if not raw:
+        return {}
+    try:
+        decoded = cbor.decode_exact(raw)
+    except Exception:
+        return {}
+    return decoded if isinstance(decoded, dict) else {}
+
+
 def run_status(frames: list[dict[str, Any]], *, sealed: bool) -> tuple[str, str | None]:
     """`(status, status_cause)` for the run itself: `SEAL_INTERRUPTED` when the run ended but was never sealed."""
     has_end = any(f["kind"] == C.KIND_RUN_END for f in frames)
     if has_end and not sealed:
         return SEAL_INTERRUPTED, "SEAL_NEVER_FINISHED"
     return ("recovered", "PROCESS_DEATH")
+
+
+#: A run id is `r_` and lowercase alphanumerics. Both conventions in the tree match (`r_` + 16 hex from
+#: `run_id_for`, `r_` + 26 base32 from `codec.ids.new_run_id`); a bare writer uuid, which an unattached SDK tape puts
+#: in its `RUN_START`, does not. Accepting only what looks like a run id keeps the capsule inside the format rules.
+_RUN_ID_RE = re.compile(r"^r_[0-9a-z]{8,40}$")
+
+
+def _declared_run_id(tape_dir: str) -> str | None:
+    """The run id the tape's own `RUN_START` names, if it names one that is well-formed. Never raises."""
+    try:
+        from blackbox.tape import reader
+
+        for frame in reader.iter_frames(tape_dir, 1):
+            if frame["kind"] != C.KIND_RUN_START:
+                continue
+            payload = cbor.decode_exact(frame["payload"])
+            declared = payload.get("run_id") if isinstance(payload, dict) else None
+            return declared if isinstance(declared, str) and _RUN_ID_RE.match(declared) else None
+    except Exception:                                  # a damaged first segment is DISCOVERED's problem, not this one
+        return None
+    return None
 
 
 # ── the state machine ───────────────────────────────────────────────────────
@@ -231,10 +461,26 @@ class Recovery:
         self.tape_dir = os.path.join(data_dir, "tape", writer_uuid_hex)
         self.now_ns = time.time_ns() if now_ns is None else now_ns
         meta = self._read_meta()
-        # Stable identity: the tape says who it is, so a resumed recovery lands in the same run directory.
-        self.run_id = "r_" + _hash(writer_uuid_hex, meta.get("created_wall_ns", 0))[:16]
-        self.run_dir = os.path.join(data_dir, "runs", self.run_id)
-        self.capsule_id = "c_" + _hash(self.run_id)[:16]
+        # Two identities, and conflating them was defect 47.
+        #
+        # `tape_key` is *this tape's* work-directory name, derived from the writer and the tape's creation time: stable
+        # across recoveries, and — the part that matters — never shared, because everything in a run directory belongs
+        # to one tape (`index.sqlite`, `scan.json`, `graph.json`, `cost.json`, the `recovery.done.*` markers). Two
+        # tapes that pointed at one directory would overwrite each other's state, which is a worse bug than the one
+        # this fixes.
+        #
+        # `run_id` is the run the tape says it belongs to: the `RUN_START` payload the tape itself wrote. A child tape
+        # attached to a launcher's run declares the launcher's id, so the two capsules name one run and the link that
+        # joins them says the same thing the manifests do. A tape that names no run (or names something that is not a
+        # run id at all — an unattached SDK tape writes its writer uuid there) falls back to `tape_key`, which is
+        # exactly what a standalone recording is.
+        self.tape_key = "r_" + _hash(writer_uuid_hex, meta.get("created_wall_ns", 0))[:16]
+        self.declared_run_id = _declared_run_id(self.tape_dir)
+        self.run_id = self.declared_run_id or self.tape_key
+        self.run_dir = os.path.join(data_dir, "runs", self.tape_key)
+        # The capsule is per *tape*, not per run: two tapes of one run are two capsules (that is what the link is
+        # for), so the id has to distinguish them or the second seal would replace the first.
+        self.capsule_id = manifest_mod.capsule_id_for(self.run_id, writer_uuid_hex)
         self.capsule_path = os.path.join(data_dir, "capsules", f"{self.capsule_id}.bbx")
         self.result = RecoveryResult(run_id=self.run_id, run_dir=self.run_dir)
         self._scan: scanner.ScanResult | None = None
@@ -391,9 +637,10 @@ class Recovery:
         nodes = classify_nodes(scan.frames, now_wall_ns=self.now_ns)
         status, cause = run_status(scan.frames, sealed=bool(scan.sealed_segments) and not scan.truncated_tail)
         graph: dict[str, object] = {"writer_uuid": self.writer_uuid_hex, "run_id": self.run_id,
-                 "frames": scan.frame_count, "gaps": scan.gaps, "nodes": [n.to_dict() for n in nodes],
+                 "frames": scan.frame_count, "gaps": scan.gaps,
+                 "nodes": graph_nodes(scan.frames, interrupted=nodes),
                  "run_status": status, "status_cause": cause,
-                 "open_nodes": sum(1 for n in nodes), "edges": []}
+                 "open_nodes": sum(1 for n in nodes), "edges": [], "edge_summary": empty_edge_summary()}
         payload = json.dumps(graph, sort_keys=True).encode()
         out = os.path.join(self.run_dir, "graph.json")
         input_hash = _hash(self.writer_uuid_hex, scan.frame_count, scan.last_seq, len(scan.gaps))
@@ -453,8 +700,9 @@ class Recovery:
             "capture": {"coverage": "PARTIAL" if scan.truncated_tail else "FULL", "providers": []},
             "redaction": {"profile_id": "none", "content_mode": "full", "masks": 0, "failures": 0},
             "gaps": scan.gaps,
-            "counts": {"events": scan.frame_count, "nodes": len(self.result.node_statuses),
-                       "segments": len(entries)},
+            "counts": {"events": scan.frame_count, "nodes": node_count(scan.frames),
+                       "nodes_interrupted": len(self.result.node_statuses), "segments": len(entries)},
+            "derived_parts": [],
         }
         chain: dict[str, object] = {"chain_root": None, "per_segment": {}}
         for f in scan.frames:
@@ -472,6 +720,36 @@ class Recovery:
         # evidence. Written into the capsule, never into the tape — the tape's bytes are the evidence this entry's
         # siblings hash, so a resolver that appended to it would be editing what it was describing (D-038).
         entries[cap.LINKS_NAME] = correlate.for_capsule(self.data_dir, self.writer_uuid_hex)
+        # D-052: the graph's edges come from *these* bytes, in this step, so the graph and the capsule's `links.json`
+        # cannot disagree. Written before the capsule, because the capsule is the thing that must not change afterwards.
+        self._write_graph_edges(entries[cap.LINKS_NAME])
+        # P4-16: the manifest carries what `blackbox verify` compares, and each field is one the capsule can recompute —
+        # except the vantage, which lives on the tape's meta page and is therefore declared and reported as unverified.
+        manifest["chain_root"] = chain["chain_root"]
+        manifest["capture_vantage"] = scan.meta.get("vantage")
+        manifest["capture_seam"] = manifest_mod.seams_of(scan.frames)
+        manifest["links_summary"] = manifest_mod.links_summary_of(entries[cap.LINKS_NAME])
+        # D-053, §13.1: the graph ships *inside* the capsule, and as a declared derived part — the bytes the user opens
+        # are the bytes `cap.derived` can recompute from the segments, so an edited graph is a detected one (BBX-E412).
+        # P4-13: the timeline as one JSON object per frame, derived from the same scan the graph is, so both are inside
+        # the hashed container and both can be recomputed from it by `blackbox capsule verify`.
+        derived: dict[str, bytes] = {}
+        graph_bytes = self._graph_bytes()
+        if graph_bytes is not None:
+            derived[cap.GRAPH_NAME] = graph_bytes
+        derived[cap.EVENTS_NAME] = export_jsonl.render(scan.frames)
+        # P4-14: the same frames as OTLP/JSON, from this capsule's own identity (the trace is the run's, the span ids are
+        # this capsule's, and neither is random) so `capsule verify` can re-render it byte for byte.
+        derived[cap.OTLP_NAME] = export_otlp.render(scan.frames, capsule_id=self.capsule_id, run_id=self.run_id)
+        # P4-20: the same spans as OTLP protobuf. Phoenix-class receivers speak protobuf and only protobuf (D-056's
+        # measurement: 415 to the JSON), so the capsule ships the encoding a real importer takes, from the same model.
+        derived[cap.OTLP_PB_NAME] = export_otlp.render_pb(scan.frames, capsule_id=self.capsule_id,
+                                                         run_id=self.run_id)
+        for part_name, part_bytes in derived.items():
+            entries[part_name] = part_bytes
+        manifest["derived_parts"] = [{"name": part_name, "sha256": hashlib.sha256(part_bytes).hexdigest(),
+                                      "generator": "blackbox 0.1.0.dev0"}
+                                     for part_name, part_bytes in sorted(derived.items())]
         input_hash = _hash(*(f"{k}:{blake2b(v).hex()}" for k, v in sorted(entries.items())))
         if self._skip("SEALED", input_hash):
             existing = cap.read_capsule(self.capsule_path)
@@ -486,6 +764,30 @@ class Recovery:
         self.result.capsule_root = str(out["root"])
         self._die("SEALED.after")
         return self.result.capsule_root
+
+    def _graph_bytes(self) -> bytes | None:
+        """This run's `graph.json` as it sits on disk — the same bytes the capsule entry carries."""
+        path = os.path.join(self.run_dir, "graph.json")
+        try:
+            with open(path, "rb") as fh:
+                return fh.read()
+        except OSError:
+            return None
+
+    def _write_graph_edges(self, links_document: bytes) -> None:
+        """Add `edges`/`edge_summary` to this run's `graph.json`. Best-effort: a graph that cannot be read keeps `[]`."""
+        path = os.path.join(self.run_dir, "graph.json")
+        try:
+            with open(path, encoding="utf-8") as fh:
+                graph = json.load(fh)
+        except (OSError, ValueError):
+            return
+        if not isinstance(graph, dict):
+            return
+        edges, summary = graph_edges(links_document, self.writer_uuid_hex)
+        graph["edges"] = edges
+        graph["edge_summary"] = summary
+        _write_atomic(path, json.dumps(graph, sort_keys=True).encode("utf-8") + b"\n")
 
     def step_indexed(self) -> str:
         self._enter("INDEXED")

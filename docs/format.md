@@ -131,6 +131,56 @@ recovery/seal time, never on the hot path. Nothing in this build appends a `LINK
 the resolved records as `links.json` (see `rec/correlate.py`), because appending to a tape to describe it would edit the
 evidence the capsule hashes.
 
+#### `graph.json` — nodes and edges (additive in 1.1, D-052)
+
+`graph.json` lives in the run directory (`runs/<tape_key>/graph.json`) and is JSON: `writer_uuid`, `run_id`, `frames`,
+`gaps`, `nodes`, `open_nodes`, `run_status`, `status_cause`, `edges`, `edge_summary`. Every node the tape opened appears
+in `nodes` (`node_slot`, `name`, `kind`, `parent`, `opened_ns`, `status`, and the `outcome`/`duration_us` its `NODE_CLOSE`
+carried); `status` is `closed`, the §14.4 interrupted class, or `unclosed` when the close is not in the scan.
+
+`edges` is derived at seal time from the **same bytes** the capsule receives as `links.json`, and each edge states what
+it knows:
+
+| field | values |
+|---|---|
+| `class` | `exact`, `declared`, `inferred` (the `LINK` class it came from) for run-level edges; `exact` and nothing else for a call edge, which has one kind of evidence |
+| `level` | `run` (both ends name a run), `tape` (one end names none), `call` (both ends recorded one call id, D-053), `node` (**not written in this build**) |
+| `from` / `to` | `{writer, run_id, node}` — `node` is `null` unless the record's frames sit inside a node's span; a call edge carries `call_id` on the side that wrote it |
+| `nodes` | `{from, to}`, `null` on both sides when no node is justified |
+| `node_join` | `unknown` (with `node_join_reason`), `exact` (both sides name a node), `partial` (exactly one does — every real call edge measured so far), `ambiguous` (a side's slot is not decidable, with `candidates`) |
+| `confidence`, `evidence` | copied from the `LINK` record; a call edge carries `{"rule": "same call id", "carried_by": "x-blackbox-call"}` |
+
+An `exact` link proves two tapes are one run; it does not prove that a node on one tape corresponds to a node on the
+other, so no run-level edge names a node and none is invented for a proxied call without a slot. A **call edge** is
+stronger and still not a node edge: the same `x-blackbox-call` value on two records means those two records are one
+call, and the edge says `level: "call"`. `edge_summary` counts the levels (`total`, `run_level`, `tape_level`,
+`call_level`, `node_level`, `node_join`) and carries the same reason, and it counts `ambiguous` joins separately, so the
+absence of node-level edges and the presence of undecidable ones are both visible rather than silent. Readers that
+predate this change see the keys they already knew and ignore the new ones.
+
+#### `links.json` — `links` and `call_links` (additive in 1.1, D-053)
+
+The capsule carries the resolver's output as `links.json`: `{links: [...], summary, call_links: [...],
+call_summary}`. `links`/`summary` are unchanged (run-level records, §11.10); `call_links` holds one record per call id
+two writers both recorded — `{call_id, left_writer, right_writer, left_run, right_run, left_node, right_node,
+ambiguous, candidates, evidence: {"rule": "same call id", "carried_by": "x-blackbox-call"}}` — and `call_summary`
+counts them (`total`, `node_level`, `call_level`, `ambiguous`). A record is `node_level` only when both sides recorded
+the call inside a node and the pairing is not ambiguous; `ambiguous` means an id appeared more than once on a side, and
+then neither node is named and `candidates` says how many pairings were refused. A reader that predates the two new keys
+ignores them, and a capsule written before D-053 simply has none: "no call ids were recorded" is not "no calls were
+linked", and the two are separate keys so the difference survives.
+
+#### `x-blackbox-run` and `x-blackbox-call` — what each proves
+
+Both headers are injected by the seam only when the launcher said a proxy is in front (`BLACKBOX_PROXY=1`), and the
+proxy strips every `x-blackbox-*` header before the upstream. `x-blackbox-run: <run>` is a claim about a **run**: the
+proxy records it as `linked_run`, and the resolver's `exact` link says two tapes belong to one run. `x-blackbox-call:
+<16 hex>` is a claim about a **call**: minted per outbound request, recorded by the seam as `call_id` and by the proxy as
+`call_id` on its own `MODEL_REQUEST` frame. An app with no proxy in front sends neither, records `call_id: null`, and
+loses nothing — there is no second vantage to join. A `MODEL_REQUEST` frame that carries a `call_id` while its writer
+is the only writer with that value is a call with one vantage, which is what an unproxied-but-minted id would look
+like; the seam does not mint one in that case, so the shape cannot arise.
+
 ### 4.0 Model-frame payloads (JSON, not CBOR)
 
 `MODEL_REQUEST` (32), `MODEL_CHUNK` (34), `MODEL_RESPONSE` (33) and `MODEL_ERROR` (35) carry canonical JSON in their
@@ -156,6 +206,10 @@ SSE or JSON in practice). The summary keys a reader may rely on:
 | `bytes_received` | bytes the application received, unchanged by redaction or by the sink |
 | `partial` | the stream ended without reaching the end of the response (cancel, timeout, dropped socket) |
 | `redaction` | `{mode, counts: {kind: n}, bytes_in, bytes_out, window, failures}` — **counts, never content** |
+
+The identity keys a `MODEL_REQUEST` carries are additive: `linked_run` (the `x-blackbox-run` value the proxy read off
+the request, §11.10) and, since D-053, `call_id` — the `x-blackbox-call` value, written by the seam that minted it and
+by the proxy that read it, `null` when there was no proxy to tell.
 
 `chunks_raw` and `chunks_stored` are separate numbers because redaction merges and drops segments; a reader that has
 one must not infer the other (D-029). A `redaction.failures` above zero means the redactor raised and its input was
@@ -299,8 +353,13 @@ ZIP, STORED for raw segment bodies and DEFLATE for JSON, entries sorted with `ma
 |---|---|
 | `events/seg-000001.raw` | the segment's bytes, byte-identical to the tape |
 | `chain.json` | `{chain_root, per_segment}` — what a reader needs to walk across a retention hole |
-| `manifest.json` | identity, `run` block (status, `status_cause`, completeness, `truncated_tail`, `lost_from_seq`), `gaps`, `counts`, `integrity {alg, entries, root}`, `signature: null` |
+| `manifest.json` | identity, `run` block (status, `status_cause`, completeness, `truncated_tail`, `lost_from_seq`), `gaps`, `counts`, `chain_root`, `capture_vantage`, `capture_seam`, `links_summary`, `derived_parts[]`, `integrity {alg, entries, root}`, `signature: null` (the P4-16 fields are described below) |
 | `INTEGRITY.sha256` | `<sha256>  <name>` per entry except itself and `manifest.json`, sorted |
+| `graph.json` | the run's nodes and edges, byte-identical to the run directory's copy (D-052, entry since D-053) |
+| `events/events.jsonl` | the timeline, one JSON object per frame, derived from the redacted frames (P4-13, D-054) |
+| `otlp/spans.json` | the same frames as OTLP/JSON ResourceSpans: agent, inference and tool spans (P4-14, D-056) |
+| `otlp/spans.pb` | the same spans as OTLP protobuf — the encoding a Phoenix-class receiver takes (P4-20, D-059) |
+| `links.json` | the resolved `LINK` records and, since D-053, the `call_links` |
 
 `integrity.root = sha256(INTEGRITY.sha256)` — the manifest can therefore carry the root without hashing itself,
 while every data byte is still covered. Every entry's timestamp is `1980-01-01 00:00:00`, every mode is `0o644`,
@@ -308,6 +367,140 @@ while every data byte is still covered. Every entry's timestamp is `1980-01-01 0
 written as `.<id>.partial` with `O_EXCL`, fsynced, `os.replace`d, then the directory is fsynced: a visible `.bbx`
 is a complete `.bbx`. Reading validates names (absolute, `..`, backslash, NUL), case-folded duplicates, sizes,
 entry-count and ratio **before** it trusts a single entry.
+
+**The manifest schema (P4-02, D-058).** `cap/manifest.py` carries the schema as data (`SCHEMA`: nested `(kind,
+required)` pairs) and validates it **on write** — after `format`/`integrity`/`signature` are filled in, before a byte is
+written — and **on read**, just after the format-version gate. A missing required key or a wrong type is `BBX-E407`
+naming the dotted path (`manifest 'run.run_id' is missing`). Required means *every* capsule this format has produced
+carries it: `derived_parts` and the four P4-16 fields are **optional**, because a capsule written before a field existed
+is old, not broken. Unknown keys are **tolerated, preserved and reported** (`Capsule.unknown_manifest_keys`) — a capsule
+from a newer writer must open here. The schema checks presence and type, not meaning: that `counts.events` matches the
+frames is `derived`'s job, and that `chain_root` is the capsule's own is `blackbox verify`'s.
+
+**What the manifest declares, and what can be checked (P4-16).** `blackbox verify` compares the manifest's claims with
+the capsule's own bytes; the table is the contract, and the last row is the one that matters:
+
+| manifest field | recomputed from | a disagreement is |
+|---|---|---|
+| `chain_root` | the `CHAIN` frames the capsule carries (last `batch` value) | `chain_root` fails |
+| `derived_parts[]` | each part re-rendered from `events/*.raw` | `BBX-E412` drift, `derived_parts` fails |
+| `capture_seam` | the `capture_seam` values on the capsule's own `MODEL_REQUEST` payloads | `capture_seam` fails |
+| `links_summary` | `links.json`'s `links`/`call_links`, counted | `links_summary` fails |
+| `capture_vantage` | **nothing** — a capsule carries no `meta` page | *not checkable*: printed as `declared`, never as a pass |
+
+`blackbox verify <capsule>`, `blackbox verify --run <id> --data DIR` and `blackbox verify --writer <uuid> --data DIR` all
+run the same five checks (plus `integrity` over every entry) and exit **0** verified, **9** a check failed, **2** the
+target cannot be read or does not exist. `--writer` is a check rather than a lookup: the manifest has no writer field, so
+each capsule's id is *recomputed* from the writer asked about and that capsule's own run id, and a capsule whose declared
+id does not match is reported rather than skipped. `--json` carries `ok: null, checkable: false` for the vantage, so a
+script cannot mistake "not checkable" for "passed".
+
+**Derived parts.** `graph.json`, `events/events.jsonl`, `otlp/spans.json` and `otlp/spans.pb` are listed in `manifest.derived_parts[]` as
+`{name, sha256, generator}` — the hash of the exact bytes written into the capsule — sorted by name so the manifest is a
+function of its inputs. `blackbox capsule verify <capsule>` recomputes each part from the capsule's own `events/*.raw`
+(`cap/derived.py`): the graph key by key (`COMPARED`: nodes, edges, counts, frames, status), each export byte for byte,
+reporting the first line that differs. A mismatch is `BBX-E412` and exits 1, an unreadable capsule exits 2, a capsule
+that declares no derived parts verifies as `absent` and exits 0, and a part this build cannot recompute is listed as
+`unknown` — printed, never counted as a pass. Verification never rewrites anything: a capsule whose part has drifted is
+reported, not repaired, and the raw frames it was derived from are untouched.
+
+#### `events/events.jsonl` — the timeline, one object per frame (P4-13, D-054)
+
+One line per frame, `LF`-terminated with a final newline, keys sorted, no generation timestamp: the file is a pure
+function of the frames, which is what makes `capsule verify` a comparison instead of a hope. Each object is
+
+`{"seq", "kind", "kind_id", "time_unix_nano", "bbx_mono_nano", "segment", "node_slot", "run_slot", "attributes"}`
+
+and every attribute name is either a **pinned OpenTelemetry semconv name** or one of ours:
+
+| attribute | when | source |
+|---|---|---|
+| `gen_ai.operation.name` | a `MODEL_REQUEST` whose path is an API the mapping knows (`chat`, `text_completion`) | semconv **v1.39.0** (`6d05e92`) |
+| `gen_ai.provider.name` | the recorded provider host is in the explicit table (`api.openai.com` → `openai`, `api.anthropic.com` → `anthropic`, `generativelanguage.googleapis.com` → `gcp.gemini`, `aiplatform.googleapis.com` → `gcp.vertex_ai`, and the others in `export_jsonl.SYSTEMS`) | semconv **v1.39.0** (`6d05e92`) |
+| `gen_ai.request.model` | the frame recorded a model | semconv **v1.39.0** (`6d05e92`) |
+| `bbx.model.*`, `bbx.node.*`, `bbx.run.*`, `bbx.gap.*`, `bbx.chain.*`, `bbx.chunk.*`, `bbx.payload`, `bbx.redaction` | everything else | this project |
+
+Three things it deliberately does not do. It does not **guess a provider**: an address that is not a known provider gets
+no `gen_ai.provider.name`, and the host it dialled is still written as `bbx.provider.host`. It does not **copy content**: a
+`MODEL_CHUNK` line carries its byte count, and the `[bbx-hash …]`/`[bbx-off …]` tag when the sink wrote one, never the
+bytes — the export is a timeline, and the bytes stay in the segments under the content policy. And it does not **emit
+`error.type`**: the tape records an error *message*, and a message is not a type, so the string is carried as
+`bbx.model.error` rather than dressed as a semconv value. Payloads of kinds the mapping says nothing about are carried
+under `bbx.payload`, or as a digest and a length when they exceed 2 KiB.
+
+#### `otlp/spans.json` — the same frames as OTLP/JSON (P4-14, D-056)
+
+One `ExportTraceServiceRequest` in proto3 JSON: `resourceSpans[0].resource.attributes` names the capsule
+(`service.name = "blackbox"`, `bbx.capsule.id`), `scopeSpans[0].scope` is `blackbox 0.1.0.dev0`, and `spans` holds the
+run. Kinds are OTLP's (`1` INTERNAL, `3` CLIENT), status codes are `0`/`1`/`2`, int64 values are strings, ids are
+lower-case hex. The same **semconv v1.39.0** pin as the JSONL export, because two exports of one capsule must not
+describe one run in two vocabularies.
+
+| frames | span | name | kind |
+|---|---|---|---|
+| `RUN_START` … `RUN_END` | the root | `bbx.run` | INTERNAL |
+| `NODE_OPEN` … `NODE_CLOSE`, kind `tool` | tool | `execute_tool {gen_ai.tool.name}` | INTERNAL |
+| any other node pair | agent | `invoke_agent {gen_ai.agent.name}`, or `invoke_agent` when the node has no name | INTERNAL |
+| `MODEL_REQUEST` … `MODEL_RESPONSE`/`MODEL_ERROR` | inference | `{gen_ai.operation.name} {gen_ai.request.model}`, each half optional | CLIENT |
+| a call whose path is not in the mapping | inference | `bbx.model.call` — no semconv name, because there is no operation to name | CLIENT |
+
+Span attributes are the same two families as the JSONL file: the pinned `gen_ai.*` names, and ours
+(`bbx.node.slot/kind/duration_us`, `bbx.call.id`, `bbx.model.*` counters, `bbx.request.fp`, `bbx.response.fp`,
+`bbx.response.status`, `bbx.span.source`, `bbx.span.truncated`, `bbx.span.partial`, `bbx.model.error`). Parents follow
+the recording: a model call's parent is the node span of its slot, a node's parent is the span of its `parent` slot, and
+the root is `bbx.run`.
+
+**Ids are derived, not drawn.** `traceId = sha256(run_id)[:32]`, so two vantages of one run share a trace — the property
+P3B-03 wants and does not yet have at node level (`docs/node-edges.md`). `spanId = sha256(capsule_id:seq)[:16]` for the
+frame that opened the span, so two capsules of one run cannot collide and the same capsule always renders the same ids.
+The writer's uuid is deliberately unused: the capsule does not carry it, and a derived part must be recomputable from what
+the capsule holds.
+
+**Pairing.** A response is paired with its request by `bbx.call.id` when both carry it — the response frame repeats the
+call id and linked run since P4-14 — and by tape order per node slot when they do not (a tape written before that change).
+A pair that never closes gets a span that ends at the tape's last frame with `bbx.span.truncated: true` and an error
+status that says which frame is missing: a node with no close is a fact about the run, and dropping its span would lose
+it.
+
+**Absent on purpose.** No token counts, no `gen_ai.response.finish_reasons`, no request parameters: this build does not
+decode response bodies (P3-08 is open), and a number invented from a byte count would be the over-claim everything else
+here refuses. No prompt or completion text — counters only, by the same rule as the JSONL export.
+
+**Declared and recomputed** like the other derived parts: sha256 in `manifest.derived_parts[]`, `capsule verify`
+re-renders and compares bytes, an edit is `BBX-E412` with the first differing line, and nothing is rewritten.
+
+**What was and was not checked.** The document validates against `tests/schemas/otlp-spans.schema.json` (the subset of
+OTLP/JSON this build produces), checked by `tests/_schema.py` — a validator that implements that subset and raises on a
+keyword it does not implement, so the snapshot cannot grow a check nobody runs.
+
+The importer was then run for real: **Phoenix 21.0.0** (`arize-phoenix`, `phoenix serve`, read back with
+`arize-phoenix-client` 3.7.0) **rejected the JSON file with `415 Unsupported content type: application/json`**, and
+**accepted a protobuf encoding of the same spans with `200`** — parsed first by the official `opentelemetry-proto`
+**1.45.2** definitions (ids adapted from OTLP/JSON's hex to proto3's base64, nothing else touched). Read back through
+Phoenix's own client, the spans arrive with their names, parent chain, trace id (`50444de0…`, byte for byte), our
+`bbx.*` attributes verbatim, and Phoenix's own `llm.system`/`llm.model_name` derived from our `gen_ai.*` names. So the
+content is accepted and the *encoding we ship* is not: the ticket stays open until the capsule also carries
+`otlp/spans.pb` (proposal **P4-20**), and Langfuse, the Collector's JSON receiver and Phoenix's gRPC port were **not**
+tested. `bench/results/2026-11-16-otlp-importer.json` holds every command, status code and gap.
+
+#### `otlp/spans.pb` — the same spans, in the encoding a receiver takes (P4-20, D-059)
+
+The binary twin of the file above: the same span model, written as OTLP protobuf by a hand-written encoder in
+`cap/export_otlp.py` (no dependency — the package has none, and this part was not going to be the first). Field numbers
+were read from the `opentelemetry-proto` 1.45.2 descriptors and are pinned in one place; the tests decode the part with
+an independent wire reader, so a wrong number fails here rather than in someone's importer.
+
+Byte-stable: fields in ascending field-number order, attributes sorted by key, spans ordered by `(start, seq)`, integers
+with the wire type their descriptor declares. `blackbox verify` re-renders and compares **bytes** on every CI cell, and a
+drifted part is reported as `bytes (N stored, M recomputed)` with both sha256s — a binary has no lines to number. It
+carries counters, fingerprints and names only: no prompt or completion text, no `gen_ai.usage.*`, no finish reasons.
+
+**Measured, not assumed.** Phoenix **21.0.0** answered **200** to the capsule's own `otlp/spans.pb`, unmodified, and read
+back all three spans with the trace id `50444de0…` byte for byte, both children naming `bbx.run`'s span id as parent,
+`bbx.model.bytes_received` still an integer, and Phoenix's `llm.system`/`llm.model_name` derived from our `gen_ai.*`
+names. Its OTLP/HTTP receiver still answers **415** to `otlp/spans.json` — the JSON part stays for readers that want
+JSON, and the protobuf part is what a Phoenix-class receiver takes. Langfuse, the Collector's OTLP/JSON receiver and
+Phoenix's gRPC port remain **untested**; `bench/results/2026-11-16-otlp-pb-importer.json` lists them.
 
 ## 9. Conformance vectors
 

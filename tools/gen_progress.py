@@ -143,6 +143,75 @@ S: dict[str, tuple[str, str, str, str, str, str]] = {
               "S1-S5, S14, S15 of 18 stages; S6-S13 have no code path yet"),
     "P2-09": ("wip", "HEAD", "tests/kill/kill_matrix.py", "bench/results/2026-11-14-kill-random.json",
               "self", "500 parent-SIGKILL trials, 0 violations; nightly runs still pending"),
+    "P4-10": ("done", "HEAD", "tests/test_ui_viewer.py (17)", "—", "self",
+              "one offline HTML file: the stylesheet, the script and the capsule's summary are inlined, with no CDN and "
+              "no request of any kind; black-and-gold glass whose contrast ratios are computed from the stylesheet's own "
+              "tokens; a keyboard-first tree (roving tabindex, skip link, shortcut dialog) and prefers-reduced-motion "
+              "honoured in both CSS and JS; capsule values reach the DOM only through textContent, the JSON block escapes "
+              "'<' and an XSS corpus survives a build/parse round-trip; a failed integrity root is a red banner, not a "
+              "timeline (D-045)"),
+    # The P3B rows were written straight into `docs/progress.md` and never into this map, so regenerating the
+    # file silently reverted six finished rows to `todo` — caught by test_state_and_progress_agree_in_both_
+    # directions on 2026-11-16 and repaired here, where the statuses belong (D-046).
+    "P3B-01": ('**todo**', '—', '—',
+               '—', '—',
+               ''),
+    "P3B-02": ('**todo**', '—', '—',
+               '—', '—',
+               ''),
+    "P3B-03": ('**todo**', '—', '—',
+               '—', '—',
+               ''),
+    "P3B-04": ('**done**', 'HEAD', 'tests/test_headers.py (7), tests/test_links.py (10), tests/test_link_records.py (16)',
+               '—', 'self',
+               "the header is injected only when `BLACKBOX_PROXY=1` and is stripped by the proxy; `LINK` is kind 19 and is resolved at seal time into the capsule's `links.json`, never appended to the tape it describes; an inferred link carries its window, delta and fingerprint and a confidence below 1.0, and a payload claiming 1.0 for `inferred` is refused on read (D-036, D-038)"),
+    "P3B-05": ('**done**', 'HEAD', 'tests/test_hook_claude_code.py (13), tests/test_hook_inbox.py (20)',
+               '—', 'self',
+               'the round-trip is byte-identical, which is stronger than "untouched"; §11.9\'s table names ten events (its prose says nine) and all ten map, with an unmapped one becoming `MARK{tool_event}`; prompts and tool arguments leave hashes and fingerprints, never content (D-039)'),
+    "P3B-06": ('**done**', 'HEAD', 'tests/test_hook_codex.py (26)',
+               '—', 'self',
+               'all twelve names map, an unknown one becomes `MARK{tool_event, raw_name}`, and a recorded session folds into paired node slots; the Codex settings schema could not be verified from this sandbox, so the adapter is `verified=False` and says so on the product surface (`schema_verified: false`, the assumption on stderr, `--settings` escape hatch) while an unknown shape is `BBX-E151` with no write (D-041)'),
+    "P3B-07": ('**wip**', 'HEAD', 'tests/test_hook_inbox.py (20), tests/test_hook_launcher.py (5)',
+               '—', 'self',
+               "one atomic file per event and 50 concurrent real processes → 50 files with zero corruption are done and tested; cold start measures p50 32.0 / p95 40.2 ms end to end **in the developer sandbox, not the bench box**, and the bench-box row is still owed. Not built: the launcher's fold is in (D-040: its own tape at vantage 3, folded every 250 ms, one last fold at exit) and S18 is a real `kill -9` between the tmp write and the rename; the bench-box cold-start row is still owed and is the only thing left in this ticket"),
+    "P3B-08": ('**done**', 'HEAD', 'tests/proxy/ (15), tests/test_proxy_server.py (18), tests/test_proxy_routes.py (10), bench/bench_proxy.py',
+               'bench/results/2026-11-15-proxy.json', 'self',
+               'the four §15.1 rows are measured with origin, proxy and client in three separate processes: added latency p50 0.165 / p99 0.471 ms, first-byte p50 0.184 ms, 200 concurrent streams with 0 errors, RSS growth 0.0 MiB at 50 req/s; S16 (`SIGKILL` mid-stream → `INTERRUPTED_PROXY`, no terminal frame), both disconnect classes on a real tape, header stripping, the allowlist, and the curl/Node/openai-SDK client matrix; the ten cells are green in run 43767064900'),
+    "P4-18": ("done", "HEAD", "tests/test_repair_workflow.py (22)", "—", "self",
+              "`blackbox repair preview|apply|verify`: the product still writes no patch — it reviews and applies the "
+              "proposal a human or agent wrote. Preview prints exact paths, a unified diff, named risk notes, the "
+              "suggested tests labelled as not-run, and the scope, and writes nothing. Apply requires a token bound to "
+              "the proposal bytes, the repository root and every target's reviewed hash; a file edited after the "
+              "preview or a proposal edited after approval aborts with the tree unchanged, and the message names the "
+              "file that moved. No `..`, no absolute path, no symlink in any component, no deletion; writes are atomic, "
+              "mode-preserving, backed up and rolled back on failure. Verify runs only the commands a human passes and "
+              "reports their real exit codes; with none it exits 3 and says the change is unverified"),
+    "P4-19": ("done", "HEAD", "tests/test_interruption_lab.py (18)",
+              "bench/results/2026-11-16-interruption-lab.json", "self",
+              "six real children, one per interruption class, killed with a real signal and recovered for real: every "
+              "one leaves a capsule whose integrity root verifies, the statuses and findings are identical across three "
+              "repeats, the mid-stream row is `likely` with chunk evidence and its alternatives, the killed tool row is "
+              "`cannot-tell` with 'the side effect may have happened', and the clean row has no interruption finding. "
+              "The artifact says in its own `limits` block that these are labels and counts, not measurements"),
+    "P4-11": ("done", "HEAD", "tests/test_ui_server.py (13)", "—", "self",
+              "`blackbox serve <capsule|dir>` publishes the same inlined page on 127.0.0.1 over an ephemeral port at a "
+              "per-process secret path, then stops after the first successful fetch. The bind is a literal and the "
+              "module has no client socket call, both asserted on the syntax tree; the response carries CSP "
+              "`default-src 'none'` / `frame-ancestors 'none'`, nosniff, no-referrer and no-store; the access log is "
+              "silenced because the request line holds the token. The plan's 'token in fragment' is DV-015: a fragment "
+              "never reaches a server, so it cannot be required — the secret is a path segment instead, which the "
+              "server checks on every request and which dies after one use"),
+    "P4-17": ("done", "HEAD", "tests/test_diagnose.py (25), tests/test_ui_viewer.py (20), "
+              "tests/test_recovery.py (29)", "—", "self",
+              "`blackbox diagnose` on a capsule or a data dir reads one capsule within a frame bound, classifies what was cut short "
+              "with §14.4's own function, and writes an incident report plus a repair brief that names its unknowns, "
+              "quotes recorded application text as fenced untrusted data, and refuses to overwrite a file a human "
+              "wrote. Read-only by construction: an AST test fails the build if a socket, a subprocess or `eval` ever "
+              "appears in the package. It found and fixed defect 44 (the `INTERRUPTED_IN_TOOL` row was unreachable, "
+              "so a killed tool call was reported as 'never touched a tool')"),
+    "P3B-09": ('**done**', 'HEAD', 'tests/test_attach_doc.py (14), tests/test_attach_sdks.py (7)',
+               '—', 'self',
+               'the two verdict tables in `docs/attach.md` are checked mechanically and the four rows this sandbox can run were run with the real clients through the exported base URL; eleven rows say **unverified** and say what is doubted. The first real client run found defect 39 (the OpenAI export lost `/v1`), fixed in `BASE_URL_SUFFIX` (D-042)'),
 }
 
 LANE = {"P0": "L0 contracts", "P1": "L1 storage", "P2": "L1 recovery"}
@@ -189,7 +258,9 @@ def main() -> None:
            "| ticket | Done when (plan) | status | commit | tests | measurement | reviewer | notes |",
            "|---|---|---|---|---|---|---|---|"]
     for tid, path, done, est, _ in rows:
-        if not tid.startswith(("P0-", "P1-", "P2-", "P3", "P3B-")):
+        # P4 is in the ledger too: the viewer rows were silently absent from this table while STATE listed them, which
+        # is the drift this script exists to prevent (found 2026-11-16, when P4-10 was finished and had nowhere to show).
+        if not tid.startswith(("P0-", "P1-", "P2-", "P3", "P3B-", "P4-")):
             continue
         st, commit, tests, meas, rev, notes = S.get(tid, ("todo", "—", "—", "—", "—", ""))
         out.append(f"| `{tid}` | {paraphrase(done)} | **{st}** | {commit} | {tests} | {meas} | {rev} | {notes} |")

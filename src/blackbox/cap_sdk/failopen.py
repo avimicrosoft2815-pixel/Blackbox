@@ -20,12 +20,30 @@ test in `tests/test_capture_failopen.py`:
 """
 from __future__ import annotations
 
+import inspect
 from typing import Any
 
 from blackbox.cap_sdk.base import ModelCall, Receiver
 
 MAX_FAILURE_SAMPLES = 64       # enough to see the shape of a failure, bounded enough to survive a broken sink on
                                 # every chunk of a long stream
+
+
+def _accepts(method: Any, name: str) -> bool:
+    """Whether `method` can be handed `name` as a keyword at all.
+
+    D-053 added a `call_id` hint to `Receiver.open_call`. A receiver written before it has no such parameter, and
+    handing it one would raise `TypeError` — which this wrapper would faithfully count as a recorder failure while
+    the receiver silently stopped recording anything. Asking the signature once, up front, keeps such a receiver
+    working: it records the call and the frame says `call_id: null`, which is true — no id reached it.
+    """
+    try:
+        params = inspect.signature(method).parameters
+    except (TypeError, ValueError):                        # a C callable, or something exotic: assume the old shape
+        return False
+    if name in params:
+        return params[name].kind in (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY)
+    return any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values())
 
 
 class FailOpenReceiver(Receiver):
@@ -35,6 +53,7 @@ class FailOpenReceiver(Receiver):
         self.inner = inner
         self.failure_count = 0
         self.failures: list[str] = []
+        self._carries_call_id = _accepts(inner.open_call, "call_id")
 
     # ── state the seams and the tests read through the wrapper ───────────────
     @property
@@ -51,15 +70,17 @@ class FailOpenReceiver(Receiver):
 
     # ── the three callbacks ─────────────────────────────────────────────────
     def open_call(self, provider: str, path: str, request: Any, *, model: str | None = None,
-                  stream: bool = False, partial: bool = False, linked_run: str | None = None) -> ModelCall:
+                  stream: bool = False, partial: bool = False, linked_run: str | None = None,
+                  call_id: str | None = None) -> ModelCall:
+        hints = {"call_id": call_id} if self._carries_call_id else {}
         try:
             return self.inner.open_call(provider, path, request, model=model, stream=stream, partial=partial,
-                                        linked_run=linked_run)
+                                        linked_run=linked_run, **hints)
         except Exception as exc:
             self._note("open_call", exc)
             # `request_fp=""` says *not fingerprinted*, which a reader can tell apart from a fingerprint of b"".
             return ModelCall(provider=provider, path=path, model=model, stream=stream, partial=True,
-                             linked_run=linked_run)
+                             linked_run=linked_run, call_id=call_id)
 
     def receive(self, call: ModelCall, chunk: bytes, *, first_byte_ms: float | None = None) -> None:
         try:

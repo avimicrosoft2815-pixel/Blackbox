@@ -1,0 +1,104 @@
+{
+  "artifact": "otlp importer acceptance",
+  "date": "2026-11-16",
+  "ticket": "P4-14 (importer clause) / P4-16 (verify ship)",
+  "what": "POST the capsule's otlp/spans.json, and an OTLP protobuf encoding of the same spans, to a real Phoenix OTLP/HTTP receiver, then read the spans back through Phoenix's own client.",
+  "environment": {
+    "platform": "Linux 6.1 x86_64 (this sandbox), CPython 3.11",
+    "importer": {
+      "name": "arize-phoenix",
+      "version": "21.0.0",
+      "server": "phoenix serve --port 6123",
+      "client": "arize-phoenix-client 3.7.0"
+    },
+    "protobuf_definitions": {
+      "name": "opentelemetry-proto",
+      "version": "1.45.2",
+      "message": "opentelemetry.proto.collector.trace.v1.trace_service_pb2.ExportTraceServiceRequest"
+    },
+    "capsule": {
+      "id": "c_02a87984fb7702b3",
+      "spans": [
+        "bbx.run",
+        "invoke_agent support-agent",
+        "chat gpt-4"
+      ],
+      "trace_id": "50444de04d35c6f7240486f96a9041f8",
+      "made_by": "recovery of a 6-frame tape (RUN_START, NODE_OPEN, MODEL_REQUEST, MODEL_RESPONSE, NODE_CLOSE, RUN_END); not a proxied run"
+    }
+  },
+  "results": [
+    {
+      "attempt": "POST otlp/spans.json as-is, content-type: application/json",
+      "http_status": 415,
+      "body": "Unsupported content type: application/json",
+      "verdict": "NOT ACCEPTED \u2014 Phoenix 21.0.0's OTLP/HTTP receiver speaks protobuf only"
+    },
+    {
+      "attempt": "google.protobuf.json_format.Parse of the same document into ExportTraceServiceRequest, after adapting traceId/spanId/parentSpanId from OTLP/JSON's hex to proto3 JSON's base64 (ids only; every other field untouched)",
+      "parsed_spans": 3,
+      "serialized_bytes": 807,
+      "verdict": "PARSED by the official proto definitions \u2014 names, kinds (1 INTERNAL, 3 CLIENT), attributes, status and timestamps all carried"
+    },
+    {
+      "attempt": "POST the protobuf above, content-type: application/x-protobuf",
+      "http_status": 200,
+      "verdict": "ACCEPTED"
+    },
+    {
+      "attempt": "read the spans back with phoenix.client.Client(base_url).spans.get_spans(project_identifier='default')",
+      "spans": 3,
+      "observed": [
+        {
+          "name": "bbx.run",
+          "span_kind": "UNKNOWN",
+          "status_code": "UNSET",
+          "parent": null,
+          "span_id": "2c417600cd4192bf"
+        },
+        {
+          "name": "invoke_agent support-agent",
+          "span_kind": "AGENT",
+          "status_code": "OK",
+          "parent": "2c417600cd4192bf"
+        },
+        {
+          "name": "chat gpt-4",
+          "span_kind": "LLM",
+          "status_code": "OK",
+          "parent": "2c417600cd4192bf",
+          "attributes": {
+            "gen_ai.operation.name": "chat",
+            "gen_ai.provider.name": "openai",
+            "gen_ai.request.model": "gpt-4",
+            "bbx.call.id": "c0ffee",
+            "bbx.response.status": 200,
+            "bbx.model.chunks_raw": 12,
+            "bbx.model.bytes_received": 8123,
+            "bbx.span.source": "model",
+            "llm.system": "openai",
+            "llm.provider": "openai",
+            "llm.model_name": "gpt-4"
+          }
+        }
+      ],
+      "checks": {
+        "trace_id_preserved": "50444de04d35c6f7240486f96a9041f8 in the file == trace_id Phoenix stored",
+        "parent_chain_preserved": "both the agent span and the model span name bbx.run's span id as parent",
+        "semconv_read_by_the_importer": "Phoenix derived llm.system/llm.provider/llm.model_name from our gen_ai.* attributes \u2014 the names are not decoration",
+        "our_names_stored_verbatim": "every bbx.* attribute came back unchanged"
+      },
+      "verdict": "ACCEPTED and READ BACK"
+    }
+  ],
+  "conclusions": {
+    "ticket_sentence": "P4-14 asks that \"a Phoenix/Langfuse-class importer accepts the file\". Measured: Phoenix does NOT accept the JSON file (415), and DOES accept an equivalent protobuf encoding of the same spans (200, read back with the trace id and parent chain intact).",
+    "status": "P4-14 stays wip: the file we ship is JSON, and the importer rejects that encoding. The failure is in the encoding, not the content \u2014 which is what the read-back proves.",
+    "not_tested": [
+      "Langfuse (no OTLP receiver installable offline here)",
+      "Phoenix's gRPC receiver (4317)",
+      "the OTLP/HTTP JSON receiver of an OpenTelemetry Collector (not available offline)"
+    ],
+    "proposal": "Ship a second derived part, otlp/spans.pb (protobuf, stdlib-only encoder), so the capsule carries the encoding a real receiver takes. Recorded in docs/STATE.json extra_work as P4-20."
+  }
+}
