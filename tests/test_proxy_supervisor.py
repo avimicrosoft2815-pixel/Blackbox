@@ -143,6 +143,12 @@ def _break_and_wait(proxy: ProxyThread, probe: ServingProbe, timeout: float = 5.
     except RuntimeError as exc:                       # a listener that never came back is a failure, not a sample
         raise AssertionError(str(exc)) from exc
     dispatch_ms = (time.monotonic() - asked) * 1000.0
+    # The rebind's own bookkeeping (`rebinds`, `noticed_ms`) is appended after the socket is serving, so a served
+    # request can arrive a few microseconds before the row does. Waiting for the row is not a weakened gate: the outage
+    # has already been measured, and this only decides which number to print beside it.
+    bookkeeping_deadline = time.monotonic() + 0.5
+    while len(proxy.rebinds) <= before and time.monotonic() < bookkeeping_deadline:
+        time.sleep(0.001)
     return {
         "outage_ms": round(float(sampled["outage_ms"]), 3),
         "outage_upper_ms": round(float(sampled["outage_upper_ms"]), 3),
