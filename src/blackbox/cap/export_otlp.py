@@ -107,6 +107,10 @@ class _Builder:
         self.run_id = run_id
         self.trace, self.root_span = _ids(capsule_id, run_id)
         self.spans: list[dict[str, Any]] = []
+        #: span id -> the seq of the frame that opened it, so the emit order is chronological and repeatable: two
+        #: frames can share a wall-clock tick (Windows' clock is coarse), and an order that fell back to a hash would
+        #: differ across platforms for no reason.
+        self.seq_of: dict[str, int] = {}
 
     def add(self, *, seq: int, name: str, kind: int, start: int, end: int, parent: str | None,
             attributes: dict[str, Any], status: dict[str, Any] | None = None) -> str:
@@ -117,6 +121,7 @@ class _Builder:
         if parent:
             span["parentSpanId"] = parent
         self.spans.append(span)
+        self.seq_of[span_id] = seq
         return span_id
 
 
@@ -164,6 +169,7 @@ def render(frames: list[dict[str, Any]], *, capsule_id: str, run_id: str | None 
         attributes: dict[str, Any] = {"bbx.span.source": "run"}
         if isinstance(payload, dict) and isinstance(payload.get("run_id"), str):
             attributes["bbx.run.id"] = payload["run_id"]
+        builder.seq_of[builder.root_span] = int(run_start.get("seq") or 0)
         builder.spans.append({
             "traceId": builder.trace, "spanId": builder.root_span, "name": "bbx.run", "kind": INTERNAL,
             "startTimeUnixNano": str(start),
@@ -251,7 +257,8 @@ def render(frames: list[dict[str, Any]], *, capsule_id: str, run_id: str | None 
                                                  "bbx.span.truncated": True},
                         status=_status(False, "the call never closed: no MODEL_RESPONSE frame"))
 
-    spans = sorted(builder.spans, key=lambda span: (int(span["startTimeUnixNano"]), span["spanId"]))
+    spans = sorted(builder.spans, key=lambda span: (int(span["startTimeUnixNano"]),
+                                                    builder.seq_of.get(span["spanId"], 0)))
     document = {
         "resourceSpans": [{
             "resource": {"attributes": _attributes({

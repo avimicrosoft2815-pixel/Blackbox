@@ -90,7 +90,10 @@ def test_the_document_validates_against_the_schema_snapshot(tmp_path):
     document = _document(path)
     _schema.validate(document, SCHEMA, root=SCHEMA)
     spans = _spans(document)
-    assert [span["name"] for span in spans] == ["bbx.run", "invoke_agent agent", "chat gpt-4"], spans
+    # Chronological, and seq-broken rather than id-broken: frames can share a wall-clock tick, so a tie must fall to the
+    # frame that opened the span, not to a hash (this ordering is what a Windows runner caught).
+    assert [span["name"] for span in spans] == ["bbx.run", "invoke_agent agent", "chat gpt-4"], \
+        [span["name"] for span in spans]
     assert len({span["spanId"] for span in spans}) == len(spans), "a span id is used once"
     assert spans[0].get("parentSpanId") is None, "the run is the root"
     assert all(span["traceId"] == spans[0]["traceId"] for span in spans)
@@ -163,7 +166,8 @@ def test_no_model_text_reaches_a_span(tmp_path):
     result = recovery.recover(str(data), writer.writer_uuid.hex())
     capsule = cap.read_capsule(result.capsule_path)
     assert secret not in capsule.entry(cap.OTLP_NAME)
-    span = _spans(json.loads(capsule.entry(cap.OTLP_NAME)))[-1]
+    spans = {span["name"]: span for span in _spans(json.loads(capsule.entry(cap.OTLP_NAME)))}
+    span = spans["chat gpt-4"]                      # by name: an index would depend on the platform's clock resolution
     assert _attributes(span)["bbx.model.bytes_received"] == len(secret), "the counter, not the bytes"
 
 
