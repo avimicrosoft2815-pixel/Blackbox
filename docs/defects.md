@@ -683,3 +683,22 @@ plan's §10 shape, and it is append-only.
   stays open until a run of the four-column bench on a runner that starves threads shows the notice columns inside the
   budget while the tick columns show the stall. The universal-100 ms claim is not made anywhere: `bench_rebind.py`'s own
   `method.bound` string says the budget is a gate on the machine that ran the file, not a promise about any machine.
+
+## Defect 59 — the verifier's own report died on a Windows console (2026-11-16, P4-16)
+
+**Found by** CI run `44005929845` at `4a1f629`: three Windows cells red, all on
+`tests/test_verify_cli.py::test_nothing_is_written_by_a_failed_verification`, with
+`UnicodeEncodeError: 'charmap' codec can't encode character '\u2260'`.
+
+**Cause.** `blackbox verify` printed `≠` between the declared and recomputed values of a failed check. A Windows console
+is cp1252 and cp1252 has no `≠`, so the command that exists to report a finding crashed while reporting one — on the
+platform where the report is most likely to be read by a human. The failure only appeared in the *failure* path: a green
+report never prints that glyph, which is why the other Windows tests stayed green.
+
+**Fix.** Every line the command prints is ASCII (`!=` in place of `≠`, and the em dashes in the argparse description
+replaced), and two tests hold the line: one asserts a failing report's stdout is ASCII, the other asserts `--help` is
+too. `docs/DECISIONS.md` D-057 records the rule — a verifier that cannot print a finding on the platform it runs on has
+not verified anything.
+
+**Not the same class, checked deliberately.** The *existing* `capsule verify` prints `…` and is left alone: cp1252 can
+encode it, so it is not a defect, and changing a working command to satisfy a rule about a different one would be churn.

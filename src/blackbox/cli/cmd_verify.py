@@ -1,8 +1,8 @@
 """`blackbox verify` — one command, three ways to name a target, five checks (P4-16).
 
-    blackbox verify data/capsules/c_….bbx
+    blackbox verify data/capsules/c_<id>.bbx
     blackbox verify --run r_0123456789abcdef --data DIR
-    blackbox verify --writer 0f1e… --data DIR
+    blackbox verify --writer <uuid> --data DIR
 
 Exit codes follow the plan: **0** every check passed, **9** a check failed (`BBX-E412` for a derived part, the capsule's
 own integrity root for a raw one), **2** the target cannot be read or does not exist. A check the capsule cannot answer —
@@ -13,6 +13,10 @@ failure; `--json` carries `ok: null, checkable: false` so a script cannot mistak
 the writer it was asked about and that capsule's own run id (`cap.manifest.capsule_id_for`) and takes the ones that
 match. A capsule whose declared id does not match its own derivation is reported rather than silently skipped — that
 mismatch is itself a finding.
+
+Every line this file prints is ASCII. A Windows console is cp1252, and a report that dies on a `!=` glyph (or a `…`) is a
+verifier that cannot report a finding on the platform where someone needs it — the CI run that caught this is recorded in
+`docs/STATE.json`'s `last_green_commit_note`.
 """
 from __future__ import annotations
 
@@ -80,13 +84,13 @@ def _print(path: str, report: dict[str, Any]) -> None:
         extra = ""
         if check["ok"] is False:
             extra = f"  declared {json.dumps(check['declared'], sort_keys=True)[:160]} " \
-                    f"≠ recomputed {json.dumps(check['recomputed'], sort_keys=True)[:160]}"
+                    f"!= recomputed {json.dumps(check['recomputed'], sort_keys=True)[:160]}"
         elif check["ok"] is None and check.get("note"):
             extra = f"  {check['note']}"
         print(f"  {mark} {check['check']}{extra}")
     for drift in (report.get("drift") or []):
         print(f"       BBX-E412 {drift['part']}.{drift['field']}: "
-              f"{json.dumps(drift.get('stored', drift.get('declared')), sort_keys=True)[:120]} ≠ "
+              f"{json.dumps(drift.get('stored', drift.get('declared')), sort_keys=True)[:120]} != "
               f"{json.dumps(drift.get('recomputed', drift.get('actual')), sort_keys=True)[:120]}")
 
 
@@ -94,7 +98,7 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
         prog="blackbox verify",
         description="Verify a capsule against its own bytes: integrity root, chain root, derived parts, capture seam and "
-                    "links summary. `capture_vantage` is printed as declared — a capsule carries no meta page, so it "
+                    "links summary. `capture_vantage` is printed as declared: a capsule carries no meta page, so it "
                     "cannot be recomputed and is not counted as a pass. Exit 0 verified, 9 a check failed, 2 unreadable.")
     ap.add_argument("capsule", nargs="?", help="path to a .bbx capsule")
     ap.add_argument("--run", help="verify every capsule of this run id under --data")

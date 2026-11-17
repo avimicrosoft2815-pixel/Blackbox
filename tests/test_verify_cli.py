@@ -212,6 +212,24 @@ def test_an_old_capsule_without_the_new_fields_is_absent_not_wrong(tmp_path, cap
     assert "capture_seam" in out and "----" in out
 
 
+def test_every_line_it_prints_survives_a_cp1252_console(tmp_path, capsys):
+    """A Windows runner is cp1252: a report that dies on a glyph cannot report a finding there (CI run 44005929845)."""
+    path = _capsule(tmp_path)
+    tampered = _rewrite(path, tmp_path / "links3.bbx",
+                        manifest_edit=lambda manifest: manifest["links_summary"].__setitem__("links", 99))
+    assert verify_main([str(tampered)]) == 9
+    captured = capsys.readouterr().out
+    assert captured.isascii(), [ch for ch in captured if ord(ch) > 127]
+
+
+def test_the_help_text_is_ascii_too(capsys):
+    with pytest.raises(SystemExit) as exc:
+        verify_main(["--help"])
+    assert exc.value.code == 0
+    captured = capsys.readouterr().out
+    assert captured.isascii(), [ch for ch in captured if ord(ch) > 127]
+
+
 def test_nothing_is_written_by_a_failed_verification(tmp_path):
     path = _capsule(tmp_path)
     before = path.read_bytes()
