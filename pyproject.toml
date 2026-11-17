@@ -33,6 +33,12 @@ capture = ["httpx==0.28.1"]
 # can only prove the seam agrees with my idea of the SDK. Kept out of `dev` and out of the runtime dependencies.
 capture-sdks = ["openai==3.51.0", "anthropic==2.8.0"]
 
+[project.scripts]
+# `pip install -e .` must produce the command the docs tell people to run. It did not: every step of the quickstart,
+# `docs/onboarding.md` and the console blocks in this repository said `blackbox ...`, while the package declared no entry
+# point at all, so an installed user got "command not found" and the only working invocation was `python -m blackbox`.
+blackbox = "blackbox.__main__:main"
+
 [project.urls]
 Documentation = "https://github.com/avimicrosoft2815-pixel/Blackbox"
 

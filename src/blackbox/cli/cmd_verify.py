@@ -28,6 +28,7 @@ from typing import Any
 
 from blackbox.cap import format as cap
 from blackbox.cap import manifest as manifest_mod
+from blackbox.cli.paths import default_data_dir
 
 
 def _capsules_in(data_dir: str) -> list[str]:
@@ -38,7 +39,7 @@ def _resolve(args: argparse.Namespace) -> tuple[list[str], str | None]:
     """The capsule paths to verify, or an error string. `--run`/`--writer` search `capsules/` and explain a miss."""
     if args.capsule:
         return [args.capsule], None
-    data_dir = os.path.expanduser(args.data or os.environ.get("BLACKBOX_DATA_DIR") or ".blackbox")
+    data_dir = default_data_dir(args.data)
     paths = _capsules_in(data_dir)
     if not paths:
         return [], f"no capsules under {os.path.join(data_dir, 'capsules')}"
@@ -82,12 +83,17 @@ def _print(path: str, report: dict[str, Any]) -> None:
         else:
             mark = "----"
         extra = ""
-        if check["ok"] is False:
+        if check["ok"] is False and not check.get("problems"):
+            # With problems, those *are* the finding: they name the entry, the declared hash and the actual one. Printing
+            # two truncated JSON blobs on top of them would bury the name in noise (and, for the integrity check, print
+            # two identical roots, because an edited entry does not move the root over the index).
             extra = f"  declared {json.dumps(check['declared'], sort_keys=True)[:160]} " \
                     f"!= recomputed {json.dumps(check['recomputed'], sort_keys=True)[:160]}"
         elif check["ok"] is None and check.get("note"):
             extra = f"  {check['note']}"
         print(f"  {mark} {check['check']}{extra}")
+        for problem in check.get("problems") or []:
+            print(f"       {problem}")
     for drift in (report.get("drift") or []):
         print(f"       BBX-E412 {drift['part']}.{drift['field']}: "
               f"{json.dumps(drift.get('stored', drift.get('declared')), sort_keys=True)[:120]} != "
@@ -103,7 +109,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("capsule", nargs="?", help="path to a .bbx capsule")
     ap.add_argument("--run", help="verify every capsule of this run id under --data")
     ap.add_argument("--writer", help="verify the capsule the given writer uuid derives (checked, not looked up)")
-    ap.add_argument("--data", help="data directory to search with --run/--writer (default $BLACKBOX_DATA_DIR, ./.blackbox)")
+    ap.add_argument("--data", help="data directory to search with --run/--writer (default $BLACKBOX_DATA_DIR, "
+                                   "$BLACKBOX_HOME, or the current directory, which is where `blackbox run` writes)")
     ap.add_argument("--json", action="store_true", help="print the report as JSON")
     args = ap.parse_args(argv)
     if not args.capsule and not (args.run or args.writer):

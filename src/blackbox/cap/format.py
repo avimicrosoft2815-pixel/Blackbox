@@ -74,16 +74,18 @@ def seg_entry_name(segment_no: int) -> str:
 
 
 def integrity_lines(entries: dict[str, bytes]) -> bytes:
-    """`<sha256>  <name>` per entry, sorted by name, excluding this file and the manifest."""
-    rows = [f"{sha256(blob).hex()}  {name}"
-            for name, blob in sorted(entries.items())
-            if name not in (INTEGRITY_NAME, MANIFEST_NAME)]
-    return ("\n".join(rows) + ("\n" if rows else "")).encode("utf-8")
+    """`<sha256>  <name>` per entry, sorted by name, excluding this file and the manifest (P4-03 moved the body to
+    `cap/integrity.py`; this name stays because callers and `docs/format.md` already use it)."""
+    from blackbox.cap import integrity
+
+    return integrity.lines(entries)
 
 
 def integrity_root(lines: bytes) -> str:
     """The single hash the manifest carries: `sha256` over the sorted INTEGRITY lines."""
-    return hashlib.sha256(lines).hexdigest()
+    from blackbox.cap import integrity
+
+    return integrity.root(lines)
 
 
 def capsule_bytes(entries: dict[str, bytes], manifest: dict[str, Any]) -> tuple[bytes, dict[str, Any]]:
@@ -196,23 +198,15 @@ def read_capsule(path: str, *, max_bytes: int = 1 << 30) -> Capsule:
     from blackbox.cap import manifest as manifest_mod_read
 
     unknown = manifest_mod_read.validate(manifest, where=path)
+    from blackbox.cap import integrity
+
+    declared_lines = entries.get(INTEGRITY_NAME, b"")
+    wanted_root = (manifest.get("integrity") or {}).get("root")
+    report = integrity.verify(entries, declared_lines, wanted_root)
     problems: list[str] = []
-    lines = entries.get(INTEGRITY_NAME, b"")
-    if not lines:
+    if not declared_lines:
         problems.append("INTEGRITY.sha256 is missing")
-    want = (manifest.get("integrity") or {}).get("root")
-    got = integrity_root(lines)
-    if want != got:
-        problems.append(f"integrity root {want} does not match the entries ({got})")
-    for line in lines.decode("utf-8", "replace").splitlines():
-        if not line.strip():
-            continue
-        digest, _, name = line.partition("  ")
-        if name not in entries:
-            problems.append(f"{name}: listed in INTEGRITY.sha256 but absent")
-            continue
-        if sha256(entries[name]).hex() != digest:
-            problems.append(f"{name}: sha256 does not match INTEGRITY.sha256")
+    problems.extend(report["problems"])
     capsule = Capsule(entries=entries, manifest=manifest, root_ok=not problems, problems=problems)
     capsule.unknown_manifest_keys = unknown
     return capsule

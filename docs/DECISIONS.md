@@ -1229,3 +1229,47 @@ readers that want JSON. Artifact: `bench/results/2026-11-16-otlp-pb-importer.jso
 offline here), the OpenTelemetry Collector's OTLP/JSON receiver, Phoenix's gRPC port 4317, and every importer other than
 Phoenix. The phrase this work supports is "a Phoenix-class receiver accepted the file and it read back intact" — not
 "OTLP is interoperable".
+
+## D-060 — a capsule carries the frames, not the preallocated hole (2026-11-17, P4-03 follow-up)
+
+Recovery put `segments.logical_bytes(path)` — the whole preallocated segment — into every capsule entry. A five-frame run
+produced two **16.0 MiB** capsules (the default segment size), so a ten-run demo left 320 MiB of zeros on disk, `ls`
+reported 16.0 MiB for evidence that was 4 KiB, and a capsule was larger than most repositories it described.
+
+`recovery.trim_padding` now drops the trailing zeros and walks back to the last **complete** frame boundary, because a
+frame's own payload may end in zero bytes: the first version trimmed zeros only, cut into the last frame, and `verify`
+caught it immediately — `graph.json.frames: 5 != 4`, `events/events.jsonl.line 5` present in the declared part and absent
+from the recomputation. That failure is why the walk exists, and it is pinned by
+`tests/test_trim_padding.py::test_a_frame_that_ends_in_zero_bytes_keeps_its_tail`.
+
+**What is deliberately not trimmed.** A non-zero tail is a partially written frame or damage, and it stays in the entry
+(with the padding behind it still dropped); `completeness` and `truncated_tail` in the manifest say what the scan made of
+it. A trimmer that dropped "whatever does not parse" would delete the wreckage a reader came for. A segment with no
+frames is cut to its header, and damage right after the header is kept.
+
+**The result, measured here:** the same five-frame run now lists `9.8 KiB` per capsule, and every frame of the tape is
+still decodable from the entry with the same sequence numbers. `blackbox verify` passes on the trimmed capsules,
+including `derived_parts`, which recomputes both parts from the trimmed bytes — the check that would have caught a
+too-aggressive trim.
+
+## D-061 — the front door is part of the product, and one data directory is where `run` put it (2026-11-17)
+
+Four things were true of the documented path and none of them worked:
+
+* `pyproject.toml` declared **no entry point**, so `pip install -e .` produced no `blackbox` command, while the README,
+  `docs/onboarding.md` and every console block said `blackbox …`. The only invocation that worked was `python -m blackbox`.
+  `[project.scripts] blackbox = "blackbox.__main__:main"` is now declared.
+* `blackbox run` writes into the **current directory** (`os.path.abspath(BLACKBOX_HOME or ".")`), but `blackbox ls` and
+  `blackbox verify --data` defaulted to `./.blackbox`. The first command a new user types after a run therefore reported
+  "no capsules" over a directory holding two. One resolver now (`cli/paths.py`): `--data`, then `$BLACKBOX_DATA_DIR`,
+  then `$BLACKBOX_HOME`, then `.` — and it does not search upward, because reporting on a directory nobody named is worse
+  than saying there is nothing here.
+* The README described a build with "no viewer, no capsules, no CLI beyond `--version`/`status`" and "157 tests". It is
+  now the four-command path that was run end-to-end for this decision: attach a real `openai` 3.51.0 client, `ls`,
+  `diagnose`, `view`, `verify`, then `repair preview` → `apply --approve <token>` → `verify --test`.
+* `pip install -e .` also needs `wheel` present to build; offline that means `--no-build-isolation` after installing it.
+  That is in the install block rather than discovered by the reader.
+
+`tests/test_readme.py` holds the line: every command in a console block must exist in the front door, the entry point must
+be declared, the version line must match the package, the read-only commands must share the default directory, and the
+limits section must keep saying 0 node-level edges, macOS 3.13 unmeasured, the untested importers and no universal 100 ms.

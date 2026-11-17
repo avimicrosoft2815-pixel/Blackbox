@@ -51,10 +51,26 @@ built is named there rather than implied: the graph's edges reach the *call* and
 "linked nodes" is a call edge that names the slot on one side and `null` on the other, not a node-to-node edge;
 `docs/node-edges.md` is the owner-requested proposal for what two genuinely recorded nodes and the evidence joining
 them would require, and the owner's decision (2026-11-16) is that P3B-03 and defect 55 stay open until that exists.**
-Suite: **Total: 1125 tests** — 1124 pass here and 1 is skipped on POSIX by name
+Suite: **Total: 1146 tests** — 1145 pass here and 1 is skipped on POSIX by name
 (`test_an_open_view_blocks_the_unlink_only_on_windows`: POSIX permits unlinking a file another fd still holds, so
-the open-view case exists only on Windows). ruff 0.17.5 and mypy 2.4.1 (`strict = true`, nothing disabled):
-0 findings.
+the open-view case exists only on Windows). Measured in this sandbox the same run gives 1140 pass, 1 skipped and
+**4 that cannot run in a depth-1 clone** (`test_forbidden_words`'s `git log` scan, `test_state_consistency`'s
+ancestry check and two in `test_status_doc` all call `tools/git_history.commit_count()`, which refuses rather than
+inspect one commit and call it a history; CI checks out with `fetch-depth: 0`). ruff 0.17.5 and mypy 2.4.1
+(`strict = true`, nothing disabled): 0 findings.
+
+**The demo path, run end to end on 2026-11-17 (D-060, D-061).** `pip install -e .` now produces a `blackbox` command
+(it declared no entry point before), `blackbox ls` and `verify --data` look where `blackbox run` writes instead of in a
+`./.blackbox` that nothing ever created, and a capsule is **9.8 KiB instead of 16 MiB** because recovery no longer puts the
+segment's preallocated hole into the archive. With that in place a real `openai` 3.51.0 client was run under the recorder
+(`blackbox run -- python3 app.py`, the client shipped unmodified): the call failed, the process exited 3, two capsules
+were recovered (23 and 17 events, `recovered/PROCESS_DEATH`), `ls` listed both, `blackbox verify` exited 0 with
+`integrity`, `chain_root`, `derived_parts`, `capture_seam` and `links_summary` green and `capture_vantage` printed as
+declared-not-checkable, `diagnose` wrote a report whose one finding is `observed` ("this run is named by 2 different
+identifiers"), `view` wrote a 56 606 B page, and `repair preview` -> `apply --approve <token>` -> `verify --test` applied
+a one-file proposal and printed `PASS`. What that run does **not** show is unchanged and still listed below: 0 node-level
+edges, no importer other than Phoenix, macOS 3.13 unmeasured, and no universal 100 ms rebind claim.
+
 
 **What `repair` does not guarantee, in one place.** The gate is documented at length in D-049/D-050 and in the P4-18
 row below; these are the three limits a reader should not have to go looking for. (1) **On Windows the symlink guarantee is check-then-write, not atomic.** `os.O_NOFOLLOW` does not exist there, so a swap that lands between the `islink` check and the open is not detected; on POSIX the descriptor flag closes that window, and closing it on Windows means opening by handle with `FILE_FLAG_OPEN_REPARSE_POINT`, which was not done. What *is* guaranteed there is that no read or write returns bytes through a link: `proposal.read_nofollow` checks before opening and `sha256_file` uses it, so the hash a reviewer approved and the bytes on disk are read by one rule (defect 50). (1b) **On Windows the backup directory is not 0700.** `os.chmod` there only toggles the read-only attribute and `os.stat` synthesises `0o777`, so a private directory is not expressible: `<repo>/.blackbox-repair` is as private as the repository's ACLs, `Applied.private_by_mode` is `False`, the manifest records that weaker fact and `repair apply` prints it (defect 51). On a filesystem that *has* POSIX modes and ignores `chmod`, the applier refuses rather than proceeding. (2) **A process killed mid-apply

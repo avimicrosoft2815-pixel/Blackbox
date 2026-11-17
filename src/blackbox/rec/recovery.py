@@ -39,6 +39,7 @@ from blackbox.errors import bbx
 from blackbox.platform import current as _plat_current
 from blackbox.rec import correlate, discover
 from blackbox.tape import chain as chain_mod
+from blackbox.tape import frame as frame_mod
 from blackbox.tape import meta as meta_mod
 from blackbox.tape import scanner, segments
 
@@ -292,6 +293,44 @@ def graph_nodes(frames: list[dict[str, Any]], *, interrupted: list[NodeRecord] |
 #: Why no edge in this build names a node. Kept as one constant so the graph, the tests and D-052 cannot drift apart.
 NODE_JOIN_REASON = ("no per-call identifier is recorded on both sides: `node_slot` numbers nodes inside one tape and "
                     "the injected header carries only <run>/<node>, so two calls from one node are indistinguishable")
+
+
+def trim_padding(raw: bytes) -> bytes:
+    """Drop the preallocated tail of a segment; keep everything else, damage included (P4-21).
+
+    A tape segment is preallocated — 16 MiB by default — and only the first frames are real. Shipping the whole file puts
+    16 MiB into every capsule for a five-frame run, which is not a recording, it is a copy of a hole. The trim is safe
+    because every capsule reader already stops at the first bytes it cannot parse, so the trimmed entry yields the same
+    frames.
+
+    Two steps, and the distinction matters. First the **all-zero** tail goes, which is padding. Then the walk back to the
+    last complete frame boundary, because a frame's own payload can end in zero bytes and a naive zero-trim would cut
+    into it. A **non-zero** tail is either a partially written frame or damage, and both are evidence: if anything other
+    than zeros sits past the last good frame, the entry keeps that region (with the padding still dropped) and
+    `completeness`/`truncated_tail` in the manifest say what the scan made of it. A trimmer that dropped "whatever does
+    not parse" would quietly delete the wreckage a reader is looking for.
+    """
+    end = len(raw)
+    while end > C.SEGMENT_HEADER_BYTES and raw[end - 1] == 0:
+        end -= 1
+    if end >= len(raw):
+        return raw
+    off = last = C.SEGMENT_HEADER_BYTES
+    while off < len(raw):
+        try:
+            _fields, nxt = frame_mod.decode(raw, off)
+        except Exception:  # a bad frame is evidence, not an error to raise
+            break
+        if nxt <= off:
+            break
+        last = off = nxt
+    if last <= C.SEGMENT_HEADER_BYTES:
+        return raw[:end]
+    if last >= end:
+        return raw[:last]
+    if raw[last:end].strip(b"\x00"):
+        return raw[:end]
+    return raw[:last]
 
 
 def graph_edges(links_document: bytes, writer_uuid: str) -> tuple[list[dict[str, Any]], dict[str, Any]]:
@@ -680,7 +719,7 @@ class Recovery:
             path = segments.seg_path_any(self.tape_dir, n)
             if path is None:
                 continue
-            out[cap.seg_entry_name(n)] = segments.logical_bytes(path)
+            out[cap.seg_entry_name(n)] = trim_padding(segments.logical_bytes(path))
         return out
 
     def step_sealed(self) -> str:
