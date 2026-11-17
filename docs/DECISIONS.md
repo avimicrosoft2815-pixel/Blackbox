@@ -1325,4 +1325,7 @@ the conservative bound from the last request served before the break, so a gap c
 refused in it. Two tempting shortcuts were measured and rejected: a connect-only probe, because a closed listening
 socket keeps completing handshakes from its accept queue (46 ms of a 60 ms stall looked like service), and a fixed 10 ms
 answer timeout, because every attempt on a Windows runner answers in ~16 ms and then reads as a timeout. The answer cap
-is therefore calibrated on the machine at start-up and recorded with each sample.
+is therefore calibrated on the machine at start-up and recorded with each sample — and it is only lowered *after* the
+machine has answered something, because lowering it first is how the Windows runner ended up with every attempt
+recorded as a timeout. The probe also needs a live upstream: the proxy's 504 for a dead port costs more than one
+attempt budget there, so a probe aimed at a dead port measures the failure path instead of service.

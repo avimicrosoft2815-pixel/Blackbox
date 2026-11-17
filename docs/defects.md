@@ -790,11 +790,18 @@ least half — a red test says which of the two claims broke.
 `outage_upper_ms` — last request served before the break to first served after it — because that bound still covers the
 gap when no request happened to be refused.
 
+**Two more things the Windows runner taught, both now in the code.** The probe must be aimed at a **live upstream**
+(`LocalUpstream`): the proxy answers a request to a dead port with its own 504, and on Windows that path costs more than
+one attempt budget, so the probe measured the failure path and read every attempt as a timeout. And `calibrate` must not
+*lower* the answer cap before the machine has answered anything — its first version did, which set the 10 ms floor on
+exactly the runner that needed the generous value.
+
 **Measured after the fix, request-level** (`bench/bench_rebind.py --n 60`,
 `bench/results/2026-11-17-rebind-request-level.json`, Linux 6.1 x86_64, CPython 3.11.2, 240 samples over four columns):
-gate **PASS**, worst upper bound **42.762 ms**, 0 over budget, 0 port moves, 0 not restored. Outage p50 / max by column:
-`notice_idle` 1.582 / 10.357 ms, `notice_loaded` 2.045 / 25.309 ms, `tick_idle` 11.156 / 21.892 ms, `tick_loaded`
-10.120 / 33.488 ms — larger than the previous revision's `rebind_ms` rows, which is the point: this is the number a
-child experiences, including the queueing in front of the rebind. The budget (`100.0 ms`), the per-sample assertion and
-the limits of the claim are unchanged: this is a gate on the machine that ran it, not a promise that any machine keeps
-100 ms (defect 58), and the tick columns' ~11 ms p50 is the tick, not the rebind.
+gate **PASS**, worst upper bound **63.3 ms**, 0 over budget, 0 port moves, 0 not restored. Outage p50 / max by column:
+`notice_idle` 1.788 / 10.640 ms, `notice_loaded` 0.351 / 19.396 ms, `tick_idle` 7.427 / 21.556 ms, `tick_loaded`
+10.949 / 24.414 ms — larger than the previous revision's `rebind_ms` rows, which is the point: this is the number a
+child experiences, including a request that was in flight when the listener went away and the queueing in front of the
+rebind. The budget (`100.0 ms`), the per-sample assertion and the limits of the claim are unchanged: this is a gate on
+the machine that ran it, not a promise that any machine keeps 100 ms (defect 58), and the tick columns' ~7–11 ms p50 is
+the tick, not the rebind.

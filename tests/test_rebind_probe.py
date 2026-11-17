@@ -130,7 +130,7 @@ def test_the_upper_bound_is_the_conservative_one() -> None:
 class _FakeProbe:
     """A probe that answers from a script, so the timeout branch can be tested without a race.
 
-    A real "listener that never comes back" test was tried and is not deterministic: the OS hands the freed port to the
+    A real "listener that never comes back" test was tried and is not repeatable: the OS hands the freed port to the
     next thing that asks for one, and when a `LocalUpstream` in a later test got it the probe was answered by a socket
     the proxy never opened. This is the same claim with no sockets in it.
     """
