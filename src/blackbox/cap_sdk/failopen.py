@@ -54,6 +54,7 @@ class FailOpenReceiver(Receiver):
         self.failure_count = 0
         self.failures: list[str] = []
         self._carries_call_id = _accepts(inner.open_call, "call_id")
+        self._carries_node_slot = _accepts(inner.open_call, "node_slot")
 
     # ── state the seams and the tests read through the wrapper ───────────────
     @property
@@ -71,8 +72,10 @@ class FailOpenReceiver(Receiver):
     # ── the three callbacks ─────────────────────────────────────────────────
     def open_call(self, provider: str, path: str, request: Any, *, model: str | None = None,
                   stream: bool = False, partial: bool = False, linked_run: str | None = None,
-                  call_id: str | None = None) -> ModelCall:
-        hints = {"call_id": call_id} if self._carries_call_id else {}
+                  call_id: str | None = None, node_slot: int | None = None) -> ModelCall:
+        hints: dict[str, Any] = {"call_id": call_id} if self._carries_call_id else {}
+        if node_slot is not None and self._carries_node_slot:
+            hints["node_slot"] = node_slot
         try:
             return self.inner.open_call(provider, path, request, model=model, stream=stream, partial=partial,
                                         linked_run=linked_run, **hints)
@@ -80,7 +83,7 @@ class FailOpenReceiver(Receiver):
             self._note("open_call", exc)
             # `request_fp=""` says *not fingerprinted*, which a reader can tell apart from a fingerprint of b"".
             return ModelCall(provider=provider, path=path, model=model, stream=stream, partial=True,
-                             linked_run=linked_run, call_id=call_id)
+                             linked_run=linked_run, call_id=call_id, node_slot=node_slot)
 
     def receive(self, call: ModelCall, chunk: bytes, *, first_byte_ms: float | None = None) -> None:
         try:

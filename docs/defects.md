@@ -1215,3 +1215,41 @@ same; one tampered capsule in the batch → exit 9 and only that capsule named; 
 `cannot read` and the path.
 
 **Tests.** `tests/test_verify_cli.py` (23, five new).
+
+## Defect 75 — every sink-written `NODE_OPEN` reached `graph.json` with no name, no kind and no owner (2026-11-18, B4)
+
+**Found by** reading the first B4 measurement back from the tape instead of from a counter: the proxy's spans were on the
+tape, `ProxyStats.spans` said `2`, and the graph listed two nodes as `{kind: None, owner: None, name: None}`.
+
+**Cause.** `TapeSink._safe` encodes payloads with `json.dumps`, while `TapeWriter.emit` — used directly by the interpreter
+writer and the hook folder — stores CBOR. `recovery._payload` decoded **CBOR only** and returned `{}` for everything the
+sink wrote, so a sink-written node lost its identity at read time. The frames were never wrong; the reader was.
+
+**Fix.** `_payload` tries CBOR, then JSON, and returns `{}` only when neither reads it. A payload that is neither is still
+an empty dict rather than an exception: a graph entry is not worth a crash, and an unreadable node is visible as a node
+with no name.
+
+**Why it mattered for B4 specifically.** A node-level edge whose ends have no name or kind is an edge naming two numbers
+— indistinguishable from an invented node to anyone reading `graph.json`. A proxy span that reads as `{kind: null}` would
+have been the blocker's own failure mode wearing a passing count.
+
+**Measured** by `tests/test_proxy_spans.py` (the tape is scanned and `recovery.graph_nodes` is asked for the span's name,
+kind, owner, outcome and duration) and by the launcher suites, which read `graph.json` from a real run.
+
+## Defect 76 — a span's own `name` field made `SinkRecorder` fail silently, and fail-open hid it (2026-11-18, B4)
+
+**Found by** the same measurement: the tape carried a `RUN_START` and no span, and the proxy's own stats said
+`spans: 0, record_errors: 1` while every request still answered `200`.
+
+**Cause.** `SinkRecorder._forward(self, name, *args, **kwargs)` — a span's payload has a field called `name`, so
+`_forward("span_open", slot, name="POST /v1/chat/completions", …)` raised `TypeError: got multiple values for argument
+'name'`. The sink counts every exception as a failed write and never re-raises (fail-open is the design), so the request
+succeeded, nothing was recorded, and no test failed: the only symptom was a number in a stats dict that nobody asserted
+on.
+
+**Fix.** The parameter is `attr`, and `_forward` now returns whether the frame reached a sink; the proxy treats `False` as
+"no span" instead of handing the call a slot no frame carries.
+
+**Measured** by `tests/test_proxy_spans.py::test_a_span_wraps_the_call_and_every_frame_carries_its_slot` (frame order and
+one slot per frame) and `::test_the_proxy_counts_the_spans_it_opened` (`spans: 1`, `spans_capped: 0`, no record errors),
+both read from a real tape written by a real proxy with a real upstream.

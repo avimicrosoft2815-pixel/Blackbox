@@ -42,6 +42,11 @@ class ModelCall:
     ending_provider: str | None = None   # `openai`, `anthropic`, `google`, `ollama`, or `unrecognised`
     linked_run: str | None = None  # `x-blackbox-run` seen on the request: the run this call belongs to (P3B-04)
     call_id: str | None = None     # this call's own id, sent as `x-blackbox-call` when a proxy is in front (D-053)
+    #: The tape slot of the span this call was recorded *inside*, when the writer opened one. A proxy opens a span per
+    #: forwarded request and passes it here, which is what makes the call's frames attributable to that span; an app node
+    #: is a different writer's span and never appears on this field. `None` means "outside any node", which is not the
+    #: same fact as "in node 0" and is never rendered as one.
+    node_slot: int | None = None
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -51,7 +56,7 @@ class ModelCall:
             "total_ms": self.total_ms, "stream": self.stream, "error": self.error, "model": self.model,
             "partial": self.partial, "end_reason": self.end_reason,
             "ending": self.ending, "ending_provider": self.ending_provider,
-            "linked_run": self.linked_run, "call_id": self.call_id,
+            "linked_run": self.linked_run, "call_id": self.call_id, "node_slot": self.node_slot,
         }
 
 
@@ -73,7 +78,7 @@ class Receiver:
 
     def open_call(self, provider: str, path: str, request: Any, *, model: str | None = None,
                   stream: bool = False, partial: bool = False, linked_run: str | None = None,
-                  call_id: str | None = None) -> ModelCall:
+                  call_id: str | None = None, node_slot: int | None = None) -> ModelCall:
         """Open a call. The hints are not decoration: a sink writes the request frame *here*, so a seam that set
         `call.model` afterwards would leave a durable frame saying `model: null` for a call that named its model."""
         raise NotImplementedError
@@ -96,9 +101,10 @@ class Recorder(Receiver):
 
     def open_call(self, provider: str, path: str, request: Any, *, model: str | None = None,
                   stream: bool = False, partial: bool = False, linked_run: str | None = None,
-                  call_id: str | None = None) -> ModelCall:
+                  call_id: str | None = None, node_slot: int | None = None) -> ModelCall:
         call = ModelCall(provider=provider, path=path, request_fp=fingerprint(request),
-                         model=model, stream=stream, partial=partial, linked_run=linked_run, call_id=call_id)
+                         model=model, stream=stream, partial=partial, linked_run=linked_run, call_id=call_id,
+                         node_slot=node_slot)
         self.calls.append(call)
         return call
 

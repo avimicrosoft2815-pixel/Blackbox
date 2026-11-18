@@ -1,6 +1,7 @@
 # Release blockers, with the evidence that puts them here
 
-Written on branch `arena/4e84d6ee-blackbox` (from `06b32a5`, the merge of PR #17). Every entry below was **reproduced on
+Started on branch `arena/4e84d6ee-blackbox` (from `06b32a5`, the merge of PR #17) and carried into
+`arena/4572f080-blackbox` (from `f4a9abb`, the merge of PR #18). Every entry below was **reproduced on
 this branch**, and each carries the command or the artifact that shows it. Nothing here is a guess, an old note carried
 forward, or a claim about a machine that was not available: where a claim is unmeasured, the entry says so and says what
 would measure it.
@@ -9,7 +10,9 @@ Order is by what a real user hits first, not by ticket number. **B1 was fixed on
 the list was first written, then **B2 and B3** (defects 68 and 69); the ids are kept stable so a comment, a defect entry
 or `docs/STATE.json` that names "B4" still points at the same thing. What remains open is **B4, B5 and B6** — two of
 which only the release machine can settle (B6, and the macOS cells it cannot acquire) and one of which is the owner's call
-on graph edges (B4). B8 was closed after the first review round, when `verify` learned to take many capsules.
+on graph edges (B4). B8 was closed after the first review round, when `verify` learned to take many capsules. **B4's fact
+changed on 2026-11-18**: node-level edges are recorded and measured on a real instrumented client, so what is left of B4 is
+the owner's tick and the parts that are honestly still unmeasured (see B4).
 
 ---
 
@@ -262,13 +265,39 @@ defaults are safe and both are said out loud.
 
 ---
 
-## B4 — P3B-03's acceptance: 0 node-level edges
+## B4 — P3B-03's acceptance: node-level edges are now **measured**, the tick is still the owner's call
 
-Unchanged and unsoftened. A shared trace id is not an edge; the capsule's `graph.json` records nodes and statuses but
-**no node-to-node edges**, so the "why did this step fail" question cannot be answered from the graph. Evidence:
-`bench/results/2026-11-16-p3b03-acceptance.json`. The rebind half of the same ticket now passes on a request-level
-measurement (worst 53.98 ms, 0 of 240 over the 100 ms budget — `bench/results/2026-11-18-rebind-instrumented.json`), and
-one half is not the ticket.
+**The blocker's stated fact was `node_level_edges_recorded: 0`, and that number is no longer zero.** The proxy now opens a
+span of its own for every request it forwards (`NODE_OPEN` … `NODE_CLOSE`, `kind: "proxy_call"`, `owner: "proxy"`, a slot
+from its own band) and tags that call's frames with the slot; the join stays the one both writers wrote, the
+`x-blackbox-call` id. Evidence, four real clients under `blackbox run` against a real loopback origin
+(`bench/results/2026-11-18-b4-node-edges.json`):
+
+| client | capsules, roots, one run id | `node_join` | node-level edges |
+|---|---|---|---|
+| `urllib` (no seam) | 2, all ok, one | `unknown` | **0** |
+| Node v22.22.3 (no seam) | 1, ok, one | `unknown` | **0** |
+| `openai` 3.51.0 as shipped | 2, all ok, one | `partial` | **0** |
+| `openai` 3.51.0 inside `api.run` | 2, all ok, one | **`exact`** | **2** (each tape's graph lists the join from its side) |
+
+The instrumented case's pair is app node `1` ↔ proxy span `16384`, call id `5eb5b57ced07034f`, on both tapes' graphs, with
+both capsules passing their own integrity root and `graph.json` recomputed from raw frames by `capsule verify`. The
+uninstrumented rows are the **negative control**: their frames carry fingerprints and timestamps, they are recorded inside
+no app node, and they produce no node-level edge — nothing is joined by time or by fingerprint.
+
+What this does **not** settle, and why the blocker stays open as the owner's decision rather than mine:
+
+* **Node clients cannot produce a node-level edge** — `api.run` has no Node equivalent, so the Node row is `unknown` at
+  node level. That is a missing feature, reported as such, not a passing row.
+* **Ambiguity is refused, but only in tests** — an id recorded twice on a side yields `level: "call"`, `ambiguous`,
+  `candidates: 2` and no node (`tests/test_proxy_spans.py`), and no live client produces a duplicate id without being
+  told to.
+* **macOS is unmeasured** for every row above.
+* Shape (b) of `docs/node-edges.md` (a hook-to-seam node join) and a launcher-owned process span are still proposals.
+
+`docs/node-edges.md` is now an implementation note with the measurement, not a proposal. The rebind half of the same
+ticket passes on a request-level measurement (worst 53.98 ms, 0 of 240 over the 100 ms budget —
+`bench/results/2026-11-18-rebind-instrumented.json`). Defects 75 and 76 are the two bugs measuring this uncovered.
 
 ## B5 — OTLP importers other than Phoenix are untested
 

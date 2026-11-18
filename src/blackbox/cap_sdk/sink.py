@@ -121,6 +121,8 @@ class TapeSink:
         self.coalesce_ms = coalesce_ms
         self._clock = clock
         self.groups: dict[int, _Group] = {}
+        # Spans this writer opened, so a close can name its own open even if a reader never sees the `NODE_OPEN`.
+        self._open_spans: dict[int, dict[str, Any]] = {}
         self.raw_chunks: dict[int, int] = {}
         self.redaction_failures = 0
         self.stored: dict[int, tuple[int, int]] = {}
@@ -136,7 +138,7 @@ class TapeSink:
             "capture_seam": seam, "content": self.content, "linked_run": call.linked_run,
             "call_id": call.call_id,
             "coalesce_bytes": self.coalesce_bytes, "coalesce_ms": self.coalesce_ms,
-        })
+        }, slot=call.node_slot)
         self.groups[id(call)] = _Group(first_ns=self._clock())
         self.raw_chunks[id(call)] = 0
         self.stored[id(call)] = (0, 0)
@@ -215,7 +217,36 @@ class TapeSink:
                           {"mode": "off", "counts": {}, "failures": 0, "note": "no redactor"}),
         }
         kind = C.KIND_MODEL_ERROR if call.error else C.KIND_MODEL_RESPONSE
-        self._safe(kind, summary)
+        self._safe(kind, summary, slot=call.node_slot)
+
+    # ── the writer's own spans ──────────────────────────────────────────────
+    def span_open(self, slot: int, *, name: str, kind: str, owner: str, **fields: Any) -> None:
+        """Open a node this writer owns: `NODE_OPEN` with the slot it allocated and who owns it.
+
+        The proxy calls this for every request it forwards (B4). It is a node in the tape's own numbering, so it is a
+        recorded span and not an inference: `graph.json` lists it with its own slot, name and duration, `owner` says the
+        proxy opened it, and a reader can tell it from an app node without a flag on an edge.
+        """
+        opened = self._clock()
+        self._open_spans[slot] = {"name": name, "kind": kind, "owner": owner, "opened_ns": opened}
+        payload = {"name": name, "kind": kind, "owner": owner, "parent": None, "opened_ns": opened, **fields}
+        self._safe(C.KIND_NODE_OPEN, payload, slot=slot)
+
+    def span_close(self, slot: int, *, outcome: str, **fields: Any) -> None:
+        """Close a span, carrying the name and kind its `NODE_OPEN` had.
+
+        A `NODE_CLOSE` whose `NODE_OPEN` was retained away is still a node a reader has to name, and the duration is
+        this writer's own measurement of its own span — the same clock the open used, not the app's.
+        """
+        record = self._open_spans.pop(slot, {})
+        fields.setdefault("name", record.get("name"))
+        fields.setdefault("kind", record.get("kind"))
+        fields.setdefault("owner", record.get("owner"))
+        if "duration_us" not in fields and record.get("opened_ns") is not None:
+            fields["duration_us"] = max(0, (self._clock() - record["opened_ns"]) // 1000)
+        payload = {"name": fields.pop("name"), "kind": fields.pop("kind"), "owner": fields.pop("owner"),
+                   "outcome": outcome, "duration_us": fields.pop("duration_us", None), **fields}
+        self._safe(C.KIND_NODE_CLOSE, payload, slot=slot)
 
     # ── internals ───────────────────────────────────────────────────────────
     def _flush(self, call: ModelCall, group: _Group, now: int) -> None:
@@ -232,16 +263,16 @@ class TapeSink:
             payload = b"[bbx-hash sha256=" + digest + b" bytes=" + str(len(raw)).encode() + b"]"
         else:
             payload = b"[bbx-off bytes=" + str(len(raw)).encode() + b"]"
-        self._safe(C.KIND_MODEL_CHUNK, payload, mono_ns=group.last_ns or now)
+        self._safe(C.KIND_MODEL_CHUNK, payload, mono_ns=group.last_ns or now, slot=call.node_slot)
         self.bytes_written += len(payload)
         group.chunks.clear()
         group.bytes = 0
         group.first_ns = now
 
-    def _safe(self, kind: int, payload: Any, **fields: Any) -> None:
+    def _safe(self, kind: int, payload: Any, *, slot: int | None = None, **fields: Any) -> None:
         try:
             body = payload if isinstance(payload, bytes) else json.dumps(payload, sort_keys=True).encode()
-            self._emit(kind, body, node_slot=self.node_slot, **fields)
+            self._emit(kind, body, node_slot=self.node_slot if slot is None else int(slot), **fields)
             self.events_written += 1
         except Exception:
             self.write_errors += 1                          # counted, never raised (fail-open)
@@ -264,11 +295,22 @@ class SinkRecorder(Receiver):
 
     def open_call(self, provider: str, path: str, request: Any, *, model: str | None = None,
                   stream: bool = False, partial: bool = False, linked_run: str | None = None,
-                  call_id: str | None = None) -> ModelCall:
+                  call_id: str | None = None, node_slot: int | None = None) -> ModelCall:
         call = self._recorder.open_call(provider, path, request, model=model, stream=stream, partial=partial,
-                                        linked_run=linked_run, call_id=call_id)
+                                        linked_run=linked_run, call_id=call_id, node_slot=node_slot)
         self._forward("on_open", call, self.installed_seam)
         return call
+
+    def span_open(self, slot: int, **fields: Any) -> bool:
+        """Forward a writer-owned span to the sink. False means nothing will be recorded for it (no sink, or a raise).
+
+        The proxy asks this before it hands a slot to a call: a span that reaches no sink must not become a slot the
+        graph believes in, because then the edge would name a node no tape contains.
+        """
+        return self._forward("span_open", slot, **fields)
+
+    def span_close(self, slot: int, **fields: Any) -> bool:
+        return self._forward("span_close", slot, **fields)
 
     def receive(self, call: ModelCall, chunk: bytes, *, first_byte_ms: float | None = None) -> None:
         self._recorder.receive(call, chunk, first_byte_ms=first_byte_ms)
@@ -279,10 +321,14 @@ class SinkRecorder(Receiver):
         self._recorder.close_call(call, status=status, total_ms=total_ms, error=error)
         self._forward("on_close", call)
 
-    def _forward(self, name: str, *args: Any, **kwargs: Any) -> None:
+    def _forward(self, attr: str, *args: Any, **kwargs: Any) -> bool:
+        # The parameter is `attr`, not `name`: a span's own field is called `name`, and a keyword argument that shares a
+        # parameter name with this method's is a `TypeError` the sink then counts as a failed write.
         if self.sink is None:
-            return
+            return False
         try:
-            getattr(self.sink, name)(*args, **kwargs)
+            getattr(self.sink, attr)(*args, **kwargs)
         except Exception:
             self.sink_errors += 1                           # the app never sees a recorder error (fail-open)
+            return False
+        return True

@@ -6,9 +6,9 @@
     "bench/results/*.json"
   ],
   "next_ticket": "P4-04",
-  "next_note": "**The three items this branch was asked to prioritise are done, and reviewed twice** (`docs/RELEASE-BLOCKERS.md`; B1, B2, B3 and B7 fixed, B4/B5/B6/B8 remain). B2: a zero-capture run prints one sentence naming the base URL as **one possible cause** rather than asserting it, with the alternative (a call that never left the process) named - `tests/test_launcher_capture_warning.py` (5). B3: backpressure at `MAX_INFLIGHT`, a bounded 60 s wait answered `503 queue-timeout`, `503 connection-limit` past `MAX_CONNECTIONS`, both caps **planned per host** from `limits.fd_budget()` and **reduced by `limits.open_fds()`** so descriptors the process already holds are not spent twice (defect 72), a delay and a rejection named separately in the run's sentence, a body line on the rejection saying what to do, and overload measured at the planned numbers - 80/80 served at the 256-descriptor plan (73 queued, 50 ms worst), 12/12 served with 50 descriptors already open (peak 87 of a 320 budget), 450/450 on the documented pair, and abrupt clients that leave while queued, at the ceiling or mid-stream returning their slot and connection (defect 73; the queued-departure limitation is in the README) - `tests/test_proxy_backpressure.py` (14), `tests/test_proxy_limits.py` (7). Defect 68/70: endings are tri-state across seven conventions, an unrecognised convention is `unverified` and reported as cannot-tell, and a convention is matched to the **end** of the path - `tests/test_stream_termination.py` (30). B8 is closed too: `verify` takes one capsule or many, expands a quoted pattern itself so the same command works on POSIX/`cmd.exe`/PowerShell, prints the worst exit code of the batch and names a pattern that matched nothing - `tests/test_verify_cli.py` (23). **Remaining:** B4's node edges (the owner's call), B5's importers (none installable offline here), then B6's release-machine rows plus the macOS cells GitHub has not been able to acquire.",
+  "next_note": "**B4's own fact changed on 2026-11-18: node-level edges are recorded and measured, and the ticket is still the owner's call.** The proxy now opens a `proxy_call` span per forwarded request (its own slot band, 0x4000-0x7FFF, with hooks stopping at 0x3FFF) and tags that call's frames with the slot, so `graph.json` carries `level: \"node\"` edges joined by `x-blackbox-call` alone: on a real instrumentation run `bench/results/2026-11-18-b4-node-edges.json` reports `node_level_edges_recorded: {python: 0, node: 0, sdk: 0, sdk-nodes: 2}`, `node_join_per_client: {python: unknown, node: unknown, sdk: partial, sdk-nodes: exact}` and `uninstrumented_clients_stay_below_node_level: true` (app node 1 <-> proxy span 16384, call id 5eb5b57ced07034f, each tape's graph listing it from its side, both capsules passing their own root). Measuring it found defects 75 and 76. Still open: a Node client cannot produce a node-level edge (`api.run` is Python-only), ambiguity is refused in tests only, macOS is unmeasured for these rows, and shape (b) plus a launcher process span remain proposals. Earlier on this branch: B2 (a zero-capture run names the base URL as **one possible cause**, with the alternative named), B3 (backpressure at `MAX_INFLIGHT`, a bounded 60 s wait answered `503 queue-timeout`, `503 connection-limit` past `MAX_CONNECTIONS`, caps planned per host from `limits.fd_budget()` minus `limits.open_fds()` - defect 72 - delays and rejections named separately, abrupt clients returning their slot, defect 73), B7, B8 (`verify` takes many capsules and expands a quoted pattern itself). **Remaining:** B5's importers (none installable offline here), B6's release-machine rows, the macOS cells GitHub has not been able to acquire, and B4's tick.",
   "last_green_commit": "f46dac1",
-  "last_green_commit_note": "Runs 44220446574 at ad3a783 and 44221709657 at f46dac1 (plus their pull-request twins 44220453866 and 44221716913): **ten of ten** jobs green in all four — docs, all three Ubuntu cells, all three Windows cells, and **all three macOS cells**, which had never been acquired on this branch before ad3a783 (44173181007 at 118bebe was Linux 3/3 + Windows 3/3 + docs green with every macOS job cancelled at 0 steps, so it was never a green run). Run 44223453730 at f57c2ac was then red on macOS 3.11 alone: the first macOS samples of the probe tests on this branch found a ceiling in one of them that assumed a quiet machine (defect 63), while an idle listener was never refused and the sample was a 43.5 ms slow answer. The commit that follows this one fixes that test and nothing in the probe.",
+  "last_green_commit_note": "Runs 44220446574 at ad3a783 and 44221709657 at f46dac1 (plus their pull-request twins 44220453866 and 44221716913): **ten of ten** jobs green in all four \u2014 docs, all three Ubuntu cells, all three Windows cells, and **all three macOS cells**, which had never been acquired on this branch before ad3a783 (44173181007 at 118bebe was Linux 3/3 + Windows 3/3 + docs green with every macOS job cancelled at 0 steps, so it was never a green run). Run 44223453730 at f57c2ac was then red on macOS 3.11 alone: the first macOS samples of the probe tests on this branch found a ceiling in one of them that assumed a quiet machine (defect 63), while an idle listener was never refused and the sample was a 43.5 ms slow answer. The commit that follows this one fixes that test and nothing in the probe.",
   "gates": {
     "G-A": "pass",
     "G-Promise": "pass",
@@ -22,9 +22,9 @@
     "G-Sec": "pending",
     "G-Release": "pending"
   },
-  "gate_note": "a gate flips to pass only with a reviewer-signed docs/gates/G-<name>.md (AGENT_FINAL.md §4); the builder never ticks its own gate",
+  "gate_note": "a gate flips to pass only with a reviewer-signed docs/gates/G-<name>.md (AGENT_FINAL.md \u00a74); the builder never ticks its own gate",
   "open_blockers": [
-    "**P3B-03's node-level edges are still 0** (B4): `bench/results/2026-11-16-p3b03-acceptance.json`. The rebind half passes on a request-level measurement; one half is not the ticket.",
+    "**P3B-03's node-level edges are measured but the ticket is the owner's call** (B4): `bench/results/2026-11-18-b4-node-edges.json` records 2 node-level edges with `node_join: exact` for an instrumented `openai` client (app node 1 <-> proxy span 16384, call id 5eb5b57ced07034f) and 0 for uninstrumented `urllib`/Node clients and for `openai` without `api.run`. Unmeasured: any Node node-level edge (`api.run` is Python-only), ambiguity from a live client, macOS. Shape (b) of `docs/node-edges.md` and a launcher process span are proposals.",
     "**OTLP importers other than Phoenix are untested** (B5): Langfuse, the Collector's OTLP/JSON receiver and Phoenix gRPC 4317.",
     "**Two rows only the release machine can settle** (B6): P3B-07's bench-box cold start (this branch: p50 30.3 / p95 38.3 ms on a 2-vCPU sandbox after defect 64 cut it from 100.8 / 108.8) and every rebind number, which no CI runner can produce."
   ],
@@ -304,7 +304,7 @@
   "extra_work": [
     {
       "id": "P3-13MP",
-      "name": "loopback mock provider (required by G-Capture, no row in the plan's §18.5 table)",
+      "name": "loopback mock provider (required by G-Capture, no row in the plan's \u00a718.5 table)",
       "status": "done",
       "commit": "714554c",
       "tests": "tests/test_mock_provider.py (9)",
@@ -341,20 +341,20 @@
     },
     {
       "id": "P3-11c",
-      "name": "the §15.1 capture rows (Disabled, content=off, content=hash, provider Δ p95, install) and the content modes they needed",
+      "name": "the \u00a715.1 capture rows (Disabled, content=off, content=hash, provider \u0394 p95, install) and the content modes they needed",
       "status": "done",
       "commit": "HEAD",
       "tests": "tests/test_content_modes.py (9), bench/bench_capture.py",
       "measurement": "bench/results/2026-11-15-capture-overhead.json",
-      "note": "the sink ignored the configured content mode (defect 30): default `hash` in Appendix A, body written anyway. Now full/hash/off with the byte count in a payload header so recovery still answers \"how much arrived\"; redaction skipped in off mode. All five §15.1 rows measured on ext4 with tmpfs as a labelled second column; the content=hash worst case (a body containing `token`) is published beside the row rather than behind it",
+      "note": "the sink ignored the configured content mode (defect 30): default `hash` in Appendix A, body written anyway. Now full/hash/off with the byte count in a payload header so recovery still answers \"how much arrived\"; redaction skipped in off mode. All five \u00a715.1 rows measured on ext4 with tmpfs as a labelled second column; the content=hash worst case (a body containing `token`) is published beside the row rather than behind it",
       "label": "self"
     },
     {
       "id": "P4-20",
-      "name": "otlp/spans.pb — the protobuf encoding a real OTLP receiver takes",
+      "name": "otlp/spans.pb \u2014 the protobuf encoding a real OTLP receiver takes",
       "status": "done",
       "tests": "tests/test_export_otlp_pb.py (12)",
-      "note": "D-059: the capsule's own otlp/spans.pb was accepted by Phoenix 21.0.0 (200) and read back with the trace id, parent chain, integer types and every bbx.* attribute intact — which is also the evidence that closes P4-14's importer clause. Langfuse, the Collector's OTLP/JSON receiver and Phoenix's gRPC port remain untested (bench/results/2026-11-16-otlp-pb-importer.json)"
+      "note": "D-059: the capsule's own otlp/spans.pb was accepted by Phoenix 21.0.0 (200) and read back with the trace id, parent chain, integer types and every bbx.* attribute intact \u2014 which is also the evidence that closes P4-14's importer clause. Langfuse, the Collector's OTLP/JSON receiver and Phoenix's gRPC port remain untested (bench/results/2026-11-16-otlp-pb-importer.json)"
     },
     {
       "id": "P4-21",

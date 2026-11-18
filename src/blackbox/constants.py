@@ -147,6 +147,13 @@ KIND_GAP = 4
 KIND_DEGRADED = 5
 KIND_HEARTBEAT = 6
 KIND_NODE_OPEN = 16
+# A tape can carry nodes from more than one writer: the hook folder numbers its nodes from 1, and the proxy now
+# opens a span of its own for every request it forwards (B4). Two writers sharing a numbering space is how two
+# unrelated spans become one graph node, so the space is split: hooks may use 1..0x3FFF, the proxy opens from
+# 0x4000. Neither side can reach the other's band, and each NODE_OPEN says who owns it.
+NODE_SLOT_HOOK_MAX = 0x3FFF
+NODE_SLOT_PROXY_BASE = 0x4000
+NODE_SLOT_PROXY_MAX = 0x7FFF
 KIND_NODE_CLOSE = 17
 KIND_EDGE = 18
 # 0x13 — the graph range's lowest free id at the time LINK was first written (append-only: MARK keeps the 0x70 it has

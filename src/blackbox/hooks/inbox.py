@@ -29,6 +29,8 @@ import os
 import time
 from typing import Any
 
+from blackbox import constants as C
+
 # The sync and the descriptor go through the platform dispatch like every other file this project writes (C29 needs
 # `O_BINARY` on Windows; C32 keeps `fsync` out of call sites). The import is cheap and the cold-start measurement in
 # `tests/test_hook_inbox.py` includes it, because a hook budget that only holds without the platform layer is not a
@@ -234,7 +236,9 @@ def fold(inbox_dir: str, writer: Any, *, limit: int | None = None) -> FoldResult
             slot = 0
             if record.opens is not None:
                 slot = int(state["next_slot"])
-                state["next_slot"] = min(slot + 1, 0xFFFF)
+                # Hook nodes stop at the top of their own band: the proxy opens spans from `NODE_SLOT_PROXY_BASE`, and
+                # one numbering space shared by two writers is how two unrelated spans become one graph node (B4).
+                state["next_slot"] = min(slot + 1, C.NODE_SLOT_HOOK_MAX)
                 state["open"][record.opens] = slot
             elif record.closes is not None:
                 slot = int(state["open"].pop(record.closes, 0) or 0)
@@ -249,7 +253,6 @@ def fold(inbox_dir: str, writer: Any, *, limit: int | None = None) -> FoldResult
                     payload["node_slot"] = slot
             kind = record.kind or 0
             if not kind:
-                from blackbox import constants as C
                 kind = C.KIND_MARK
             writer.append(kind, cbor.encode(payload), node_slot=slot, priority=1)
             written += 1

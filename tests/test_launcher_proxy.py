@@ -279,11 +279,18 @@ def _run_starts(data_dir: Path) -> list[dict]:
     return out
 
 
-def _graph_with_nodes(data_dir: Path) -> dict:
-    graphs = [json.loads(path.read_text(encoding="utf-8")) for path in sorted((data_dir / "runs").glob("*/graph.json"))]
-    with_nodes = [graph for graph in graphs if graph.get("nodes")]
-    assert len(with_nodes) == 1, [graph.get("nodes") for graph in graphs]
-    return with_nodes[0]
+def _graphs(data_dir: Path) -> list[dict]:
+    """Every `graph.json` the run left, one per tape that recorded frames."""
+    return [json.loads(path.read_text(encoding="utf-8"))
+            for path in sorted((data_dir / "runs").glob("*/graph.json"))]
+
+
+def _app_graph(data_dir: Path, names: set[str]) -> dict:
+    """The graph of the tape whose nodes are the app's — the proxy's tape carries a `proxy_call` span instead."""
+    for graph in _graphs(data_dir):
+        if {node["name"] for node in graph.get("nodes", [])} >= names:
+            return graph
+    raise AssertionError(f"no graph holds the nodes {sorted(names)}: {[g.get('nodes') for g in _graphs(data_dir)]}")
 
 
 def test_the_call_id_lands_on_both_tapes_and_never_reaches_the_upstream(tmp_path, origin, capfd):
@@ -318,17 +325,37 @@ def test_two_concurrent_calls_get_two_ids_and_two_graph_edges_each_naming_its_ow
         result = launcher.launch([sys.executable, str(script)], data_dir=str(tmp_path / "data"), out=handle,
                                  proxy=True, proxy_routes=_routes(origin), env=env)
     assert result.exit_code == 0, result.exit_code
-    graph = _graph_with_nodes(tmp_path / "data")
+    graph = _app_graph(tmp_path / "data", {"first", "second"})
     nodes = {node["name"]: node["node_slot"] for node in graph["nodes"]}
-    assert sorted(nodes) == ["first", "second"], graph["nodes"]
-    call_edges = [edge for edge in graph["edges"] if edge["level"] == "call"]
-    assert len(call_edges) == 2, graph["edges"]
-    assert len({edge["from"]["call_id"] for edge in call_edges}) == 2, "two calls, two ids"
-    named = sorted(edge["nodes"]["from"] for edge in call_edges)
-    assert named == sorted(nodes.values()), "each edge names the node its own call was inside"
-    assert all(edge["nodes"]["to"] is None for edge in call_edges), "the proxy records calls, not the app's nodes"
-    assert graph["edge_summary"]["call_level"] == 2 and graph["edge_summary"]["node_level"] == 0
-    assert graph["edge_summary"]["node_join"] == "partial"
+    assert sorted(key for key in nodes if key in {"first", "second"}) == ["first", "second"], graph["nodes"]
+    app_nodes = {node["name"]: node for node in graph["nodes"] if node["name"] in {"first", "second"}}
+    assert {node["kind"] for node in app_nodes.values()} == {"run"}, app_nodes
+
+    # B4's measurement, from a real launch: one id per call, and the proxy's recorded span on the other end of it, so
+    # the edge is node-to-node — both ends recorded by their own writer, neither invented.
+    call_or_node = [edge for edge in graph["edges"] if edge["level"] in ("call", "node")]
+    assert len(call_or_node) == 2, graph["edges"]
+    assert len({edge["from"]["call_id"] for edge in call_or_node}) == 2, "two calls, two ids"
+    assert {edge["level"] for edge in call_or_node} == {"node"}, call_or_node
+    assert sorted(edge["nodes"]["from"] for edge in call_or_node) == sorted(
+        nodes[name] for name in ("first", "second")), "each edge names the node its own call was inside"
+    to_nodes = [edge["nodes"]["to"] for edge in call_or_node]
+    assert all(isinstance(node, int) and node >= C.NODE_SLOT_PROXY_BASE for node in to_nodes), to_nodes
+    assert len(set(to_nodes)) == 2, "two calls in flight at once got two proxy spans, not one shared span"
+    assert graph["edge_summary"]["call_level"] == 0 and graph["edge_summary"]["node_level"] == 2
+    assert graph["edge_summary"]["node_join"] == "exact" and graph["edge_summary"]["ambiguous"] == 0
+    assert all(edge["node_join"] == "exact" for edge in call_or_node), call_or_node
+
+    # The proxy's spans are nodes of the proxy's own tape. A run may leave more than one graph (one per run id the
+    # child started), so the spans are counted across all of them rather than assumed to live in one file.
+    everything = [node for other in _graphs(tmp_path / "data") for node in other["nodes"]]
+    spans = [node for node in everything if node["kind"] == "proxy_call"]
+    assert len(spans) == 2, everything
+    assert {node["owner"] for node in spans} == {"proxy"}, spans
+    assert {node["name"] for node in spans} == {"POST /v1/chat/completions"}, spans
+    used_as_an_end = {edge["nodes"]["to"] for other in _graphs(tmp_path / "data") for edge in other["edges"]
+                      if edge["level"] == "node"}
+    assert {node["node_slot"] for node in spans} <= used_as_an_end, (used_as_an_end, spans)
 
 
 def test_an_uninstrumented_child_leaves_no_node_and_no_call_edge(tmp_path, origin, capfd):
@@ -354,13 +381,17 @@ def test_an_uninstrumented_child_leaves_no_node_and_no_call_edge(tmp_path, origi
     starts = _run_starts(tmp_path / "data")
     assert starts and {start["run_id"] for start in starts} == {result.run_id}, starts
 
-    graphs = [json.loads(path.read_text(encoding="utf-8"))
-              for path in sorted((tmp_path / "data" / "runs").glob("*/graph.json"))]
+    graphs = _graphs(tmp_path / "data")
     assert graphs, "the run left a graph"
+    # The proxy did forward the request, so its tape records a span of its own — that span is a fact about the proxy's
+    # vantage, not an app node. What must be absent is an app node, and any edge that would join one: `call_id` is null
+    # on the record, so there is nothing to join on, and inventing an end is what D-052 forbids.
+    spans = [node for graph in graphs for node in graph["nodes"]]
+    assert [(node["kind"], node["owner"]) for node in spans] in ([], [("proxy_call", "proxy")]), spans
     for graph in graphs:
-        assert graph["nodes"] == [], "no instrumented writer opened a node, so the graph must list none"
-        # The run may still hold run-level links between its own tapes (the auto-imported interpreter writes one even
-        # when the app makes no model call). What must be absent is a *call* edge: there is no id to justify one.
-        assert [edge for edge in graph["edges"] if edge["level"] != "run"] == [], graph["edges"]
+        for edge in graph["edges"]:
+            assert edge["level"] == "run", edge
+            assert edge["nodes"] == {"from": None, "to": None}, edge
         assert graph["edge_summary"]["call_level"] == 0
         assert graph["edge_summary"]["node_level"] == 0
+        assert graph["edge_summary"]["node_join"] == "unknown", graph["edge_summary"]

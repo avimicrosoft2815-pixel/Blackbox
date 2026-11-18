@@ -197,12 +197,24 @@ def graphs(data_dir: Path) -> list[dict]:
             continue
         nodes = graph.get("nodes") or []
         edges = graph.get("edges") or []
+        summary = graph.get("edge_summary") or {}
         out.append({"run_dir": path.parent.name, "writer_uuid": graph.get("writer_uuid"),
                     "run_id": graph.get("run_id"), "graph_nodes": len(nodes), "graph_edges": len(edges),
                     "edge_levels": sorted({str(edge.get("level")) for edge in edges}),
                     "node_level_edges": sum(1 for edge in edges if edge.get("level") == "node"),
                     "edge_nodes_named": sum(1 for edge in edges
                                             if (edge.get("nodes") or {}).get("from") or (edge.get("nodes") or {}).get("to")),
+                    "node_join": summary.get("node_join"), "node_join_reason": summary.get("node_join_reason"),
+                    "ambiguous_edges": summary.get("ambiguous"),
+                    "node_kinds": sorted({str(n.get("kind")) for n in nodes}),
+                    "node_owners": sorted({str(n.get("owner")) for n in nodes}),
+                    # Which recorded spans the node-level edges actually name, both ends, with the slots a reader can
+                    # find in `graph.json`. This is the evidence the blocker asks for, not a count of edges.
+                    "node_level_pairs": [{"from": (e.get("nodes") or {}).get("from"),
+                                          "to": (e.get("nodes") or {}).get("to"),
+                                          "call_id": (e.get("from") or {}).get("call_id"),
+                                          "join": e.get("node_join")}
+                                         for e in edges if e.get("level") == "node"],
                     "open_nodes": graph.get("open_nodes"),
                     "node_statuses": sorted({str(n.get("status")) for n in nodes}),
                     "node_slots": sorted({n.get("node_slot") for n in nodes})})
@@ -295,9 +307,21 @@ def main(argv: list[str] | None = None) -> int:
             # D-052: the graph carries the link it can justify, at run level, and names no nodes. The ticket asks for
             # linked *nodes*, so `node_level_edges` is the number that decides whether it can be ticked — and it is
             # reported as a count, not as a missing key (defect 55 stays open until it is not zero).
-            "run_level_edges_recorded": sum(g.get("graph_edges", 0) for r in results for g in r["graphs"]),
-            "node_level_edges_recorded": sum(g.get("node_level_edges", 0) for r in results for g in r["graphs"]),
+            "edges_recorded": sum(g.get("graph_edges", 0) for r in results for g in r["graphs"]),
+            "node_level_edges_recorded": {r["client"]: sum(g.get("node_level_edges", 0) for g in r["graphs"])
+                                          for r in results},
             "edges_naming_a_node": sum(g.get("edge_nodes_named", 0) for r in results for g in r["graphs"]),
+            # B4's two-sided claim: a node-level edge exists only where both writers recorded a span, and the spans it
+            # names are the app's node and the proxy's `proxy_call` span — never one span standing in for both.
+            "node_join_per_client": {r["client"]: sorted({str(g.get("node_join")) for g in r["graphs"]})
+                                     for r in results},
+            "proxy_spans_on_tape": {r["client"]: sum(1 for g in r["graphs"] if "proxy_call" in (g.get("node_kinds") or []))
+                                    for r in results},
+            # A client that installs no seam records no node, so its edges must stay at run/call level. This is the
+            # negative control: `python` and `node` here are plain stdlib clients with no `import blackbox`.
+            "uninstrumented_clients_stay_below_node_level": all(
+                g.get("node_level_edges", 0) == 0
+                for r in results if r["client"] in ("python", "node") for g in r["graphs"]),
             "node_available": node is not None,
         },
     }

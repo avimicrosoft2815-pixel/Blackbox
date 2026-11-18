@@ -289,6 +289,9 @@ def graph_nodes(frames: list[dict[str, Any]], *, interrupted: list[NodeRecord] |
             payload = _payload(f.get("payload") or b"")
             nodes[slot] = {"node_slot": slot, "name": payload.get("name"), "kind": payload.get("kind"),
                            "parent": payload.get("parent"), "opened_ns": payload.get("opened_ns"),
+                           # Who opened this node. A proxy's span is a real recorded node and a different writer's
+                           # observation from the app's, so a reader can tell them apart without reading an edge (B4).
+                           "owner": payload.get("owner"),
                            "status": "unclosed", "outcome": None, "detail": ""}
         elif kind == C.KIND_NODE_CLOSE:
             node = nodes.get(slot)
@@ -427,8 +430,14 @@ def graph_edges(links_document: bytes, writer_uuid: str) -> tuple[list[dict[str,
     named = [e for e in edges if (e["nodes"]["from"] or e["nodes"]["to"])]
     node_level = sum(1 for e in edges if e["level"] == "node")
     node_join = "exact" if node_level else ("partial" if named else "unknown")
-    reason = NODE_JOIN_REASON if not named else (
-        "the call is inside a node on one tape only: the proxy vantage records calls, not the app's nodes")
+    if node_level:
+        reason = ("both ends of the call are inside nodes their own writer opened: the app's node on one tape and the "
+                  "proxy's span on the other")
+    elif named:
+        reason = ("the call is inside a node on one tape only: the other writer recorded the call without a span "
+                  "around it, and a node is not invented for the end an edge is missing")
+    else:
+        reason = NODE_JOIN_REASON
     summary: dict[str, Any] = {
         "total": len(edges),
         "run_level": sum(1 for e in edges if e["level"] == "run"),
@@ -449,14 +458,26 @@ def empty_edge_summary() -> dict[str, Any]:
 
 
 def _payload(raw: bytes) -> dict[str, Any]:
-    """A frame payload as a dict, or an empty dict when it will not decode: a graph entry is not worth an exception."""
+    """A frame payload as a dict, or an empty dict when neither encoding reads it.
+
+    Two encodings land on one tape: frames written by the sink are JSON (`TapeSink._safe`), frames written straight
+    through `TapeWriter.emit` are CBOR. Reading only CBOR made every sink-written `NODE_OPEN` list as a node with no
+    name or kind — the proxy's span, measured 2026-11-18, arrived in `graph.json` as `{kind: None, owner: None}`
+    (defect 72).
+    """
     if not raw:
         return {}
     try:
         decoded = cbor.decode_exact(raw)
+        if isinstance(decoded, dict):
+            return decoded
+    except Exception:
+        pass
+    try:
+        decoded_json = json.loads(raw.decode("utf-8"))
     except Exception:
         return {}
-    return decoded if isinstance(decoded, dict) else {}
+    return decoded_json if isinstance(decoded_json, dict) else {}
 
 
 def run_status(frames: list[dict[str, Any]], *, sealed: bool) -> tuple[str, str | None]:
