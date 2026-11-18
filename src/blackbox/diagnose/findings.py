@@ -106,6 +106,8 @@ def _model_calls(evidence: Evidence) -> list[Finding]:
                     checks=["re-run with the SDK seam (-m blackbox or the sitecustomize launcher) to get app-side counts"]))
         partial_terminal = [f for f in terminal if f.kind == C.KIND_MODEL_RESPONSE
                             and bool(f.data.get("partial"))]
+        unverified = [f for f in terminal if f.kind == C.KIND_MODEL_RESPONSE
+                      and f.data.get("ending") == "unverified"]
         if partial_terminal:
             # The ending exists and says it is not an ending (defect 66). Before this, a provider that hung up
             # mid-stream produced a MODEL_RESPONSE with `partial: false` and this report said "nothing was cut short"
@@ -132,6 +134,31 @@ def _model_calls(evidence: Evidence) -> list[Finding]:
                     "re-run the same request: a truncation that repeats points at the provider or the path to it",
                     "read the application's own output for that call: a short answer with no exception means the cut was "
                     "silent to the app, which is the case this recorder exists to make visible",
+                ]))
+        if unverified:
+            # The owner's rule: never claim a stream is complete when its ending is unknown, and never claim it was cut
+            # either. This is the third answer, and it has to be visible or `partial: false` reads as "finished".
+            first = unverified[0]
+            provider = first.data.get("ending_provider") or "unrecognised"
+            out.append(Finding(
+                id=f"stream-ending-unknown-{slot}", verdict=CANNOT_TELL, confidence=LOW,
+                title=f"whether the stream at node {slot} finished is not recorded",
+                basis=(f"{first.ref()} is a MODEL_RESPONSE with `ending: unverified`: the path this call used follows a "
+                       f"stream convention this build does not know (`{provider}`), so no terminator was expected or "
+                       f"looked for. {len(chunks)} MODEL_CHUNK frame(s) reached the tape. The absence of a marker here "
+                       "means the question was not asked, not that the stream was cut."),
+                evidence=[first.ref()] + [f.ref() for f in chunks[-2:]],
+                alternatives=[
+                    "the stream finished normally and the provider has no terminator to observe",
+                    "the stream was cut and no convention exists to prove it",
+                    "the client closed the stream after reading what it needed",
+                ],
+                checks=[
+                    "compare the response's chunk count and byte count with what the provider's own logs or dashboard "
+                    "report for the same request",
+                    "re-run the same call through a client whose stream convention this build knows, if one exists",
+                    "read the application's own output for that call: a complete-looking answer is not evidence either "
+                    "way, which is exactly why this is recorded as unknown",
                 ]))
         if requests and not chunks and not terminal:
             out.append(Finding(

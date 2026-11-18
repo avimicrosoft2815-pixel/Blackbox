@@ -51,7 +51,21 @@ built is named there rather than implied: the graph's edges reach the *call* and
 "linked nodes" is a call edge that names the slot on one side and `null` on the other, not a node-to-node edge;
 `docs/node-edges.md` is the owner-requested proposal for what two genuinely recorded nodes and the evidence joining
 them would require, and the owner's decision (2026-11-16) is that P3B-03 and defect 55 stay open until that exists.**
-Suite: **Total: 1195 tests** — 1194 pass here and 1 is skipped on POSIX by name
+
+**The three things this branch was asked to prioritise are done, and `docs/RELEASE-BLOCKERS.md` carries each with its
+measurement.** (1) A run that captured nothing now says so: `blackbox run` prints one sentence after the summary when the
+run had a proxy, recovered capsules, and recorded zero model calls, naming the cause (an adopted base URL) and the flag
+that fixes it (`--force-proxy`) — B2, `tests/test_launcher_capture_warning.py` (5), verified end-to-end through the
+installed CLI. (2) The connection ceiling has a policy instead of an accident: a request past `MAX_INFLIGHT` (200) waits
+for a slot, a wait past 60 s is answered `503 queue-timeout`, a client past `MAX_CONNECTIONS` (512) is answered `503
+connection-limit` in milliseconds, and the caps fit the 1024-descriptor stock budget by arithmetic rather than by hope —
+B3, `tests/test_proxy_backpressure.py` (5), measured in `bench/results/2026-11-16-b3-connection-limit.json` (450 of 450
+served, probe answered in 1053.8 ms instead of timing out at 4 s, 96 surplus clients refused in a median 4.4 ms). (3)
+Stream termination is recorded in three states rather than two, across seven provider conventions, and a stream whose
+ending this recorder does not recognise is recorded as `unverified` and reported as **cannot tell** — never as complete
+— defect 68, `tests/test_stream_termination.py` (23). What remains open is B4, B5, B6 and B8.
+
+Suite: **Total: 1218 tests** — 1217 pass here and 1 is skipped on POSIX by name
 (`test_an_open_view_blocks_the_unlink_only_on_windows`: POSIX permits unlinking a file another fd still holds, so
 the open-view case exists only on Windows). The number is for the dependency set CI installs,
 `.[dev,capture,capture-sdks]`: sixteen tests live behind `anthropic`, so a venv with only `httpx` and `openai`

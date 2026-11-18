@@ -6,9 +6,9 @@
     "bench/results/*.json"
   ],
   "next_ticket": "P4-04",
-  "next_note": "**The product's headline promise now holds on the real-user path** (`docs/RELEASE-BLOCKERS.md` carries all eight items with reproductions; B1 and B7 are fixed here, B2/B3/B4/B5/B6/B8 remain). B1 was the one that mattered: a mock provider truncating 3 of 6 chunks used to be recorded as `partial: False` with a report saying 'nothing in these frames indicates that anything was cut short'. `TerminatorWatch` in `cap_sdk/tee.py` keeps the last 128 bytes of a stream, knows the two conventions it can vouch for (`[DONE]`, `message_stop`), and marks a clean end without them as partial with a recorded `end_reason`; `diagnose` emits an **observed** finding and the headline now reads 'The evidence shows that a model stream ended before the provider finished it'. Finding it exposed defect 67: `diagnose/evidence._decode` read CBOR only, so every model frame reached the rules as an empty dict and the timeline printed 'MODEL_REQUEST 312 B' with no provider, path, model or partial flag - the frames the report is about were the ones it could not read; it now tries JSON first, as export_jsonl always has. Defect 65 was the same disease in the manifest (a constant `coverage: FULL` for an empty capsule and `content_mode: full` for hashed frames), now derived from the frames. Fixed earlier on this branch: the hook path imported all eleven commands to run one (p50 100.8 -> 30.3 ms, p95 108.8 -> 38.3, inside the 40 ms gate on this box; defect 64), the descriptor ceiling is raised to what the kernel grants (defect 62, policy half open), and `diagnose <dir>` picks the run's capsule that has model calls instead of the newest file (B7). **Next, in the order the blocker list gives them:** B2 (the launcher is silent when a run captured nothing - a one-line stderr warning, plus the owner's call on whether the run result should say `captured: 0`), B3 (pick one of the three concurrency policies), then B8 and the two rows only the release machine can settle (B6).",
+  "next_note": "**The three items this branch was asked to prioritise are done** (`docs/RELEASE-BLOCKERS.md`; B1, B2, B3 and B7 are fixed here, B4/B5/B6/B8 remain). B2: a run that recorded no model call while the proxy was up now prints one sentence after the summary - the count comes from each capsule's own manifest (`RunResult.captured`), and the exit status stays the child's - `tests/test_launcher_capture_warning.py` (5), verified through the installed CLI. B3: the connection ceiling is decided rather than inherited - backpressure at `MAX_INFLIGHT` 200, a bounded 60 s wait answered `503 queue-timeout`, and `503 connection-limit` past `MAX_CONNECTIONS` 512, with the caps chosen so the worst case (808) fits the stock 1024-descriptor budget even where `RLIMIT_NOFILE` could not be raised; `ProxyStats` carries `queued`, `max_queue_wait_ms` and `refused_reasons`, and the launcher says what happened `tests/test_proxy_backpressure.py` (5), `bench/results/2026-11-16-b3-connection-limit.json` (450/450 served, probe 1053.8 ms instead of a 4 s timeout, 96 surplus clients refused in a median 4.4 ms). Defect 68: stream endings are tri-state (`terminated`/`unterminated`/`unverified`) across seven provider conventions, and an unrecognised convention is reported as `cannot tell`, never as complete - `tests/test_stream_termination.py` (23) plus a `diagnose` finding `stream-ending-unknown-<slot>`. Fixed earlier: defect 64 (hook cold start p50 100.8 -> 30.3 ms), defect 62 (descriptor budget raised), defect 65 (manifest derived from frames), defect 66 (truncated stream marked partial), defect 67 (JSON model frames were read as empty), B7 (`diagnose <dir>` picks the capsule with calls). **Remaining, in the order the blocker list gives them:** B8 (`verify` takes exactly one capsule), then B4's node edges and B5's importers, then the two release-machine rows (B6).",
   "last_green_commit": "f46dac1",
-  "last_green_commit_note": "Runs 44220446574 at ad3a783 and 44221709657 at f46dac1 (plus their pull-request twins 44220453866 and 44221716913): **ten of ten** jobs green in all four \u2014 docs, all three Ubuntu cells, all three Windows cells, and **all three macOS cells**, which had never been acquired on this branch before ad3a783 (44173181007 at 118bebe was Linux 3/3 + Windows 3/3 + docs green with every macOS job cancelled at 0 steps, so it was never a green run). Run 44223453730 at f57c2ac was then red on macOS 3.11 alone: the first macOS samples of the probe tests on this branch found a ceiling in one of them that assumed a quiet machine (defect 63), while an idle listener was never refused and the sample was a 43.5 ms slow answer. The commit that follows this one fixes that test and nothing in the probe.",
+  "last_green_commit_note": "Runs 44220446574 at ad3a783 and 44221709657 at f46dac1 (plus their pull-request twins 44220453866 and 44221716913): **ten of ten** jobs green in all four — docs, all three Ubuntu cells, all three Windows cells, and **all three macOS cells**, which had never been acquired on this branch before ad3a783 (44173181007 at 118bebe was Linux 3/3 + Windows 3/3 + docs green with every macOS job cancelled at 0 steps, so it was never a green run). Run 44223453730 at f57c2ac was then red on macOS 3.11 alone: the first macOS samples of the probe tests on this branch found a ceiling in one of them that assumed a quiet machine (defect 63), while an idle listener was never refused and the sample was a 43.5 ms slow answer. The commit that follows this one fixes that test and nothing in the probe.",
   "gates": {
     "G-A": "pass",
     "G-Promise": "pass",
@@ -22,10 +22,8 @@
     "G-Sec": "pending",
     "G-Release": "pending"
   },
-  "gate_note": "a gate flips to pass only with a reviewer-signed docs/gates/G-<name>.md (AGENT_FINAL.md \u00a74); the builder never ticks its own gate",
+  "gate_note": "a gate flips to pass only with a reviewer-signed docs/gates/G-<name>.md (AGENT_FINAL.md §4); the builder never ticks its own gate",
   "open_blockers": [
-    "**A run whose calls were never recorded still reports success** (B2 in `docs/RELEASE-BLOCKERS.md`). The manifest and the report now say so (`coverage: NONE`, `model_calls: 0`, an observed finding naming `--force-proxy`), but the launcher prints `recovered` and exits 0 for a run that captured nothing while the proxy was up.",
-    "**Concurrency has no policy at the descriptor ceiling** (B3, defect 62). Raising the soft `RLIMIT_NOFILE` turned a 450-connection burst that timed out an in-flight probe after 4 s into one that served it in 2 ms, but past the ceiling a child still waits with no error. The owner chooses backpressure, explicit 503, or nothing-but-say-it.",
     "**P3B-03's node-level edges are still 0** (B4): `bench/results/2026-11-16-p3b03-acceptance.json`. The rebind half passes on a request-level measurement; one half is not the ticket.",
     "**OTLP importers other than Phoenix are untested** (B5): Langfuse, the Collector's OTLP/JSON receiver and Phoenix gRPC 4317.",
     "**Two rows only the release machine can settle** (B6): P3B-07's bench-box cold start (this branch: p50 30.3 / p95 38.3 ms on a 2-vCPU sandbox after defect 64 cut it from 100.8 / 108.8) and every rebind number, which no CI runner can produce.",
@@ -307,7 +305,7 @@
   "extra_work": [
     {
       "id": "P3-13MP",
-      "name": "loopback mock provider (required by G-Capture, no row in the plan's \u00a718.5 table)",
+      "name": "loopback mock provider (required by G-Capture, no row in the plan's §18.5 table)",
       "status": "done",
       "commit": "714554c",
       "tests": "tests/test_mock_provider.py (9)",
@@ -344,20 +342,20 @@
     },
     {
       "id": "P3-11c",
-      "name": "the \u00a715.1 capture rows (Disabled, content=off, content=hash, provider \u0394 p95, install) and the content modes they needed",
+      "name": "the §15.1 capture rows (Disabled, content=off, content=hash, provider Δ p95, install) and the content modes they needed",
       "status": "done",
       "commit": "HEAD",
       "tests": "tests/test_content_modes.py (9), bench/bench_capture.py",
       "measurement": "bench/results/2026-11-15-capture-overhead.json",
-      "note": "the sink ignored the configured content mode (defect 30): default `hash` in Appendix A, body written anyway. Now full/hash/off with the byte count in a payload header so recovery still answers \"how much arrived\"; redaction skipped in off mode. All five \u00a715.1 rows measured on ext4 with tmpfs as a labelled second column; the content=hash worst case (a body containing `token`) is published beside the row rather than behind it",
+      "note": "the sink ignored the configured content mode (defect 30): default `hash` in Appendix A, body written anyway. Now full/hash/off with the byte count in a payload header so recovery still answers \"how much arrived\"; redaction skipped in off mode. All five §15.1 rows measured on ext4 with tmpfs as a labelled second column; the content=hash worst case (a body containing `token`) is published beside the row rather than behind it",
       "label": "self"
     },
     {
       "id": "P4-20",
-      "name": "otlp/spans.pb \u2014 the protobuf encoding a real OTLP receiver takes",
+      "name": "otlp/spans.pb — the protobuf encoding a real OTLP receiver takes",
       "status": "done",
       "tests": "tests/test_export_otlp_pb.py (12)",
-      "note": "D-059: the capsule's own otlp/spans.pb was accepted by Phoenix 21.0.0 (200) and read back with the trace id, parent chain, integer types and every bbx.* attribute intact \u2014 which is also the evidence that closes P4-14's importer clause. Langfuse, the Collector's OTLP/JSON receiver and Phoenix's gRPC port remain untested (bench/results/2026-11-16-otlp-pb-importer.json)"
+      "note": "D-059: the capsule's own otlp/spans.pb was accepted by Phoenix 21.0.0 (200) and read back with the trace id, parent chain, integer types and every bbx.* attribute intact — which is also the evidence that closes P4-14's importer clause. Langfuse, the Collector's OTLP/JSON receiver and Phoenix's gRPC port remain untested (bench/results/2026-11-16-otlp-pb-importer.json)"
     },
     {
       "id": "P4-21",

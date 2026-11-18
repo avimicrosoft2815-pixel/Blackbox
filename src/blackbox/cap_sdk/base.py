@@ -34,7 +34,12 @@ class ModelCall:
     error: str | None = None
     model: str | None = None
     partial: bool = False         # the seam saw the call but not all of it; never a guess, always a marker
-    end_reason: str | None = None  # why `partial` is set, in words: a short stream must say how it was short
+    end_reason: str | None = None  # why the ending is not "terminated", in words
+    #: What the seam can say about how the stream ended: `terminated` (the provider's own terminator was seen),
+    #: `unterminated` (a known convention, terminator missing — the stream was cut), `unverified` (no convention this
+    #: build knows, so **nothing is claimed**). `None` for a call that was not a stream.
+    ending: str | None = None
+    ending_provider: str | None = None   # `openai`, `anthropic`, `google`, `ollama`, or `unrecognised`
     linked_run: str | None = None  # `x-blackbox-run` seen on the request: the run this call belongs to (P3B-04)
     call_id: str | None = None     # this call's own id, sent as `x-blackbox-call` when a proxy is in front (D-053)
 
@@ -45,6 +50,7 @@ class ModelCall:
             "bytes_received": self.bytes_received, "first_byte_ms": self.first_byte_ms,
             "total_ms": self.total_ms, "stream": self.stream, "error": self.error, "model": self.model,
             "partial": self.partial, "end_reason": self.end_reason,
+            "ending": self.ending, "ending_provider": self.ending_provider,
             "linked_run": self.linked_run, "call_id": self.call_id,
         }
 

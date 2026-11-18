@@ -6,8 +6,9 @@ forward, or a claim about a machine that was not available: where a claim is unm
 would measure it.
 
 Order is by what a real user hits first, not by ticket number. **B1 was fixed on this branch** (defects 66 and 67) after
-the list was first written; the ids are kept stable so a comment, a defect entry or `docs/STATE.json` that names "B4"
-still points at the same thing.
+the list was first written, then **B2 and B3** (defects 68 and 69); the ids are kept stable so a comment, a defect entry
+or `docs/STATE.json` that names "B4" still points at the same thing. What remains open is **B4, B5, B6 and B8** — two of
+which only the release machine can settle (B6) and one of which is the owner's call on graph edges (B4).
 
 ---
 
@@ -64,14 +65,29 @@ reached the rules as an empty dict** and the timeline printed `MODEL_REQUEST —
 `partial`. It now tries JSON first, as `cap/export_jsonl` always has, and the timeline shows
 `provider=127.0.0.1; model=gpt-4o-mini; path=/v1/chat/completions; stream=True; partial=False; capture_seam=httpx-hooks`.
 
-**What is still the owner's call.** (1) A *generic* `text/event-stream` with an unknown convention is deliberately not
-marked — the specification has no terminator, so marking one would be a guess at somebody else's protocol. (2) Whether a
-`partial` call should also change the **run status** from `recovered` to something a user reads as "incomplete"; today it
-is a finding in the report, not a status.
+**The unknown-convention half is answered now (defect 68).** A stream whose provider this recorder does not recognise is
+still never marked `partial` — that remains the rule, because a generic `text/event-stream` has no terminator in its
+specification and inventing one would be a guess about somebody else's protocol. What changed is that the absence of a
+convention is no longer *indistinguishable from a verified ending*: the ending is recorded in three states, and the third
+one says so.
+
+| recorded `ending` | meaning | `partial` | what a report says |
+|---|---|---|---|
+| `terminated` | a marker from this provider's own convention was seen | `False` | the stream finished (with the provider named) |
+| `unterminated` | the convention is known and its marker is missing | `True` | **observed**: the stream ended before the provider finished it |
+| `unverified` | no convention is known for this path | `False`, and no claim either way | **cannot tell**: whether the stream finished is not recorded |
+
+Supported conventions, each a row in `TERMINATORS` and each tested by provider: OpenAI chat/legacy `data: [DONE]`,
+OpenAI Responses `response.completed`, Anthropic `message_stop`, Gemini `"finishReason"`, Ollama `"done": true` (chat and
+generate). A marker from *another* provider's convention does not count, and a non-streaming JSON body is not a stream.
+`tests/test_stream_termination.py` (23) and one new `diagnose` test (38 in that file) hold it.
+
+**What is still the owner's call.** Whether a `partial` call should also change the **run status** from `recovered` to
+something a user reads as "incomplete"; today it is a finding in the report, not a status.
 
 ---
 
-## B2 — A run whose calls were never recorded reports success and shows an empty capsule
+## B2 — A run whose calls were never recorded reports success and shows an empty capsule — FIXED on this branch
 
 **What a user hits.** They export `OPENAI_BASE_URL` (a gateway, a corporate proxy, or just their own test server) and run
 `blackbox run -- python app.py`. The launcher **adopts** a base URL the user set instead of overwriting it — correct, and
@@ -79,7 +95,7 @@ documented — so the traffic never reaches the recorder. The run prints `recove
 capsule, `diagnose` writes a report, and the capsule contains five frames: `RUN_START`, two `CHAIN`, `RUN_END`,
 `SEG_END`. Nothing about the call the user wanted explained.
 
-**Evidence (before and after this branch's fix, same run):**
+**Evidence (before and after, same run):**
 
 ```console
 $ blackbox ls
@@ -89,8 +105,7 @@ c_9ea910f9c2de3ca1  r_e072267e38ca3fc3  recovered/PROCESS_DEATH  11      14.5 Ki
 ```
 
 before: `capture={'coverage': 'FULL', 'providers': []}` and the report said *completeness `full`*, with no mention that
-nothing was recorded. After (defect 65, this branch): `capture={'coverage': 'NONE', 'model_calls': 0}`, and `diagnose`
-now prints
+nothing was recorded. After defect 65: `capture={'coverage': 'NONE', 'model_calls': 0}`, and `diagnose` prints
 
 ```
 - no model call was recorded in this capsule, so nothing here describes a request or a response
@@ -98,45 +113,89 @@ now prints
 
 with the cause and the fix (`blackbox run --force-proxy` names every variable it displaces).
 
-**Still blocking:** the **launcher** is silent. A run that recorded zero model calls while the proxy was up exits 0 and
-prints `recovered`, exactly like a run that recorded a hundred. A one-line warning at exit — *"no model call reached the
-recorder in this run; if your app sets its own base URL, `--force-proxy` points it here"* — turns the trap into a
-message. That is a small change to `rec/launcher.py` and it needs a decision about whether a zero-capture run should
-also change its exit status (recommended: no — the child's exit code is the child's, and the warning belongs on stderr).
+**Fixed (this branch).** Two halves, because the trap had two exits:
+
+* **The launcher says it.** After the summary line, when a run recovered capsules, had a proxy, and recorded **zero model
+  calls**, `blackbox run` prints one sentence and no more. Measured on a real CLI run (`blackbox run --data-dir … sh -c
+  'echo hi'`):
+
+  ```
+  blackbox: this run recorded no model call — the 1 capsule of run r_d188348b679e0c11 holds no request and no
+  response. If this command talks to a model API, its base URL was not the recorder's (a base URL your environment or
+  code sets is adopted as an upstream rather than overwritten), and `blackbox run --force-proxy` points every base-URL
+  variable at the recorder and names each one it displaces. A command that makes no model call is fine; this line
+  describes the run, not a failure.
+  ```
+
+  and the same command with a client that reaches the recorder prints nothing (`model_calls: 1`). The count comes from
+  each capsule's own manifest (`RunResult.captured`), not from the proxy's counters, because `blackbox ls` will show
+  those capsules to the user tomorrow and two answers to the same question is the thing this project keeps refusing.
+* **The exit status is the child's.** The warning is a sentence on the run's output stream; it does not change the exit
+  code, because the child's exit code belongs to the child and a recorder that fails a successful command is a recorder
+  people uninstall. That was the decision the blocker asked for and it is taken here.
+
+**Tests.** `tests/test_launcher_capture_warning.py` (5): a run that made no model call says so and does not read as an
+error; the sentence names the cause and the flag that fixes it; a run that reached the recorder is not warned about; no
+warning without a proxy; and the singular/plural wording is asserted so "1 capsule … holds" cannot regress. End-to-end,
+on this box, through the installed CLI: warning present for `sh -c 'echo hi'`, absent for a `urllib` client through the
+recorder.
 
 ---
 
-## B3 — Concurrency is bounded by the descriptor table, and nothing decides what happens at the bound
+## B3 — Concurrency had no policy at the descriptor ceiling — DECIDED and FIXED on this branch
 
 **What a user hits.** A parallel batch (an agent fanning out 200 calls, or 400 with retries) against a slow upstream. The
 listener stops accepting, the child's requests wait with no error, and asyncio logs a traceback per attempt that nobody
 reads.
 
-**Measured on this box** (`ulimit -n` soft 1024, hard 524288, 2 vCPUs; client and prober in their own processes, so the
-numbers are the proxy's):
+**Measured before** (`ulimit -n` soft 1024, hard 524288, 2 vCPUs; client and prober in their own processes, so the
+numbers are the proxy's): at 450 concurrent in-flight requests the proxy's table was full — `socket.accept() out of
+system resource` — and **a new request during the burst timed out after 4 s with no answer**. Raising the soft limit to
+what the kernel already grants (`proxy/limits.py`, to 65536) moved the cliff: the same burst held 1366 descriptors and
+the probe was served in 2 ms. That half is not a decision, and it is still the first thing the proxy does.
 
-| state | 450 concurrent in-flight requests | a new request during the burst |
+**The decision, and why this one.** Of the three options the blocker named, **backpressure** — with an explicit ceiling
+above it — is what this branch implements, because the proxy's promise is *pass-through*: a recorder that refuses a
+request the provider would have answered has broken the thing it exists for. The rules, all in `proxy/server.py`:
+
+| situation | answer | cost |
 |---|---|---|
-| before | proxy's table full: `socket.accept() out of system resource`, `/proc/self/fd` unreadable | **timed out after 4 s**, no answer |
-| after (soft limit raised to 65536) | 1366 descriptors held, all 450 kept open | **served in 2 ms** |
+| request in flight already equals `MAX_INFLIGHT` (200) | the request **waits** for a slot; its socket stays open | the wait is counted (`stats.queued`) and its length recorded |
+| the wait exceeds `QUEUE_WAIT_S` (60 s) | `503` + `x-blackbox-error: queue-timeout: …` | never leaves a request parked forever |
+| more than `MAX_CONNECTIONS` (512) clients held open | `503` + `x-blackbox-error: connection-limit: …` in milliseconds | the one case the recorder cannot serve, so it says so |
 
-**Fixed on this branch — the part that is not a decision.** `src/blackbox/proxy/limits.py` raises the process's soft
-`RLIMIT_NOFILE` to what the kernel already grants (bounded by the hard limit, capped at 65536, no-op on Windows), on
-proxy start, recorded as `ProxyThread.fd_limit`. Tests: `tests/test_proxy_limits.py` (4) prove the raise, the Windows
-answer (`None`), the arithmetic (a 40-connection burst against a deliberately tiny 64-descriptor budget), and the target.
+Why **200** and **512**, rather than a flag: the caps are derived from a descriptor budget, not a preference. One
+descriptor per held connection plus one per in-flight request is the whole model, so the worst case is
+`512 + 200 + 96` (the 96 counts the listener, the idle pool at `2 * routes`, the tape, and stdio) = **808**, under the
+smallest default soft limit this project meets (1024 on Linux and macOS) — which means the caps hold *even on a host
+where `limits.py` could not raise anything*, Windows included. `tests/test_proxy_backpressure.py` asserts that
+arithmetic so the numbers cannot drift apart from the reason for them. There is deliberately no `--max-connections` yet:
+a knob whose safe range is one budget interval invites the exact failure this replaces, and adding it is a decision with
+a validation story of its own.
 
-**Still blocking — the part that is a decision.** There is no cap and no backpressure policy. Raising the limit moves
-the cliff; it does not remove it, and the cliff is *silent*: a child that is queued behind the limit cannot tell that
-from a slow provider. The owner must choose one:
+**Measured after** (`bench/bench_connection_limit.py` → `bench/results/2026-11-16-b3-connection-limit.json`; same 2-vCPU
+Linux sandbox, origin sleeping 300 ms per request, soft limit raised the way a launcher raises it):
 
-1. **backpressure (recommended)** — an `asyncio.Semaphore` of `--max-connections` in `ProxyServer._handle`, so beyond
-   the cap the client waits with its own socket open and nothing is refused. Peak descriptors become `clients + cap`
-   instead of `2 × clients`; the capsule records the wait. No request the upstream would have served is lost.
-2. **explicit refusal** — 503 with `x-blackbox-error` past the cap. Cheaper to reason about, but a recorder that refuses
-   a request the provider would have answered has broken the promise the proxy exists for; it also needs a new event so
-   the capsule says it happened.
-3. **nothing, but say it** — leave the cliff, and make `diagnose`/`run` report the descriptor ceiling and whether the run
-   came near it.
+| measurement | result |
+|---|---|
+| 450 concurrent requests | **450 of 450 answered 200**, 0 refused, 444 queued, longest queue wait 887 ms, origin peak 192 in flight |
+| a probe issued during that burst | **200**, in 1053.8 ms — it waited ~0.9 s for a slot instead of timing out after 4 s with nothing |
+| 96 clients beyond `MAX_CONNECTIONS` | **96 of 96 answered `503`** with `connection-limit: at most 512 connections are held at once`, median **4.4 ms**, max 7.7 ms |
+
+**What a user reads.** A run that hit either rule says so once, after the summary — the same discipline as B2's sentence:
+`the recorder answered 2 requests itself instead of passing them through (connection-limit: 2); 3 requests waited for a
+slot at the 200-request ceiling, the longest 812 ms`, followed by the note that the numbers are a descriptor budget.
+`ProxyStats` carries `queued`, `max_queue_wait_ms` and `refused_reasons` so the sentence is derived, not guessed.
+
+**Tests.** `tests/test_proxy_backpressure.py` (5), with the ceilings turned down so a test *is* a real burst at a real
+ceiling: six requests against `max_inflight=2` are all served, two at a time, none refused; a connection past
+`max_connections=2` gets its `503` in under two seconds; a wait past a 0.3 s bound is answered, not stalled; a client
+that connects and says nothing past the limit is told and closed; and the descriptor arithmetic above. `ProxyServer` takes
+the three numbers as parameters so the behaviour is testable without 512 sockets; the defaults are the documented ones.
+
+**Still the owner's call.** Whether the caps should be configurable, and whether a `503` the recorder issued should be
+counted in the *capsule* (today it is in `stats` and in the run's sentence, not in a frame). Neither blocks: both
+defaults are safe and both are said out loud.
 
 ---
 

@@ -509,3 +509,42 @@ def test_the_manifest_describes_the_frames_it_has_rather_than_a_constant(tmp_pat
     assert empty["capture"]["coverage"] == "NONE", empty["capture"]
     assert empty["capture"]["model_calls"] == 0
     assert empty["redaction"]["content_mode"] == "unknown", empty["redaction"]
+
+
+def test_an_unknown_stream_convention_is_a_cannot_tell_not_a_silence(tmp_path: Path) -> None:
+    """The owner's rule, at the report level: an unknown ending must not read as "finished" (defect 68).
+
+    `partial: false` with no other field is indistinguishable from a completed stream, so the report needs a third
+    answer; here it is, in the words the user sees.
+    """
+    request = {"path": "/v1/some/new/stream", "provider": "127.0.0.1", "model": "m", "stream": True,
+               "partial": False, "capture_seam": "httpx-hooks", "content": "hash"}
+    response = {"path": "/v1/some/new/stream", "provider": "127.0.0.1", "model": "m", "status": 200,
+                "chunks_raw": 2, "bytes_received": 100, "partial": False, "content": "hash",
+                "ending": "unverified", "ending_provider": "unrecognised",
+                "end_reason": "this build does not know /v1/some/new/stream's stream convention"}
+    w = TapeWriter(str(tmp_path / "data"), segment_bytes=C.MIN_SEGMENT_BYTES)
+    w.batch_bytes = 0
+    w.batch_ms = 0.0
+    w.open()
+    for kind, payload in ((C.KIND_RUN_START, {"run_id": "r_unk", "source": "sdk"}),
+                          (C.KIND_MODEL_REQUEST, request),
+                          (C.KIND_MODEL_CHUNK, {"bytes": 50}),
+                          (C.KIND_MODEL_RESPONSE, response),
+                          (C.KIND_RUN_END, {"run_id": "r_unk", "source": "sdk"})):
+        w.append(kind, json.dumps(payload).encode(), node_slot=0, priority=2, run_slot=1)
+        w.publish()
+    w.close()
+    result = recovery.recover(str(tmp_path / "data"))
+    assert result.capsule_path
+    report = build(load(result.capsule_path))
+    finding = next((f for f in report.findings if f.id.startswith("stream-ending-unknown-")), None)
+    assert finding is not None, [f.id for f in report.findings]
+    assert finding.verdict == CANNOT_TELL
+    assert "not recorded" in finding.title
+    assert not [f for f in report.findings if f.id.startswith("stream-ended-short-")], (
+        "an unknown ending is not evidence of a cut")
+    text = "\n".join(report.render()) if hasattr(report, "render") else ""
+    if text:
+        assert "nothing in these frames indicates that anything was cut short" not in text, (
+            "the report may not claim completeness about a stream whose ending it could not check")

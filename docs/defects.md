@@ -1021,3 +1021,71 @@ for the request and `partial=True; status=200` for the response.
 
 **Test.** `test_a_json_payload_is_evidence_and_was_invisible_before_defect_67` builds a capsule whose model frames are
 JSON (as the seams write them) and asserts the attributes and the rendered summary.
+
+## Defect 68 — a stream whose ending this recorder does not recognise was reported as one it had verified (2026-11-16, B1 follow-up)
+
+**Found by** asking what defect 66's fix does for the providers it does not name. It knows two conventions and refuses
+to guess at any other, which is right — a generic `text/event-stream` has no terminator in its specification, so marking
+one would be a guess about somebody else's protocol. What was wrong is what the capsule *said* while refusing: the only
+recorded fact was `partial: False`, and `partial: False` is exactly what a stream the provider finished says. So a Gemini,
+Responses-API or Ollama stream, or any gateway in front of them, was indistinguishable from a verified complete one —
+the same failure this project fixed for OpenAI and Anthropic in defect 66, surviving in the providers nobody had tested.
+A recorder that cannot tell is allowed to say "I cannot tell". It is not allowed to say "complete".
+
+**Fix.** `cap_sdk/tee.py` records an `ending` with three values, plus the provider whose convention was consulted:
+
+| `ending` | when | `partial` | capsule `end_reason` |
+|---|---|---|---|
+| `terminated` | a marker of the request path's own convention was seen | `False` | the terminator, named |
+| `unterminated` | the convention is known and the marker is missing | `True` | which marker was expected and not seen |
+| `unverified` | no convention is known for this path | `False`, and no claim made | "whether the stream finished is not recorded" |
+
+`TERMINATORS` is a table of `(path suffix, marker, provider)`: OpenAI chat and legacy completions `data: [DONE]`,
+OpenAI Responses `response.completed`, Anthropic `message_stop`, Gemini `"finishReason"`, Ollama `"done": true` for both
+`/api/chat` and `/api/generate`. A marker belonging to *another* provider's convention in the body does not count. The
+ending and the provider travel on the response frame (`bbx.model.ending`, `bbx.model.ending_provider`), so `diagnose`
+can act on them without re-reading bytes: a new finding `stream-ending-unknown-<slot>` (verdict `CANNOT_TELL`, confidence
+`LOW`, title *"whether the stream at node N finished is not recorded"*) names the provider that was not recognised and
+lists what would settle it.
+
+**Why the third state and not a boolean.** The user's requirement is the sentence, not the flag: *never claim a stream is
+complete when its ending is unknown*. A boolean forces "complete" and "cut short" to be the only two things a capsule can
+say, so the honest answer for an unrecognised provider has nowhere to go. The cost is one extra value on a frame; the
+benefit is that `diagnose` can print "cannot tell" instead of nothing, and a future provider is one table row, not a
+change to the frame format.
+
+**Tests.** `tests/test_stream_termination.py` (23): every row of the table terminated by its own marker; a missing marker
+is `unterminated` and partial with a reason; a marker from another provider's convention is `unterminated`, not
+`terminated`; a non-streaming JSON body is not a stream and is not judged; an unrecognised path is `unverified`, is not
+partial, and its reason says the ending is not recorded. `tests/test_diagnose.py` (38) adds
+`test_an_unknown_stream_convention_is_a_cannot_tell_not_a_silence`, which writes a capsule whose response frame carries
+`ending: unverified` and asserts the finding and the "not recorded" wording.
+
+## Defect 69 — at the connection ceiling the proxy had no answer at all, only whichever failure came first (2026-11-16, B3)
+
+**Found by** measuring the burst that B3 describes instead of reasoning about it: at 450 concurrent requests with the
+stock 1024-descriptor soft limit, `accept` failed with `socket.accept() out of system resource` and a request issued
+during the burst **timed out after 4 s with no answer**. Raising the limit (`proxy/limits.py`) moved the cliff to 1366
+descriptors and served the probe in 2 ms, which is why that half was not the blocker: what remained was that the ceiling
+was still whatever the descriptor table happened to be, and what happened at it was a log line the child never sees.
+
+**Decision.** Backpressure, with an explicit ceiling above it — the recommended option, because the proxy's promise is
+pass-through and a recorder that refuses a request the provider would have answered has broken the thing it exists for.
+A request past `MAX_INFLIGHT` (200, §15.1's concurrent-stream count) waits for a slot and is counted; a wait past
+`QUEUE_WAIT_S` (60 s) is answered `503` with `x-blackbox-error: queue-timeout`; a client past `MAX_CONNECTIONS` (512) is
+answered `503` with `x-blackbox-error: connection-limit` in milliseconds, because that is the one case the recorder
+genuinely cannot serve. The numbers are derived, not preferred: `512 + 200 + 96 = 808 < 1024`, so the caps hold on a host
+where `limits.py` could not raise anything. `tests/test_proxy_backpressure.py` asserts the arithmetic.
+
+**Measured after** (`bench/bench_connection_limit.py` → `bench/results/2026-11-16-b3-connection-limit.json`): 450 of 450
+requests answered `200`, 0 refused, 444 queued, longest queue wait 887 ms, origin peak 192 in flight; the probe during
+the burst answered `200` in 1053.8 ms; 96 clients beyond the connection cap each answered `503` with the reason, median
+4.4 ms, max 7.7 ms.
+
+**What the user reads.** `ProxyStats` gains `queued`, `max_queue_wait_ms` and `refused_reasons`, and the launcher prints
+one sentence after the run's summary when any of them is non-zero — naming what was refused, what waited, and that the
+numbers are a descriptor budget rather than a preference. Deliberately silent when nothing happened.
+
+**What is still open, and is the owner's.** Whether the caps become flags (a safe range is one budget interval, so a flag
+needs its own validation story), and whether a `503` the recorder issued belongs in the capsule as a frame — today it is
+in `stats` and in the run's sentence only.

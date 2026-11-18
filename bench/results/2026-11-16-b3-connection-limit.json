@@ -1,0 +1,83 @@
+{
+  "what": "B3 - behaviour at the proxy's connection ceiling",
+  "caps": {
+    "max_inflight": 200,
+    "max_connections": 512,
+    "worst_case_fds": 712
+  },
+  "hardware": {
+    "python": "3.11.2",
+    "platform": "Linux-6.1.158+-x86_64-with-glibc2.36",
+    "cpus": 2
+  },
+  "origin_delay_s": 0.3,
+  "fd_limit": {
+    "before": 1024,
+    "after": 65536
+  },
+  "burst": {
+    "requests": 450,
+    "statuses": {
+      "200": 450
+    },
+    "wall_ms": 1388.5,
+    "median_ms": 957.9,
+    "max_ms": 1916.0,
+    "origin_peak_in_flight": 192,
+    "served_by_origin": 451
+  },
+  "probe_during_burst": {
+    "status": 200,
+    "ms": 1053.8,
+    "reason": ""
+  },
+  "stats_after_burst": {
+    "requests": 451,
+    "streamed": 451,
+    "refused": 0,
+    "refused_reasons": {},
+    "queued": 444,
+    "max_queue_wait_ms": 887.2,
+    "upstream_errors": 0,
+    "uncertain": 0,
+    "client_gone": 0,
+    "upstream_gone": 0,
+    "record_errors": 0,
+    "bytes_to_client": 4961,
+    "bytes_to_upstream": 0,
+    "per_route": {
+      "openai": 451
+    }
+  },
+  "surplus": {
+    "clients_over_cap": 96,
+    "statuses": {
+      "503": 96
+    },
+    "median_ms": 4.4,
+    "max_ms": 7.7,
+    "reasons": [
+      "connection-limit: at most 512 connections are held at once"
+    ]
+  },
+  "stats_after_surplus": {
+    "requests": 963,
+    "streamed": 651,
+    "refused": 96,
+    "refused_reasons": {
+      "connection-limit": 96
+    },
+    "queued": 719,
+    "max_queue_wait_ms": 887.2,
+    "upstream_errors": 0,
+    "uncertain": 0,
+    "client_gone": 0,
+    "upstream_gone": 0,
+    "record_errors": 0,
+    "bytes_to_client": 7161,
+    "bytes_to_upstream": 0,
+    "per_route": {
+      "openai": 851
+    }
+  }
+}

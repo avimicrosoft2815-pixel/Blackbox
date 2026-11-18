@@ -35,8 +35,8 @@ VERSION = "0.1.0.dev0"
 #: Findings whose subject is a *cause* of an interruption. Everything else is an observation about the record, and the
 #: brief files it as exactly that — a brief that lists "two identifiers name this run" under "Likely cause" teaches its
 #: reader to patch an id scheme in response to a crash.
-CAUSE_PREFIXES = ("interrupted-stream-", "stream-ended-short-", "no-first-byte-", "provider-error-",
-                  "tool-outcome-unknown-")
+CAUSE_PREFIXES = ("interrupted-stream-", "stream-ended-short-", "stream-ending-unknown-", "no-first-byte-",
+                  "provider-error-", "tool-outcome-unknown-")
 CAUSE_IDS = ("no-run-end", "torn-tail", "integrity-root", "empty-capsule")
 FENCE = "```"
 

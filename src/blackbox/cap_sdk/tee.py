@@ -39,21 +39,43 @@ from blackbox.cap_sdk.failopen import fail_open
 _TEE_STREAMS: dict[str, Any] = {}       # built on first use, per client module
 _ASYNC_TEE_STREAMS: dict[str, Any] = {}
 
-#: What a stream of that path must contain before it counts as finished. Two providers, one rule each, and **only**
-#: paths whose convention is known: a generic `text/event-stream` has no terminator in its specification, so marking one
-#: incomplete would be a guess about somebody else's protocol. The markers can straddle two chunks, which is why the tee
-#: keeps a tail instead of testing each chunk on its own.
-TERMINATORS: tuple[tuple[str, bytes], ...] = (
-    ("/chat/completions", b"[DONE]"),
-    ("/completions", b"[DONE]"),
-    ("/messages", b"message_stop"),
+#: What a stream of that path must contain before it counts as finished — one entry per convention this build can
+#: **vouch for**, each with the provider it belongs to. Anything not listed here is *unknown*, and an unknown ending is
+#: recorded as unknown rather than assumed complete (the rule the owner set: never claim a stream is complete when its
+#: ending is unknown). The markers can straddle two chunks, which is why the tee keeps a tail instead of testing each
+#: chunk on its own.
+TERMINATORS: tuple[tuple[str, bytes, str], ...] = (
+    ("/chat/completions", b"[DONE]", "openai"),                 # OpenAI chat completions
+    ("/completions", b"[DONE]", "openai"),                      # OpenAI legacy completions
+    ("/responses", b"response.completed", "openai"),            # OpenAI Responses API
+    ("/messages", b"message_stop", "anthropic"),                # Anthropic messages
+    ("streamGenerateContent", b'"finishReason"', "google"),      # Gemini streaming (last event carries finishReason)
+    ("/api/chat", b'"done":true', "ollama"),                    # Ollama NDJSON chat
+    ("/api/generate", b'"done":true', "ollama"),                # Ollama NDJSON generate
 )
 TAIL_BYTES = 128
+
+#: The three values `ending` can take, and what each one *claims*:
+ENDING_TERMINATED = "terminated"       # the provider's own terminator was seen: the stream finished
+ENDING_UNTERMINATED = "unterminated"   # a known convention, and its terminator never came: the stream was cut
+ENDING_UNVERIFIED = "unverified"       # no convention this build knows: **no claim either way**
 
 
 def expected_terminators(path: str) -> list[bytes]:
     """The markers this path's stream must end with, or an empty list when the path's convention is not known here."""
-    return [marker for suffix, marker in TERMINATORS if suffix in (path or "")]
+    return [marker for suffix, marker, _provider in TERMINATORS if suffix in (path or "")]
+
+
+def expected_provider(path: str) -> str:
+    """Which convention this path belongs to (`openai`, `anthropic`, `google`, `ollama`), or `"unrecognised"`.
+
+    The word is recorded in the capsule: a reader has to be able to tell "the provider finished" from "this build had no
+    convention to judge this stream by", and `unrecognised` is the honest second answer.
+    """
+    for suffix, _marker, provider in TERMINATORS:
+        if suffix in (path or ""):
+            return provider
+    return "unrecognised"
 
 
 class TerminatorWatch:
@@ -66,8 +88,11 @@ class TerminatorWatch:
     """
 
     def __init__(self, path: str) -> None:
+        self.path = path or ""
         self.markers = expected_terminators(path)
+        self.provider = expected_provider(path)
         self.tail = b""
+        self.marked_unterminated = False
 
     def feed(self, chunk: bytes) -> None:
         if self.markers and chunk:
@@ -76,10 +101,19 @@ class TerminatorWatch:
     def saw_terminator(self) -> bool:
         return any(marker in self.tail for marker in self.markers)
 
+    def ending(self) -> str:
+        """One of `ENDING_TERMINATED`, `ENDING_UNTERMINATED`, `ENDING_UNVERIFIED` — the capsule's own claim."""
+        if not self.markers:
+            return ENDING_UNVERIFIED
+        return ENDING_TERMINATED if self.saw_terminator() else ENDING_UNTERMINATED
+
     def reason(self) -> str | None:
-        """None when the stream is complete (or its convention is unknown), else a sentence for the capsule."""
-        if not self.markers or self.saw_terminator():
+        """Why the ending is not `terminated`, in words for the capsule; `None` when it is."""
+        if self.ending() == ENDING_TERMINATED:
             return None
+        if self.ending() == ENDING_UNVERIFIED:
+            return (f"this build does not know {self.path or 'this path'}'s stream convention, so whether the stream "
+                    f"finished is not recorded: the body ended, and no terminator was expected or looked for")
         return (f"the stream ended without the provider terminator "
                 f"({self.markers[0].decode('ascii', 'replace')}); the body was closed by the other end, not finished")
 
@@ -133,10 +167,15 @@ def tee_stream_class(module_name: str = "httpx") -> Any:
                 return
             self.done = True
             if completed and error is None:
+                self.call.ending = self.watch.ending()
+                self.call.ending_provider = self.watch.provider
                 missing = self.watch.reason()
-                if missing is not None:          # a clean end of body that is not a finished stream (defect 66)
-                    self.call.partial = True
+                if missing is not None:
+                    # `unterminated`: a convention we know, and its terminator never came — the stream was cut, and the
+                    # bytes that arrived are what a reader gets (defect 66). `unverified`: no convention, so the capsule
+                    # records that it does not know rather than claiming completion.
                     self.call.end_reason = missing
+                    self.call.partial = self.call.ending == ENDING_UNTERMINATED
             if not completed and error is None:
                 # Closed early — a `break`, a timeout, a cancelled consumer. The bytes that arrived are real; the
                 # call did not finish, and a capsule must be able to tell those apart (D-023's `partial`, applied
@@ -200,10 +239,15 @@ def async_tee_stream_class(module_name: str = "httpx") -> Any:
                 return
             self.done = True
             if completed and error is None:
+                self.call.ending = self.watch.ending()
+                self.call.ending_provider = self.watch.provider
                 missing = self.watch.reason()
-                if missing is not None:          # a clean end of body that is not a finished stream (defect 66)
-                    self.call.partial = True
+                if missing is not None:
+                    # `unterminated`: a convention we know, and its terminator never came — the stream was cut, and the
+                    # bytes that arrived are what a reader gets (defect 66). `unverified`: no convention, so the capsule
+                    # records that it does not know rather than claiming completion.
                     self.call.end_reason = missing
+                    self.call.partial = self.call.ending == ENDING_UNTERMINATED
             if not completed and error is None:
                 # Closed early — a `break`, a timeout, a cancelled consumer. The bytes that arrived are real; the
                 # call did not finish, and a capsule must be able to tell those apart (D-023's `partial`, applied

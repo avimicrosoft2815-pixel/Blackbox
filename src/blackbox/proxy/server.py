@@ -54,6 +54,23 @@ CONNECT_TIMEOUT = 15.0
 IDLE_TIMEOUT = 75.0
 READ_CHUNK = 64 * 1024
 BACKLOG = 256                          # §15.1 asks for 200 concurrent streams; a backlog of 100 is a refusal
+# B3 (docs/RELEASE-BLOCKERS.md): what the proxy does at the ceiling, decided rather than inherited. The recommended
+# option there was backpressure, and that is what these numbers are — a request past `MAX_INFLIGHT` keeps its socket and
+# *waits* for a slot (nothing the upstream would have served is refused), and a client that opens more sockets than
+# `MAX_CONNECTIONS` is answered in milliseconds instead of being left to hang. Neither number is a guess: they are the
+# largest pair whose worst case fits the smallest default descriptor budget this project meets (1024 on Linux and macOS)
+# even when `limits.py` could not raise anything, Windows included.
+MAX_INFLIGHT = 200                     # §15.1's concurrent streams: one slot per request in flight, up and down
+MAX_CONNECTIONS = 512                  # clients held open at once (a keep-alive connection costs one descriptor)
+QUEUE_WAIT_S = 60.0                    # a request queued longer than this is answered with a 503, never left to stall
+# `MAX_CONNECTIONS` client sockets + one upstream per in-flight request + the pool's idle sockets (`2 * routes`) + the
+# listener, the tape, and stdio. The assertion below is what `tests/test_proxy_limits.py` holds us to.
+WORST_CASE_FDS = MAX_CONNECTIONS + MAX_INFLIGHT
+# The listener, the idle pool (at most `2 * routes`), the tape, the sink's log, and stdio, in the worst case this project
+# runs into. Counted rather than waved at, because `tests/test_proxy_backpressure.py` adds it to `WORST_CASE_FDS` and
+# requires the total to fit below.
+PROXY_LOCAL_SLACK_FDS = 96
+FD_BUDGET = 1024
 WRITE_HIGH_WATER = 64 * 1024           # stop reading upstream while the client is this far behind, so RSS stays flat
 WILDCARD_V4 = ".".join(["0"] * 4)      # written this way so the wildcard bind is not a literal in the source
 SCHEME = "http"                        # the listener is plain loopback; TLS is upstream's business
@@ -181,6 +198,9 @@ class ProxyStats:
     requests: int = 0
     streamed: int = 0
     refused: int = 0
+    queued: int = 0                    # requests that waited for a slot: backpressure, not a failure (B3)
+    max_queue_wait_ms: float = 0.0
+    refused_reasons: dict[str, int] = field(default_factory=dict)
     upstream_errors: int = 0
     uncertain: int = 0                 # a request that may have reached the upstream and got no response
     client_gone: int = 0               # the client hung up while the upstream was still sending (§14.4a)
@@ -190,8 +210,15 @@ class ProxyStats:
     bytes_to_upstream: int = 0
     per_route: dict[str, int] = field(default_factory=dict)
 
+    def refuse(self, reason: str) -> None:
+        """Count a request the proxy did not pass through, under the reason a user could act on."""
+        self.refused += 1
+        self.refused_reasons[reason] = self.refused_reasons.get(reason, 0) + 1
+
     def as_dict(self) -> dict[str, Any]:
         return {"requests": self.requests, "streamed": self.streamed, "refused": self.refused,
+                "refused_reasons": dict(sorted(self.refused_reasons.items())),
+                "queued": self.queued, "max_queue_wait_ms": round(self.max_queue_wait_ms, 1),
                 "upstream_errors": self.upstream_errors, "uncertain": self.uncertain,
                 "client_gone": self.client_gone, "upstream_gone": self.upstream_gone,
                 "record_errors": self.record_errors,
@@ -224,7 +251,9 @@ class ProxyServer:
     """One loopback listener. `start()` is async; `serve_forever()` is for the launcher's thread (P3B-03)."""
 
     def __init__(self, routes: Routes, *, receiver: Any = None, port: int = 0, host: str | None = None,
-                 retry_transmitted: bool = False, clock: Any = time.monotonic) -> None:
+                 retry_transmitted: bool = False, clock: Any = time.monotonic,
+                 max_inflight: int = MAX_INFLIGHT, max_connections: int = MAX_CONNECTIONS,
+                 queue_wait_s: float = QUEUE_WAIT_S) -> None:
         self.routes = routes
         self.receiver = receiver                      # anything with open_call/receive/close_call (a SinkRecorder)
         # Off by default: see `SAFE_METHODS`. A caller who turns this on is asserting something about their upstreams.
@@ -234,6 +263,12 @@ class ProxyServer:
         self._clock = clock
         self._server: asyncio.AbstractServer | None = None
         self.stats = ProxyStats()
+        # The numbers are parameters so a test can be a *real* burst at a *real* ceiling without 512 sockets: the
+        # behaviour at the limit is the thing under test, and it does not depend on the size of the limit.
+        self.max_inflight = max(1, int(max_inflight))
+        self.max_connections = max(1, int(max_connections))
+        self.queue_wait_s = max(0.0, float(queue_wait_s))
+        self._inflight = asyncio.Semaphore(self.max_inflight)
         self._tls: dict[bool, ssl.SSLContext] = {}
         self._writers: set[asyncio.StreamWriter] = set()
         self.pool = _UpstreamPool()
@@ -304,6 +339,14 @@ class ProxyServer:
         self._writers.add(writer)
         _nodelay(writer)
         try:
+            if len(self._writers) > self.max_connections:
+                # B3's hard ceiling. Past `max_connections` there is no answer that keeps the promise — the recorder
+                # cannot hold the socket — so it answers *now*, with a 503 and a reason, which a client can retry on.
+                # The alternative measured before this was a child waiting four seconds for a connection nothing would
+                # ever complete, and asyncio logging a traceback per attempt at `accept`.
+                self.stats.refuse("connection-limit")
+                await self._answer_at_limit(reader, writer)
+                return
             while True:
                 try:
                     request = await asyncio.wait_for(self._read_request_head(reader), timeout=IDLE_TIMEOUT)
@@ -347,15 +390,49 @@ class ProxyServer:
             headers.append((name.strip(), value.strip()))
         return _Request(method=method, target=target, version=version, headers=headers)
 
+    async def _answer_at_limit(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        """Answer a connection that cannot be held, cheaply and in well-formed HTTP.
+
+        The request head is read first *if it is already there*: a client that has sent its request deserves a `503` it
+        can parse, and a client that connected and said nothing costs two seconds and a descriptor, not a slot.
+        """
+        with contextlib.suppress(Exception):
+            await asyncio.wait_for(self._read_request_head(reader), timeout=2.0)
+        await self._fail(writer, 503,
+                         f"connection-limit: at most {self.max_connections} connections are held at once",
+                         keep=False)
+
     # -- one request ---------------------------------------------------------------------------------------------
     async def _serve(self, request: _Request, reader: asyncio.StreamReader,
                      writer: asyncio.StreamWriter) -> bool:
         self.stats.requests += 1
+        started = self._clock()
+        try:
+            await asyncio.wait_for(self._inflight.acquire(), timeout=self.queue_wait_s)
+        except TimeoutError:
+            # A bounded wait is the whole point: an unbounded one is the silent stall this blocker is about.
+            self.stats.refuse("queue-timeout")
+            self.stats.max_queue_wait_ms = max(self.stats.max_queue_wait_ms, self.queue_wait_s * 1000.0)
+            await self._fail(writer, 503,
+                             f"queue-timeout: no slot within {self.queue_wait_s:.0f}s "
+                             f"({self.max_inflight} requests already in flight)", request.keep_alive)
+            return request.keep_alive
+        waited_ms = (self._clock() - started) * 1000.0
+        self.stats.max_queue_wait_ms = max(self.stats.max_queue_wait_ms, waited_ms)
+        if waited_ms >= 1.0:
+            self.stats.queued += 1
+        try:
+            return await self._serve_request(request, reader, writer)
+        finally:
+            self._inflight.release()
+
+    async def _serve_request(self, request: _Request, reader: asyncio.StreamReader,
+                             writer: asyncio.StreamWriter) -> bool:
         path = request.target
         try:
             route = self.routes.resolve(path, request.headers)
         except RouteError as exc:
-            self.stats.refused += 1
+            self.stats.refuse(exc.reason)
             await self._fail(writer, exc.status or 502, exc.reason, request.keep_alive)
             return request.keep_alive
 
