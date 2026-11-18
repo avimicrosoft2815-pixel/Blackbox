@@ -1229,3 +1229,127 @@ readers that want JSON. Artifact: `bench/results/2026-11-16-otlp-pb-importer.jso
 offline here), the OpenTelemetry Collector's OTLP/JSON receiver, Phoenix's gRPC port 4317, and every importer other than
 Phoenix. The phrase this work supports is "a Phoenix-class receiver accepted the file and it read back intact" — not
 "OTLP is interoperable".
+
+## D-060 — a capsule carries the frames, not the preallocated hole (2026-11-17, P4-03 follow-up)
+
+Recovery put `segments.logical_bytes(path)` — the whole preallocated segment — into every capsule entry. A five-frame run
+produced two **16.0 MiB** capsules (the default segment size), so a ten-run demo left 320 MiB of zeros on disk, `ls`
+reported 16.0 MiB for evidence that was 4 KiB, and a capsule was larger than most repositories it described.
+
+`recovery.trim_padding` now drops the trailing zeros and walks back to the last **complete** frame boundary, because a
+frame's own payload may end in zero bytes: the first version trimmed zeros only, cut into the last frame, and `verify`
+caught it immediately — `graph.json.frames: 5 != 4`, `events/events.jsonl.line 5` present in the declared part and absent
+from the recomputation. That failure is why the walk exists, and it is pinned by
+`tests/test_trim_padding.py::test_a_frame_that_ends_in_zero_bytes_keeps_its_tail`.
+
+**What is deliberately not trimmed.** A non-zero tail is a partially written frame or damage, and it stays in the entry
+(with the padding behind it still dropped); `completeness` and `truncated_tail` in the manifest say what the scan made of
+it. A trimmer that dropped "whatever does not parse" would delete the wreckage a reader came for. A segment with no
+frames is cut to its header, and damage right after the header is kept.
+
+**The result, measured here:** the same five-frame run now lists `9.8 KiB` per capsule, and every frame of the tape is
+still decodable from the entry with the same sequence numbers. `blackbox verify` passes on the trimmed capsules,
+including `derived_parts`, which recomputes both parts from the trimmed bytes — the check that would have caught a
+too-aggressive trim.
+
+## D-061 — the front door is part of the product, and one data directory is where `run` put it (2026-11-17)
+
+Four things were true of the documented path and none of them worked:
+
+* `pyproject.toml` declared **no entry point**, so `pip install -e .` produced no `blackbox` command, while the README,
+  `docs/onboarding.md` and every console block said `blackbox …`. The only invocation that worked was `python -m blackbox`.
+  `[project.scripts] blackbox = "blackbox.__main__:main"` is now declared.
+* `blackbox run` writes into the **current directory** (`os.path.abspath(BLACKBOX_HOME or ".")`), but `blackbox ls` and
+  `blackbox verify --data` defaulted to `./.blackbox`. The first command a new user types after a run therefore reported
+  "no capsules" over a directory holding two. One resolver now (`cli/paths.py`): `--data`, then `$BLACKBOX_DATA_DIR`,
+  then `$BLACKBOX_HOME`, then `.` — and it does not search upward, because reporting on a directory nobody named is worse
+  than saying there is nothing here.
+* The README described a build with "no viewer, no capsules, no CLI beyond `--version`/`status`" and "157 tests". It is
+  now the four-command path that was run end-to-end for this decision: attach a real `openai` 3.51.0 client, `ls`,
+  `diagnose`, `view`, `verify`, then `repair preview` → `apply --approve <token>` → `verify --test`.
+* `pip install -e .` also needs `wheel` present to build; offline that means `--no-build-isolation` after installing it.
+  That is in the install block rather than discovered by the reader.
+
+`tests/test_readme.py` holds the line: every command in a console block must exist in the front door, the entry point must
+be declared, the version line must match the package, the read-only commands must share the default directory, and the
+limits section must keep saying 0 node-level edges, macOS 3.13 unmeasured, the untested importers and no universal 100 ms.
+
+## D-062 — the pinned test count belongs to a dependency environment, and says which one (2026-11-17)
+
+`docs/STATUS.md` said "Total: 1146 tests" and CI said 1162, so every cell went red on
+`test_the_test_count_line_matches_the_suite_size` — the first red this branch produced that was entirely the document's
+fault. The 16 are behind `anthropic`: CI installs `.[dev,capture,capture-sdks]`, the sentence was measured in a venv
+with `httpx` and `openai` and no `anthropic`, and collection is a function of what is importable.
+
+Two changes, and the second is the one that matters. The sentence now says 1162 and names the environment it belongs to,
+with the 1146 that the lighter venv collects. The test, when an optional client is missing, **skips with the package's
+name** instead of comparing against a number it cannot check — with every extra present it still asserts equality, so the
+CI environment remains the one that holds the line.
+
+A count without an environment is not a measurement. The rule generalises: any number a document pins is only meaningful
+with the command and the environment that produced it (`docs/README.md` §8 already says this for benchmarks; the suite
+count was the one place it was not applied).
+
+## D-063 — the loop repairs its own listener; the tick is for the deaths that say nothing (2026-11-17, defect 60)
+
+The watchdog rebind went watchdog-thread → `run_coroutine_threadsafe(close).result()` → loop thread → back. On a loaded
+CI runner that round trip took **103.04 ms** of a 100 ms budget, while every other sample on the same runner took
+0.3 ms: the time was the OS not scheduling the loop thread, paid twice because the work hopped threads twice.
+
+`lost_cb` already fires **on the loop thread**. So the notice now schedules the repair there directly
+(`call_soon` when it is on that thread, `call_soon_threadsafe` otherwise), which removes one hop and the wait for a
+thread to be scheduled. The watchdog keeps its tick, unchanged, for the listener that dies without a notice — that path
+still hops, and the test for it still passes by setting `lost_cb = None`.
+
+**Measured** (`bench/results/2026-11-17-rebind-after-loop-restore.json`, 240 samples, four columns): gate PASS, worst
+outage 21.185 ms, 0 over budget, 0 port moves. On the notice path the improvement is in the numbers a child would feel:
+`notice_idle` outage p50 0.919 → 0.459 ms (rebind p50 0.44 → 0.186), `notice_loaded` p50 0.721 → 0.141 ms (rebind p50
+0.226 → 0.06); the tick columns are unchanged.
+
+**What is not changed:** the budget (`100.0 ms`), the per-sample assertion, and the claim. A stalled machine can still
+exceed 100 ms, and the failure message prints the watchdog's own tick lateness so the cause is visible rather than
+argued about afterwards. The measurement starts when `close()` returns rather than when the test asked for it, because
+until the close runs the listener is still accepting and a child experiences nothing; the harness's own
+`dispatch_ms` is printed beside the outage instead of being counted as product latency. The test's docstring says this
+in the place a reviewer of the next change will read it. (Superseded on 2026-11-17 by the request-level clock below,
+which starts at the first request that could not be served and therefore does not depend on when any coroutine
+returned.)
+
+**Measured by requests, not by a coroutine's return (second revision, 2026-11-17).** The clock described above starts
+when `close()` returns, and that was still an assumption: the socket stops accepting inside `close()`, so downtime can
+begin before the caller is woken, and an in-process clock cannot time an interval inside the call it is timing. The
+outage is now measured from outside our threads with `tools/rebind_probe.py` — a real request loop on the child's port —
+and it covers that window by construction (`tests/test_rebind_probe.py` makes the window 60 ms wide and asserts the
+clock contains it, while a post-`close()` clock reports ~0 ms of it). The gate stays 100 ms per sample, now asserted on
+the conservative bound from the last request served before the break, so a gap can never be hidden by having no request
+refused in it. Two tempting shortcuts were measured and rejected: a connect-only probe, because a closed listening
+socket keeps completing handshakes from its accept queue (46 ms of a 60 ms stall looked like service), and a fixed 10 ms
+answer timeout, because every attempt on a Windows runner answers in ~16 ms and then reads as a timeout. The answer cap
+is therefore calibrated on the machine at start-up and recorded with each sample — and it is only lowered *after* the
+machine has answered something, because lowering it first is how the Windows runner ended up with every attempt
+recorded as a timeout. The probe also needs a live upstream: the proxy's 504 for a dead port costs more than one
+attempt budget there, so a probe aimed at a dead port measures the failure path instead of service. The end of the gap
+must come from a request **issued after the break**: a request that was in flight when the break was asked for is
+answered by the old listener, and accepting that answer as the end of the outage reports zero downtime for an outage
+that lasted the whole stall (a Windows runner did exactly that). With that rule in place the first request-level bench **failed** on the machine that ran it — 3 of 240 samples over
+budget, worst 3319.604 ms, all on the watchdog-tick column under one busy process per CPU, with 1965 refused requests in
+the worst sample and `rebind_ms` 0.204 ms — and that was written down as defect 58 arriving on schedule.
+
+**Correction (2026-11-18): it was the probe's own load.** Every sample now also records the supervisor's tick lateness,
+a no-op ping on the proxy's loop, a probe aimed **directly at the upstream**, the kind of non-service (`refused` = no
+listener, `timeout`/`no-answer` = listener there, answer slow), and the process's open descriptors. In the multi-second
+samples the tick was **5.8 ms** late, the loop answered a no-op in **14.4 ms**, the rebind took **0.4 ms**, and the
+upstream itself missed **22 of 64** direct requests. A timeline capture then produced
+`OSError: [Errno 24] Too many open files` / `socket.accept() out of system resource`: the probe shares the process with
+the proxy, this machine allows **1024** descriptors and has **two** CPUs, and three unrested prober threads issuing
+thousands of connections a second exhausted the table, so the listener could no longer accept. The "outage" was the
+measurement's.
+
+The decision, therefore, has two halves. The gate is unchanged — 100 ms per sample, asserted on the conservative
+request-level bound, on every sample, in four columns. And **a probe may not saturate the process it measures**:
+`ServingProbe` defaults to two threads with a 1 ms rest (~a few hundred attempts/s, ~2 ms resolution) and reports
+`open_fds` with every measurement, so saturation is visible in the artifact. With that, the request-level gate
+**passes**: 240 samples, worst upper bound **53.98 ms**, 0 over budget, 0 port moves
+(`bench/results/2026-11-18-rebind-instrumented.json`). The instrumented columns stay, because a future slow sample must
+say which of the five possible causes it was, and because the first honest instrumented run is what corrected a wrong
+diagnosis — defect 60 is closed by the loop-side repair *and* by the measurement no longer manufacturing its failure.

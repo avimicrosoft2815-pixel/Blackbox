@@ -702,3 +702,217 @@ not verified anything.
 
 **Not the same class, checked deliberately.** The *existing* `capsule verify` prints `…` and is left alone: cp1252 can
 encode it, so it is not a defect, and changing a working command to satisfy a rule about a different one would be churn.
+
+## Defect 60 — the watchdog spent its budget waiting for its own loop thread (2026-11-17, P3B-03/resubmission of PR #17)
+
+**Found by** CI run `44132154945` at `127d187` (push) and `44132192208` (pull request), ubuntu py3.11:
+
+```
+FAILED tests/test_proxy_supervisor.py::test_every_watchdog_rebind_lands_inside_the_budget_not_the_median_of_them
+AssertionError: worst watchdog outage 103.2 ms over the 100.0 ms budget;
+outages [103.2, 0.8, 0.7, 0.8, 0.7, 0.7, 0.8, 0.7] ms,
+rebinds [103.04, 0.36, 0.33, 0.34, 0.35, 0.33, 0.42, 0.26] ms,
+worst watchdog tick lateness 86.2 ms over 9 ticks
+```
+
+**What the numbers say.** The outage and the rebind are the same 103 ms: the time was inside `rebind()`, not in the
+tick that precedes it (the 86.2 ms lateness is a different, earlier tick, recorded by the same run). Inside `rebind()`
+there is exactly one thing that can take 100 ms on an idle proxy: `asyncio.run_coroutine_threadsafe(old.close(),
+loop).result(5)` — a **cross-thread round trip** from the watchdog thread to the loop thread and back. Every other
+sample on the same runner took 0.26–0.42 ms, so this is not the socket work; it is the OS not scheduling the loop
+thread for ~100 ms while the watchdog waited on it. The machine is also visibly loaded: 86.2 ms of tick lateness.
+
+**Why it is a defect and not a runner story.** A design that needs *two* thread hops to repair a listener charges the
+machine's scheduling jitter twice: once to wake the watchdog, once to get back onto the loop. The second hop is
+avoidable, because the early notice (`lost_cb`, defect 58) already fires **on the loop thread**, which is running and
+which is the thread that must serve the child anyway.
+
+**Fix.** `ProxyThread._listener_lost` now schedules the repair on the loop (`loop.call_soon` when it is already on that
+thread, `call_soon_threadsafe` otherwise) and `_restore_on_loop` closes and re-binds there, with `_restoring` keeping
+the watchdog's tick off a second, racing rebind. The port is remembered in `_port` rather than read off a listener that
+has just been closed — that was the first attempt's bug: `_server` was `None` at that point, `port` fell back to `0`,
+and the restore took a fresh port (`every rebind must keep the port` caught it in one run). The watchdog tick is
+unchanged and still the only path for a listener that dies **without** saying so
+(`test_a_listener_that_dies_without_saying_so_is_still_restored_on_the_tick` sets `lost_cb = None` and asserts the
+tick restores it).
+
+**The gate is not weakened.** `REBIND_BUDGET_MS` is still 100.0 and still asserted on **every** sample, not a median or
+a p95. Two things did change in the *measurement*, both stated in the test's docstring: `outage_ms` now starts when
+`close()` has **returned** (before that the listener was still accepting, so a child saw no outage), and the harness's
+own `dispatch_ms` is printed beside it instead of being silently counted as the product's latency. What the child
+experiences from the moment the listener stops is still asserted; the test's scheduling is now visible rather than
+folded in.
+
+**Measured after the fix.** `bench/bench_rebind.py --n 60`, Linux 6.1 x86_64, CPython 3.11.2, 240 samples over four
+columns (`bench/results/2026-11-17-rebind-after-loop-restore.json`): the gate is **PASS**, worst outage 21.185 ms,
+**0 over budget, 0 port moves, 0 not restored**. The notice path, before → after on the same machine
+(`2026-11-16-rebind-detectors.json` → this file): `notice_idle` outage p50 0.919 → **0.459 ms** and rebind p50
+0.44 → **0.186 ms**; `notice_loaded` outage p50 0.721 → **0.141 ms** and rebind p50 0.226 → **0.06 ms**. The tick
+columns are unchanged (p99 20.4 / 21.2 ms) because the tick path was not touched. The claim stays what it was: a budget
+measured on the machine that ran it, no universal 100 ms promise — `bench_rebind.py`'s `method.bound` string says so, and
+defect 58's open row is about the *universal* claim, not about this one.
+
+**The clock, second revision (2026-11-17): it is measured by requests, not by a coroutine's return.** The revised
+clock above starts when `close()` returns, which fixes the harness's hop but is optimistic in the other direction: the
+listening socket stops accepting *inside* `close()`, so a request is already refused while the coroutine is still
+running — in `wait_closed()`, in a pool drain, or after the loop thread was descheduled before the caller was woken. An
+in-process clock cannot see that interval, because it is inside the call whose return it is timing.
+
+`tools/rebind_probe.py` measures it from outside our threads: real requests in a loop through the proxy on the port the
+child was told, from the **first request that was not served** to the first one that was. Any HTTP status line counts
+as served, including the proxy's own 504 for an unreachable upstream. A raw socket rather than `http.client` for a
+measured reason: `http.client` can block for its whole timeout on a connection accepted just before the listener went
+away, so the probe sleeps through the outage it is supposed to be measuring and reports "no failure observed".
+
+**Two designs were tried and rejected on measurement, and both are recorded here so they are not retried.**
+
+*A connect-only probe.* Cheap, and it cannot hang — but a listening socket that has been closed keeps completing
+handshakes from its accept queue while the queue has room, so connections are **accepted** for tens of milliseconds
+after the listener is gone (46 ms of a 60 ms stall, measured) with nothing answering them. "Connected" is not "serving".
+
+*A fixed 10 ms answer timeout* (to stop a hung request blinding the probe). On the Windows runner every attempt came
+back `timeout@15.5ms`: a loopback request through this proxy answers in ~16 ms there, so the probe reported that a
+serving listener was not serving, and four supervisor tests failed with `no request was served in 2.0 s`. A cap is only
+honest above the floor of the machine, and that floor is not knowable from here — so the cap is now **measured at
+start-up** (`ServingProbe.calibrate`: three times the median answered request, never below 10 ms, never above the 50 ms
+attempt budget) and recorded with every sample as `probe_answer_timeout_ms`. Three requests are in flight at once, so a
+request that is never answered cannot blind the probe for more than one attempt.
+
+**What the unit test pins down.** `tests/test_rebind_probe.py` stalls `close()` for **60 ms after the socket has already
+stopped accepting**, then measures the same break two ways: the request clock reports the 60 ms as an outage (the
+`outage_upper_ms` bound contains it by construction), and a clock that started when `close()` returned reports ~0 ms of
+it. The test asserts the request clock contains at least 80% of the stall and that the post-`close()` clock misses at
+least half — a red test says which of the two claims broke.
+
+**The probe has a resolution, and it is reported.** One attempt is 0.2–0.6 ms on loopback (median of *served* attempts
+— refusals return in microseconds and would fake a 0.01 ms resolution exactly when the number matters).
+`probe_cycle_ms` and `probe_answer_timeout_ms` are printed beside every outage, and the budget is asserted on
+`outage_upper_ms` — last request served before the break to first served after it — because that bound still covers the
+gap when no request happened to be refused.
+
+**Two more things the Windows runner taught, both now in the code.** The probe must be aimed at a **live upstream**
+(`LocalUpstream`): the proxy answers a request to a dead port with its own 504, and on Windows that path costs more than
+one attempt budget, so the probe measured the failure path and read every attempt as a timeout. And `calibrate` must not
+*lower* the answer cap before the machine has answered anything — its first version did, which set the 10 ms floor on
+exactly the runner that needed the generous value.
+
+**Measured after the fix, request-level — corrected on 2026-11-18.** The first request-level run failed the gate:
+3 of 240 samples over the 100 ms budget, all in `tick_loaded`, worst 3319.604 ms. That was written down here as "the
+watchdog thread was not scheduled". **That was wrong**, and the way it was found matters more than the correction:
+
+every sample now also records the supervisor's own tick lateness (`wake_late_ms`, defect 58's record), a no-op ping on
+the proxy's loop (`loop_late_ms`, how long the loop takes to answer anything at all), a probe pointed **directly at the
+upstream** (so a starved upstream cannot hide as a dead listener), and the *kind* of non-service — `refused` means the
+listener was gone, `timeout`/`no-answer` means it was there and the answer did not arrive. In the worst samples:
+`wake_late_ms` **5.8 ms**, `loop_late_ms` **14.4 ms**, `rebind_ms` **0.4 ms**, and the upstream itself failing **22 of 64**
+direct requests. The watchdog was not late and the rebind was not slow.
+
+A timeline capture then reproduced the cause directly:
+
+```
+OSError: [Errno 24] Too many open files
+  File "asyncio/selector_events.py", line 165, in _accept_connection
+socket.accept() out of system resource
+```
+
+The probe shares the process with the proxy. Three threads with no rest issued thousands of connections a second, and
+this machine allows **1024** descriptors per process (`ulimit -n`) on **two** CPUs: the probe exhausted the table, the
+listener could no longer accept, and the measurement reported seconds of "outage" that were its own load. A measurement
+that saturates the thing it is measuring is not a measurement.
+
+**Fix (in the probe, not in the gate).** `ServingProbe` defaults to two threads with a 1 ms rest between attempts — a
+few hundred attempts a second, ~2 ms of resolution, far inside the budget — and every measurement reports `open_fds` so
+saturation is visible in the artifact instead of being inferred later.
+
+**Result** (`bench/results/2026-11-18-rebind-instrumented.json`, `--n 60`, Linux 6.1 x86_64, CPython 3.11.2, 240
+samples, four columns, `open_fds` 12–25 throughout): gate **PASS**, worst upper bound **53.98 ms**, 0 over budget,
+0 port moves, 0 not restored. Outage p50 / p99 by column: `notice_idle` 1.213 / 5.891 ms, `notice_loaded` 0.881 /
+53.980 ms, `tick_idle` 10.156 / 21.512 ms, `tick_loaded` 8.080 / 23.123 ms.
+
+Three further runs of the same command in the same session passed at **45.781**, **47.043** and **40.754** ms (0 of 240
+over budget in each); they are not committed as artifacts — the run above is the one whose samples are in the tree, and
+the command that produced it is `bench/bench_rebind.py --n 60` with no other arguments.
+
+The budget (`100.0 ms`), the per-sample assertion, the request-level definition and its limits are unchanged. What
+changed is that a slow sample now names its own cause, and that the measurement no longer manufactures the failure it
+is supposed to detect.
+
+## Defect 61 — a stopped proxy left its handler tasks to the garbage collector (2026-11-18, P3B-03)
+
+**Found by** the Windows cells of `9a42b0f`, which printed one of these per shutdown (the job log is unreadable from
+here, but the annotation carries it):
+
+```
+ERROR asyncio:base_events.py:1833 Task was destroyed but it is pending!
+task: <Task pending name='Task-4' coro=<ProxyServer._handle() ...> wait_for=<Future pending>>
+```
+
+**Invariant.** After `ProxyThread.stop()` the proxy owns nothing: no listener, no connection, no task that can wake up
+later and touch a closed loop.
+
+**Cause.** `stop()` closed the listener and called `loop.stop()`, but never closed or drained the loop. A handler still
+waiting on an upstream was therefore a *pending task* that nobody owned: destroyed whenever the collector reached it —
+one warning per shutdown — with its two sockets handed to the GC instead of closed. Windows showed it first because a
+request to a dead upstream there waits for a SYN retry, which is exactly the window in which the loop stops.
+
+**Fix.** `ProxyThread._drain_and_close()`: cancel every pending task **in rounds**, because cancelling *runs* the loop,
+and running the loop runs the `connection made` callbacks that were already queued — each of which creates a new handler
+the first round cannot have seen (measured: one round left three handlers behind per shutdown under a probing client).
+Then three short settle turns for connections accepted in the last microseconds, then `loop.close()`. It records
+`pending_at_stop` and `undrained_at_stop`, so "the drain converged" is a number and not a promise.
+
+**Test.** `test_stopping_while_a_handler_is_pending_does_not_abandon_it` — a black-hole upstream (accepts, never
+answers) so a handler is pending on every platform, a client, a probe hammering during shutdown, and the assertion that
+nothing the loop knew about was left (`undrained_at_stop == 0`).
+
+**Residual, recorded rather than retried away.** A connection accepted between the loop's last turn and its close still
+produces a handler nobody owns, so the *warning* is not asserted; the contract asserted is the drain. Removing the
+residue needs the accept path to be closed before the drain, which is what `close()` does — the window left is the
+queue between the kernel and the loop.
+
+## Defect 62 — nothing caps concurrent connections, so a burst stops the listener accepting (2026-11-18, open)
+
+**Found by** defect 60's investigation: `socket.accept() out of system resource` with `OSError: [Errno 24] Too many open
+files` at `ulimit -n 1024`, while the proxy held one descriptor per in-flight client **and** one per in-flight upstream
+connection.
+
+**What happens.** Past the descriptor limit the loop's accept fails, asyncio logs the traceback, and the listener keeps
+failing until descriptors free up. Children then see refusals or timeouts even though the process is alive and the
+listener is "serving" as far as `is_serving()` is concerned.
+
+**Why it is not fixed here.** A cap is a policy — how many concurrent calls a recorder accepts, what it answers past the
+cap (503 with a reason, which is a visible event in the capsule, or a queue with a timeout), and whether the cap is a
+flag. That is a decision for the owner, not a drive-by change in a PR about rebinds. Recorded with its reproducer (the
+probe defaults are now gentle, so a burst has to be issued deliberately).
+
+**Proposal for the next increment.** A `ProxyServer(max_connections=...)` with an `asyncio.Semaphore`, refusals counted
+in `stats` and recorded as a `proxy.overloaded` event so the capsule says what happened; a bench row that runs at the
+cap; and a test that drives it at 2x the cap and asserts every child got either service or a documented 503.
+
+## Defect 63 — the probe's honesty test asserted the runner's mood, and only macOS said so (2026-11-18, P3B-03)
+
+**Found by** run `44223453730` at `f57c2ac`, the first time a macOS cell executed the probe tests on this branch:
+
+```
+FAILED tests/test_rebind_probe.py::test_no_outage_is_reported_when_nothing_is_refused
+AssertionError: {'outage_upper_ms': 43.5..., 'observed_failure': True, 'refused_details': ['timeout'],
+                 'probe_answer_timeout_ms': 10.0, ...}
+```
+
+**What the sample says.** The break in that test takes nothing away — it sleeps 10 ms and returns — so the listener never
+went anywhere. The probe recorded one attempt whose answer did not arrive inside the calibrated 10 ms cap and therefore
+called it a 43.5 ms outage. That is the definition working as written: the cap is `max(10 ms, 3 x this machine's median
+loopback answer)`, so on a shared macOS runner one scheduler hiccup lands outside it, and the child-side story ("no
+answer for 43.5 ms") is true.
+
+**The defect** is in the assertion, not the probe: it demanded `outage_upper_ms <= max(12 ms, 9 x cycle)`, a ceiling
+written for a quiet Linux box, so it failed exactly on the machine whose *speed* it was measuring. Its own comment
+already admitted a stray failure was "the probe being honest".
+
+**Fix.** The test now asserts what it means and nothing about the machine's speed: a listener that was never closed may
+**not** be refused (`"refused" not in refused_details` — a refused connect with the listener up is a defect), a slow
+answer is allowed, and the ceiling is the budget (100 ms) rather than a healthy-machine constant. The magnitude claims
+stay where they were: the bench, and
+`test_every_watchdog_rebind_lands_inside_the_budget_not_the_median_of_them`; the clock's honesty stays in
+`test_the_clock_counts_downtime_inside_close_before_it_returns`. Linux and Windows had passed this test all along —
+there were simply no macOS samples of it until now.

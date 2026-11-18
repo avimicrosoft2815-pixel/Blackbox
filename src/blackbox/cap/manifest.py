@@ -33,6 +33,7 @@ from typing import Any
 from blackbox import constants as C
 from blackbox.cap import derived
 from blackbox.cap import format as cap
+from blackbox.cap import integrity as integrity_mod
 from blackbox.errors import bbx
 
 #: The exit code the plan fixes for "a check failed" (P4-16). Distinct from 2 (bad input) on purpose: a script must be
@@ -118,11 +119,14 @@ def links_summary_of(document: bytes) -> dict[str, Any]:
             "unresolved": len(links) + len(calls) - (resolved(links) + resolved(calls))}
 
 
-def _check(name: str, *, declared: Any, recomputed: Any, ok: bool | None, note: str | None = None) -> dict[str, Any]:
+def _check(name: str, *, declared: Any, recomputed: Any, ok: bool | None, note: str | None = None,
+           problems: list[str] | None = None) -> dict[str, Any]:
     check: dict[str, Any] = {"check": name, "declared": declared, "recomputed": recomputed, "ok": ok,
                              "checkable": ok is not None}
     if note:
         check["note"] = note
+    if problems:
+        check["problems"] = problems
     return check
 
 
@@ -132,9 +136,21 @@ def verify(capsule: cap.Capsule, *, frames: list[dict[str, Any]] | None = None) 
     frames = derived.frames_of(capsule) if frames is None else frames
     checks: list[dict[str, Any]] = []
 
-    checks.append(_check("integrity", declared=(manifest.get("integrity") or {}).get("root"),
-                         recomputed=None if capsule.root_ok else capsule.problems, ok=capsule.root_ok,
-                         note=None if capsule.root_ok else "the capsule's own integrity root does not verify"))
+    # P4-03: the integrity check names the entry that changed, because "the capsule was modified" is not something a
+    # reader can act on. The report is recomputed here from the entries themselves (not read back from `read_capsule`),
+    # so the check is a comparison and not a repetition of what the reader already decided.
+    declared_root = (manifest.get("integrity") or {}).get("root")
+    integrity_report = integrity_mod.verify(capsule.entries, capsule.entries.get(cap.INTEGRITY_NAME, b""),
+                                            declared_root)
+    checks.append(_check("integrity", declared=declared_root,
+                         recomputed={"matched": integrity_report["matched"],
+                                     "mismatched": [item["name"] for item in integrity_report["mismatched"]],
+                                     "missing": integrity_report["missing"],
+                                     "unlisted": integrity_report["unlisted"],
+                                     "root_ok": integrity_report["root"]["ok"]},
+                         ok=integrity_report["ok"],
+                         note=None if integrity_report["ok"] else "the capsule's own entries are not the ones it sealed",
+                         problems=integrity_report["problems"]))
 
     declared_chain = manifest.get("chain_root")
     fresh_chain = chain_root_of(frames)

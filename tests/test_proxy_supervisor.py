@@ -9,7 +9,18 @@ Two promises are tested here, and they are the two that make the proxy safe to h
 """
 from __future__ import annotations
 
+import asyncio
+import sys
 import time
+from collections.abc import Iterator
+from pathlib import Path
+
+import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+
+from rebind_probe import LocalUpstream, ServingProbe, measure_outage
 
 from blackbox.proxy.routes import Route, Routes
 from blackbox.proxy.supervisor import (
@@ -22,10 +33,18 @@ from blackbox.proxy.supervisor import (
 )
 
 
-def _table() -> Routes:
-    return Routes([Route(name="openai", base="http://127.0.0.1:9", prefix="/openai"),
-                   Route(name="anthropic", base="http://127.0.0.1:9", prefix="/anthropic")],
+def _table(base: str = "http://127.0.0.1:9") -> Routes:
+    """A route to `base`. The probe tests pass a live upstream: the proxy's 504 path is slow enough on Windows to read
+    as a hang, and a probe that is never answered measures the failure path instead of service."""
+    return Routes([Route(name="openai", base=base, prefix="/openai"),
+                   Route(name="anthropic", base=base, prefix="/anthropic")],
                   default="openai")
+
+
+@pytest.fixture(scope="module")
+def upstream() -> Iterator[LocalUpstream]:
+    with LocalUpstream() as server:
+        yield server
 
 
 def test_an_unset_variable_is_exported_and_names_the_proxy():
@@ -88,15 +107,25 @@ def test_a_rebind_keeps_the_port_the_child_was_told_and_lands_inside_the_budget(
         assert proxy.rebinds == [elapsed]
 
 
-def _break_and_wait(proxy: ProxyThread, timeout: float = 5.0) -> dict:
-    """Close the listener behind the supervisor's back and time how long the child would have waited.
+def _break_and_wait(proxy: ProxyThread, probe: ServingProbe, timeout: float = 5.0) -> dict:
+    """Close the listener behind the supervisor's back and time the outage **a request** experiences.
 
-    The number that matters is the **outage**: from the listener stopping to a new listener serving on the same port.
-    Three numbers are returned, and they answer different questions: `outage_ms` is what a child experiences,
-    `rebind_ms` is the work inside `rebind()`, and `noticed_ms` is how long the supervisor took to *see* the loss —
-    present only when the listener said so (`lost_cb`, defect 58), absent when detection was the tick.
+    `outage_ms` comes from `tools/rebind_probe.py`, not from a clock in this process: a real request is issued through
+    the port the child was told, and the outage is the interval between the first request that was not served and the
+    first one that was. That definition is the only one that cannot be argued with afterwards, and it covers the two
+    failures the earlier clocks had:
+
+    * a clock that started when the test *asked* for the close charged the harness's cross-thread hop to the product
+      (a 103.2 ms reading on a CI runner, defect 60);
+    * a clock that started when `close()` **returned** was optimistic the other way: the socket stops accepting inside
+      `close()`, so a request can be refused while the coroutine is still running (`wait_closed()`, the pool drain, a
+      loop thread descheduled before the caller wakes). `tests/test_rebind_probe.py` makes that interval 30 ms wide and
+      asserts this clock contains it.
+
+    `rebind_ms` (the product's own work), `dispatch_ms` (this test's hop) and `noticed_ms` (detection) come back beside
+    it, so a red row says which part of the outage was whose. The budget is asserted on `outage_upper_ms`, the
+    conservative bound, on **every** sample.
     """
-    import asyncio
 
     server = proxy.server
     loop = proxy._loop
@@ -104,34 +133,50 @@ def _break_and_wait(proxy: ProxyThread, timeout: float = 5.0) -> dict:
     port_before = proxy.port
     before = len(proxy.rebinds)
     noticed_before = len(proxy.noticed_ms)
-    started = time.monotonic()
-    asyncio.run_coroutine_threadsafe(server.close(), loop).result(5)
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        current = proxy.server
-        if (current is not None and current is not server and current.is_serving
-                and len(proxy.rebinds) > before):
-            return {"outage_ms": (time.monotonic() - started) * 1000.0,
-                    "rebind_ms": proxy.rebinds[before], "port_before": port_before,
-                    "port_after": proxy.port, "watchdog": True,
-                    "noticed_ms": (proxy.noticed_ms[len(proxy.noticed_ms) - 1]
-                                   if len(proxy.noticed_ms) > noticed_before else None)}
-        time.sleep(0.0005)
-    raise AssertionError(f"the watchdog did not restore service within {timeout} s")
+    asked = time.monotonic()
+
+    def break_it() -> None:
+        asyncio.run_coroutine_threadsafe(server.close(), loop).result(5)
+
+    try:
+        sampled = measure_outage(probe, break_it, timeout=timeout)
+    except RuntimeError as exc:                       # a listener that never came back is a failure, not a sample
+        raise AssertionError(str(exc)) from exc
+    dispatch_ms = (time.monotonic() - asked) * 1000.0
+    # The rebind's own bookkeeping (`rebinds`, `noticed_ms`) is appended after the socket is serving, so a served
+    # request can arrive a few microseconds before the row does. Waiting for the row is not a weakened gate: the outage
+    # has already been measured, and this only decides which number to print beside it.
+    bookkeeping_deadline = time.monotonic() + 0.5
+    while len(proxy.rebinds) <= before and time.monotonic() < bookkeeping_deadline:
+        time.sleep(0.001)
+    return {
+        "outage_ms": round(float(sampled["outage_ms"]), 3),
+        "outage_upper_ms": round(float(sampled["outage_upper_ms"]), 3),
+        "rebind_ms": round(proxy.rebinds[before], 3) if len(proxy.rebinds) > before else None,
+        "dispatch_ms": round(dispatch_ms, 3),
+        "probe_cycle_ms": round(float(sampled["probe_cycle_ms"]), 3),
+        "refused_requests": int(sampled["refused_requests"]),
+        "observed_failure": bool(sampled["observed_failure"]),
+        "port_before": port_before,
+        "port_after": proxy.port,
+        "watchdog": True,
+        "noticed_ms": (proxy.noticed_ms[len(proxy.noticed_ms) - 1] if len(proxy.noticed_ms) > noticed_before else None),
+    }
 
 
-def test_the_watchdog_brings_a_dead_listener_back_without_being_asked():
+def test_the_watchdog_brings_a_dead_listener_back_without_being_asked(upstream: LocalUpstream) -> None:
     """Structural, not statistical: the watchdog is what restored service, and it kept the port the child was told."""
-    with ProxyThread(_table()) as proxy:
+    with ProxyThread(_table(upstream.base)) as proxy, ServingProbe(proxy.port) as probe:
+        time.sleep(0.02)                                  # the probe must see a serving listener first
         port = proxy.port
-        sample = _break_and_wait(proxy)
+        sample = _break_and_wait(proxy, probe)
         assert proxy.server is not None and proxy.server.is_serving
         assert sample["port_after"] == port, "a rebind that moves the port breaks the child that was told it"
         assert len(proxy.rebinds) == 1, "the rebind that restored service was the watchdog's, not a manual one"
-        assert proxy.rebinds == [sample["rebind_ms"]]
+        assert round(proxy.rebinds[0], 3) == sample["rebind_ms"]
 
 
-def test_every_watchdog_rebind_lands_inside_the_budget_not_the_median_of_them():
+def test_every_watchdog_rebind_lands_inside_the_budget_not_the_median_of_them(upstream: LocalUpstream) -> None:
     """P3B-03 / §11.8, measured as the requirement is written: **every** watchdog-triggered rebind, per sample.
 
     The earlier version of this test took the median of five samples, four of which were manual `rebind()` calls. That
@@ -141,7 +186,8 @@ def test_every_watchdog_rebind_lands_inside_the_budget_not_the_median_of_them():
     gated row and its outliers are visible in the same failure message.
     """
     samples: list[dict] = []
-    with ProxyThread(_table()) as proxy:
+    with ProxyThread(_table(upstream.base)) as proxy, ServingProbe(proxy.port) as probe:
+        time.sleep(0.02)                                  # the probe must see a serving listener first
         port = proxy.port
         assert proxy._supervise_ms == SUPERVISE_MS, "this test measures the tick that ships"
         tick = SUPERVISE_MS / 1000.0
@@ -152,22 +198,27 @@ def test_every_watchdog_rebind_lands_inside_the_budget_not_the_median_of_them():
         delays = [0.001] + [tick * i / 7 for i in range(1, 7)] + [0.001]
         for delay in delays:
             time.sleep(delay)
-            samples.append(_break_and_wait(proxy))
+            samples.append(_break_and_wait(proxy, probe))
         assert all(s["port_after"] == port for s in samples), "every rebind must keep the port"
         assert len(proxy.rebinds) == len(samples), "each break must have been repaired by exactly one watchdog rebind"
     outages = [s["outage_ms"] for s in samples]
-    worst = max(outages)
+    worst = max(s["outage_upper_ms"] for s in samples)          # the conservative bound is what is gated
     # A red row has to say *which* half of the outage was ours: the rebind, or a watchdog thread the machine did not
     # schedule. `wake_late_ms` is the supervisor's own record of how late its ticks woke (defect 58), so a starved
     # runner is named as such in the failure message instead of being argued about afterwards.
     lateness = getattr(proxy, "wake_late_ms", [])
     assert worst <= REBIND_BUDGET_MS, (
-        f"worst watchdog outage {worst:.1f} ms over the {REBIND_BUDGET_MS} ms budget; "
-        f"outages {[round(o, 1) for o in outages]} ms, rebinds {[round(s['rebind_ms'], 2) for s in samples]} ms, "
+        f"worst request-level outage {worst:.1f} ms (upper bound) over the {REBIND_BUDGET_MS} ms budget; "
+        f"outages {[round(o, 1) for o in outages]} ms, "
+        f"rebinds {[round(s['rebind_ms'], 2) for s in samples]} ms, "
+        f"dispatch {[round(s['dispatch_ms'], 2) for s in samples]} ms, "
+        f"refused {[s['refused_requests'] for s in samples]}, "
+        f"probe cycle {sorted({s['probe_cycle_ms'] for s in samples})} ms, "
+        f"restores from the loop {proxy.restores_from_loop}, "
         f"worst watchdog tick lateness {max(lateness, default=0.0):.1f} ms over {len(lateness)} ticks")
 
 
-def test_a_listener_that_dies_without_saying_so_is_still_restored_on_the_tick():
+def test_a_listener_that_dies_without_saying_so_is_still_restored_on_the_tick(upstream: LocalUpstream) -> None:
     """The early notice is an optimisation of detection, not a replacement for the watchdog (defect 58).
 
     A close says so and is noticed in microseconds; a listener that dies for any other reason — an OS error, a socket
@@ -175,12 +226,102 @@ def test_a_listener_that_dies_without_saying_so_is_still_restored_on_the_tick():
     left. This test removes the notice and asserts the old behaviour survives, because a fast path that is the *only*
     path is a new way to lose the listener entirely.
     """
-    with ProxyThread(_table()) as proxy:
+    with ProxyThread(_table(upstream.base)) as proxy, ServingProbe(proxy.port) as probe:
+        time.sleep(0.02)
         listener = proxy.server
         assert listener is not None
         listener.lost_cb = None                      # die silently, the way an OS-level loss would
-        sample = _break_and_wait(proxy)
+        sample = _break_and_wait(proxy, probe)
         assert sample["noticed_ms"] is None, "nothing notified the supervisor, so nothing may claim an early notice"
         assert proxy.noticed_ms == [], proxy.noticed_ms
-    assert sample["outage_ms"] > 0
+    assert sample["outage_upper_ms"] > 0, "a silent death took service away for at least one request"
     assert sample["port_after"] == sample["port_before"], "a backstop rebind keeps the port the child was told"
+
+
+def test_a_fast_tick_never_moves_the_port_and_never_double_restores(upstream: LocalUpstream) -> None:
+    """The race a full-suite run found (defect 60): two owners, one port.
+
+    With the fix in place the notice repairs the listener on the loop *and* wakes the watchdog, so for a moment two
+    paths can both see "no listener": the loop's task and the tick. Before `_restore_pending` was set synchronously by
+    the notice, the tick could get there first, call `rebind()`, and race the loop for the port — the loser fell back to
+    a port of its own, which breaks every child that was told the old one. A 1 ms tick makes that window wide instead of
+    theoretical, and 25 breaks are enough for it to happen on a loaded machine if it still can.
+    """
+    with ProxyThread(_table(upstream.base), supervise_ms=1.0) as proxy, ServingProbe(proxy.port) as probe:
+        time.sleep(0.02)
+        port = proxy.port
+        for index in range(25):
+            sample = _break_and_wait(proxy, probe)
+            assert sample["port_after"] == port, f"break {index} moved the port: {sample}"
+        assert not proxy.port_changed, "a rebind gave up the port the child was told"
+        assert len(proxy.rebinds) == 25, f"25 breaks, {len(proxy.rebinds)} rebinds: something restored twice"
+
+
+
+def test_stopping_while_a_handler_is_pending_does_not_abandon_it(tmp_path: Path) -> None:
+    """Defect 61: `loop.stop()` left a handler task pending, and the garbage collector announced it.
+
+    A request that is still waiting on an upstream when the listener closes is a pending task. The loop was never
+    closed, so the task was destroyed whenever the collector reached it — one `Task was destroyed but it is pending!`
+    per shutdown on Windows (a dead upstream there waits for the SYN retry), and a socket handed to the collector
+    instead of being closed. The test uses a *black-hole* upstream (accepts, never answers) so the task is pending
+    everywhere, not only where the OS is slow.
+    """
+    import gc
+    import logging
+    import socket
+    import threading
+
+    messages: list[str] = []
+
+    class Collect(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            messages.append(record.getMessage())
+
+    handler = Collect()
+    asyncio_log = logging.getLogger("asyncio")
+    asyncio_log.addHandler(handler)
+    hole = socket.socket()
+    hole.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    hole.bind(("127.0.0.1", 0))
+    hole.listen(16)
+    held: list[object] = []
+    threading.Thread(target=lambda: [held.append(hole.accept()) for _ in range(8)], daemon=True).start()
+    try:
+        with ProxyThread(_table(f"http://127.0.0.1:{hole.getsockname()[1]}")) as proxy:
+            port = proxy.port
+
+            def client() -> None:
+                try:
+                    with socket.create_connection(("127.0.0.1", port), timeout=2) as sock:
+                        sock.sendall(b"GET /openai/v1/models HTTP/1.1\r\nHost: blackbox\r\nConnection: close\r\n\r\n")
+                        sock.recv(64)
+                except OSError:
+                    pass
+
+            threading.Thread(target=client, daemon=True).start()
+            time.sleep(0.05)                       # the handler is now waiting on the upstream
+            # Hammer the port through a few closes as well. Cancelling the pending tasks *runs* the loop, which runs
+            # the `connection made` callbacks that were already queued: one drain round left three handlers behind per
+            # shutdown under a probing client, so the round count has to converge and the test has to exercise it.
+            with ServingProbe(port):
+                loop = proxy._loop
+                assert loop is not None
+                for _ in range(3):
+                    server = proxy.server
+                    assert server is not None
+                    asyncio.run_coroutine_threadsafe(server.close(), loop).result(5)
+                    time.sleep(0.02)
+        assert proxy.pending_at_stop >= 1, (
+            "the handler should still have been pending when the listener closed; otherwise this test proves nothing")
+        assert proxy.undrained_at_stop == 0, (
+            f"{proxy.undrained_at_stop} task(s) survived the drain and would be destroyed by the collector: {messages}")
+        gc.collect()                               # what would have announced an abandoned task
+        # `undrained_at_stop == 0` above is the guarantee: everything the loop knew about was cancelled and awaited, and
+        # the loop is closed, so nothing is left for the collector to announce. The message is deliberately *not*
+        # asserted: a connection accepted in the microseconds between the loop's last turn and its close still produces
+        # a handler nobody owns, and this test hammers the port while the proxy shuts down. That residue is recorded in
+        # defect 61 rather than hidden behind a retry loop.
+    finally:
+        asyncio_log.removeHandler(handler)
+        hole.close()

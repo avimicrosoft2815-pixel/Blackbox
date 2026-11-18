@@ -9,6 +9,10 @@ three tasks**, not a plan. Nothing here has been run by anyone outside this sess
 python3 -m venv .venv && .venv/bin/pip install -e . pytest && .venv/bin/blackbox --version
 ```
 
+An offline machine needs `wheel` present for that build (`pip install wheel`, then `pip install -e .
+--no-build-isolation`), otherwise it stops with `invalid command 'bdist_wheel'`. Until 2026-11-17 the package declared no
+entry point at all, so this command did not exist even after a successful install (D-061).
+
 Expected: `blackbox 0.1.0.dev0 (format v2)`. Do not read the rest of the repository first — that is the point of
 the test.
 
@@ -27,7 +31,7 @@ Then answer, in your own words, without looking at any other file:
 ## Task 2 — read a run back
 
 ```
-ls capsules/ && .venv/bin/blackbox verify capsules/*.bbx
+.venv/bin/blackbox ls && .venv/bin/blackbox verify capsules/*.bbx
 .venv/bin/blackbox view capsules/
 .venv/bin/blackbox diagnose capsules/ --brief repair-brief.md
 ```

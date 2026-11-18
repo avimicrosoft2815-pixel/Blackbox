@@ -1,0 +1,219 @@
+"""The outage clock, tested against the ways a clock about downtime can lie.
+
+Defect 60's failure was a 103.2 ms reading that was mostly the *harness's* thread hop, so the first revision started its
+clock when `close()` returned. That is defensible but optimistic: the listening socket stops accepting **inside**
+`close()`, and a request can be refused while the coroutine is still running (`wait_closed()`, the pool drain, a loop
+thread descheduled before the caller wakes). The honest clock therefore does not live in our threads at all — it is a
+real connection and a real request, on the port the child was told.
+
+It also separates the two questions a single number kept conflating: whether the **listener** is there (connect
+refused / accepted — the gap, and what the 100 ms budget is about) and whether a **connection is answered** (a request
+in flight when the listener goes away can hang until its own timeout — a real casualty, reported as `service_gap_ms`,
+never added to the gap). A connect-only probe was tried for the gap and rejected: a closed listening socket keeps
+completing handshakes from its accept queue, so connections are accepted for tens of milliseconds while nothing answers
+them.
+
+The test that matters is `test_the_clock_counts_downtime_inside_close_before_it_returns`: it makes `close()` spend
+60 ms *after* the socket is gone, then asserts the measured gap contains those 60 ms while the post-close clock
+reports almost nothing. A clock that cannot see this interval cannot be trusted with a 100 ms budget.
+"""
+from __future__ import annotations
+
+import asyncio
+import sys
+import time
+from pathlib import Path
+
+import pytest
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))
+sys.path.insert(0, str(ROOT / "tools"))
+
+from rebind_probe import Attempt, LocalUpstream, ServingProbe, measure_outage, try_serve
+
+from blackbox.proxy.routes import Route, Routes
+from blackbox.proxy.server import ProxyServer
+from blackbox.proxy.supervisor import ProxyThread
+
+
+def _table(base: str) -> Routes:
+    """A route to a *live* upstream: a closed port is answered slowly enough on Windows to look like a hang."""
+    return Routes([Route(name="openai", base=base, prefix="/openai")], default="openai")
+
+
+def _probe(port: int) -> ServingProbe:
+    """Three requests in flight (the default): one hung request cannot blind the measurement."""
+    return ServingProbe(port)
+
+
+def test_an_answered_request_is_served_and_a_refused_one_is_not() -> None:
+    with LocalUpstream() as upstream, ProxyThread(_table(upstream.base)) as proxy:
+        served = try_serve(proxy.port)
+        assert served.served is True, served
+        assert served.detail.startswith("HTTP 2"), (
+            f"the upstream is live; the proxy must forward and answer, and it said {served.detail}")
+        port = proxy.port
+    refused = try_serve(port, timeout=0.2)
+    assert refused.served is False, "after the listener is gone the port must not be served"
+    # The connect itself may be refused *or* accepted and never answered: a listening socket that has just been closed
+    # keeps completing handshakes from its accept queue for a moment (measured on Windows; it is why this module probes
+    # with requests rather than connections). Both are "not served", and that is the only claim here.
+
+
+def test_the_clock_counts_downtime_inside_close_before_it_returns(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The interval the post-close clock cannot see: the socket is gone, the coroutine has not returned yet."""
+    original = ProxyServer.close
+    stall_s = 0.060
+    stalled: dict[str, bool] = {"done": False}
+
+    async def slow_close(self: ProxyServer) -> None:
+        await original(self)
+        if not stalled["done"]:      # only the break stalls: the restore's own close must not hide its start
+            stalled["done"] = True
+            time.sleep(stall_s)      # the listener is already closed here; the caller is still waiting
+
+    with LocalUpstream() as upstream, ProxyThread(_table(upstream.base)) as proxy, _probe(proxy.port) as probe:
+        server, loop = proxy.server, proxy._loop
+        assert server is not None and loop is not None
+        time.sleep(0.02)                                  # let the probes see a serving listener first
+        monkeypatch.setattr(ProxyServer, "close", slow_close)
+        close_returned: list[float] = []
+        sampled = measure_outage(probe, lambda: (
+            asyncio.run_coroutine_threadsafe(server.close(), loop).result(5),
+            close_returned.append(time.perf_counter()))[-1], timeout=5.0)
+        monkeypatch.setattr(ProxyServer, "close", original)
+    assert sampled["observed_failure"] is True, "the listener was gone for 60 ms; a connect must have been refused"
+    assert isinstance(sampled["outage_ms"], float)
+    assert sampled["outage_ms"] >= stall_s * 1000.0 * 0.8, (
+        f"{stall_s * 1000:.0f} ms of downtime happened before close() returned; the clock reported "
+        f"{sampled['outage_ms']:.1f} ms")
+    # What the optimistic clock would have said: from `close()` returning to the first *answered* request.
+    served_after = sampled["served_again"]
+    assert isinstance(served_after, float), "a request must have been answered again after the restore"
+    post_close_ms = (served_after - close_returned[0]) * 1000.0
+    missed = sampled["outage_ms"] - post_close_ms
+    assert missed >= stall_s * 1000.0 / 2, (
+        f"the post-close clock would have reported {post_close_ms:.1f} ms of the {sampled['outage_ms']:.1f} ms outage, "
+        f"missing {missed:.1f} ms of it — which is why the outage is measured by connections, not by when a coroutine "
+        "returned")
+
+
+def test_no_outage_is_reported_when_nothing_is_refused() -> None:
+    """A measurement that invents downtime is as useless as one that hides it."""
+    with LocalUpstream() as upstream, ProxyThread(_table(upstream.base)) as proxy, _probe(proxy.port) as probe:
+        time.sleep(0.02)
+        sampled = measure_outage(probe, lambda: time.sleep(0.01), timeout=2.0)
+    assert isinstance(sampled["outage_upper_ms"], float)
+    # The break here takes nothing away, so the one thing the probe may **not** report is a refusal: a connect that is
+    # refused with the listener up is the listener having vanished on its own, which is a defect and not jitter.
+    assert "refused" not in sampled["refused_details"], sampled
+    # What it may report is a slow answer — the attempt cap is calibrated to 3x this machine's median, so one scheduling
+    # hiccup reads as "not served" even though the listener is fine. That is the definition of an outage (a child waited
+    # longer than the cap), so the number is honest; the ceiling asserted here is the budget, not a healthy-machine
+    # ceiling. This test used to demand `max(12 ms, 9 cycles)` and macOS 3.11 in run 44223453730 produced 43.5 ms on an
+    # idle proxy with `refused_details == ["timeout"]`: the runner was slow, not the proxy, and a ceiling written for a
+    # quiet Linux box was asserting the runner's mood. The magnitude claims live with the budget (the bench and
+    # `test_every_watchdog_rebind_lands_inside_the_budget_not_the_median_of_them`), and the clock's honesty lives in
+    # `test_the_clock_counts_downtime_inside_close_before_it_returns`.
+    assert sampled["outage_upper_ms"] < 100.0, sampled
+    if not sampled["observed_failure"]:
+        assert sampled["outage_ms"] == sampled["outage_upper_ms"], "with no refusal both clocks are the same span"
+
+
+def test_the_upper_bound_is_the_conservative_one() -> None:
+    with LocalUpstream() as upstream, ProxyThread(_table(upstream.base)) as proxy, _probe(proxy.port) as probe:
+        server, loop = proxy.server, proxy._loop
+        assert server is not None and loop is not None
+        time.sleep(0.02)
+        sampled = measure_outage(probe, lambda: asyncio.run_coroutine_threadsafe(server.close(), loop).result(5))
+    assert isinstance(sampled["outage_ms"], float) and isinstance(sampled["outage_upper_ms"], float)
+    assert sampled["outage_upper_ms"] >= sampled["outage_ms"] >= 0.0
+    if sampled["observed_failure"]:                     # a fast loopback rebind can finish inside one probe cycle
+        assert int(sampled["refused_requests"]) >= 1
+    assert sampled["outage_upper_ms"] < 100.0, f"a loopback rebind took {sampled['outage_upper_ms']:.1f} ms"
+
+
+class _FakeProbe:
+    """A probe that answers from a script, so the timeout branch can be tested without a race.
+
+    A real "listener that never comes back" test was tried and is not repeatable: the OS hands the freed port to the
+    next thing that asks for one, and when a `LocalUpstream` in a later test got it the probe was answered by a socket
+    the proxy never opened. This is the same claim with no sockets in it.
+    """
+
+    def __init__(self, script: list[Attempt]) -> None:
+        self.script = script
+        self.answer_timeout_s = 0.05
+        self._at = 0
+
+    def calibrate(self, **kwargs: object) -> float:
+        return 50.0
+
+    def mark(self) -> int:
+        return 0
+
+    def recent(self, mark: int) -> list[Attempt]:
+        # Every poll reveals one more attempt, exactly as a live probe would.
+        self._at = min(len(self.script), self._at + 1)
+        return self.script[: self._at]
+
+    def cycle_ms(self, sample: int = 200) -> float:
+        return 0.5
+
+    def alive(self) -> bool:
+        return True
+
+
+def test_a_listener_that_never_comes_back_is_an_error_not_a_zero() -> None:
+    now = time.perf_counter()
+    served = Attempt(now, now + 0.001, True, True, "HTTP 200")
+    refused = [Attempt(now + 0.001 + 0.001 * i, now + 0.0012 + 0.001 * i, False, False, "refused")
+               for i in range(50)]
+    with pytest.raises(RuntimeError, match="did not come back"):
+        measure_outage(_FakeProbe([served, *refused]), lambda: None, timeout=0.4)   # type: ignore[arg-type]
+
+
+def test_a_probe_on_a_port_nobody_serves_cannot_measure_an_outage() -> None:
+    probe = _probe(9).start()
+    try:
+        with pytest.raises(RuntimeError, match="not measuring a serving listener"):
+            measure_outage(probe, lambda: None, timeout=0.3)
+    finally:
+        probe.stop()
+
+
+def test_the_probe_reports_its_own_resolution() -> None:
+    """Every number out of this module is bounded by the probe's cycle, and the cycle is printed beside it."""
+    with LocalUpstream() as upstream, ProxyThread(_table(upstream.base)) as proxy, ServingProbe(proxy.port) as probe:
+        time.sleep(0.05)
+        cycle = probe.cycle_ms()
+        attempts = probe.since(0)
+    assert attempts and all(attempt.served for attempt in attempts)
+    assert 0.0 < cycle < 50.0, f"one loopback request took {cycle:.2f} ms; that is the resolution of every number here"
+
+
+def test_the_probe_leaves_the_process_descriptors_to_answer_with() -> None:
+    """The probe shares the process with the proxy, and it must not eat it (defect 60).
+
+    Three unrested threads issuing thousands of connections a second exhausted this machine's 1024 descriptors, the
+    listener could no longer accept, and the bench reported seconds of outage that were the measurement's own load. The
+    defaults are part of the measurement's honesty, so they are pinned here rather than left to a comment.
+    """
+    probe = ServingProbe(9)
+    assert probe.threads <= 2, "more prober threads than the listener has room for is how the bench lied once"
+    assert probe.interval_s > 0.0, "an unrested prober starves the listener it is measuring"
+
+
+def test_every_measurement_carries_the_process_descriptor_count() -> None:
+    """`open_fds` is what makes saturation visible in the artifact instead of being inferred later."""
+    from rebind_probe import open_fds
+
+    with LocalUpstream() as upstream, ProxyThread(_table(upstream.base)) as proxy, ServingProbe(proxy.port) as probe:
+        time.sleep(0.05)
+        before = open_fds()
+        sampled = measure_outage(probe, lambda: asyncio.run_coroutine_threadsafe(proxy._server.close(), proxy._loop).result(5))  # type: ignore[union-attr]
+    assert "open_fds" in sampled
+    if sys.platform.startswith("linux"):
+        assert isinstance(before, int) and before > 0
+        assert isinstance(sampled["open_fds"], int) and sampled["open_fds"] > 0
