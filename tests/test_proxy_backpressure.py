@@ -24,13 +24,18 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import http.client
+import os
+import socket
 import threading
 import time
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
 
+from blackbox.proxy.limits import open_fds
 from blackbox.proxy.routes import Route, Routes
 from blackbox.proxy.server import (
     ERROR_HEADER,
@@ -49,9 +54,14 @@ BODY = b'{"id":"chatcmpl-test","choices":[{"message":{"content":"hi"}}]}'
 
 
 class GatedOrigin:
-    """An origin that parks every request until it is released, and counts how many are parked at once."""
+    """An origin that parks every request until it is released, and counts how many are parked at once.
 
-    def __init__(self) -> None:
+    `stream=True` answers with a slow `text/event-stream` instead of a JSON body, which is what an abrupt disconnect
+    mid-response needs: the client has something to close *during*, and the proxy has a write that fails afterwards.
+    """
+
+    def __init__(self, *, stream: bool = False) -> None:
+        self.stream = stream
         self.port = 0
         self.active = 0
         self.peak = 0
@@ -109,22 +119,38 @@ class GatedOrigin:
                 finally:
                     self.active -= 1
                 self.served += 1
-                writer.write(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
-                             b"Content-Length: " + str(len(BODY)).encode() + b"\r\nConnection: keep-alive\r\n\r\n"
-                             + BODY)
-                await writer.drain()
+                if self.stream:
+                    await self._stream(writer)
+                else:
+                    writer.write(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+                                 b"Content-Length: " + str(len(BODY)).encode() + b"\r\nConnection: keep-alive\r\n\r\n"
+                                 + BODY)
+                    await writer.drain()
         except (asyncio.IncompleteReadError, ConnectionError):
             return
         finally:
             writer.close()
+
+    async def _stream(self, writer: asyncio.StreamWriter) -> None:
+        """Chunked SSE, one chunk every 50 ms: long enough that a client can leave in the middle of it."""
+        writer.write(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\n"
+                     b"Connection: keep-alive\r\n\r\n")
+        await writer.drain()
+        for index in range(40):
+            piece = b'data: {"i":%d}\n\n' % index
+            writer.write(f"{len(piece):x}\r\n".encode() + piece + b"\r\n")
+            await writer.drain()
+            await asyncio.sleep(0.05)
+        writer.write(b"0\r\n\r\n")
+        await writer.drain()
 
 
 class Bench:
     """One event loop in one thread: a gated origin, and a proxy whose ceilings are the test's."""
 
     def __init__(self, *, max_inflight: int = MAX_INFLIGHT, max_connections: int = MAX_CONNECTIONS,
-                 queue_wait_s: float = 60.0) -> None:
-        self.origin = GatedOrigin()
+                 queue_wait_s: float = 60.0, stream: bool = False) -> None:
+        self.origin = GatedOrigin(stream=stream)
         self.proxy: ProxyServer | None = None
         self.loop: asyncio.AbstractEventLoop | None = None
         self.ready = threading.Event()
@@ -180,6 +206,24 @@ class Bench:
     def port(self) -> int:
         assert self.proxy is not None
         return self.proxy.port
+
+    def writers(self) -> int:
+        """How many client connections the listener is still holding — the leak check for an abrupt disconnect."""
+        assert self.proxy is not None and self.loop is not None
+
+        async def read() -> int:
+            assert self.proxy is not None
+            return len(self.proxy._writers)
+
+        return asyncio.run_coroutine_threadsafe(read(), self.loop).result(10)
+
+    def wait_for(self, predicate: Any, timeout: float = 15.0) -> bool:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if predicate(self.stats()):
+                return True
+            time.sleep(0.02)
+        return False
 
     def stats(self) -> dict[str, Any]:
         assert self.proxy is not None and self.loop is not None
@@ -290,8 +334,6 @@ def test_a_wait_that_would_outlive_the_bound_is_answered_not_stalled() -> None:
 
 def test_a_silent_connection_at_the_limit_is_closed_not_held() -> None:
     """A client that connects and says nothing past the limit costs two seconds and a descriptor, never a slot."""
-    import socket
-
     with Bench(max_inflight=8, max_connections=1) as bench:
         holder = Caller(bench.port)
         holder.start()
@@ -361,3 +403,178 @@ def test_a_server_built_on_a_small_host_uses_the_plan_and_says_so(monkeypatch: A
     caps = server.stats.as_dict()["caps"]
     assert caps["fd_budget"] == 256 and caps["max_connections"] == server.max_connections
     assert "256 descriptors" in caps["why"]
+
+
+# -- overload at the *planned* numbers ------------------------------------------------------------------------------
+#
+# The tests above turn the caps down by hand, which proves the behaviour; these use the plan a real small host would get
+# (`plan_caps`), so the numbers under test are the ones a 256-descriptor macOS shell or a hard-limited container runs with.
+
+
+def test_a_burst_past_a_planned_small_ceiling_is_served_not_refused() -> None:
+    """The 256-descriptor plan (96 connections, 64 in flight) under 80 concurrent requests: served, queued, none rejected."""
+    plan = plan_caps(256)
+    with Bench(max_inflight=plan.max_inflight, max_connections=plan.max_connections) as bench:
+        callers = [Caller(bench.port, timeout=60) for _ in range(80)]
+        for caller in callers:
+            caller.start()
+        assert bench.origin.await_parked(min(plan.max_inflight, 64), timeout=30), "the burst never reached the origin"
+        bench.origin.release()
+        for caller in callers:
+            caller.join(90)
+        assert [caller.status for caller in callers] == [200] * 80, [c.status for c in callers if c.status != 200]
+        stats = bench.stats()
+        assert stats["refused"] == 0, stats
+        assert stats["queued"] >= 1, "80 requests against a 64-slot ceiling must show a wait"
+        assert stats["caps"]["max_inflight"] == plan.max_inflight
+
+
+def test_descriptors_already_open_come_out_of_the_same_budget() -> None:
+    """The tape, the child's own files and the SDK's sockets spend the budget the caps are planned from.
+
+    Counting only the limit plans the slack twice: on a 256-descriptor host whose process already holds 60, a plan of
+    96 + 64 + 96 would need 316.
+    """
+    free = plan_caps(256)
+    held = plan_caps(256, in_use=60)
+    assert held.max_connections < free.max_connections and held.max_inflight < free.max_inflight, (free, held)
+    assert held.max_connections + held.max_inflight + PROXY_LOCAL_SLACK_FDS + 60 <= 256, held
+    assert held.in_use == 60 and "60 are already open" in held.reason
+
+    # Nothing to account for, nothing changes; and a host with room to spare keeps the documented pair however much is open.
+    assert (plan_caps(256, in_use=0).max_connections, plan_caps(256, in_use=None).max_connections) == (
+        free.max_connections, free.max_connections)
+    roomy = plan_caps(65536, in_use=300)
+    assert (roomy.max_connections, roomy.max_inflight) == (MAX_CONNECTIONS, MAX_INFLIGHT)
+
+
+def test_the_listener_counts_descriptors_already_open(monkeypatch: Any) -> None:
+    """The wiring, not just the arithmetic: `ProxyServer` plans from the budget *and* from what is already held."""
+    import blackbox.proxy.server as server_module
+
+    monkeypatch.setattr(server_module, "fd_budget", lambda: 400)
+    monkeypatch.setattr(server_module, "open_fds", lambda: 120)
+    server = ProxyServer(Routes([Route(name="openai", base="http://127.0.0.1:9")], default="openai"))
+    caps = server.stats.as_dict()["caps"]
+    assert caps["open_at_start"] == 120, caps
+    assert server.max_connections + server.max_inflight + PROXY_LOCAL_SLACK_FDS + 120 <= 400, caps
+    assert "120 are already open" in caps["why"], caps
+
+
+@pytest.mark.skipif(open_fds() is None, reason="no descriptor count on this platform (Windows)")
+def test_a_host_with_files_already_open_stays_inside_its_budget() -> None:
+    """Real descriptors, a real burst, and a check that the process does not pass the budget it planned from.
+
+    Forty descriptors are held open (the equivalent of a child's database, a log and a few sockets), the plan is made
+    from the budget *minus those*, and the peak descriptor count during the burst is required to stay under the budget.
+    """
+    budget = 320
+    opened = [os.pipe() for _ in range(20)]                     # 40 real descriptors, held for the whole test
+    try:
+        before = open_fds()
+        assert before is not None
+        plan = plan_caps(budget, in_use=before)
+        peak = [0]
+
+        def sample() -> None:
+            while not stop.is_set():
+                current = open_fds()
+                if current is not None:
+                    peak[0] = max(peak[0], current)
+                time.sleep(0.01)
+
+        stop = threading.Event()
+        with Bench(max_inflight=plan.max_inflight, max_connections=plan.max_connections) as bench:
+            sampler = threading.Thread(target=sample, daemon=True)
+            sampler.start()
+            callers = [Caller(bench.port, timeout=30) for _ in range(12)]
+            for caller in callers:
+                caller.start()
+            assert bench.origin.await_parked(12, timeout=30)
+            bench.origin.release()
+            for caller in callers:
+                caller.join(45)
+            stop.set()
+            sampler.join(5)
+            assert [caller.status for caller in callers] == [200] * 12, [c.status for c in callers]
+        assert peak[0] <= budget, (
+            f"the process reached {peak[0]} descriptors on a host that allows {budget}, with {before} already open "
+            f"and caps of {plan.max_connections} connections / {plan.max_inflight} in flight")
+        assert peak[0] > before, "the burst did not open anything, so the measurement proves nothing"
+    finally:
+        for read_end, write_end in opened:
+            os.close(read_end)
+            os.close(write_end)
+
+
+# -- abrupt disconnects ----------------------------------------------------------------------------------------------
+
+
+def test_a_client_that_leaves_while_queued_does_not_hold_a_slot() -> None:
+    """A client that vanishes while waiting for a slot must not keep the slot when its turn comes.
+
+    Documented limitation: the proxy cannot notice a departure while it is parked on the semaphore, so the request may
+    already have reached the provider by the time the write fails. What must not happen is a slot that is never returned
+    — this test proves the *next* request is served.
+    """
+    with Bench(max_inflight=1, max_connections=8, queue_wait_s=30) as bench:
+        holder = Caller(bench.port, timeout=30)
+        holder.start()
+        assert bench.origin.await_parked(1, timeout=15)
+        queued = socket.create_connection(("127.0.0.1", bench.port), timeout=15)
+        queued.sendall(b'POST /v1/chat/completions HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\n'
+                       b'Content-Length: 2\r\n\r\n{}')
+        time.sleep(0.3)                                        # it is queued behind the holder now
+        queued.close()                                         # ...and the client is gone
+        bench.origin.release()
+        holder.join(45)
+        assert holder.status == 200
+        fresh = Caller(bench.port, timeout=30)
+        fresh.start()
+        fresh.join(45)
+        assert fresh.status == 200, fresh.error
+        stats = bench.stats()
+        assert stats["refused"] == 0, stats
+        assert stats["queued"] >= 1, "the abandoned request was queued, and that is a fact worth counting"
+
+
+def test_a_client_that_leaves_at_the_ceiling_does_not_hold_a_connection() -> None:
+    """The refusal is immediate, the client may leave before reading it, and the connection count must still drain."""
+    with Bench(max_inflight=8, max_connections=2) as bench:
+        holders = [Caller(bench.port, timeout=30) for _ in range(2)]
+        for holder in holders:
+            holder.start()
+        assert bench.origin.await_parked(2, timeout=15)
+        extra = socket.create_connection(("127.0.0.1", bench.port), timeout=15)
+        extra.sendall(b"GET /v1/models HTTP/1.1\r\nHost: x\r\n\r\n")
+        assert extra.recv(64).startswith(b"HTTP/1.1 503")
+        extra.close()
+        bench.origin.release()
+        for holder in holders:
+            holder.join(45)
+        deadline = time.monotonic() + 15
+        while time.monotonic() < deadline and bench.writers() != 0:
+            time.sleep(0.02)
+        assert bench.writers() == 0, "a closed connection is still counted, so the ceiling leaks"
+        fresh = Caller(bench.port, timeout=30)
+        fresh.start()
+        fresh.join(45)
+        assert fresh.status == 200
+        assert bench.stats()["refused_reasons"].get("connection-limit") == 1
+
+
+def test_an_abrupt_disconnect_mid_stream_frees_the_slot() -> None:
+    """A client that closes in the middle of a stream: recorded as gone, and the one in-flight slot returned."""
+    with Bench(max_inflight=1, max_connections=8, queue_wait_s=20, stream=True) as bench:
+        client = socket.create_connection(("127.0.0.1", bench.port), timeout=15)
+        client.sendall(b'POST /v1/chat/completions HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\n'
+                       b'Content-Length: 2\r\n\r\n{}')
+        bench.origin.release()
+        first = client.recv(4096)
+        assert first.startswith(b"HTTP/1.1 200") and b"event-stream" in first, first[:120]
+        client.close()                                          # gone mid-stream, with no terminator read
+        assert bench.wait_for(lambda stats: stats["client_gone"] + stats["upstream_gone"] >= 1, timeout=20), bench.stats()
+        fresh = Caller(bench.port, timeout=30)
+        fresh.start()
+        fresh.join(45)
+        assert fresh.status == 200, fresh.error

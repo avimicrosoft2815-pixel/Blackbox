@@ -62,17 +62,21 @@ connection-limit` in milliseconds — and both caps are **planned from the descr
 (`limits.fd_budget()` → `server.plan_caps()`), shrinking to fit a 256-descriptor macOS shell or a hard-limited container,
 stopping at floors with the reason recorded when the budget is below what the proxy needs, and stated as policy rather
 than arithmetic on Windows, where no such budget is published. A delay and a rejection are named separately in the run's
-sentence, and the rejected request's body says what to do — B3, `tests/test_proxy_backpressure.py` (7),
+sentence, and the rejected request's body says what to do — B3, `tests/test_proxy_backpressure.py` (14),
 `tests/test_proxy_limits.py` (7), measured in `bench/results/2026-11-16-b3-connection-limit.json` (450 of 450 served,
-probe answered in 948.9 ms instead of timing out at 4 s, 96 surplus clients refused in a median 4.0 ms) and end to end on
-a hard-200-descriptor host (62 connections + 42 in flight, 8 of 8 requests served). (3) Stream termination is recorded in
+probe answered in 948.9 ms instead of timing out at 4 s, 96 surplus clients refused in a median 4.0 ms), end to end on a
+hard-200-descriptor host (62 connections + 42 in flight, 8 of 8 requests served), at the 256-descriptor plan (80 of 80
+served, 73 queued, longest wait 50 ms), with 50 descriptors already open on a 320-budget host (plan 104/70, peak 87
+descriptors), and against abrupt clients that leave while queued, at the ceiling, or mid-stream (slot and connection both
+returned; the queued-departure limitation is in the README). The plan now also subtracts what the process already holds
+(defect 72). (3) Stream termination is recorded in
 three states rather than two, across seven provider conventions, a stream whose ending this recorder does not recognise is
 recorded as `unverified` and reported as **cannot tell** — never as complete — and a convention is matched to the *end* of
 the path, so a batch listing is not judged as a stream — defects 68 and 70, `tests/test_stream_termination.py` (30). The
 zero-capture sentence now offers the base URL as **one possible cause** rather than asserting it, naming the alternative (a
 call that never left the process). What remains open is B4, B5, B6 and B8.
 
-Suite: **Total: 1230 tests** — 1229 pass here and 1 is skipped on POSIX by name
+Suite: **Total: 1237 tests** — 1236 pass here and 1 is skipped on POSIX by name
 (`test_an_open_view_blocks_the_unlink_only_on_windows`: POSIX permits unlinking a file another fd still holds, so
 the open-view case exists only on Windows). The number is for the dependency set CI installs,
 `.[dev,capture,capture-sdks]`: sixteen tests live behind `anthropic`, so a venv with only `httpx` and `openai`

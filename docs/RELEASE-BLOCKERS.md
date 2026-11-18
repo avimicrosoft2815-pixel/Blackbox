@@ -186,6 +186,7 @@ says that the budget is below what the proxy needs and stops at floors (16 conne
 | 256 (a macOS shell that refused the raise) | 96 | 64 | "this host allows 256 descriptors, so the caps are 96 connections + 64 in flight + 96 for the process" |
 | 200 (a hard limit nobody can pass) | 62 | 42 | same sentence, with those numbers — **measured end to end**: 8 concurrent requests, 8 served `200` |
 | 64 (below the floors) | 16 | 8 | "this host allows only 64 descriptors, below the 120 the proxy needs: the caps are the floors … and the 503 at them is what protects the process" |
+| 320 with **50 already open** | 104 | 70 | "this host allows 320 descriptors and 50 are already open, so the caps are 104 connections + 70 in flight + 96 for the process" |
 | `None` (**Windows**: no readable budget) | 512 | 200 | "this platform publishes no descriptor budget, so 512 connections and 200 in flight are policy numbers; the 503 at the ceiling is what bounds the process" |
 
 That last row is the platform review in one line: on Windows the arithmetic above does not exist, so the caps are stated
@@ -228,11 +229,29 @@ and the queue case says `the requests already in flight are slower than the reco
 fewer at once`. `ProxyStats` carries `queued`, `max_queue_wait_ms`, `refused_reasons` and `caps`, so every clause of every
 sentence is derived from what happened rather than guessed from a constant.
 
-**Tests.** `tests/test_proxy_backpressure.py` (7), with the ceilings turned down so a test *is* a real burst at a real
-ceiling: six requests against `max_inflight=2` are all served, two at a time, none refused; a connection past
-`max_connections=2` gets its `503` in under two seconds **including the body line quoted above**; a wait past a 0.3 s
-bound is answered, not stalled; a client that connects and says nothing past the limit is told and closed; the descriptor
-arithmetic; the `plan_caps` table row by row; and a server built on a 256-descriptor host that uses the plan and says so.
+**Overload, measured at the planned numbers rather than hand-picked ones** (`tests/test_proxy_backpressure.py`, 14):
+
+| case | result |
+|---|---|
+| 80 concurrent requests at the 256-descriptor plan (96 connections / 64 in flight) | **80 of 80 answered `200`**, 0 refused, 73 queued, longest wait **50 ms**, 119 ms wall |
+| 12 concurrent requests on a 320-budget host with **50 descriptors already open** | **12 of 12 answered `200`**, plan 104 / 70, **peak 87 descriptors** — under the budget |
+| 450 concurrent requests on the documented pair (1024-budget host) | 450 of 450 `200`, 383 queued, longest wait 735 ms (the bench above) |
+| a client that closes **while queued** for the only slot | the slot is returned and the next request is served `200`; nothing refused |
+| a client that closes **at the connection ceiling**, before reading its `503` | the connection count drains to 0; the next request is served `200`; `connection-limit: 1` |
+| a client that closes **mid-stream** with one in-flight slot | `client_gone` recorded; the next request is served `200` — no slot leaked |
+
+**Limitation, stated rather than implied.** A client that disappears while *queued* cannot be noticed until its turn
+comes, because the recorder is parked on the semaphore and not reading that socket. The slot is returned then, the
+departure is counted, and the abandoned request **may already have reached the provider** — the recorder cannot un-send
+it. Mid-stream departures are recorded as `client_gone` (§14.4a) and cost no slot. `README.md` says both in the
+"what this does not do" list.
+
+**Tests.** `tests/test_proxy_backpressure.py` (14): the ceilings turned down so a test *is* a real burst at a real
+ceiling (six requests against `max_inflight=2` all served, two at a time, none refused); a connection past
+`max_connections=2` getting its `503` in under two seconds **including the body line quoted above**; a wait past a 0.3 s
+bound answered, not stalled; a client that connects and says nothing past the limit told and closed; the descriptor
+arithmetic; the `plan_caps` table row by row; the plan's own arithmetic when the process already holds descriptors; a
+server built on a small host that uses the plan and says so; and the three abrupt-disconnect cases above.
 `ProxyServer` takes the numbers as parameters so the behaviour is testable without 512 sockets; left unset they are
 derived, never assumed.
 

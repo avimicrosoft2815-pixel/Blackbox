@@ -1147,3 +1147,52 @@ asserts `connections + inflight + slack <= budget` wherever a fitting pair exist
 256-descriptor host uses the plan and publishes it; `tests/test_proxy_limits.py` (7) reads the budget in a subprocess at
 200 descriptors and asserts the plan fits. `tests/test_launcher_capture_warning.py` (5) asserts the sentence separates
 delay from rejection and that the Windows wording makes no arithmetic claim.
+
+## Defect 72 — the plan spent descriptors the process had already opened (2026-11-16, B3 review round 2)
+
+**Found by** asking what `plan_caps` means on a host that is already busy: a `blackbox run` process holds the tape, the
+child's inherited handles, the SDK's sockets and everything the application opened before the listener exists. The plan
+subtracted `PROXY_LOCAL_SLACK_FDS` (96) and nothing else, so on a 256-descriptor host whose process already held 60 the
+arithmetic was `96 + 64 + 96 = 256` — of a budget with 60 already gone. The slack was being spent twice, and the caps
+would have been the cliff again, this time with the arithmetic to prove it.
+
+**Fix.** `limits.open_fds()` reads the count the platform exposes (`/proc/self/fd` on Linux, `/dev/fd` on macOS and the
+BSDs, `None` on Windows), and `plan_caps(budget, in_use=...)` subtracts it: `room = budget - slack - in_use`. The count is
+a lower bound — the scan holds one descriptor of its own — which errs in the safe direction, and `ProxyStats.caps`
+publishes `open_at_start` plus a sentence that names the number when it is non-zero.
+
+**Measured** (this sandbox): 40 real descriptors held open plus the interpreter's own 10, budget 320 →
+`plan(320, in_use=50) = 104 connections / 70 in flight` (`104 + 70 + 96 + 50 = 320`), 12 concurrent requests through the
+listener, **peak descriptor count 87, all 12 answered `200`**. The test asserts the peak against the budget rather than
+against a constant, so a future change that spends the slack twice fails here.
+
+**Tests.** `tests/test_proxy_backpressure.py` (14): `test_descriptors_already_open_come_out_of_the_same_budget` (the
+arithmetic, including that a host with room to spare keeps the documented pair however much is open),
+`test_the_listener_counts_descriptors_already_open` (the wiring and `stats.caps.open_at_start`) and
+`test_a_host_with_files_already_open_stays_inside_its_budget` (40 real pipes, a real burst, the peak measured).
+
+## Defect 73 — overload behaviour was tested at hand-picked numbers, and disconnects were not tested at all (2026-11-16, B3 review round 2)
+
+**Found by** reading the test list against the ways a real overload arrives. The suite proved the *behaviour* at
+`max_inflight=2` and `max_connections=2` — good, and necessary — but never at a **planned** ceiling, never with the
+process already holding descriptors, and never with a client that **leaves** while queued, at the ceiling, or mid-stream.
+Three of those are the cases a hung recorder would produce if a slot or a connection leaked, and nothing would have caught
+it.
+
+**What the new tests measure, and what they found.**
+
+| case | result |
+|---|---|
+| 80 concurrent requests at the 256-descriptor plan (96 connections / 64 in flight) | **80 of 80 answered `200`**, 0 refused, 73 queued, longest wait **50 ms**, 119 ms wall |
+| 12 concurrent requests on a 320-budget host with 50 descriptors already open | **12 of 12 answered `200`**, plan 104 / 70, **peak 87 descriptors** |
+| a client that closes while queued for the only slot | slot returned; the next request is served `200`; nothing refused |
+| a client that closes at the connection ceiling (before reading its `503`) | connection count drains to 0; the next request is served `200`; `refused_reasons["connection-limit"] == 1` |
+| a client that closes mid-stream (one in-flight slot) | `client_gone` recorded; the next request is served `200` |
+
+No leak was found. One **limitation** was: a client that disappears while queued cannot be noticed until its turn comes,
+because the recorder is parked on the semaphore rather than reading that socket — so the slot is returned only then, and
+the abandoned request may already have reached the provider. That is now written down in the README and in
+`docs/RELEASE-BLOCKERS.md` rather than left as an implication.
+
+**Tests.** `tests/test_proxy_backpressure.py` (14), including the mid-stream case, which needed an origin that streams
+slowly (`GatedOrigin(stream=True)`: chunked SSE, one chunk every 50 ms) so a disconnect can land inside the response.

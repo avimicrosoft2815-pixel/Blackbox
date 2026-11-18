@@ -76,4 +76,23 @@ def fd_budget() -> int | None:
     return int(soft)
 
 
-__all__ = ["DEFAULT_TARGET", "fd_budget", "raise_fd_limit"]
+def open_fds() -> int | None:
+    """How many descriptors this process holds *right now*, or `None` where that cannot be counted.
+
+    The budget is shared with everything else the process is doing — the tape, a database the child opened, the SDK's own
+    sockets, a user's files — so a plan built from the limit alone would spend descriptors that are already gone. Linux
+    exposes the count as a directory (`/proc/self/fd`), macOS and the BSDs as `/dev/fd`; the scan itself holds one
+    descriptor for a moment, so the number is `+/-1` and the plan treats it as a lower bound. Windows has no cheap
+    equivalent a process can read, and the answer there is `None` (the same honesty as `fd_budget()`).
+    """
+    import os
+
+    for path in ("/proc/self/fd", "/dev/fd"):
+        try:
+            return len(os.listdir(path))
+        except OSError:
+            continue
+    return None
+
+
+__all__ = ["DEFAULT_TARGET", "fd_budget", "open_fds", "raise_fd_limit"]
