@@ -1353,3 +1353,34 @@ request-level bound, on every sample, in four columns. And **a probe may not sat
 (`bench/results/2026-11-18-rebind-instrumented.json`). The instrumented columns stay, because a future slow sample must
 say which of the five possible causes it was, and because the first honest instrumented run is what corrected a wrong
 diagnosis — defect 60 is closed by the loop-side repair *and* by the measurement no longer manufacturing its failure.
+
+## D-064 — a writer's span is its own, with its own band, and the join is still one call id (2026-11-18, B4)
+
+**The question.** `docs/node-edges.md` proposed two shapes for a node-to-node edge and this build implemented the first:
+the proxy opens a span per forwarded request. Implementing it raised three that the proposal could not answer, and the
+answers are what this entry records. The ticket's tick stays the owner's (D-052/D-053 stand); this is how the mechanism
+was built, not whether it should be.
+
+**1. Two writers on one tape need disjoint numbers.** A node slot was documented as "the tape's own numbering", and the
+hook folder numbers from 1 per session. A proxy that also numbered from 1 would make slot 3 mean two different spans in
+one `graph.json` — the ambiguity the whole design refuses. So the number space is split: hooks get 1–`NODE_SLOT_HOOK_MAX`
+(0x3FFF) and the proxy 0x4000–0x7FFF (`NODE_SLOT_PROXY_BASE`/`MAX`). A writer that exhausts its band **stops opening
+spans and counts them** (`ProxyStats.spans_capped`); the call is still recorded, without a span, and its edge falls back
+to `level: "call"`. A node with no frames is never an answer to a full band.
+
+**2. A span only exists if a frame carries it.** The proxy asks its receiver for the span before handing the slot to the
+call, and a receiver that will not record it says so (`SinkRecorder.span_open` returns `False` when there is no sink or
+the write raised). A slot the graph would believe in but no `NODE_OPEN` carries is exactly the invented node D-052 rule 2
+forbids, so the call gets no slot instead.
+
+**3. The proxy names its own span, never the app's.** The close frame carries the span's `name`, `kind` and `owner` that
+its own open wrote, and the graph lists it with `owner: "proxy"`. The app's node is named only by the app's tape. What
+joins them is still `x-blackbox-call` and nothing else: no `x-blackbox-node` header was added, so the proxy cannot claim
+to know which app node a request was inside — the resolver reads that from the app's own frames, and refuses when either
+side is missing or duplicated (`node_join: "partial"`/`"ambiguous"` with the candidate count).
+
+**A consequence worth writing down, because it was a bug in the other direction.** A writer that can see the body's own
+framing must say what it saw: `partial` on a proxied call is now `False` when the body ended inside its `content-length`
+or at a chunked terminator, and `True` with `ending: "unverified"` when it ended at the connection's close (defect 77).
+The seam got the same treatment from the other side: a body that was never a stream is not judged against a stream's
+terminator table (defect 78). Both were found by running the product, not by testing the mechanism.
