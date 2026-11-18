@@ -145,6 +145,13 @@ class SpanBench:
         self.loop.call_soon_threadsafe(self.loop.stop)
         assert self._thread is not None
         self._thread.join(20)
+        # The loop has to be shut down here, in this thread, and then closed: a loop left open with a pending task is
+        # reported by a *later* test — on a Windows Proactor loop as "Task was destroyed but it is pending!" — which is
+        # how this fixture failed a Windows CI cell while every assertion in it passed (2026-11-18).
+        with contextlib.suppress(Exception):
+            self.loop.run_until_complete(self.loop.shutdown_asyncgens())
+        with contextlib.suppress(Exception):
+            self.loop.close()
         self._closed = True
 
     def _run(self) -> None:
@@ -170,11 +177,14 @@ class SpanBench:
         self.writer_uuid = self.writer.writer_uuid.hex()
         await self.proxy.close()
         await self.origin.close()
-        current = asyncio.current_task()
-        pending = [task for task in asyncio.all_tasks() if task is not current]
-        for task in pending:
-            task.cancel()
-        if pending:
+        # Cancel cooperatively until nothing is left: one pass leaves the tasks that were spawned by another task's
+        # cancellation (an accept loop waking a connection handler), and those are what a Proactor loop then reports.
+        for _ in range(5):
+            pending = [task for task in asyncio.all_tasks() if task is not asyncio.current_task()]
+            if not pending:
+                break
+            for task in pending:
+                task.cancel()
             await asyncio.gather(*pending, return_exceptions=True)
         self.writer.close()
 
