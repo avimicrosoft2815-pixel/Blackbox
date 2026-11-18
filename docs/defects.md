@@ -888,3 +888,31 @@ probe defaults are now gentle, so a burst has to be issued deliberately).
 **Proposal for the next increment.** A `ProxyServer(max_connections=...)` with an `asyncio.Semaphore`, refusals counted
 in `stats` and recorded as a `proxy.overloaded` event so the capsule says what happened; a bench row that runs at the
 cap; and a test that drives it at 2x the cap and asserts every child got either service or a documented 503.
+
+## Defect 63 — the probe's honesty test asserted the runner's mood, and only macOS said so (2026-11-18, P3B-03)
+
+**Found by** run `44223453730` at `f57c2ac`, the first time a macOS cell executed the probe tests on this branch:
+
+```
+FAILED tests/test_rebind_probe.py::test_no_outage_is_reported_when_nothing_is_refused
+AssertionError: {'outage_upper_ms': 43.5..., 'observed_failure': True, 'refused_details': ['timeout'],
+                 'probe_answer_timeout_ms': 10.0, ...}
+```
+
+**What the sample says.** The break in that test takes nothing away — it sleeps 10 ms and returns — so the listener never
+went anywhere. The probe recorded one attempt whose answer did not arrive inside the calibrated 10 ms cap and therefore
+called it a 43.5 ms outage. That is the definition working as written: the cap is `max(10 ms, 3 x this machine's median
+loopback answer)`, so on a shared macOS runner one scheduler hiccup lands outside it, and the child-side story ("no
+answer for 43.5 ms") is true.
+
+**The defect** is in the assertion, not the probe: it demanded `outage_upper_ms <= max(12 ms, 9 x cycle)`, a ceiling
+written for a quiet Linux box, so it failed exactly on the machine whose *speed* it was measuring. Its own comment
+already admitted a stray failure was "the probe being honest".
+
+**Fix.** The test now asserts what it means and nothing about the machine's speed: a listener that was never closed may
+**not** be refused (`"refused" not in refused_details` — a refused connect with the listener up is a defect), a slow
+answer is allowed, and the ceiling is the budget (100 ms) rather than a healthy-machine constant. The magnitude claims
+stay where they were: the bench, and
+`test_every_watchdog_rebind_lands_inside_the_budget_not_the_median_of_them`; the clock's honesty stays in
+`test_the_clock_counts_downtime_inside_close_before_it_returns`. Linux and Windows had passed this test all along —
+there were simply no macOS samples of it until now.

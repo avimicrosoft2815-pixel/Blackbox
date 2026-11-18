@@ -104,12 +104,19 @@ def test_no_outage_is_reported_when_nothing_is_refused() -> None:
     with LocalUpstream() as upstream, ProxyThread(_table(upstream.base)) as proxy, _probe(proxy.port) as probe:
         time.sleep(0.02)
         sampled = measure_outage(probe, lambda: time.sleep(0.01), timeout=2.0)
-        cycle = float(sampled["probe_cycle_ms"])
     assert isinstance(sampled["outage_upper_ms"], float)
-    # The break here takes nothing away, so whatever the probe saw, it cannot have been a long outage. (A stray reset
-    # of one loopback connect is possible and would make `observed_failure` true; that is the probe being honest, not
-    # the measurement inventing downtime.)
-    assert sampled["outage_upper_ms"] <= max(12.0, 9 * cycle), sampled
+    # The break here takes nothing away, so the one thing the probe may **not** report is a refusal: a connect that is
+    # refused with the listener up is the listener having vanished on its own, which is a defect and not jitter.
+    assert "refused" not in sampled["refused_details"], sampled
+    # What it may report is a slow answer — the attempt cap is calibrated to 3x this machine's median, so one scheduling
+    # hiccup reads as "not served" even though the listener is fine. That is the definition of an outage (a child waited
+    # longer than the cap), so the number is honest; the ceiling asserted here is the budget, not a healthy-machine
+    # ceiling. This test used to demand `max(12 ms, 9 cycles)` and macOS 3.11 in run 44223453730 produced 43.5 ms on an
+    # idle proxy with `refused_details == ["timeout"]`: the runner was slow, not the proxy, and a ceiling written for a
+    # quiet Linux box was asserting the runner's mood. The magnitude claims live with the budget (the bench and
+    # `test_every_watchdog_rebind_lands_inside_the_budget_not_the_median_of_them`), and the clock's honesty lives in
+    # `test_the_clock_counts_downtime_inside_close_before_it_returns`.
+    assert sampled["outage_upper_ms"] < 100.0, sampled
     if not sampled["observed_failure"]:
         assert sampled["outage_ms"] == sampled["outage_upper_ms"], "with no refusal both clocks are the same span"
 
