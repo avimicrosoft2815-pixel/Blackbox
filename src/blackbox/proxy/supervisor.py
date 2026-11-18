@@ -184,6 +184,8 @@ class ProxyThread:
         self._restore_pending = False
         self.restores_from_loop = 0
         self.port_changed = False                          # set when a rebind could not keep the port the child was told
+        self.pending_at_stop = 0                           # tasks still pending when the loop was drained (defect 61)
+        self.undrained_at_stop = 0                         # ...and how many survived the drain (must be 0)
         self._lock = threading.Lock()
 
     # -- lifecycle -----------------------------------------------------------------------------------------------
@@ -231,6 +233,53 @@ class ProxyThread:
             self._thread.join(5)
         if self._watchdog is not None:
             self._watchdog.join(5)
+        self._drain_and_close(self._loop)
+
+    def _drain_and_close(self, loop: asyncio.AbstractEventLoop | None) -> None:
+        """Cancel what is still pending and close the loop (defect 61).
+
+        A handler that was still waiting on an upstream when the listener closed is a *pending task*, and `loop.stop()`
+        leaves it pending. The loop is then never closed, so the task is destroyed whenever the collector gets to it,
+        which prints `Task was destroyed but it is pending!` and hands that socket to the GC instead of closing it.
+        Windows showed one per shutdown (a request to a dead upstream there waits for the SYN retry); the warning is
+        also exactly the shape of message that hides a real one later.
+
+        Done after the loop thread has exited and before the loop is closed, on this thread: the loop is not running, so
+        it can be driven to completion here for the cancellations only.
+        """
+        if loop is None or loop.is_closed():
+            return
+        # In rounds, because cancelling the pending tasks *runs the loop*, and running the loop runs the `connection
+        # made` callbacks that were already queued — those create new handler tasks, which the first round cannot have
+        # seen. Measured: one round left three handlers behind per shutdown under a probing client.
+        with contextlib.suppress(Exception):
+            for _ in range(8):
+                pending = [task for task in asyncio.all_tasks(loop) if not task.done()]
+                if not pending:
+                    break
+                self.pending_at_stop += len(pending)
+                for task in pending:
+                    task.cancel()
+                loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+        with contextlib.suppress(Exception):
+            # Settle: an accept that was already queued when the listener closed still runs its `connection made`
+            # callback the next time the loop turns, and *that* creates a handler task the rounds above cannot have
+            # seen. Three short turns catch them; measured on this repository, without them a probing client left one
+            # handler per shutdown to be destroyed by the collector.
+            for _ in range(3):
+                loop.run_until_complete(asyncio.sleep(0.002))
+                late = [task for task in asyncio.all_tasks(loop) if not task.done()]
+                for task in late:
+                    task.cancel()
+                if late:
+                    self.pending_at_stop += len(late)
+                    loop.run_until_complete(asyncio.gather(*late, return_exceptions=True))
+        with contextlib.suppress(Exception):
+            # Last look: a task that is still pending here will be destroyed by the collector and announced. Recorded
+            # rather than swallowed, so a test can assert the drain converged instead of trusting it.
+            self.undrained_at_stop = sum(1 for task in asyncio.all_tasks(loop) if not task.done())
+        with contextlib.suppress(Exception):
+            loop.close()
 
     # -- introspection -------------------------------------------------------------------------------------------
     @property

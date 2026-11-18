@@ -38,6 +38,7 @@ import platform
 import random
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -98,6 +99,49 @@ def _upstream() -> tuple[subprocess.Popen[str], str]:
     return proc, f"http://127.0.0.1:{port}"
 
 
+class _LoopPing:
+    """How long the proxy's event loop takes to answer a no-op: the loop thread's own scheduling latency.
+
+    The outage is measured from outside, so a slow sample needs a cause and not a shrug. Two threads can spend it: the
+    watchdog (its own tick lateness is `wake_late_ms`, defect 58) and the loop (this). If the tick is thousands of
+    milliseconds late while this stays under a millisecond, the OS did not run the watchdog; if both are late, the
+    machine did not run this process at all.
+    """
+
+    def __init__(self, loop: Any) -> None:
+        self.loop = loop
+        self.latencies_ms: list[float] = []
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._run, name="bench-loop-ping", daemon=True)
+
+    def _run(self) -> None:
+        while not self._stop.is_set():
+            sent = time.perf_counter()
+            answered = threading.Event()
+
+            def callback(at: float = sent, flag: threading.Event = answered) -> None:
+                self.latencies_ms.append((time.perf_counter() - at) * 1000.0)
+                flag.set()
+
+            try:
+                self.loop.call_soon_threadsafe(callback)
+            except RuntimeError:                     # the loop is closed: nothing left to measure
+                return
+            answered.wait(2.0)
+            self._stop.wait(0.005)
+
+    def start(self) -> _LoopPing:
+        self._thread.start()
+        return self
+
+    def stop(self) -> None:
+        self._stop.set()
+        self._thread.join(2)
+
+    def worst_since(self, index: int) -> float:
+        return max(self.latencies_ms[index:], default=0.0)
+
+
 def _burn(stop: Any) -> None:
     """CPU contention, in its own process: a thread would hand the GIL back and measure nothing (see defect 40's family)."""
     value = 0
@@ -106,7 +150,8 @@ def _burn(stop: Any) -> None:
             value = (value * 1103515245 + 12345) & 0x7FFFFFFF
 
 
-def _outage_once(proxy: ProxyThread, probe: ServingProbe, *, notify: bool = True) -> dict[str, Any]:
+def _outage_once(proxy: ProxyThread, probe: ServingProbe, *, notify: bool = True,
+                 ping: _LoopPing | None = None, upstream_probe: ServingProbe | None = None) -> dict[str, Any]:
     """Break the listener and measure the outage **a request** experiences. Returns one sample.
 
     `notify=False` removes the listener's own notice before closing it, so the loss is the kind nothing announces (an
@@ -127,6 +172,9 @@ def _outage_once(proxy: ProxyThread, probe: ServingProbe, *, notify: bool = True
     port_before = proxy.port
     rebinds_before = len(proxy.rebinds)
     noticed_before = len(proxy.noticed_ms)
+    wake_before = len(proxy.wake_late_ms)
+    ping_before = len(ping.latencies_ms) if ping is not None else 0
+    upstream_before = upstream_probe.mark() if upstream_probe is not None else 0
     try:
         sampled = measure_outage(probe, lambda: asyncio.run_coroutine_threadsafe(server.close(), loop).result(5))
     except RuntimeError as exc:
@@ -136,6 +184,15 @@ def _outage_once(proxy: ProxyThread, probe: ServingProbe, *, notify: bool = True
                 "probe_cycle_ms": probe.cycle_ms()}
     rebind_ms = proxy.rebinds[rebinds_before] if len(proxy.rebinds) > rebinds_before else None
     noticed = proxy.noticed_ms[len(proxy.noticed_ms) - 1] if len(proxy.noticed_ms) > noticed_before else None
+    # Who spent the time, when a sample is slow: the watchdog's own tick lateness, and how long the loop took to answer
+    # a no-op while all this was happening. Recorded for every sample, not only the slow ones.
+    wake_late = max(proxy.wake_late_ms[wake_before:], default=0.0)
+    loop_late = ping.worst_since(ping_before) if ping is not None else None
+    # The upstream, asked directly (not through the proxy) in the same window. A probe request is only "served" when
+    # something answers it, and the upstream is a separate process competing for the same CPUs: this is what tells a
+    # starved upstream apart from a rebind that did not keep up.
+    upstream_attempts = upstream_probe.recent(upstream_before) if upstream_probe is not None else []
+    upstream_failed = [a for a in upstream_attempts if not a.served]
     return {
         "outage_ms": round(float(sampled["outage_ms"]), 3),
         "outage_upper_ms": round(float(sampled["outage_upper_ms"]), 3),
@@ -146,9 +203,18 @@ def _outage_once(proxy: ProxyThread, probe: ServingProbe, *, notify: bool = True
         "port_after": proxy.port,
         "port_kept": proxy.port == port_before,
         "refused_requests": int(sampled["refused_requests"]),
+        # What kind of "not served": `refused` means the listener was gone, `timeout`/`no-answer` means it was there and
+        # the answer did not arrive inside the calibrated cap. A slow sample that is all timeouts is contention, not a
+        # listener that failed to come back, and the two must not be read as the same thing.
+        "refused_details": list(sampled["refused_details"]),
+        "open_fds": sampled["open_fds"],
         "observed_failure": bool(sampled["observed_failure"]),
         "probe_cycle_ms": round(float(sampled["probe_cycle_ms"]), 4),
         "probe_answer_timeout_ms": round(float(sampled["probe_answer_timeout_ms"]), 3),
+        "wake_late_ms": round(float(wake_late), 3),
+        "loop_late_ms": None if loop_late is None else round(float(loop_late), 3),
+        "upstream_attempts": len(upstream_attempts),
+        "upstream_failed": len(upstream_failed),
     }
 
 
@@ -166,11 +232,16 @@ def _column(trials: int, *, supervise_ms: float, loaded: bool, notify: bool = Tr
     samples: list[dict[str, Any]] = []
     upstream_proc, upstream_base = _upstream()
     proxy = ProxyThread(_table(upstream_base), supervise_ms=supervise_ms)
+    ping: _LoopPing | None = None
     probe: ServingProbe | None = None
+    upstream_probe: ServingProbe | None = None
     rng = random.Random(seed)
     try:
         proxy.start()
         probe = ServingProbe(proxy.port).start()
+        upstream_probe = ServingProbe(int(upstream_base.rsplit(":", 1)[1]), threads=1, interval_s=0.02).start()
+        loop = proxy._loop                                  # the bench measures that loop
+        ping = _LoopPing(loop).start() if loop is not None else None
         time.sleep(0.05)                        # let the watchdog arm before the first break
         for _ in range(trials):
             # Phase matters: a listener that dies just after a tick waits a whole tick, one that dies just before a
@@ -179,8 +250,13 @@ def _column(trials: int, *, supervise_ms: float, loaded: bool, notify: bool = Tr
             # distribution). Sleeping a random fraction of a tick samples the whole space; the max over these samples
             # is the number the budget must survive.
             time.sleep(rng.uniform(0.0, supervise_ms / 1000.0))
-            samples.append(_outage_once(proxy, probe, notify=notify))
+            samples.append(_outage_once(proxy, probe, notify=notify, ping=ping, upstream_probe=upstream_probe))
     finally:
+        if ping is not None:
+            with contextlib.suppress(Exception):
+                ping.stop()
+        with contextlib.suppress(Exception):
+            upstream_probe.stop()
         if probe is not None:
             with contextlib.suppress(Exception):
                 probe.stop()

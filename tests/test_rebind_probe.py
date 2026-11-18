@@ -184,3 +184,29 @@ def test_the_probe_reports_its_own_resolution() -> None:
         attempts = probe.since(0)
     assert attempts and all(attempt.served for attempt in attempts)
     assert 0.0 < cycle < 50.0, f"one loopback request took {cycle:.2f} ms; that is the resolution of every number here"
+
+
+def test_the_probe_leaves_the_process_descriptors_to_answer_with() -> None:
+    """The probe shares the process with the proxy, and it must not eat it (defect 60).
+
+    Three unrested threads issuing thousands of connections a second exhausted this machine's 1024 descriptors, the
+    listener could no longer accept, and the bench reported seconds of outage that were the measurement's own load. The
+    defaults are part of the measurement's honesty, so they are pinned here rather than left to a comment.
+    """
+    probe = ServingProbe(9)
+    assert probe.threads <= 2, "more prober threads than the listener has room for is how the bench lied once"
+    assert probe.interval_s > 0.0, "an unrested prober starves the listener it is measuring"
+
+
+def test_every_measurement_carries_the_process_descriptor_count() -> None:
+    """`open_fds` is what makes saturation visible in the artifact instead of being inferred later."""
+    from rebind_probe import open_fds
+
+    with LocalUpstream() as upstream, ProxyThread(_table(upstream.base)) as proxy, ServingProbe(proxy.port) as probe:
+        time.sleep(0.05)
+        before = open_fds()
+        sampled = measure_outage(probe, lambda: asyncio.run_coroutine_threadsafe(proxy._server.close(), proxy._loop).result(5))  # type: ignore[union-attr]
+    assert "open_fds" in sampled
+    if sys.platform.startswith("linux"):
+        assert isinstance(before, int) and before > 0
+        assert isinstance(sampled["open_fds"], int) and sampled["open_fds"] > 0

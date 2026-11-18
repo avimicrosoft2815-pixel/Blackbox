@@ -1331,7 +1331,25 @@ recorded as a timeout. The probe also needs a live upstream: the proxy's 504 for
 attempt budget there, so a probe aimed at a dead port measures the failure path instead of service. The end of the gap
 must come from a request **issued after the break**: a request that was in flight when the break was asked for is
 answered by the old listener, and accepting that answer as the end of the outage reports zero downtime for an outage
-that lasted the whole stall (a Windows runner did exactly that). With that rule in place the request-level bench
-**fails** on the machine that ran it — 3 of 240 samples over budget, worst 3319.604 ms, all on the watchdog-tick column
-under one busy process per CPU, with 1965 refused requests in the worst sample and `rebind_ms` 0.204 ms — which is
-defect 58's claim arriving on schedule rather than a reason to relax the gate.
+that lasted the whole stall (a Windows runner did exactly that). With that rule in place the first request-level bench **failed** on the machine that ran it — 3 of 240 samples over
+budget, worst 3319.604 ms, all on the watchdog-tick column under one busy process per CPU, with 1965 refused requests in
+the worst sample and `rebind_ms` 0.204 ms — and that was written down as defect 58 arriving on schedule.
+
+**Correction (2026-11-18): it was the probe's own load.** Every sample now also records the supervisor's tick lateness,
+a no-op ping on the proxy's loop, a probe aimed **directly at the upstream**, the kind of non-service (`refused` = no
+listener, `timeout`/`no-answer` = listener there, answer slow), and the process's open descriptors. In the multi-second
+samples the tick was **5.8 ms** late, the loop answered a no-op in **14.4 ms**, the rebind took **0.4 ms**, and the
+upstream itself missed **22 of 64** direct requests. A timeline capture then produced
+`OSError: [Errno 24] Too many open files` / `socket.accept() out of system resource`: the probe shares the process with
+the proxy, this machine allows **1024** descriptors and has **two** CPUs, and three unrested prober threads issuing
+thousands of connections a second exhausted the table, so the listener could no longer accept. The "outage" was the
+measurement's.
+
+The decision, therefore, has two halves. The gate is unchanged — 100 ms per sample, asserted on the conservative
+request-level bound, on every sample, in four columns. And **a probe may not saturate the process it measures**:
+`ServingProbe` defaults to two threads with a 1 ms rest (~a few hundred attempts/s, ~2 ms resolution) and reports
+`open_fds` with every measurement, so saturation is visible in the artifact. With that, the request-level gate
+**passes**: 240 samples, worst upper bound **53.98 ms**, 0 over budget, 0 port moves
+(`bench/results/2026-11-18-rebind-instrumented.json`). The instrumented columns stay, because a future slow sample must
+say which of the five possible causes it was, and because the first honest instrumented run is what corrected a wrong
+diagnosis — defect 60 is closed by the loop-side repair *and* by the measurement no longer manufacturing its failure.

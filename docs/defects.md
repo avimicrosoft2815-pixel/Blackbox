@@ -796,19 +796,95 @@ one attempt budget, so the probe measured the failure path and read every attemp
 *lower* the answer cap before the machine has answered anything — its first version did, which set the 10 ms floor on
 exactly the runner that needed the generous value.
 
-**Measured after the fix, request-level — and the gate fails on this machine, which is the honest result**
-(`bench/bench_rebind.py --n 60`, `bench/results/2026-11-17-rebind-request-level.json`, Linux 6.1 x86_64, CPython 3.11.2,
-240 samples over four columns): outage p50 by column `notice_idle` 1.710 ms, `notice_loaded` 0.410 ms, `tick_idle`
-11.191 ms, `tick_loaded` 10.922 ms; **3 of 240 samples over the 100 ms budget**, all in `tick_loaded`, worst 3319.604 ms;
-0 port moves. The three bad samples are not the probe losing the plot: the worst one recorded **1965 refused requests**
-during those 3.3 s, so the listener really was gone, and its own `rebind_ms` was **0.204 ms** when the tick finally ran.
-The time went entirely to the watchdog thread not being scheduled while one busy process per CPU ran on a 2-vCPU box.
+**Measured after the fix, request-level — corrected on 2026-11-18.** The first request-level run failed the gate:
+3 of 240 samples over the 100 ms budget, all in `tick_loaded`, worst 3319.604 ms. That was written down here as "the
+watchdog thread was not scheduled". **That was wrong**, and the way it was found matters more than the correction:
 
-That is defect 58's claim, arriving where it was predicted: a sleeping-thread design cannot bound what the OS will not
-schedule, and the notice path (which repairs on the loop thread) is what keeps the common case inside the budget. It is
-also why the *previous* revision's `PASS` (worst 21.185 ms) must be read as optimistic: its clock could end the gap on a
-request that had been issued **before** the break, so a starved tick could look like a fast recovery. Requiring the
-answer that ends the gap to come from a request issued after the break is what exposed it.
+every sample now also records the supervisor's own tick lateness (`wake_late_ms`, defect 58's record), a no-op ping on
+the proxy's loop (`loop_late_ms`, how long the loop takes to answer anything at all), a probe pointed **directly at the
+upstream** (so a starved upstream cannot hide as a dead listener), and the *kind* of non-service — `refused` means the
+listener was gone, `timeout`/`no-answer` means it was there and the answer did not arrive. In the worst samples:
+`wake_late_ms` **5.8 ms**, `loop_late_ms` **14.4 ms**, `rebind_ms` **0.4 ms**, and the upstream itself failing **22 of 64**
+direct requests. The watchdog was not late and the rebind was not slow.
 
-The budget (`100.0 ms`), the per-sample assertion and its limits are unchanged. This entry does not claim 100 ms on any
-machine; it claims that the number is now measured from the child's side, that the measurement can fail, and that it did.
+A timeline capture then reproduced the cause directly:
+
+```
+OSError: [Errno 24] Too many open files
+  File "asyncio/selector_events.py", line 165, in _accept_connection
+socket.accept() out of system resource
+```
+
+The probe shares the process with the proxy. Three threads with no rest issued thousands of connections a second, and
+this machine allows **1024** descriptors per process (`ulimit -n`) on **two** CPUs: the probe exhausted the table, the
+listener could no longer accept, and the measurement reported seconds of "outage" that were its own load. A measurement
+that saturates the thing it is measuring is not a measurement.
+
+**Fix (in the probe, not in the gate).** `ServingProbe` defaults to two threads with a 1 ms rest between attempts — a
+few hundred attempts a second, ~2 ms of resolution, far inside the budget — and every measurement reports `open_fds` so
+saturation is visible in the artifact instead of being inferred later.
+
+**Result** (`bench/results/2026-11-18-rebind-instrumented.json`, `--n 60`, Linux 6.1 x86_64, CPython 3.11.2, 240
+samples, four columns, `open_fds` 12–25 throughout): gate **PASS**, worst upper bound **53.98 ms**, 0 over budget,
+0 port moves, 0 not restored. Outage p50 / p99 by column: `notice_idle` 1.213 / 5.891 ms, `notice_loaded` 0.881 /
+53.980 ms, `tick_idle` 10.156 / 21.512 ms, `tick_loaded` 8.080 / 23.123 ms.
+
+Three further runs of the same command in the same session passed at **45.781**, **47.043** and **40.754** ms (0 of 240
+over budget in each); they are not committed as artifacts — the run above is the one whose samples are in the tree, and
+the command that produced it is `bench/bench_rebind.py --n 60` with no other arguments.
+
+The budget (`100.0 ms`), the per-sample assertion, the request-level definition and its limits are unchanged. What
+changed is that a slow sample now names its own cause, and that the measurement no longer manufactures the failure it
+is supposed to detect.
+
+## Defect 61 — a stopped proxy left its handler tasks to the garbage collector (2026-11-18, P3B-03)
+
+**Found by** the Windows cells of `9a42b0f`, which printed one of these per shutdown (the job log is unreadable from
+here, but the annotation carries it):
+
+```
+ERROR asyncio:base_events.py:1833 Task was destroyed but it is pending!
+task: <Task pending name='Task-4' coro=<ProxyServer._handle() ...> wait_for=<Future pending>>
+```
+
+**Invariant.** After `ProxyThread.stop()` the proxy owns nothing: no listener, no connection, no task that can wake up
+later and touch a closed loop.
+
+**Cause.** `stop()` closed the listener and called `loop.stop()`, but never closed or drained the loop. A handler still
+waiting on an upstream was therefore a *pending task* that nobody owned: destroyed whenever the collector reached it —
+one warning per shutdown — with its two sockets handed to the GC instead of closed. Windows showed it first because a
+request to a dead upstream there waits for a SYN retry, which is exactly the window in which the loop stops.
+
+**Fix.** `ProxyThread._drain_and_close()`: cancel every pending task **in rounds**, because cancelling *runs* the loop,
+and running the loop runs the `connection made` callbacks that were already queued — each of which creates a new handler
+the first round cannot have seen (measured: one round left three handlers behind per shutdown under a probing client).
+Then three short settle turns for connections accepted in the last microseconds, then `loop.close()`. It records
+`pending_at_stop` and `undrained_at_stop`, so "the drain converged" is a number and not a promise.
+
+**Test.** `test_stopping_while_a_handler_is_pending_does_not_abandon_it` — a black-hole upstream (accepts, never
+answers) so a handler is pending on every platform, a client, a probe hammering during shutdown, and the assertion that
+nothing the loop knew about was left (`undrained_at_stop == 0`).
+
+**Residual, recorded rather than retried away.** A connection accepted between the loop's last turn and its close still
+produces a handler nobody owns, so the *warning* is not asserted; the contract asserted is the drain. Removing the
+residue needs the accept path to be closed before the drain, which is what `close()` does — the window left is the
+queue between the kernel and the loop.
+
+## Defect 62 — nothing caps concurrent connections, so a burst stops the listener accepting (2026-11-18, open)
+
+**Found by** defect 60's investigation: `socket.accept() out of system resource` with `OSError: [Errno 24] Too many open
+files` at `ulimit -n 1024`, while the proxy held one descriptor per in-flight client **and** one per in-flight upstream
+connection.
+
+**What happens.** Past the descriptor limit the loop's accept fails, asyncio logs the traceback, and the listener keeps
+failing until descriptors free up. Children then see refusals or timeouts even though the process is alive and the
+listener is "serving" as far as `is_serving()` is concerned.
+
+**Why it is not fixed here.** A cap is a policy — how many concurrent calls a recorder accepts, what it answers past the
+cap (503 with a reason, which is a visible event in the capsule, or a queue with a timeout), and whether the cap is a
+flag. That is a decision for the owner, not a drive-by change in a PR about rebinds. Recorded with its reproducer (the
+probe defaults are now gentle, so a burst has to be issued deliberately).
+
+**Proposal for the next increment.** A `ProxyServer(max_connections=...)` with an `asyncio.Semaphore`, refusals counted
+in `stats` and recorded as a `proxy.overloaded` event so the capsule says what happened; a bench row that runs at the
+cap; and a test that drives it at 2x the cap and asserts every child got either service or a documented 503.

@@ -9,6 +9,7 @@ Two promises are tested here, and they are the two that make the proxy safe to h
 """
 from __future__ import annotations
 
+import asyncio
 import sys
 import time
 from collections.abc import Iterator
@@ -125,7 +126,6 @@ def _break_and_wait(proxy: ProxyThread, probe: ServingProbe, timeout: float = 5.
     it, so a red row says which part of the outage was whose. The budget is asserted on `outage_upper_ms`, the
     conservative bound, on **every** sample.
     """
-    import asyncio
 
     server = proxy.server
     loop = proxy._loop
@@ -256,3 +256,72 @@ def test_a_fast_tick_never_moves_the_port_and_never_double_restores(upstream: Lo
         assert not proxy.port_changed, "a rebind gave up the port the child was told"
         assert len(proxy.rebinds) == 25, f"25 breaks, {len(proxy.rebinds)} rebinds: something restored twice"
 
+
+
+def test_stopping_while_a_handler_is_pending_does_not_abandon_it(tmp_path: Path) -> None:
+    """Defect 61: `loop.stop()` left a handler task pending, and the garbage collector announced it.
+
+    A request that is still waiting on an upstream when the listener closes is a pending task. The loop was never
+    closed, so the task was destroyed whenever the collector reached it — one `Task was destroyed but it is pending!`
+    per shutdown on Windows (a dead upstream there waits for the SYN retry), and a socket handed to the collector
+    instead of being closed. The test uses a *black-hole* upstream (accepts, never answers) so the task is pending
+    everywhere, not only where the OS is slow.
+    """
+    import gc
+    import logging
+    import socket
+    import threading
+
+    messages: list[str] = []
+
+    class Collect(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            messages.append(record.getMessage())
+
+    handler = Collect()
+    asyncio_log = logging.getLogger("asyncio")
+    asyncio_log.addHandler(handler)
+    hole = socket.socket()
+    hole.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    hole.bind(("127.0.0.1", 0))
+    hole.listen(16)
+    held: list[object] = []
+    threading.Thread(target=lambda: [held.append(hole.accept()) for _ in range(8)], daemon=True).start()
+    try:
+        with ProxyThread(_table(f"http://127.0.0.1:{hole.getsockname()[1]}")) as proxy:
+            port = proxy.port
+
+            def client() -> None:
+                try:
+                    with socket.create_connection(("127.0.0.1", port), timeout=2) as sock:
+                        sock.sendall(b"GET /openai/v1/models HTTP/1.1\r\nHost: blackbox\r\nConnection: close\r\n\r\n")
+                        sock.recv(64)
+                except OSError:
+                    pass
+
+            threading.Thread(target=client, daemon=True).start()
+            time.sleep(0.05)                       # the handler is now waiting on the upstream
+            # Hammer the port through a few closes as well. Cancelling the pending tasks *runs* the loop, which runs
+            # the `connection made` callbacks that were already queued: one drain round left three handlers behind per
+            # shutdown under a probing client, so the round count has to converge and the test has to exercise it.
+            with ServingProbe(port):
+                loop = proxy._loop
+                assert loop is not None
+                for _ in range(3):
+                    server = proxy.server
+                    assert server is not None
+                    asyncio.run_coroutine_threadsafe(server.close(), loop).result(5)
+                    time.sleep(0.02)
+        assert proxy.pending_at_stop >= 1, (
+            "the handler should still have been pending when the listener closed; otherwise this test proves nothing")
+        assert proxy.undrained_at_stop == 0, (
+            f"{proxy.undrained_at_stop} task(s) survived the drain and would be destroyed by the collector: {messages}")
+        gc.collect()                               # what would have announced an abandoned task
+        # `undrained_at_stop == 0` above is the guarantee: everything the loop knew about was cancelled and awaited, and
+        # the loop is closed, so nothing is left for the collector to announce. The message is deliberately *not*
+        # asserted: a connection accepted in the microseconds between the loop's last turn and its close still produces
+        # a handler nobody owns, and this test hammers the port while the proxy shuts down. That residue is recorded in
+        # defect 61 rather than hidden behind a retry loop.
+    finally:
+        asyncio_log.removeHandler(handler)
+        hole.close()

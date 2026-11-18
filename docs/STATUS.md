@@ -51,7 +51,7 @@ built is named there rather than implied: the graph's edges reach the *call* and
 "linked nodes" is a call edge that names the slot on one side and `null` on the other, not a node-to-node edge;
 `docs/node-edges.md` is the owner-requested proposal for what two genuinely recorded nodes and the evidence joining
 them would require, and the owner's decision (2026-11-16) is that P3B-03 and defect 55 stay open until that exists.**
-Suite: **Total: 1170 tests** — 1169 pass here and 1 is skipped on POSIX by name
+Suite: **Total: 1173 tests** — 1172 pass here and 1 is skipped on POSIX by name
 (`test_an_open_view_blocks_the_unlink_only_on_windows`: POSIX permits unlinking a file another fd still holds, so
 the open-view case exists only on Windows). The number is for the dependency set CI installs,
 `.[dev,capture,capture-sdks]`: sixteen tests live behind `anthropic`, so a venv with only `httpx` and `openai`
@@ -207,12 +207,13 @@ One line per §15.1 row: fs · N · warm-up · p50 / p95 / p99 · raw JSON.
 - same row, keeper off · ext4 · p50 167.899 · p99 304.614 µs · `bench/results/2026-11-15-payload-blob.json` (reported)
 - same row, `kernel` mode · ext4 · p50 194.982 · p99 477.095 µs · 1 024 blob syncs · `bench/results/2026-11-15-payload-blob.json` (reported)
 - watchdog rebind of a dead proxy listener · no filesystem involved · two runs, idle n=60 each: p50 12.39 / 11.58 · p95 20.76 / 20.53 · max **21.86** / 21.38 ms (detection + rebind; rebind alone p50 0.82 / 0.80, max 2.90 ms) · loaded n=60 each (one busy process per CPU): p50 11.52 / 11.77 · max 21.47 / 20.59 ms · 0 of 240 over the 100 ms budget, 0 port moves · 2 vCPU x86_64 Linux 6.1.158 container, phase randomised per trial, every sample kept · `bench/results/2026-11-16-rebind-a.json`, `bench/results/2026-11-16-rebind-b.json`
+- request-level watchdog rebind, `tools/rebind_probe.py` on the child's port · no filesystem involved · 4 columns × 60 trials: p50 1.213 / 0.881 / 10.156 / 8.080 ms, p99 5.891 / 53.980 / 21.512 / 23.123 ms · worst observed error bound **53.98** ms, 0 of 240 samples over the 100 ms budget, 0 port moves, 0 not restored · 2 vCPU x86_64 Linux 6.1, `open_fds` 12–25 (the earlier 3.3 s samples were the probe exhausting the 1024-descriptor limit, defect 60) · `bench/results/2026-11-18-rebind-instrumented.json`
 - randomized parent-`SIGKILL` · ext4 · 500 effective trials, 10 cells × 50 · 0 violations, 0 `not_started` · fresh clone of `af908bc`, `tests/kill/kill_matrix.py`
 - tmpfs labelled column for every row above · tmpfs · recovery 79.9 ms/10 k, amplification identical · `bench/results/2026-11-15-recovery.json` (`results.tmpfs`) — never gate evidence
 
 ## Deviations applied (DEVIATIONS.md) and held findings (F#)
 
-The defect list (seed → invariant → cause → fix → test) lives in `docs/defects.md` — twenty-six entries. Six are
+The defect list (seed → invariant → cause → fix → test) lives in `docs/defects.md` — sixty-two entries. Six are
 from this stretch of work: defects 23 and 24 (a seam that installed, reported `installed`, and captured nothing because both real SDKs speak
 `httpx2`; and a request frame that could say `model: null`), defect 25 (the Windows teardown fixture that probed
 every object in the collector and turned `anthropic`'s `LazyProxy` into nine teardown errors), defect 26 (open: on

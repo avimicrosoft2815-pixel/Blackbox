@@ -74,7 +74,10 @@ def test_status_has_the_six_section_10_sections_in_order() -> None:
 
 def test_no_claim_in_status_is_hedged_with_two_answers() -> None:
     text = _text()
-    for stale in ("eight of nine", "candidate cause", "that is the next ticket", "53.9", "C1–C24", "C1-C24"):
+    # "53.9" narrowed to the stale recovery row it was written for (`53.9 ms/10k` where the row's own JSON said 52.1):
+    # the proxy now reports a legitimate 53.980 ms p99 on the request-level rebind row, and a guard that fires on a
+    # correct number is a guard that gets deleted instead of read.
+    for stale in ("eight of nine", "candidate cause", "that is the next ticket", "53.9 ms/10k", "C1–C24", "C1-C24"):
         assert stale not in text, f"STATUS still carries the stale text {stale!r}"
 
 

@@ -34,12 +34,21 @@ that floor is not knowable from here.
 What is done instead: the answer cap is **measured on this machine at start-up** (`calibrate`), and several requests are
 in flight at once, so a request that is never answered cannot blind the probe for longer than one attempt.
 
+**The probe shares the process with the proxy, and it must not eat it.** Descriptors are the scarce resource: this
+machine allows 1024 per process (`ulimit -n`) and has two CPUs, and an early version of this module issued thousands of
+connections a second from three threads. It exhausted the descriptor table, the listener then failed to accept
+(`socket.accept() out of system resource`), and the measurement reported multi-second outages that were entirely its
+own load — the kind of number that looks like a product defect and is not. The defaults now leave the listener room to
+answer (`interval_s=0.001`, two threads, i.e. a few hundred attempts a second and ~2 ms of resolution), and every
+measurement reports `open_fds` so that saturation is visible in the artifact instead of inferred later.
+
 Every number from here is bounded by the probe's own cycle. `cycle_ms()` reports it and callers print it beside the
 numbers, because a measurement whose resolution is not stated is a number pretending to be a fact.
 """
 from __future__ import annotations
 
 import http.server
+import os
 import socket
 import threading
 import time
@@ -47,6 +56,19 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 REQUEST_PATH = "/openai/v1/models"
+
+
+def open_fds() -> int | None:
+    """How many descriptors this process holds, where the OS can say; `None` elsewhere.
+
+    The probe and the proxy are in the same process, so a probe that saturates the descriptor table (1024 here) makes
+    the *listener* fail to accept — measured: `socket.accept() out of system resource` with the probe reporting seconds
+    of outage that were its own connections. Recorded with every measurement for that reason.
+    """
+    try:
+        return len(os.listdir("/proc/self/fd"))
+    except OSError:
+        return None
 
 
 @dataclass(frozen=True)
@@ -152,8 +174,8 @@ class ServingProbe:
     MIN_ANSWER_TIMEOUT_S = 0.010      # below this a loopback answer is indistinguishable from a hang
     CALIBRATION_SAMPLE = 5
 
-    def __init__(self, port: int, path: str = REQUEST_PATH, *, interval_s: float = 0.0,
-                 timeout: float = 0.05, threads: int = 3) -> None:
+    def __init__(self, port: int, path: str = REQUEST_PATH, *, interval_s: float = 0.001,
+                 timeout: float = 0.05, threads: int = 2) -> None:
         self.port = port
         self.path = path
         self.interval_s = interval_s
@@ -336,6 +358,7 @@ def measure_outage(probe: ServingProbe, break_listener: Callable[[], object], *,
         "last_served_before": last_served_before.started,
         "probe_cycle_ms": probe.cycle_ms(),
         "probe_answer_timeout_ms": probe.answer_timeout_s * 1000.0,
+        "open_fds": open_fds(),
     }
 
 
