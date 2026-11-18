@@ -23,7 +23,13 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from blackbox.proxy.limits import DEFAULT_TARGET, raise_fd_limit
 
+#: Windows has no `RLIMIT_NOFILE` and no soft/hard descriptor budget, so the two tests that *measure* one are POSIX
+#: tests: they would otherwise assert the absence of a mechanism rather than a bug. The Windows behaviour (`None`, no
+#: exception) is covered by `test_a_platform_without_the_limit_says_so_and_does_not_raise`, which runs everywhere.
+posix_only = pytest.mark.skipif(sys.platform == "win32", reason="no RLIMIT_NOFILE on Windows")
 
+
+@posix_only
 def test_the_soft_limit_is_raised_to_what_the_kernel_already_grants() -> None:
     """Run in a subprocess: lowering a soft limit is allowed, but a test must not leave the suite with a bigger budget
     than it started with (and a raise cannot be undone where the hard limit is the ceiling)."""
@@ -56,6 +62,7 @@ def test_a_platform_without_the_limit_says_so_and_does_not_raise(monkeypatch: py
     assert raise_fd_limit() is None
 
 
+@posix_only
 def test_a_burst_larger_than_the_old_soft_limit_is_still_served() -> None:
     """The arithmetic of defect 62, as a test: 40 concurrent requests need ~80 descriptors, so a proxy whose soft limit
     is 64 cannot serve them unless it raises the limit first. The probe in the middle of the burst is the child's side.
