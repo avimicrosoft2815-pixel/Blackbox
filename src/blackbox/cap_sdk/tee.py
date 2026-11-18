@@ -39,6 +39,50 @@ from blackbox.cap_sdk.failopen import fail_open
 _TEE_STREAMS: dict[str, Any] = {}       # built on first use, per client module
 _ASYNC_TEE_STREAMS: dict[str, Any] = {}
 
+#: What a stream of that path must contain before it counts as finished. Two providers, one rule each, and **only**
+#: paths whose convention is known: a generic `text/event-stream` has no terminator in its specification, so marking one
+#: incomplete would be a guess about somebody else's protocol. The markers can straddle two chunks, which is why the tee
+#: keeps a tail instead of testing each chunk on its own.
+TERMINATORS: tuple[tuple[str, bytes], ...] = (
+    ("/chat/completions", b"[DONE]"),
+    ("/completions", b"[DONE]"),
+    ("/messages", b"message_stop"),
+)
+TAIL_BYTES = 128
+
+
+def expected_terminators(path: str) -> list[bytes]:
+    """The markers this path's stream must end with, or an empty list when the path's convention is not known here."""
+    return [marker for suffix, marker in TERMINATORS if suffix in (path or "")]
+
+
+class TerminatorWatch:
+    """Remembers whether a stream carried its provider's terminator, without holding the stream.
+
+    Only the last `TAIL_BYTES` are kept: a marker split across two chunks still matches, and a 200 MB stream costs 128
+    bytes of memory. `reason()` is what the tee records when the body ended cleanly and the marker never came — the case
+    that used to be indistinguishable from a completed stream (`MODEL_RESPONSE` with `partial: False` for a provider that
+    hung up after three of six chunks; defect 66).
+    """
+
+    def __init__(self, path: str) -> None:
+        self.markers = expected_terminators(path)
+        self.tail = b""
+
+    def feed(self, chunk: bytes) -> None:
+        if self.markers and chunk:
+            self.tail = (self.tail + bytes(chunk))[-TAIL_BYTES:]
+
+    def saw_terminator(self) -> bool:
+        return any(marker in self.tail for marker in self.markers)
+
+    def reason(self) -> str | None:
+        """None when the stream is complete (or its convention is unknown), else a sentence for the capsule."""
+        if not self.markers or self.saw_terminator():
+            return None
+        return (f"the stream ended without the provider terminator "
+                f"({self.markers[0].decode('ascii', 'replace')}); the body was closed by the other end, not finished")
+
 
 def tee_stream_class(module_name: str = "httpx") -> Any:
     """`SyncByteStream` subclass for that client module, built lazily so the import stays optional."""
@@ -60,6 +104,7 @@ def tee_stream_class(module_name: str = "httpx") -> Any:
             self.status = status
             self.started = started
             self.done = False
+            self.watch = TerminatorWatch(call.path)
 
         def _elapsed_ms(self) -> float:
             return (time.perf_counter_ns() - self.started) / 1_000_000
@@ -78,6 +123,7 @@ def tee_stream_class(module_name: str = "httpx") -> Any:
                     raise
                 if chunk:
                     first_ms = self._elapsed_ms() if self.call.first_byte_ms is None else None
+                    self.watch.feed(chunk)
                     self.recorder.receive(self.call, chunk, first_byte_ms=first_ms)
                 yield chunk
             self._finish(completed=True)
@@ -86,6 +132,11 @@ def tee_stream_class(module_name: str = "httpx") -> Any:
             if self.done:
                 return
             self.done = True
+            if completed and error is None:
+                missing = self.watch.reason()
+                if missing is not None:          # a clean end of body that is not a finished stream (defect 66)
+                    self.call.partial = True
+                    self.call.end_reason = missing
             if not completed and error is None:
                 # Closed early — a `break`, a timeout, a cancelled consumer. The bytes that arrived are real; the
                 # call did not finish, and a capsule must be able to tell those apart (D-023's `partial`, applied
@@ -122,6 +173,7 @@ def async_tee_stream_class(module_name: str = "httpx") -> Any:
             self.status = status
             self.started = started
             self.done = False
+            self.watch = TerminatorWatch(call.path)
 
         def _elapsed_ms(self) -> float:
             return (time.perf_counter_ns() - self.started) / 1_000_000
@@ -138,6 +190,7 @@ def async_tee_stream_class(module_name: str = "httpx") -> Any:
                     raise
                 if chunk:
                     first_ms = self._elapsed_ms() if self.call.first_byte_ms is None else None
+                    self.watch.feed(chunk)
                     self.recorder.receive(self.call, chunk, first_byte_ms=first_ms)
                 yield chunk
             self._finish(completed=True)
@@ -146,6 +199,11 @@ def async_tee_stream_class(module_name: str = "httpx") -> Any:
             if self.done:
                 return
             self.done = True
+            if completed and error is None:
+                missing = self.watch.reason()
+                if missing is not None:          # a clean end of body that is not a finished stream (defect 66)
+                    self.call.partial = True
+                    self.call.end_reason = missing
             if not completed and error is None:
                 # Closed early — a `break`, a timeout, a cancelled consumer. The bytes that arrived are real; the
                 # call did not finish, and a capsule must be able to tell those apart (D-023's `partial`, applied

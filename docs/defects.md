@@ -974,3 +974,50 @@ same run afterwards: `coverage: NONE, model_calls: 0` for the empty capsule, and
 ['127.0.0.1'], model_calls: 1` for the captured one — with the report now printing `content mode hash`, and `diagnose`
 saying **"no model call was recorded in this capsule"** as an observed line, plus the actionable cause
 (`blackbox run --force-proxy`).
+
+## Defect 66 — a stream the provider cut short was recorded as a finished one (2026-11-18, P3-05/P5-pre)
+
+**Found by** running the documented path against a mock provider that truncates after 3 of 6 chunks, with a real
+`openai` client: the SDK saw a clean end of body, the script exited 0 and printed three chunks, and the capsule recorded
+`MODEL_RESPONSE {..., 'partial': False}` followed by `blackbox diagnose` saying *"nothing in these frames indicates that
+anything was cut short"*.
+
+**Cause.** `cap_sdk/tee.py`: a clean `StopIteration` on the inner stream meant `completed=True`, so `partial` stayed
+`False` no matter what the SSE body did or did not contain. An OpenAI stream that never carried `data: [DONE]`, and an
+Anthropic stream that never carried `message_stop`, were byte-identical, from the seam's point of view, to streams that
+finished. **This is the failure mode the recorder exists for**: a provider timeout, a gateway 502 mid-stream or a dropped
+link leaves an application holding a short answer with no exception, and the capsule used to agree with it.
+
+**Fix.** `TerminatorWatch` in the tee: it keeps the last 128 bytes of the stream (a marker can straddle two chunks, which
+chunk-by-chunk testing would miss), knows only two conventions — `[DONE]` for `/chat/completions` and `/completions`,
+`message_stop` for `/messages` — and on a clean end **without** the marker sets `partial = True` and records why in a new
+`end_reason` (`ModelCall.end_reason`, written on the response frame as `bbx.model.end_reason`). *Deliberately
+conservative*: a generic `text/event-stream` has no terminator in its specification, so an unknown path is never marked —
+that would be a guess about somebody else's protocol.
+
+**Diagnosis side (defect 67 below).** `diagnose` now emits an **observed** finding for a `MODEL_RESPONSE` whose own
+`partial` flag is set (`stream-ended-short-<node>`), quoting the recorded `end_reason`, and the report's headline says
+"a model stream ended before the provider finished it" instead of denying that anything was cut short. Measured on the
+same reproduction afterwards: `partial: True`, `end_reason: the stream ended without the provider terminator ([DONE]);
+the body was closed by the other end, not finished`, and two observed findings in the report.
+
+**Tests.** `tests/test_stream_termination.py` (11): a stream without `[DONE]` is partial and says why; with it, complete;
+a marker split across two chunks is still seen; the same for `message_stop`; four unknown paths are never marked; the tail
+stays 128 bytes over 1 MB of stream; the table names what it covers. `tests/test_diagnose.py` adds the observed finding,
+the quiet case (`partial: false` produces nothing) and the manifest assertions below.
+
+## Defect 67 — the diagnosis read every model frame as an empty dict (2026-11-18, P5-pre)
+
+**Found by** looking for the finding defect 66 should have produced and not finding it: `diagnose/evidence._decode` tried
+`cbor.decode_exact` only, while the model frames (request, chunk, response, error) carry **JSON** payloads. Every rule
+that reads those attributes — interrupted streams, provider errors, capture seams, `partial` — was reading `{}`, and the
+report's timeline rendered `MODEL_REQUEST — 312 B` with no provider, path, model or stream flag: the frames the report is
+*about* were the ones it could not read.
+
+**Fix.** `_decode` tries JSON first (when the payload starts with `{`) and falls back to CBOR, the same order
+`cap/export_jsonl._payload_of` has always used. After: the timeline prints
+`provider=127.0.0.1; model=gpt-4o-mini; path=/v1/chat/completions; stream=True; partial=False; capture_seam=httpx-hooks`
+for the request and `partial=True; status=200` for the response.
+
+**Test.** `test_a_json_payload_is_evidence_and_was_invisible_before_defect_67` builds a capsule whose model frames are
+JSON (as the seams write them) and asserts the attributes and the rendered summary.

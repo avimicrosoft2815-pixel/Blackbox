@@ -207,6 +207,8 @@ class TapeSink:
             "bytes_received": call.bytes_received, "first_byte_ms": call.first_byte_ms, "total_ms": call.total_ms,
             "content": self.content,
             "response_fp": call.response_fp, "partial": call.partial, "error": call.error,
+            # Why a short stream was short. Additive: capsules written before this key fall back to `partial` alone.
+            "end_reason": call.end_reason,
             "redaction": ({**self.redactor.as_dict(), "failures": self.redaction_failures}
                           if self.redactor is not None else
                           {"mode": "off", "counts": {}, "failures": 0, "note": "no redactor"}),

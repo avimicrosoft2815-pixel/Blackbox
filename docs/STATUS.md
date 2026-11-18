@@ -51,7 +51,7 @@ built is named there rather than implied: the graph's edges reach the *call* and
 "linked nodes" is a call edge that names the slot on one side and `null` on the other, not a node-to-node edge;
 `docs/node-edges.md` is the owner-requested proposal for what two genuinely recorded nodes and the evidence joining
 them would require, and the owner's decision (2026-11-16) is that P3B-03 and defect 55 stay open until that exists.**
-Suite: **Total: 1179 tests** — 1178 pass here and 1 is skipped on POSIX by name
+Suite: **Total: 1195 tests** — 1194 pass here and 1 is skipped on POSIX by name
 (`test_an_open_view_blocks_the_unlink_only_on_windows`: POSIX permits unlinking a file another fd still holds, so
 the open-view case exists only on Windows). The number is for the dependency set CI installs,
 `.[dev,capture,capture-sdks]`: sixteen tests live behind `anthropic`, so a venv with only `httpx` and `openai`
@@ -215,7 +215,7 @@ One line per §15.1 row: fs · N · warm-up · p50 / p95 / p99 · raw JSON.
 
 ## Deviations applied (DEVIATIONS.md) and held findings (F#)
 
-The defect list (seed → invariant → cause → fix → test) lives in `docs/defects.md` — sixty-five entries. Six are
+The defect list (seed → invariant → cause → fix → test) lives in `docs/defects.md` — sixty-seven entries. Six are
 from this stretch of work: defects 23 and 24 (a seam that installed, reported `installed`, and captured nothing because both real SDKs speak
 `httpx2`; and a request frame that could say `model: null`), defect 25 (the Windows teardown fixture that probed
 every object in the collector and turned `anthropic`'s `LazyProxy` into nine teardown errors), defect 26 (open: on

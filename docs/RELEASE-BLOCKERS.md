@@ -5,11 +5,13 @@ this branch**, and each carries the command or the artifact that shows it. Nothi
 forward, or a claim about a machine that was not available: where a claim is unmeasured, the entry says so and says what
 would measure it.
 
-Order is by what a real user hits first, not by ticket number.
+Order is by what a real user hits first, not by ticket number. **B1 was fixed on this branch** (defects 66 and 67) after
+the list was first written; the ids are kept stable so a comment, a defect entry or `docs/STATE.json` that names "B4"
+still points at the same thing.
 
 ---
 
-## B1 — A model stream the provider cut short is recorded as **complete**, and the report says nothing was cut short
+## B1 — A model stream the provider cut short is recorded as **complete** — FIXED on this branch, one policy question left
 
 **What a user hits.** Their streaming call stops after three chunks. The SDK sees a clean end of body and raises
 nothing; the script exits 0 and prints a short answer. They open a capsule to find out why. The capsule says the call
@@ -44,13 +46,28 @@ and it is the one failure mode a user cannot see for themselves. `test_day14_kil
 (the tail is torn, `RUN_END` is missing) but not for a **truncated upstream**, which is the ordinary case in the wild
 (provider timeout, gateway 502 mid-stream, dropped connection).
 
-**What fixing it requires (owner input on one point).** Track the provider's terminator in the tee: keep the last ~64
-bytes of the stream (a marker can straddle two chunks), key the rule on the recorded path (`/chat/completions`,
-`/completions` → `data: [DONE]`; `/messages` → `message_stop`), and on a clean end **without** the terminator set
-`partial=True` plus a recorded reason (`stream ended without the provider terminator`). The owner's decision: whether a
-*generic* SSE stream with an unknown convention should also be marked (conservative: no — record the fact, do not guess
-at the semantics), and whether `partial=True` should also raise the run's status from `recovered` to something a user
-reads as "incomplete".
+**Fixed (defects 66 and 67).** `TerminatorWatch` in `cap_sdk/tee.py` keeps the last 128 bytes of the stream, knows the two
+conventions it can vouch for (`[DONE]` for `/chat/completions` and `/completions`, `message_stop` for `/messages`), and on
+a clean end **without** the marker sets `partial = True` and records why in `ModelCall.end_reason`. `diagnose` now emits
+an **observed** finding for a response whose own `partial` flag is set, quoting that reason, and the report's headline
+reads *"The evidence shows that a model stream ended before the provider finished it."* Same reproduction afterwards:
+
+```
+MODEL_RESPONSE  {'partial': True, 'end_reason': 'the stream ended without the provider terminator ([DONE]); the body was
+                 closed by the other end, not finished', ...}
+report: Findings by strength: 2 observed.
+### 2. the response stream at node 0 ended before the provider finished it
+```
+
+It also surfaced a second defect on the way (67): `diagnose/evidence._decode` read only CBOR, so **every model frame
+reached the rules as an empty dict** and the timeline printed `MODEL_REQUEST — 312 B` with no provider, path, model or
+`partial`. It now tries JSON first, as `cap/export_jsonl` always has, and the timeline shows
+`provider=127.0.0.1; model=gpt-4o-mini; path=/v1/chat/completions; stream=True; partial=False; capture_seam=httpx-hooks`.
+
+**What is still the owner's call.** (1) A *generic* `text/event-stream` with an unknown convention is deliberately not
+marked — the specification has no terminator, so marking one would be a guess at somebody else's protocol. (2) Whether a
+`partial` call should also change the **run status** from `recovered` to something a user reads as "incomplete"; today it
+is a finding in the report, not a status.
 
 ---
 
@@ -146,7 +163,7 @@ exercised, and none of them can be installed offline here. Evidence: `bench/resu
   needs one busy process per CPU and a quiet loop, which a shared runner cannot give. macOS is now measured *for the
   test suite* (ten of ten on `ad3a783`, `f46dac1`, `66fc174`), never *for the bench*.
 
-## B7 — `diagnose capsules/` picks the newest capsule, which may be the wrong one of the run's two
+## B7 — `diagnose capsules/` picked the newest capsule, which may be the wrong one of the run's two — FIXED
 
 Every `blackbox run` of a Python child leaves **two** capsules with the **same run id**: the child's tape and the SDK
 helper tape (`… and 1 more tape (sdk)`). They are distinguished only by event count (11 vs 5 in the run above). The
@@ -154,9 +171,17 @@ directory form of `diagnose` — the form the README shows — takes the newest 
 five-frame helper tape and say nothing about the call. It happened to pick the app capsule in both reproductions here,
 which is luck, not a rule.
 
-**Fix is small and needs no decision:** when the newest capsule under a directory has `coverage: NONE` (or fewer model
-frames than a sibling with the same run id), say so and name the sibling; or make `diagnose <dir>` require `--run` when
-a directory holds more than one capsule for the same run.
+**Fixed.** `diagnose <dir>` now picks *the newest run's capsule that has something to say*: inside the newest run's
+capsules the most model calls wins, then the most events, and it prints what it passed over and why —
+
+```
+reading capsules/c_372e….bbx (1 model call(s), 11 event(s); passed over capsules/c_5a96….bbx: 0 model call(s), 5
+event(s) — name a capsule explicitly to diagnose a different one)
+```
+
+A capsule outside the newest run is never preferred, so "the newest run" still decides *which run*; the choice inside it
+is now about content rather than mtime. Test: `test_a_directory_with_a_run_s_two_capsules_picks_the_one_with_the_model_calls`
+(the helper tape is written last, so mtime alone would pick it).
 
 ## B8 — `verify` takes exactly one capsule, and the README's habit is a glob
 
@@ -170,6 +195,8 @@ say so in `--help`.
 
 | what | before | after | test |
 |---|---|---|---|
+| `diagnose <dir>` with a run's two capsules (B7) | newest file wins (the 5-frame helper tape) | the capsule with the model calls, with what was passed over named | `tests/test_diagnose.py` |
+| a stream truncated by the provider (defects 66/67) | `partial: False`, "nothing was cut short", timeline with no model attributes | `partial: True` + `end_reason`, an observed finding, headline names it | `tests/test_stream_termination.py` (11), `tests/test_diagnose.py` (+4) |
 | `blackbox ingest` cold start (the hook path, per tool call) | p50 **100.8**, p95 108.8 ms | p50 **30.3**, p95 **38.3** ms | `test_the_ingest_command_costs_the_agent_tens_of_milliseconds` (marginal cost, not a runner's mood), `test_the_ingest_path_imports_only_what_it_uses` |
 | 450 concurrent requests (descriptor ceiling) | accept fails, in-flight probe **4 s timeout** | all served, probe **2 ms** | `tests/test_proxy_limits.py` (4) |
 | an empty capsule's manifest | `coverage: FULL`, completeness `full`, silence | `coverage: NONE`, `model_calls: 0`, an observed finding + the `--force-proxy` hint | `tests/test_diagnose.py`, `tests/test_capsule.py` |

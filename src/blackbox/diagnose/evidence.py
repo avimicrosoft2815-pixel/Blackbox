@@ -152,11 +152,24 @@ def _decode(blob: bytes) -> list[Frame]:
         except Exception:
             break
         data: dict[str, Any] = {}
+        raw_payload = fields.get("payload") or b""
+        # JSON first, then CBOR — the order `cap/export_jsonl._payload_of` uses, and for the same reason: the model
+        # frames (request, chunk, response, error) carry **JSON** payloads, everything else carries CBOR. Trying CBOR
+        # only left `data` empty for exactly the frames a diagnosis is about, so the report's timeline showed
+        # `MODEL_REQUEST  312 B` with no provider, path, model or `partial` flag, and every rule that reads those keys
+        # (interrupted streams, provider errors, capture seams) was reading an empty dict (defect 67).
         try:
-            decoded = cbor.decode_exact(fields.get("payload") or b"")
-            data = decoded if isinstance(decoded, dict) else {}
-        except Exception:
-            data = {}
+            decoded_json = json.loads(raw_payload.decode("utf-8")) if raw_payload.startswith(b"{") else None
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            decoded_json = None
+        if isinstance(decoded_json, dict):
+            data = decoded_json
+        else:
+            try:
+                decoded = cbor.decode_exact(raw_payload)
+                data = decoded if isinstance(decoded, dict) else {}
+            except Exception:
+                data = {}
         out.append(Frame(seq=int(fields.get("seq") or 0), kind=fields["kind"],
                          kind_name=C.KIND_NAMES.get(fields["kind"], f"KIND_{fields['kind']}"),
                          node_slot=int(fields.get("node_slot") or 0), wall_ns=int(fields.get("wall_ns") or 0),

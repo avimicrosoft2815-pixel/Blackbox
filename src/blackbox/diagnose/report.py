@@ -35,7 +35,8 @@ VERSION = "0.1.0.dev0"
 #: Findings whose subject is a *cause* of an interruption. Everything else is an observation about the record, and the
 #: brief files it as exactly that — a brief that lists "two identifiers name this run" under "Likely cause" teaches its
 #: reader to patch an id scheme in response to a crash.
-CAUSE_PREFIXES = ("interrupted-stream-", "no-first-byte-", "provider-error-", "tool-outcome-unknown-")
+CAUSE_PREFIXES = ("interrupted-stream-", "stream-ended-short-", "no-first-byte-", "provider-error-",
+                  "tool-outcome-unknown-")
 CAUSE_IDS = ("no-run-end", "torn-tail", "integrity-root", "empty-capsule")
 FENCE = "```"
 
@@ -86,11 +87,14 @@ class Report:
         if not self.evidence.frames:
             return "The capsule holds no frames, so there is nothing to diagnose yet."
         cut = next((f for f in self.findings if f.id.startswith("interrupted-stream-")), None)
+        short = next((f for f in self.findings if f.id.startswith("stream-ended-short-")), None)
         ended = next((f for f in self.findings if f.id == "no-run-end"), None)
         tool = next((f for f in self.findings if f.id.startswith("tool-outcome-unknown-")), None)
         parts = []
         if cut:
             parts.append("a model response stopped mid-stream with no ending recorded")
+        if short:
+            parts.append("a model stream ended before the provider finished it")
         if ended:
             parts.append("the process never closed its run")
         if tool:

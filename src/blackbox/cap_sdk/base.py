@@ -34,6 +34,7 @@ class ModelCall:
     error: str | None = None
     model: str | None = None
     partial: bool = False         # the seam saw the call but not all of it; never a guess, always a marker
+    end_reason: str | None = None  # why `partial` is set, in words: a short stream must say how it was short
     linked_run: str | None = None  # `x-blackbox-run` seen on the request: the run this call belongs to (P3B-04)
     call_id: str | None = None     # this call's own id, sent as `x-blackbox-call` when a proxy is in front (D-053)
 
@@ -43,7 +44,8 @@ class ModelCall:
             "response_fp": self.response_fp, "status": self.status, "chunks": self.chunks,
             "bytes_received": self.bytes_received, "first_byte_ms": self.first_byte_ms,
             "total_ms": self.total_ms, "stream": self.stream, "error": self.error, "model": self.model,
-            "partial": self.partial, "linked_run": self.linked_run, "call_id": self.call_id,
+            "partial": self.partial, "end_reason": self.end_reason,
+            "linked_run": self.linked_run, "call_id": self.call_id,
         }
 
 

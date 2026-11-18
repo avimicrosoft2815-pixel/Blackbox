@@ -335,8 +335,32 @@ def test_diagnose_of_a_directory_chooses_the_newest_capsule_and_says_so(
     capsule = _clean(tmp_path)
     assert diagnose_main([str(tmp_path / "data")]) == 0
     err = capsys.readouterr().err
-    assert "reading the newest capsule under" in err
+    assert "reading " in err, err
     assert Path(capsule).name in err
+
+
+def test_a_directory_with_a_run_s_two_capsules_picks_the_one_with_the_model_calls(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """Every Python child leaves two capsules for one run; the newest is not always the interesting one (B7).
+
+    The helper tape is written *last* here, so mtime alone would pick the five-frame capsule that describes nothing.
+    """
+    import shutil
+    import time
+
+    with_models = _model_capsule(tmp_path / "app", partial=False, terminator=None)
+    empty = _capsule(tmp_path / "helper", (C.KIND_RUN_START, 0, {"run_id": "r_json", "source": "sdk"}))
+    # Same run id, and the empty one newest: copy both into one directory with the mtimes in that order.
+    capsules = tmp_path / "data" / "capsules"
+    capsules.mkdir(parents=True)
+    shutil.copy(with_models, capsules / Path(with_models).name)
+    shutil.copy(empty, capsules / Path(empty).name)
+    time.sleep(0.01)
+    os.utime(capsules / Path(empty).name, None)          # the helper tape is the newest file
+    assert diagnose_main([str(capsules)]) == 0
+    err = capsys.readouterr().err
+    assert Path(with_models).name in err, err
+    assert "passed over" in err and "0 model call(s)" in err, err
 
 
 def test_diagnose_exits_1_on_something_it_cannot_read(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -412,3 +436,76 @@ def test_the_brief_points_at_the_sanctioned_repair_path_and_calls_itself_unverif
     assert "This brief is not a patch and cannot become one" in brief
     assert "blackbox repair preview" in brief and "--approve" in brief and "blackbox repair verify" in brief
     assert "Nothing in this brief counts as a verification" in brief
+
+
+# ── defect 67: model frames carry JSON, and the rules must be able to read it ────────────────────────────────────────
+def _model_capsule(tmp_path: Path, *, partial: bool, terminator: str | None) -> str:
+    """A capsule whose model frames are JSON, exactly as the seams write them (not CBOR like everything else)."""
+    request = {"path": "/v1/chat/completions", "provider": "127.0.0.1", "model": "gpt-4o-mini", "stream": True,
+               "partial": False, "capture_seam": "httpx-hooks", "content": "hash"}
+    response = {"path": "/v1/chat/completions", "provider": "127.0.0.1", "model": "gpt-4o-mini", "status": 200,
+                "chunks_raw": 2, "bytes_received": 501, "partial": partial, "content": "hash",
+                "end_reason": terminator}
+    w = TapeWriter(str(tmp_path / "data"), segment_bytes=C.MIN_SEGMENT_BYTES)
+    w.batch_bytes = 0
+    w.batch_ms = 0.0
+    w.open()
+    for kind, payload in ((C.KIND_RUN_START, {"run_id": "r_json", "source": "sdk"}),
+                          (C.KIND_MODEL_REQUEST, request),
+                          (C.KIND_MODEL_CHUNK, {"bytes": 92}),
+                          (C.KIND_MODEL_RESPONSE, response),
+                          (C.KIND_RUN_END, {"run_id": "r_json", "source": "sdk"})):
+        w.append(kind, json.dumps(payload).encode(), node_slot=0, priority=2, run_slot=1)
+        w.publish()
+    w.close()
+    result = recovery.recover(str(tmp_path / "data"))
+    assert result.capsule_path
+    return result.capsule_path
+
+
+def test_a_json_payload_is_evidence_and_was_invisible_before_defect_67(tmp_path: Path) -> None:
+    """`_decode` tried CBOR only, so every model frame reached the rules as an empty dict.
+
+    The report's timeline showed `MODEL_REQUEST  312 B` with no provider, path, model or `partial` — the frames a
+    diagnosis is *about* were the ones it could not read.
+    """
+    evidence = load(_model_capsule(tmp_path, partial=True, terminator="stream ended without [DONE]"))
+    requests = evidence.of_kind(C.KIND_MODEL_REQUEST)
+    assert requests and requests[0].data.get("path") == "/v1/chat/completions"
+    assert requests[0].data.get("capture_seam") == "httpx-hooks"
+    assert "provider=127.0.0.1" in requests[0].summary, requests[0].summary
+
+
+def test_a_model_response_that_says_it_is_partial_is_an_observed_interruption(tmp_path: Path) -> None:
+    report = build(load(_model_capsule(tmp_path, partial=True, terminator="stream ended without [DONE]")))
+    finding = next((f for f in report.findings if f.id.startswith("stream-ended-short-")), None)
+    assert finding is not None, [f.id for f in report.findings]
+    assert finding.verdict == OBSERVED
+    joined = " ".join([*finding.evidence, finding.basis])
+    assert "stream ended without [DONE]" in joined, joined
+    assert "ended before the provider finished it" in report.headline().lower(), report.headline()
+    rendered = "\n".join(report.render()) if hasattr(report, "render") else ""
+    if rendered:
+        assert "nothing in these frames indicates that anything was cut short" not in rendered
+
+
+def test_a_complete_model_response_produces_no_interruption_finding(tmp_path: Path) -> None:
+    """The other half: `partial: false` must stay quiet, or the finding would fire on every healthy call."""
+    report = build(load(_model_capsule(tmp_path, partial=False, terminator=None)))
+    assert not [f for f in report.findings if f.id.startswith("stream-ended-short-")]
+
+
+def test_the_manifest_describes_the_frames_it_has_rather_than_a_constant(tmp_path: Path) -> None:
+    """Defect 65: `coverage` said FULL for a capsule with no model call, and `content_mode` said `full` for `hash`."""
+    from blackbox.cap.format import read_capsule
+
+    with_models = read_capsule(_model_capsule(tmp_path, partial=False, terminator=None)).manifest
+    assert with_models["capture"]["coverage"] == "FULL"
+    assert with_models["capture"]["model_calls"] == 1
+    assert with_models["capture"]["providers"] == ["127.0.0.1"]
+    assert with_models["redaction"]["content_mode"] == "hash", with_models["redaction"]
+
+    empty = read_capsule(_capsule(tmp_path / "empty", (C.KIND_RUN_START, 0, {"run_id": "r_none", "source": "sdk"}))).manifest
+    assert empty["capture"]["coverage"] == "NONE", empty["capture"]
+    assert empty["capture"]["model_calls"] == 0
+    assert empty["redaction"]["content_mode"] == "unknown", empty["redaction"]
