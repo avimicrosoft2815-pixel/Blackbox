@@ -56,12 +56,13 @@ def capsule_id_for(run_id: str, writer_uuid_hex: str) -> str:
     return "c_" + hashlib.blake2b(data).hexdigest()[:16]
 
 
-def _payloads(frames: list[dict[str, Any]], kind: int) -> list[dict[str, Any]]:
+def _payloads(frames: list[dict[str, Any]], kind: int | tuple[int, ...]) -> list[dict[str, Any]]:
     from blackbox.cap import export_jsonl
 
+    kinds = (kind,) if isinstance(kind, int) else kind
     out: list[dict[str, Any]] = []
     for frame in frames:
-        if int(frame.get("kind") or 0) != kind:
+        if int(frame.get("kind") or 0) not in kinds:
             continue
         payload = export_jsonl._payload_of(frame)
         if isinstance(payload, dict):
@@ -94,6 +95,30 @@ def seams_of(frames: list[dict[str, Any]]) -> list[str]:
     """The distinct `capture_seam` values the capsule's own model requests carry, sorted."""
     return sorted({str(item["capture_seam"]) for item in _payloads(frames, _SEAM_KIND)
                    if isinstance(item.get("capture_seam"), str) and item["capture_seam"]})
+
+
+def content_modes_of(frames: list[dict[str, Any]]) -> list[str]:
+    """The `content` modes the capsule's own model frames recorded (`full`, `hash`, `off`), sorted and distinct.
+
+    Read from the frames, not from a configuration the recovery process does not have: the manifest used to say
+    `content_mode: full` for every capsule, including the ones whose model frames carried `content: hash` — so a report
+    told a user the text was in the capsule when only its hash was (defect 65).
+    """
+    modes = {str(item["content"]) for item in _payloads(frames, (C.KIND_MODEL_REQUEST, C.KIND_MODEL_RESPONSE))
+             if isinstance(item.get("content"), str) and item["content"]}
+    return sorted(modes)
+
+
+def provider_hosts_of(frames: list[dict[str, Any]]) -> list[str]:
+    """The upstream hosts the capsule's model requests were addressed to, sorted and distinct."""
+    hosts = {str(item["provider"]) for item in _payloads(frames, C.KIND_MODEL_REQUEST)
+             if isinstance(item.get("provider"), str) and item["provider"]}
+    return sorted(hosts)
+
+
+def model_call_count(frames: list[dict[str, Any]]) -> int:
+    """How many model requests the tape recorded — the number that decides whether a capsule has anything to say."""
+    return len(_payloads(frames, C.KIND_MODEL_REQUEST))
 
 
 def links_summary_of(document: bytes) -> dict[str, Any]:

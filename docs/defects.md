@@ -916,3 +916,61 @@ stay where they were: the bench, and
 `test_every_watchdog_rebind_lands_inside_the_budget_not_the_median_of_them`; the clock's honesty stays in
 `test_the_clock_counts_downtime_inside_close_before_it_returns`. Linux and Windows had passed this test all along —
 there were simply no macOS samples of it until now.
+
+## Defect 64 — the hook path imported all eleven commands to run one (2026-11-18, P3B-07)
+
+**Found by** measuring `blackbox ingest` the way an agent pays it — a whole interpreter, stdin to file — after macOS 3.11
+failed `test_the_ingest_command_costs_the_agent_tens_of_milliseconds` at 948 ms against its 900 ms ceiling:
+
+```
+console script ingest  p50 100.8  p95 108.8  max 117.3 ms
+```
+
+**Cause.** The front door's dispatch table imported **every** command module eagerly, and `blackbox.ui.server` alone
+drags in `http.server`, `ssl`, `socketserver`, `email.*`, `html` and `mimetypes`. Measured as isolated processes on this
+box: bare interpreter 10.1 ms, `import argparse` 17.7 ms, `import blackbox.cli.ingest` (everything the command needs)
+24.3 ms, **importing the whole dispatch table 96.6 ms**. The hook paid ~72 ms for ten commands it never ran, on the
+agent's critical path, for every tool call.
+
+**Fix.** `COMMANDS` is a name → (module, attribute) table and `_load(name)` imports one entry point; nothing is imported
+until a command is chosen. Measured after, same command path: **p50 30.3, p95 38.3, max 42.0 ms** — inside the plan's
+40 ms p95 gate for the first time on this box (the bench-box row is still owed, so the ticket stays open).
+
+**Tests.** `test_the_ingest_command_costs_the_agent_tens_of_milliseconds` now asserts the **marginal** cost over a bare
+interpreter (≤ 80 ms) rather than an absolute ceiling on a shared runner, and
+`test_the_ingest_path_imports_only_what_it_uses` asserts the import list itself (`http.server`, `ssl`, `socketserver`,
+`email.parser`, the UI, the proxy launcher, the repair/verify/ls/hook/link commands must not be in `sys.modules` after an
+ingest). A wall-clock bound on a runner is a claim about the runner; the import list is a claim about our code.
+
+## Defect 65 — a capsule's manifest described a recording it had not made (2026-11-18, P4-03/P3B-03)
+
+**Found by** running the documented four-command path from a **wheel install** against a mock provider that truncates a
+stream after 3 of 6 chunks:
+
+```
+-- c_1f5b…: 5 events, 0 model frames, capture={'coverage': 'FULL', 'providers': []},
+              redaction={'content_mode': 'full', …}
+-- c_9ea9…: 11 events, 3 model frames, capture={'coverage': 'FULL', 'providers': []},
+              redaction={'content_mode': 'full', …}
+    MODEL_REQUEST  {'bbx.model.content': 'hash', 'bbx.model.partial': False}
+    MODEL_RESPONSE {'bbx.model.content': 'hash', 'bbx.model.partial': False}
+```
+
+Two fields were constants in `rec/recovery.py` rather than facts about the recording:
+
+* `capture.coverage` was `FULL` unless the tape's tail was torn — so a capsule holding **no model call at all** claimed
+  full coverage, and `blackbox diagnose` called its completeness `full` and said nothing. A user whose app sets its own
+  base URL (the launcher *adopts* a set base URL instead of overwriting it) gets exactly that capsule: the run reports
+  `recovered`, the capsule lists five frames, and nothing anywhere says "your calls were never recorded".
+* `redaction.content_mode` was `full` for every capsule, while the model frames carried `content: hash` — the report
+  told a user "content mode `full`" (the text is in the capsule) when only a hash was. The diagnostic output and the
+  evidence disagreed, and the report is the half a user reads.
+
+**Fix.** Both blocks are derived from the frames (`cap/manifest.py` grew `content_modes_of`, `provider_hosts_of`,
+`model_call_count`): `coverage` is `NONE` when no model call was recorded, `PARTIAL` when the tail was torn, `FULL`
+otherwise; `content_mode` is the single mode the frames carry, `mixed` where they disagree, `unknown` where there are
+none; `providers` lists the upstream hosts the requests were addressed to, and `capture.model_calls` counts them. On the
+same run afterwards: `coverage: NONE, model_calls: 0` for the empty capsule, and `content_mode: hash, providers:
+['127.0.0.1'], model_calls: 1` for the captured one — with the report now printing `content mode hash`, and `diagnose`
+saying **"no model call was recorded in this capsule"** as an observed line, plus the actionable cause
+(`blackbox run --force-proxy`).

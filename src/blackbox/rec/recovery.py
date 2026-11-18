@@ -232,6 +232,26 @@ def classify_nodes(frames: list[dict[str, Any]], *, now_wall_ns: int | None = No
     return out
 
 
+def _coverage(scan: Any) -> str:
+    """`NONE` when the tape holds no model call, `PARTIAL` when its tail was torn, `FULL` otherwise.
+
+    A capsule with nothing in it is not a capsule with complete coverage. The distinction is the whole point of the
+    field: `NONE` is what tells a user their app was not talking to the recorder (the common cause is a base-URL variable
+    the launcher adopted instead of overwriting), and `diagnose` now says so in words (defect 65).
+    """
+    if manifest_mod.model_call_count(scan.frames) == 0:
+        return "NONE"
+    return "PARTIAL" if scan.truncated_tail else "FULL"
+
+
+def _content_mode(scan: Any) -> str:
+    """What the frames say the content mode was: one mode, `mixed` if they disagree, `unknown` if there are no frames."""
+    modes = manifest_mod.content_modes_of(scan.frames)
+    if not modes:
+        return "unknown"
+    return modes[0] if len(modes) == 1 else "mixed"
+
+
 def node_count(frames: list[dict[str, Any]]) -> int:
     """How many nodes the run *had*, which is not how many are still open.
 
@@ -736,8 +756,14 @@ class Recovery:
                     "completeness": scan.completeness(),
                     "truncated_tail": scan.truncated_tail,
                     "lost_from_seq": scan.lost_from_seq},
-            "capture": {"coverage": "PARTIAL" if scan.truncated_tail else "FULL", "providers": []},
-            "redaction": {"profile_id": "none", "content_mode": "full", "masks": 0, "failures": 0},
+            # Both blocks are **derived from the frames**, not asserted (defect 65). They used to be constants:
+            # `coverage` said FULL for a capsule that recorded no model call at all, and `content_mode` said `full` for
+            # capsules whose model frames carried `content: hash` — so `blackbox diagnose` told a user the text was in
+            # the capsule when only its hash was, and called an empty recording complete. A manifest that describes
+            # itself wrongly is worse than a missing field: every reader trusts it.
+            "capture": {"coverage": _coverage(scan), "providers": manifest_mod.provider_hosts_of(scan.frames),
+                        "model_calls": manifest_mod.model_call_count(scan.frames)},
+            "redaction": {"profile_id": "none", "content_mode": _content_mode(scan), "masks": 0, "failures": 0},
             "gaps": scan.gaps,
             "counts": {"events": scan.frame_count, "nodes": node_count(scan.frames),
                        "nodes_interrupted": len(self.result.node_statuses), "segments": len(entries)},

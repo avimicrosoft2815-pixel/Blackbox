@@ -258,7 +258,17 @@ def _label(evidence: Evidence) -> None:
         e.cannot_know.append("content recording was off: only counts and names exist")
     if e.masks:
         e.observed.append(f"{e.masks} value(s) were masked by the redaction profile before the bytes reached the tape")
-    if e.coverage and e.coverage != "FULL":
+    if e.coverage == "NONE":
+        # The most common real-user confusion this build can produce: the app set its own base URL, the launcher adopted
+        # it rather than overwriting it, and the capsule is therefore empty of the calls the user wanted explained. The
+        # report used to call that "completeness full" and say nothing (defect 65).
+        e.observed.append("no model call was recorded in this capsule, so nothing here describes a request or a response")
+        e.cannot_know.append(
+            "why nothing was recorded: the likeliest causes are an application that sets its own base URL (the launcher "
+            "adopts a base URL you set instead of overwriting it, so the call never reached the recorder) and a client "
+            "the capture seams do not cover. `blackbox run --force-proxy` points every base-URL variable at the "
+            "recorder and names each one it displaces")
+    elif e.coverage and e.coverage != "FULL":
         e.cannot_know.append(f"capture coverage is {e.coverage}: some bytes were not observed at all")
     if e.capture_seams:
         e.observed.append("capture seam(s) that wrote these calls: " + ", ".join(e.capture_seams))

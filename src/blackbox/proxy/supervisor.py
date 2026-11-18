@@ -27,6 +27,7 @@ from dataclasses import dataclass, field, replace
 from typing import Any
 
 from blackbox.cap_sdk import headers as cap_headers
+from blackbox.proxy.limits import raise_fd_limit
 from blackbox.proxy.routes import Route, Routes
 from blackbox.proxy.server import ProxyServer
 
@@ -184,6 +185,7 @@ class ProxyThread:
         self._restore_pending = False
         self.restores_from_loop = 0
         self.port_changed = False                          # set when a rebind could not keep the port the child was told
+        self.fd_limit: tuple[int, int] | None = None        # (before, after) descriptors, None where the OS has none
         self.pending_at_stop = 0                           # tasks still pending when the loop was drained (defect 61)
         self.undrained_at_stop = 0                         # ...and how many survived the drain (must be 0)
         self._lock = threading.Lock()
@@ -203,6 +205,10 @@ class ProxyThread:
 
     def _run(self) -> None:
         try:
+            # Two descriptors per in-flight request, so the descriptor table *is* the concurrency limit (defect 62).
+            # Raising the soft limit to what the OS already granted is not a policy: refusing a request the upstream
+            # would have served is, and that one is not decided here.
+            self.fd_limit = raise_fd_limit()
             self._loop = asyncio.new_event_loop()
             asyncio.set_event_loop(self._loop)
             self._server = self._loop.run_until_complete(
