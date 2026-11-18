@@ -224,6 +224,7 @@ nothing from a proposal is ever executed.
 |---|---|---|---|---|
 | `main` `f4a9abb` (run 44400312163) | green | 3/3 green | 3/3 green | **3/3 cancelled at 0 steps** — "not acquired by Runner of type hosted". Unmeasured, not passed |
 | branch `9e6a35a` (run 44405724450) | green | 3/3 green | 3/3 green | **3/3 cancelled at 0 steps** — unmeasured |
+| branch `c1c0ad8` (run 44412902847) | green | 3/3 green | 3/3 green | **3/3 green — 11 steps each** (this is the first fully measured matrix on this branch) |
 | branch `feeb598` (run 44406070968) | green | 3/3 green | 3/3 green except **py3.11**, which failed `test_the_ingest_command_costs_the_agent_tens_of_milliseconds` (84 ms marginal over a bare interpreter, 115 vs 31, against an 80 ms bound) | **3/3 cancelled at 0 steps** — unmeasured |
 
 The Windows py3.11 failure was re-run rather than declared a flake, and the second sample said something different: the
