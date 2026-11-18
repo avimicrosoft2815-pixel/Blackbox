@@ -7,6 +7,7 @@ repair parser's help rather than this one's. Exit code 2 for an unknown command 
 from __future__ import annotations
 
 import argparse
+import importlib
 import sys
 from collections.abc import Callable
 
@@ -23,24 +24,30 @@ HELP = ("`status` prints the build line; `run -- cmd` runs a command under the r
         "`ingest` is the command a coding agent's hook runs; `hook install|remove|status` manages the hook adapters")
 
 
-def _dispatch_table() -> dict[str, Callable[[list[str]], int]]:
-    """Imports are inside the functions: `--version` and `status` must work without loading the proxy, the SDK or numpy-
-    free as they are, a command that cannot import itself should not stop `blackbox --version`."""
-    from blackbox.cap.cli import main as capsule_main
-    from blackbox.cli.cmd_ls import main as ls_main
-    from blackbox.cli.cmd_verify import main as verify_main
-    from blackbox.cli.hook import main as hook_main
-    from blackbox.cli.ingest import main as ingest_main
-    from blackbox.cli.link import main as link_main
-    from blackbox.diagnose.cli import main as diagnose_main
-    from blackbox.rec.launcher import main as run_main
-    from blackbox.repair.cli import main as repair_main
-    from blackbox.ui.server import main as serve_main
-    from blackbox.ui.viewer import main as view_main
+# name -> (module, attribute). Nothing is imported until a command is actually chosen: the hook path (`ingest`) is on
+# the agent's critical path and used to pay for ten modules it never runs — measured on this box, importing the whole
+# table cost 72 ms of a 101 ms cold start, `blackbox.ui.server` alone dragging in `http.server`, `ssl`, `email`, `html`,
+# `socketserver` and `mimetypes` (defect 64). The dispatch is a name, and a name costs nothing until it is imported.
+COMMANDS: dict[str, tuple[str, str]] = {
+    "run": ("blackbox.rec.launcher", "main"),
+    "ingest": ("blackbox.cli.ingest", "main"),
+    "hook": ("blackbox.cli.hook", "main"),
+    "view": ("blackbox.ui.viewer", "main"),
+    "serve": ("blackbox.ui.server", "main"),
+    "diagnose": ("blackbox.diagnose.cli", "main"),
+    "repair": ("blackbox.repair.cli", "main"),
+    "link": ("blackbox.cli.link", "main"),
+    "capsule": ("blackbox.cap.cli", "main"),
+    "verify": ("blackbox.cli.cmd_verify", "main"),
+    "ls": ("blackbox.cli.cmd_ls", "main"),
+}
 
-    return {"run": run_main, "ingest": ingest_main, "hook": hook_main, "view": view_main, "serve": serve_main,
-            "diagnose": diagnose_main, "repair": repair_main, "link": link_main, "capsule": capsule_main,
-            "verify": verify_main, "ls": ls_main}
+
+def _load(name: str) -> Callable[[list[str]], int]:
+    """Import one command's entry point. A command that cannot import itself must not stop another one."""
+    module, attribute = COMMANDS[name]
+    entry: Callable[[list[str]], int] = getattr(importlib.import_module(module), attribute)
+    return entry
 
 
 KNOWN = ("run", "ingest", "hook", "view", "serve", "diagnose", "repair", "link", "capsule", "verify", "ls")
@@ -53,15 +60,15 @@ def main(argv: list[str] | None = None) -> int:
     for index, token in enumerate(raw):
         if token in KNOWN:
             if any(flag in ("-h", "--help") for flag in raw[index + 1:]):
-                return _dispatch_table()[token](raw[index + 1:])
+                return _load(token)(raw[index + 1:])
             break
     ap = argparse.ArgumentParser(prog="blackbox", description="BlackBox recorder (pre-alpha)")
     ap.add_argument("--version", action="version",
                     version=f"blackbox {__version__} (format v{C.FORMAT_VERSION})")
     ap.add_argument("command", nargs="?", default="status", help=HELP)
     args, rest = ap.parse_known_args(raw)
-    if args.command in _dispatch_table():
-        return _dispatch_table()[args.command](rest)
+    if args.command in COMMANDS:
+        return _load(args.command)(rest)
     if args.command == "status":
         print(f"blackbox {__version__}: pre-alpha. Storage, recovery, the capture seams, the loopback proxy, the "
               f"launcher's attach, the offline viewer, the read-only diagnosis, the interruption lab and the "

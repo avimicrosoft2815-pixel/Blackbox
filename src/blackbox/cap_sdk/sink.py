@@ -207,6 +207,9 @@ class TapeSink:
             "bytes_received": call.bytes_received, "first_byte_ms": call.first_byte_ms, "total_ms": call.total_ms,
             "content": self.content,
             "response_fp": call.response_fp, "partial": call.partial, "error": call.error,
+            # Why a short stream was short, and what the seam could actually say: `terminated` / `unterminated` /
+            # `unverified`. Additive: capsules written before these keys fall back to `partial` alone.
+            "end_reason": call.end_reason, "ending": call.ending, "ending_provider": call.ending_provider,
             "redaction": ({**self.redactor.as_dict(), "failures": self.redaction_failures}
                           if self.redactor is not None else
                           {"mode": "off", "counts": {}, "failures": 0, "note": "no redactor"}),

@@ -236,20 +236,63 @@ def test_the_inbox_defaults_follow_the_run_and_never_the_working_directory(monke
     assert inbox.default_dir(None).endswith(os.path.join(".blackbox", "inbox"))
 
 
+def _median_ms(cmd: list[str], *, n: int, stdin: bytes | None = None, env: dict[str, str] | None = None) -> float:
+    times = []
+    for _ in range(n):
+        started = time.perf_counter()
+        finished = subprocess.run(cmd, input=stdin, capture_output=True, env=env, timeout=120)
+        times.append((time.perf_counter() - started) * 1000)
+        assert finished.returncode == 0, finished.stderr[-500:]
+    times.sort()
+    return times[len(times) // 2]
+
+
 def test_the_ingest_command_costs_the_agent_tens_of_milliseconds(tmp_path: Path) -> None:
-    """P3B-07's cold-start row, measured the way a hook pays it: a whole interpreter, stdin to file."""
+    """P3B-07's cold-start row, measured the way a hook pays it: a whole interpreter, stdin to file.
+
+    The number that matters is the **marginal** cost over a bare interpreter, because that is the part this project
+    owns: an absolute bound on a shared runner measures the runner's mood (macOS 3.11 in run 44225232306 took 948 ms
+    against a 900 ms ceiling on a commit where every other cell passed). Defect 64 was exactly a marginal cost — the
+    front door imported all eleven commands to run one, 72 ms of a 101 ms hook — so the assertion is the delta, with an
+    absolute ceiling kept only as a sanity bound. The plan's own gate (40 ms p95 on the bench box) is a separate row and
+    is still owed; the sandbox numbers are in docs/STATUS.md.
+    """
     payload = json.dumps({"session_id": "s1", "tool_name": "Bash", "tool_input": {"command": "ls"}}).encode()
     env = {**os.environ, "PYTHONPATH": str(ROOT / "src")}
-    started = time.perf_counter()
-    finished = subprocess.run([sys.executable, "-m", "blackbox", "ingest", "--tool", "claude-code",
-                               "--event", "PreToolUse", "--inbox", str(tmp_path / "inbox")],
-                              input=payload, capture_output=True, env=env, timeout=60)
-    elapsed_ms = (time.perf_counter() - started) * 1000
-    assert finished.returncode == 0, finished.stderr
+    bare = _median_ms([sys.executable, "-c", "pass"], n=5)
+    ingest = _median_ms([sys.executable, "-m", "blackbox", "ingest", "--tool", "claude-code",
+                         "--event", "PreToolUse", "--inbox", str(tmp_path / "inbox")], n=5, stdin=payload, env=env)
+    assert len(inbox.pending(str(tmp_path / "inbox"))) == 5
+    assert ingest < 900, f"cold start took {ingest:.0f} ms"
+    assert ingest - bare <= 80.0, (
+        f"one hook event cost {ingest - bare:.0f} ms over a bare interpreter ({ingest:.0f} vs {bare:.0f} ms); "
+        f"before defect 64 the front door imported every command and this delta was ~90 ms")
+
+
+def test_the_ingest_path_imports_only_what_it_uses(tmp_path: Path) -> None:
+    """Defect 64, as an import-list assertion rather than a stopwatch: `ingest` may not load the UI, the proxy or the
+    repair machinery. A wall-clock bound on a shared runner is a claim about the runner; this one is about our code.
+    """
+    probe = (
+        "import json, sys\n"
+        "import blackbox.__main__ as front\n"
+        "rc = front.main(['ingest', '--tool', 'claude-code', '--event', 'PreToolUse', '--inbox', "
+        f"{str(tmp_path / 'inbox')!r}, '--quiet'])\n"
+        "heavy = sorted(name for name in ("
+        "'http.server', 'ssl', 'socketserver', 'email.parser', 'blackbox.ui.server', 'blackbox.ui.viewer', "
+        "'blackbox.rec.launcher', 'blackbox.repair.cli', 'blackbox.cap.cli', 'blackbox.diagnose.cli', "
+        "'blackbox.cli.cmd_verify', 'blackbox.cli.cmd_ls', 'blackbox.cli.hook', 'blackbox.cli.link')"
+        " if name in sys.modules)\n"
+        "print(json.dumps({'rc': rc, 'heavy': heavy}))\n"
+    )
+    payload = json.dumps({"session_id": "s1", "tool_name": "Bash"}).encode()
+    finished = subprocess.run([sys.executable, "-c", probe], input=payload, capture_output=True,
+                              env={**os.environ, "PYTHONPATH": str(ROOT / "src")}, timeout=120)
+    assert finished.returncode == 0, finished.stderr[-800:]
+    answer = json.loads(finished.stdout.decode().strip().splitlines()[-1])
+    assert answer["rc"] == 0
+    assert answer["heavy"] == [], f"a hook event imported {answer['heavy']}; that is the user's latency"
     assert len(inbox.pending(str(tmp_path / "inbox"))) == 1
-    # The plan's gate is 40 ms p95 on the bench box; this is a developer sandbox running the whole suite, so the bound
-    # here is deliberately loose and the row in docs/STATUS.md says which machine the real number belongs to.
-    assert elapsed_ms < 900, f"cold start took {elapsed_ms:.0f} ms"
 
 
 @pytest.mark.parametrize("stdin", [b"not json at all", b"[1,2,3]", b""])

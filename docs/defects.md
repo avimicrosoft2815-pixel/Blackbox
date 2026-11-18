@@ -916,3 +916,302 @@ stay where they were: the bench, and
 `test_every_watchdog_rebind_lands_inside_the_budget_not_the_median_of_them`; the clock's honesty stays in
 `test_the_clock_counts_downtime_inside_close_before_it_returns`. Linux and Windows had passed this test all along —
 there were simply no macOS samples of it until now.
+
+## Defect 64 — the hook path imported all eleven commands to run one (2026-11-18, P3B-07)
+
+**Found by** measuring `blackbox ingest` the way an agent pays it — a whole interpreter, stdin to file — after macOS 3.11
+failed `test_the_ingest_command_costs_the_agent_tens_of_milliseconds` at 948 ms against its 900 ms ceiling:
+
+```
+console script ingest  p50 100.8  p95 108.8  max 117.3 ms
+```
+
+**Cause.** The front door's dispatch table imported **every** command module eagerly, and `blackbox.ui.server` alone
+drags in `http.server`, `ssl`, `socketserver`, `email.*`, `html` and `mimetypes`. Measured as isolated processes on this
+box: bare interpreter 10.1 ms, `import argparse` 17.7 ms, `import blackbox.cli.ingest` (everything the command needs)
+24.3 ms, **importing the whole dispatch table 96.6 ms**. The hook paid ~72 ms for ten commands it never ran, on the
+agent's critical path, for every tool call.
+
+**Fix.** `COMMANDS` is a name → (module, attribute) table and `_load(name)` imports one entry point; nothing is imported
+until a command is chosen. Measured after, same command path: **p50 30.3, p95 38.3, max 42.0 ms** — inside the plan's
+40 ms p95 gate for the first time on this box (the bench-box row is still owed, so the ticket stays open).
+
+**Tests.** `test_the_ingest_command_costs_the_agent_tens_of_milliseconds` now asserts the **marginal** cost over a bare
+interpreter (≤ 80 ms) rather than an absolute ceiling on a shared runner, and
+`test_the_ingest_path_imports_only_what_it_uses` asserts the import list itself (`http.server`, `ssl`, `socketserver`,
+`email.parser`, the UI, the proxy launcher, the repair/verify/ls/hook/link commands must not be in `sys.modules` after an
+ingest). A wall-clock bound on a runner is a claim about the runner; the import list is a claim about our code.
+
+## Defect 65 — a capsule's manifest described a recording it had not made (2026-11-18, P4-03/P3B-03)
+
+**Found by** running the documented four-command path from a **wheel install** against a mock provider that truncates a
+stream after 3 of 6 chunks:
+
+```
+-- c_1f5b…: 5 events, 0 model frames, capture={'coverage': 'FULL', 'providers': []},
+              redaction={'content_mode': 'full', …}
+-- c_9ea9…: 11 events, 3 model frames, capture={'coverage': 'FULL', 'providers': []},
+              redaction={'content_mode': 'full', …}
+    MODEL_REQUEST  {'bbx.model.content': 'hash', 'bbx.model.partial': False}
+    MODEL_RESPONSE {'bbx.model.content': 'hash', 'bbx.model.partial': False}
+```
+
+Two fields were constants in `rec/recovery.py` rather than facts about the recording:
+
+* `capture.coverage` was `FULL` unless the tape's tail was torn — so a capsule holding **no model call at all** claimed
+  full coverage, and `blackbox diagnose` called its completeness `full` and said nothing. A user whose app sets its own
+  base URL (the launcher *adopts* a set base URL instead of overwriting it) gets exactly that capsule: the run reports
+  `recovered`, the capsule lists five frames, and nothing anywhere says "your calls were never recorded".
+* `redaction.content_mode` was `full` for every capsule, while the model frames carried `content: hash` — the report
+  told a user "content mode `full`" (the text is in the capsule) when only a hash was. The diagnostic output and the
+  evidence disagreed, and the report is the half a user reads.
+
+**Fix.** Both blocks are derived from the frames (`cap/manifest.py` grew `content_modes_of`, `provider_hosts_of`,
+`model_call_count`): `coverage` is `NONE` when no model call was recorded, `PARTIAL` when the tail was torn, `FULL`
+otherwise; `content_mode` is the single mode the frames carry, `mixed` where they disagree, `unknown` where there are
+none; `providers` lists the upstream hosts the requests were addressed to, and `capture.model_calls` counts them. On the
+same run afterwards: `coverage: NONE, model_calls: 0` for the empty capsule, and `content_mode: hash, providers:
+['127.0.0.1'], model_calls: 1` for the captured one — with the report now printing `content mode hash`, and `diagnose`
+saying **"no model call was recorded in this capsule"** as an observed line, plus the actionable cause
+(`blackbox run --force-proxy`).
+
+## Defect 66 — a stream the provider cut short was recorded as a finished one (2026-11-18, P3-05/P5-pre)
+
+**Found by** running the documented path against a mock provider that truncates after 3 of 6 chunks, with a real
+`openai` client: the SDK saw a clean end of body, the script exited 0 and printed three chunks, and the capsule recorded
+`MODEL_RESPONSE {..., 'partial': False}` followed by `blackbox diagnose` saying *"nothing in these frames indicates that
+anything was cut short"*.
+
+**Cause.** `cap_sdk/tee.py`: a clean `StopIteration` on the inner stream meant `completed=True`, so `partial` stayed
+`False` no matter what the SSE body did or did not contain. An OpenAI stream that never carried `data: [DONE]`, and an
+Anthropic stream that never carried `message_stop`, were byte-identical, from the seam's point of view, to streams that
+finished. **This is the failure mode the recorder exists for**: a provider timeout, a gateway 502 mid-stream or a dropped
+link leaves an application holding a short answer with no exception, and the capsule used to agree with it.
+
+**Fix.** `TerminatorWatch` in the tee: it keeps the last 128 bytes of the stream (a marker can straddle two chunks, which
+chunk-by-chunk testing would miss), knows only two conventions — `[DONE]` for `/chat/completions` and `/completions`,
+`message_stop` for `/messages` — and on a clean end **without** the marker sets `partial = True` and records why in a new
+`end_reason` (`ModelCall.end_reason`, written on the response frame as `bbx.model.end_reason`). *Deliberately
+conservative*: a generic `text/event-stream` has no terminator in its specification, so an unknown path is never marked —
+that would be a guess about somebody else's protocol.
+
+**Diagnosis side (defect 67 below).** `diagnose` now emits an **observed** finding for a `MODEL_RESPONSE` whose own
+`partial` flag is set (`stream-ended-short-<node>`), quoting the recorded `end_reason`, and the report's headline says
+"a model stream ended before the provider finished it" instead of denying that anything was cut short. Measured on the
+same reproduction afterwards: `partial: True`, `end_reason: the stream ended without the provider terminator ([DONE]);
+the body was closed by the other end, not finished`, and two observed findings in the report.
+
+**Tests.** `tests/test_stream_termination.py` (11): a stream without `[DONE]` is partial and says why; with it, complete;
+a marker split across two chunks is still seen; the same for `message_stop`; four unknown paths are never marked; the tail
+stays 128 bytes over 1 MB of stream; the table names what it covers. `tests/test_diagnose.py` adds the observed finding,
+the quiet case (`partial: false` produces nothing) and the manifest assertions below.
+
+## Defect 67 — the diagnosis read every model frame as an empty dict (2026-11-18, P5-pre)
+
+**Found by** looking for the finding defect 66 should have produced and not finding it: `diagnose/evidence._decode` tried
+`cbor.decode_exact` only, while the model frames (request, chunk, response, error) carry **JSON** payloads. Every rule
+that reads those attributes — interrupted streams, provider errors, capture seams, `partial` — was reading `{}`, and the
+report's timeline rendered `MODEL_REQUEST — 312 B` with no provider, path, model or stream flag: the frames the report is
+*about* were the ones it could not read.
+
+**Fix.** `_decode` tries JSON first (when the payload starts with `{`) and falls back to CBOR, the same order
+`cap/export_jsonl._payload_of` has always used. After: the timeline prints
+`provider=127.0.0.1; model=gpt-4o-mini; path=/v1/chat/completions; stream=True; partial=False; capture_seam=httpx-hooks`
+for the request and `partial=True; status=200` for the response.
+
+**Test.** `test_a_json_payload_is_evidence_and_was_invisible_before_defect_67` builds a capsule whose model frames are
+JSON (as the seams write them) and asserts the attributes and the rendered summary.
+
+## Defect 68 — a stream whose ending this recorder does not recognise was reported as one it had verified (2026-11-16, B1 follow-up)
+
+**Found by** asking what defect 66's fix does for the providers it does not name. It knows two conventions and refuses
+to guess at any other, which is right — a generic `text/event-stream` has no terminator in its specification, so marking
+one would be a guess about somebody else's protocol. What was wrong is what the capsule *said* while refusing: the only
+recorded fact was `partial: False`, and `partial: False` is exactly what a stream the provider finished says. So a Gemini,
+Responses-API or Ollama stream, or any gateway in front of them, was indistinguishable from a verified complete one —
+the same failure this project fixed for OpenAI and Anthropic in defect 66, surviving in the providers nobody had tested.
+A recorder that cannot tell is allowed to say "I cannot tell". It is not allowed to say "complete".
+
+**Fix.** `cap_sdk/tee.py` records an `ending` with three values, plus the provider whose convention was consulted:
+
+| `ending` | when | `partial` | capsule `end_reason` |
+|---|---|---|---|
+| `terminated` | a marker of the request path's own convention was seen | `False` | the terminator, named |
+| `unterminated` | the convention is known and the marker is missing | `True` | which marker was expected and not seen |
+| `unverified` | no convention is known for this path | `False`, and no claim made | "whether the stream finished is not recorded" |
+
+`TERMINATORS` is a table of `(path suffix, marker, provider)`: OpenAI chat and legacy completions `data: [DONE]`,
+OpenAI Responses `response.completed`, Anthropic `message_stop`, Gemini `"finishReason"`, Ollama `"done": true` for both
+`/api/chat` and `/api/generate`. A marker belonging to *another* provider's convention in the body does not count. The
+ending and the provider travel on the response frame (`bbx.model.ending`, `bbx.model.ending_provider`), so `diagnose`
+can act on them without re-reading bytes: a new finding `stream-ending-unknown-<slot>` (verdict `CANNOT_TELL`, confidence
+`LOW`, title *"whether the stream at node N finished is not recorded"*) names the provider that was not recognised and
+lists what would settle it.
+
+**Why the third state and not a boolean.** The user's requirement is the sentence, not the flag: *never claim a stream is
+complete when its ending is unknown*. A boolean forces "complete" and "cut short" to be the only two things a capsule can
+say, so the honest answer for an unrecognised provider has nowhere to go. The cost is one extra value on a frame; the
+benefit is that `diagnose` can print "cannot tell" instead of nothing, and a future provider is one table row, not a
+change to the frame format.
+
+**Tests.** `tests/test_stream_termination.py` (23): every row of the table terminated by its own marker; a missing marker
+is `unterminated` and partial with a reason; a marker from another provider's convention is `unterminated`, not
+`terminated`; a non-streaming JSON body is not a stream and is not judged; an unrecognised path is `unverified`, is not
+partial, and its reason says the ending is not recorded. `tests/test_diagnose.py` (38) adds
+`test_an_unknown_stream_convention_is_a_cannot_tell_not_a_silence`, which writes a capsule whose response frame carries
+`ending: unverified` and asserts the finding and the "not recorded" wording.
+
+## Defect 69 — at the connection ceiling the proxy had no answer at all, only whichever failure came first (2026-11-16, B3)
+
+**Found by** measuring the burst that B3 describes instead of reasoning about it: at 450 concurrent requests with the
+stock 1024-descriptor soft limit, `accept` failed with `socket.accept() out of system resource` and a request issued
+during the burst **timed out after 4 s with no answer**. Raising the limit (`proxy/limits.py`) moved the cliff to 1366
+descriptors and served the probe in 2 ms, which is why that half was not the blocker: what remained was that the ceiling
+was still whatever the descriptor table happened to be, and what happened at it was a log line the child never sees.
+
+**Decision.** Backpressure, with an explicit ceiling above it — the recommended option, because the proxy's promise is
+pass-through and a recorder that refuses a request the provider would have answered has broken the thing it exists for.
+A request past `MAX_INFLIGHT` (200, §15.1's concurrent-stream count) waits for a slot and is counted; a wait past
+`QUEUE_WAIT_S` (60 s) is answered `503` with `x-blackbox-error: queue-timeout`; a client past `MAX_CONNECTIONS` (512) is
+answered `503` with `x-blackbox-error: connection-limit` in milliseconds, because that is the one case the recorder
+genuinely cannot serve. The numbers are derived, not preferred: `512 + 200 + 96 = 808 < 1024`, so the caps hold on a host
+where `limits.py` could not raise anything. `tests/test_proxy_backpressure.py` asserts the arithmetic.
+
+**Measured after** (`bench/bench_connection_limit.py` → `bench/results/2026-11-16-b3-connection-limit.json`): 450 of 450
+requests answered `200`, 0 refused, 444 queued, longest queue wait 887 ms, origin peak 192 in flight; the probe during
+the burst answered `200` in 1053.8 ms; 96 clients beyond the connection cap each answered `503` with the reason, median
+4.4 ms, max 7.7 ms.
+
+**What the user reads.** `ProxyStats` gains `queued`, `max_queue_wait_ms` and `refused_reasons`, and the launcher prints
+one sentence after the run's summary when any of them is non-zero — naming what was refused, what waited, and that the
+numbers are a descriptor budget rather than a preference. Deliberately silent when nothing happened.
+
+**What is still open, and is the owner's.** Whether the caps become flags (a safe range is one budget interval, so a flag
+needs its own validation story), and whether a `503` the recorder issued belongs in the capsule as a frame — today it is
+in `stats` and in the run's sentence only.
+
+## Defect 70 — a convention was matched by substring, so a listing endpoint was judged as a stream (2026-11-16, defect 68 follow-up)
+
+**Found by** writing the test for an unfamiliar format and asking what `/v1/messages/batches` would be. It answered
+`anthropic`. `expected_terminators` tested `suffix in path`, so:
+
+* `/v1/messages/batches` — Anthropic's batch-listing endpoint, which returns a JSON object and no stream at all — was
+  judged against `message_stop`. If it had arrived as a stream and ended without one, the capsule would have said the
+  stream was **cut**, which is a claim about a call that has no stream to cut. The mirror image of the defect 68 mistake,
+  in the other direction, and the same root cause: a convention belongs to an *endpoint*, and the endpoint is the end of
+  the path.
+* `/v1/chat/completions` matched both the `/chat/completions` and the legacy `/completions` row, so one path carried two
+  markers and `expected_terminators` returned `[b"[DONE]", b"[DONE]"]`. Harmless by luck (same marker, same provider) and
+  wrong by construction.
+
+**Fix.** `convention_for(path)` strips the query string and requires `path.endswith(suffix)`, choosing the longest matching
+suffix. One path, one row, one provider. `/v1/messages/batches`, `/v1/chat/completions/extra` and `/v1/responses/input_items`
+now resolve to **unrecognised**, i.e. `unverified`, i.e. no claim.
+
+**Tests.** `tests/test_stream_termination.py` (30): the table test asserts one marker per path and that a query string does
+not change the answer; `test_a_path_that_only_contains_a_known_suffix_is_not_judged_by_it` covers the three paths above;
+and `test_an_unfamiliar_format_is_recorded_as_unknown` adds four endpoints this build has never had a row for — Cohere
+`/v2/chat`, Mistral `/v1/chat` (which does emit `[DONE]`), a Bedrock
+`invoke-with-response-stream` envelope, and a gateway path — each asserted `unverified`, `unrecognised`, not partial, and
+with the reason that says the ending is not recorded.
+
+## Defect 71 — the caps were a plan for one host, printed on every host (2026-11-16, B3 platform review)
+
+**Found by** walking the arithmetic across the platforms this project actually runs on. `512 + 200 + 96 = 808 < 1024` is
+true of a Linux box with the stock soft limit, and it was written down as though it were true everywhere. It is not:
+
+* a **macOS** shell starts at a soft limit of **256** (the number in `proxy/limits.py`'s own docstring), and
+  `raise_fd_limit` can be refused — for instance under a hard limit the user cannot pass;
+* a container or CI sandbox can have any hard limit at all, including ones below the slack;
+* **Windows** has no `RLIMIT_NOFILE` at all, so the number the sentence was derived from does not exist there.
+
+On the first two, the proxy would have promised 808 descriptors it did not have: the caps would have *been* the cliff, with
+a documented number in front of it.
+
+**Fix.** `limits.fd_budget()` reads the soft limit the process has *after* the raise attempt (`None` on Windows and for an
+unlimited soft limit), and `server.plan_caps()` derives the pair from it — shrinking to fit, stopping at floors (16
+connections, 8 in flight) when the budget is below what the proxy needs, and saying so in `ProxyStats.caps["why"]`. The
+documented 200/512 is now what a 1024-descriptor host gets, not a constant every host is told.
+
+**Measured, end to end, on a host that cannot raise its limit** (hard 200, so `setrlimit` returns 200→200): caps planned at
+**62 connections + 42 in flight + 96 = 200**, 8 concurrent requests through the real listener, **8 answered `200`**.
+
+**What the user reads now.** The run's sentence is built from `stats.caps`, so it prints the numbers that were in force —
+`the ceilings are 62 in flight and 42 connections…` — or, on Windows, that they are policy numbers because the platform
+publishes no budget. A rejection also carries a body line for the developer whose request it was
+(`this is the recorder's ceiling, not the provider's: retry when its in-flight requests finish, or run fewer at once`), and
+a delay is labelled a delay rather than folded into the same count.
+
+**Tests.** `tests/test_proxy_backpressure.py` (7) covers the plan table row by row (65536, 1024, 256, 128, 64, `None`),
+asserts `connections + inflight + slack <= budget` wherever a fitting pair exists, and asserts that a server built on a
+256-descriptor host uses the plan and publishes it; `tests/test_proxy_limits.py` (7) reads the budget in a subprocess at
+200 descriptors and asserts the plan fits. `tests/test_launcher_capture_warning.py` (5) asserts the sentence separates
+delay from rejection and that the Windows wording makes no arithmetic claim.
+
+## Defect 72 — the plan spent descriptors the process had already opened (2026-11-16, B3 review round 2)
+
+**Found by** asking what `plan_caps` means on a host that is already busy: a `blackbox run` process holds the tape, the
+child's inherited handles, the SDK's sockets and everything the application opened before the listener exists. The plan
+subtracted `PROXY_LOCAL_SLACK_FDS` (96) and nothing else, so on a 256-descriptor host whose process already held 60 the
+arithmetic was `96 + 64 + 96 = 256` — of a budget with 60 already gone. The slack was being spent twice, and the caps
+would have been the cliff again, this time with the arithmetic to prove it.
+
+**Fix.** `limits.open_fds()` reads the count the platform exposes (`/proc/self/fd` on Linux, `/dev/fd` on macOS and the
+BSDs, `None` on Windows), and `plan_caps(budget, in_use=...)` subtracts it: `room = budget - slack - in_use`. The count is
+a lower bound — the scan holds one descriptor of its own — which errs in the safe direction, and `ProxyStats.caps`
+publishes `open_at_start` plus a sentence that names the number when it is non-zero.
+
+**Measured** (this sandbox): 40 real descriptors held open plus the interpreter's own 10, budget 320 →
+`plan(320, in_use=50) = 104 connections / 70 in flight` (`104 + 70 + 96 + 50 = 320`), 12 concurrent requests through the
+listener, **peak descriptor count 87, all 12 answered `200`**. The test asserts the peak against the budget rather than
+against a constant, so a future change that spends the slack twice fails here.
+
+**Tests.** `tests/test_proxy_backpressure.py` (14): `test_descriptors_already_open_come_out_of_the_same_budget` (the
+arithmetic, including that a host with room to spare keeps the documented pair however much is open),
+`test_the_listener_counts_descriptors_already_open` (the wiring and `stats.caps.open_at_start`) and
+`test_a_host_with_files_already_open_stays_inside_its_budget` (40 real pipes, a real burst, the peak measured).
+
+## Defect 73 — overload behaviour was tested at hand-picked numbers, and disconnects were not tested at all (2026-11-16, B3 review round 2)
+
+**Found by** reading the test list against the ways a real overload arrives. The suite proved the *behaviour* at
+`max_inflight=2` and `max_connections=2` — good, and necessary — but never at a **planned** ceiling, never with the
+process already holding descriptors, and never with a client that **leaves** while queued, at the ceiling, or mid-stream.
+Three of those are the cases a hung recorder would produce if a slot or a connection leaked, and nothing would have caught
+it.
+
+**What the new tests measure, and what they found.**
+
+| case | result |
+|---|---|
+| 80 concurrent requests at the 256-descriptor plan (96 connections / 64 in flight) | **80 of 80 answered `200`**, 0 refused, 73 queued, longest wait **50 ms**, 119 ms wall |
+| 12 concurrent requests on a 320-budget host with 50 descriptors already open | **12 of 12 answered `200`**, plan 104 / 70, **peak 87 descriptors** |
+| a client that closes while queued for the only slot | slot returned; the next request is served `200`; nothing refused |
+| a client that closes at the connection ceiling (before reading its `503`) | connection count drains to 0; the next request is served `200`; `refused_reasons["connection-limit"] == 1` |
+| a client that closes mid-stream (one in-flight slot) | `client_gone` recorded; the next request is served `200` |
+
+No leak was found. One **limitation** was: a client that disappears while queued cannot be noticed until its turn comes,
+because the recorder is parked on the semaphore rather than reading that socket — so the slot is returned only then, and
+the abandoned request may already have reached the provider. That is now written down in the README and in
+`docs/RELEASE-BLOCKERS.md` rather than left as an implication.
+
+**Tests.** `tests/test_proxy_backpressure.py` (14), including the mid-stream case, which needed an origin that streams
+slowly (`GatedOrigin(stream=True)`: chunked SSE, one chunk every 50 ms) so a disconnect can land inside the response.
+
+## Defect 74 — the verifier refused the command a user types after `ls` shows two capsules (2026-11-16, B8)
+
+**Found by** following the blocker list rather than the code: `blackbox verify capsules/*.bbx` — the natural next command
+after a run leaves two capsules with one run id — was `error: unrecognized arguments`, because the positional was
+`nargs="?"`. On a shell that does not expand patterns (`cmd.exe`, PowerShell) the same habit arrives as a literal path and
+would have been read as a missing file.
+
+**Fix.** The positional is `nargs="*"`, and the command expands a pattern itself with `glob`, so one line works on every
+platform. Every capsule is verified and printed; the exit code is the **worst** outcome of the batch (9 any check failed,
+2 any target unreadable, 0 all verified), which keeps the plan's three codes meaningful when more than one capsule is
+named. A pattern that matches nothing is reported as a warning when another argument matched — a typo must not silently
+shrink the set being verified — and is a `2` on its own.
+
+**Measured** on a real run's two capsules: quoted pattern → `2 capsule(s) verified`, exit 0; shell-expanded paths → the
+same; one tampered capsule in the batch → exit 9 and only that capsule named; one unreadable path → exit 2 with
+`cannot read` and the path.
+
+**Tests.** `tests/test_verify_cli.py` (23, five new).

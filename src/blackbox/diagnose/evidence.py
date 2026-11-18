@@ -152,11 +152,24 @@ def _decode(blob: bytes) -> list[Frame]:
         except Exception:
             break
         data: dict[str, Any] = {}
+        raw_payload = fields.get("payload") or b""
+        # JSON first, then CBOR — the order `cap/export_jsonl._payload_of` uses, and for the same reason: the model
+        # frames (request, chunk, response, error) carry **JSON** payloads, everything else carries CBOR. Trying CBOR
+        # only left `data` empty for exactly the frames a diagnosis is about, so the report's timeline showed
+        # `MODEL_REQUEST  312 B` with no provider, path, model or `partial` flag, and every rule that reads those keys
+        # (interrupted streams, provider errors, capture seams) was reading an empty dict (defect 67).
         try:
-            decoded = cbor.decode_exact(fields.get("payload") or b"")
-            data = decoded if isinstance(decoded, dict) else {}
-        except Exception:
-            data = {}
+            decoded_json = json.loads(raw_payload.decode("utf-8")) if raw_payload.startswith(b"{") else None
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            decoded_json = None
+        if isinstance(decoded_json, dict):
+            data = decoded_json
+        else:
+            try:
+                decoded = cbor.decode_exact(raw_payload)
+                data = decoded if isinstance(decoded, dict) else {}
+            except Exception:
+                data = {}
         out.append(Frame(seq=int(fields.get("seq") or 0), kind=fields["kind"],
                          kind_name=C.KIND_NAMES.get(fields["kind"], f"KIND_{fields['kind']}"),
                          node_slot=int(fields.get("node_slot") or 0), wall_ns=int(fields.get("wall_ns") or 0),
@@ -258,7 +271,17 @@ def _label(evidence: Evidence) -> None:
         e.cannot_know.append("content recording was off: only counts and names exist")
     if e.masks:
         e.observed.append(f"{e.masks} value(s) were masked by the redaction profile before the bytes reached the tape")
-    if e.coverage and e.coverage != "FULL":
+    if e.coverage == "NONE":
+        # The most common real-user confusion this build can produce: the app set its own base URL, the launcher adopted
+        # it rather than overwriting it, and the capsule is therefore empty of the calls the user wanted explained. The
+        # report used to call that "completeness full" and say nothing (defect 65).
+        e.observed.append("no model call was recorded in this capsule, so nothing here describes a request or a response")
+        e.cannot_know.append(
+            "why nothing was recorded: the likeliest causes are an application that sets its own base URL (the launcher "
+            "adopts a base URL you set instead of overwriting it, so the call never reached the recorder) and a client "
+            "the capture seams do not cover. `blackbox run --force-proxy` points every base-URL variable at the "
+            "recorder and names each one it displaces")
+    elif e.coverage and e.coverage != "FULL":
         e.cannot_know.append(f"capture coverage is {e.coverage}: some bytes were not observed at all")
     if e.capture_seams:
         e.observed.append("capture seam(s) that wrote these calls: " + ", ".join(e.capture_seams))

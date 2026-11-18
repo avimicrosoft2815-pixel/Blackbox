@@ -106,6 +106,18 @@ Data lives where you ran the app (`./tape/`, `./capsules/`); `--data-dir` puts i
   violations); power loss is not claimed. See [`docs/guarantees.md`](docs/guarantees.md).
 - **The watchdog is best-effort.** If the proxy dies, the listener comes back in p50 0.76 ms and the measured worst
   outage was 51.9 ms on Linux — with no universal 100 ms guarantee (defect 58).
+- **A wide batch is delayed, and a very wide one is rejected — on purpose, and visibly.** The recorder holds at most
+  512 connections and passes through at most 200 model requests at a time on a host with the usual 1024-descriptor
+  budget, and **both numbers are planned from the descriptor budget the machine actually has** (a macOS shell that starts
+  at 256 gets 96 connections and 64 in flight; a container with less gets less). Past the in-flight ceiling a request
+  **waits** for a slot — nothing is dropped, and the wait is counted in the run's output. Past the connection ceiling, or
+  after 60 s of waiting, the request is **rejected** with `503` and `x-blackbox-error: connection-limit` /
+  `queue-timeout` plus a body line saying what to do; those requests never reach a provider. A run that hit either rule
+  says so in one sentence after its summary, naming the delay and the rejection separately
+  ([`docs/RELEASE-BLOCKERS.md`](docs/RELEASE-BLOCKERS.md) B3, defects 62, 69, 71, 72).
+- **A client that disconnects while queued is noticed late.** The slot is returned and the departure is counted, but the
+  request it abandoned may already have reached the provider, because the recorder cannot see a socket close while it is
+  parked waiting for a slot. Mid-stream disconnects are recorded as such (`client_gone`).
 
 ## Where to read next
 

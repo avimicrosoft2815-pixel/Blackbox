@@ -72,6 +72,7 @@ class RunResult:
     capsules: list[dict[str, Any]] = field(default_factory=list)   # P3B-03: every tape of this run, with its role
     recovery_error: str | None = None
     proxy: dict[str, Any] = field(default_factory=dict)      # P3B-03: url, port, exports, adopted, rebinds
+    captured: dict[str, Any] = field(default_factory=dict)   # B2: what the capsules of this run actually hold
     sdk: dict[str, Any] = field(default_factory=dict)        # P3B-03: the temp .pth, what it is, whether it was used
     hooks: dict[str, Any] = field(default_factory=dict)      # P3B-07: inbox, tape, events, frames, quarantined
 
@@ -412,9 +413,98 @@ def launch(argv: list[str], *, data_dir: str | None = None, stall_ms: int = 5_00
                 result.recovery_error = capsules[0]["error"]
         except Exception as exc:                           # recovery is a report, never an exit-code change
             result.recovery_error = f"{type(exc).__name__}: {exc}"
+    if recover and result.capsules:
+        result.captured = _capture_totals(result.capsules)
     if out:
         print(_summary_line(result), file=out)
+        if recover and result.capsules and result.proxy.get("url") and result.captured.get("model_calls") == 0:
+            # B2 in docs/RELEASE-BLOCKERS.md: the run reports `recovered`, lists capsules, exits 0 — and says nothing
+            # about the fact that none of them holds a request. The commonest cause is not a bug in the recorder: a base
+            # URL the application sets is adopted as an upstream rather than overwritten, so the traffic never arrives.
+            print(_empty_capture_warning(result), file=out)
+        limit = _limit_warning(result)
+        if limit is not None:
+            print(limit, file=out)
     return result
+
+
+def _capture_totals(capsules: list[dict[str, Any]]) -> dict[str, Any]:
+    """Sum what the run's capsules say they captured: model calls, events, and how many capsules could be read.
+
+    Read from each manifest rather than inferred from the proxy's own counters: `ls` would show these capsules to the
+    user tomorrow, and a run report that disagrees with them is the kind of second answer this project refuses.
+    """
+    calls = events = unreadable = 0
+    for capsule in capsules:
+        path = capsule.get("capsule_path")
+        if not path:
+            unreadable += 1
+            continue
+        try:
+            from blackbox.cap.format import read_capsule
+
+            manifest = read_capsule(str(path), max_bytes=32 << 20).manifest
+            calls += int((manifest.get("capture") or {}).get("model_calls") or 0)
+            events += int((manifest.get("counts") or {}).get("events") or 0)
+        except Exception:
+            unreadable += 1
+    return {"model_calls": calls, "events": events, "capsules": len(capsules), "unreadable": unreadable}
+
+
+def _limit_warning(result: RunResult) -> str | None:
+    """Say what happened at the proxy's ceiling, and which of the two things it was (B3, `docs/RELEASE-BLOCKERS.md`).
+
+    A **delay** and a **rejection** are different facts and a user cannot act on them the same way, so they are named
+    separately and never added together: a request that waited for a slot was still answered, and a request the recorder
+    refused never reached a provider and came back as a `503`. The ceilings in the sentence are read from the proxy's own
+    `stats.caps`, so a host that had to shrink them prints the numbers it actually used rather than the documented pair.
+    """
+    stats = (result.proxy or {}).get("stats") or {}
+    caps = stats.get("caps") or {}
+    refused = int(stats.get("refused") or 0)
+    queued = int(stats.get("queued") or 0)
+    if not refused and not queued:
+        return None
+    in_flight = caps.get("max_inflight")
+    connections = caps.get("max_connections")
+    budget = caps.get("fd_budget")
+    parts: list[str] = []
+    if queued:
+        parts.append("delay, nothing lost: {n} request{s} waited for one of the recorder's {cap} in-flight slots, the "
+                     "longest {ms:.0f} ms; every one of them was passed through".format(
+                         n=queued, s="" if queued == 1 else "s", cap=in_flight or "?",
+                         ms=float(stats.get("max_queue_wait_ms") or 0.0)))
+    if refused:
+        reasons = stats.get("refused_reasons") or {}
+        detail = ", ".join(f"{name}: {count}" for name, count in sorted(reasons.items())) or "no reason recorded"
+        parts.append("rejection: the recorder answered {n} request{s} itself instead of passing {them} through "
+                     "({detail}); those never reached a provider, and the client was given a 503 naming the ceiling, "
+                     "so a retry is the action".format(
+                         n=refused, s="" if refused == 1 else "s", them="it" if refused == 1 else "them", detail=detail))
+    if in_flight and connections and budget:
+        parts.append(f"the ceilings are {in_flight} in flight and {connections} connections, derived from this host's "
+                     f"{budget}-descriptor budget rather than set by hand")
+    elif in_flight and connections:
+        parts.append(f"the ceilings are {in_flight} in flight and {connections} connections; this platform publishes no "
+                     f"descriptor budget, so they are policy numbers and the 503 at them is what bounds the process")
+    return "blackbox: " + "; ".join(parts) + "."
+
+
+def _empty_capture_warning(result: RunResult) -> str:
+    count = result.captured.get("capsules", len(result.capsules))
+    # A possible cause, never a finding: this recorder writes the capsule it is given and cannot see the child's network.
+    # A command that talks to no model API produces exactly this line, and so does a call that never left the process
+    # (a mock client, an SDK that ignores the variable). Only the first of the causes below is a recorder problem, and the
+    # sentence is written so a reader can tell them apart instead of being told which one happened.
+    return ("blackbox: this run recorded no model call — the {n} capsule{s} of run {run} {hold} no request and no "
+            "response. That is not a failure by itself: a command that talks to no model API is exactly this. If this "
+            "one was meant to talk to a model API, the base URL is one possible cause (a base URL your environment or "
+            "code sets is adopted as an upstream rather than overwritten, so the traffic never arrives), and `blackbox "
+            "run --force-proxy` points every base-URL variable at the recorder and names each one it displaces. A call "
+            "that never left the process — a mock, or a client that ignores the variable — would look the same from "
+            "here. This line describes the run, not a verdict on it."
+            ).format(n=count, s="" if count == 1 else "s", hold="holds" if count == 1 else "hold",
+                     run=result.run_id)
 
 
 #: `python`, `python3`, `python3.11`, `pythonw` — and nothing else. The first draft ended in `[a-z]*`, which also
