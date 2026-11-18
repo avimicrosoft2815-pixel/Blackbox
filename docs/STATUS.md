@@ -218,6 +218,21 @@ nothing from a proposal is ever executed.
 | Licence decision, release tag, merge to `main` | requires humans | `release.yml` is prepared and **not** triggered; no tag, no `LICENSE`, no licence field. |
 | P10, P12 | blocked (not started by design) | P10 starts only after every v1.0 gate is green; P12 never without instruction. |
 
+## CI as observed, not as hoped (2026-11-18)
+
+| ref | docs | Ubuntu | Windows | macOS |
+|---|---|---|---|---|
+| `main` `f4a9abb` (run 44400312163) | green | 3/3 green | 3/3 green | **3/3 cancelled at 0 steps** — "not acquired by Runner of type hosted". Unmeasured, not passed |
+| branch `9e6a35a` (run 44405724450) | green | 3/3 green | 3/3 green | **3/3 cancelled at 0 steps** — unmeasured |
+| branch `feeb598` (run 44406070968) | green | 3/3 green | 3/3 green except **py3.11**, which failed `test_the_ingest_command_costs_the_agent_tens_of_milliseconds` (84 ms marginal over a bare interpreter, 115 vs 31, against an 80 ms bound) | **3/3 cancelled at 0 steps** — unmeasured |
+
+The Windows py3.11 failure is a **timing margin on a shared runner**, and the evidence for that is the diff rather than a
+shrug: `feeb598` touches `bench/`, `docs/`, `tests/test_forbidden_words.py`'s allowlist and nothing on the ingest path,
+the same job passed the same test at `9e6a35a`, and the same measurement here (Linux, this sandbox) is **21.7 ms** median
+over a bare interpreter. The test was not weakened: it still asserts the marginal bound, and the run was re-triggered
+(`gh run rerun --failed`) so a second Windows sample exists either way. Job logs are not retrievable from this sandbox
+(`gh run view --log-failed` → `EOF`), so the numbers above come from the check-run annotation GitHub stores.
+
 ## The fresh-install journey, measured (2026-11-18)
 
 `bench/journey.py` → `bench/results/2026-11-18-journey.json`: install from a **wheel** into a **new venv** (no

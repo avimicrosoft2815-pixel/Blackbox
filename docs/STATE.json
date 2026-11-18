@@ -372,5 +372,11 @@
       "tests": "tests/test_readme.py (6), tests/test_ls.py (7)",
       "note": "D-061: `pip install -e .` produced no `blackbox` command (no `[project.scripts]`), `ls`/`verify --data` defaulted to `./.blackbox` while `run` writes to the current directory, and the README still described a build with no capsules and no viewer. All three fixed; the read-only commands share `cli/paths.py`; every command in a README console block must exist in the front door, and the limits section is pinned"
     }
-  ]
+  ],
+  "ci_observations": {
+    "main_f4a9abb_run_44400312163": "docs + 3/3 Ubuntu + 3/3 Windows green; all three macOS jobs cancelled at 0 steps (not acquired) - unmeasured, not passed",
+    "branch_9e6a35a_run_44405724450": "docs + 3/3 Ubuntu + 3/3 Windows green; macOS 3/3 cancelled",
+    "branch_feeb598_run_44406070968": "docs + 3/3 Ubuntu green; Windows 2/3 with py3.11 failing test_the_ingest_command_costs_the_agent_tens_of_milliseconds (84 ms marginal vs an 80 ms bound, 115 vs 31 ms); macOS 3/3 cancelled. Investigated: that commit touches bench/docs/a test allowlist only, the same job passed at 9e6a35a, and the same measurement here is 21.7 ms median; the job was re-triggered rather than the test weakened",
+    "job_logs": "not retrievable from this sandbox (gh run view --log-failed returns EOF); numbers come from check-run annotations"
+  }
 }

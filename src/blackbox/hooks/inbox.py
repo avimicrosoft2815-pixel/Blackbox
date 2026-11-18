@@ -29,8 +29,6 @@ import os
 import time
 from typing import Any
 
-from blackbox import constants as C
-
 # The sync and the descriptor go through the platform dispatch like every other file this project writes (C29 needs
 # `O_BINARY` on Windows; C32 keeps `fsync` out of call sites). The import is cheap and the cold-start measurement in
 # `tests/test_hook_inbox.py` includes it, because a hook budget that only holds without the platform layer is not a
@@ -214,6 +212,10 @@ def fold(inbox_dir: str, writer: Any, *, limit: int | None = None) -> FoldResult
     `PostToolUse` able to close the `NODE_OPEN` its `PreToolUse` opened **in an earlier process**: the slots are on
     disk, next to the entries, not in a folder that dies with the command that ran it.
     """
+    # Imported here, not at module scope: `blackbox ingest` is the command a coding agent's hook runs, and its import
+    # cost is the product's (defect 64). `constants` is already on the path the CLI takes, but the front door is not the
+    # place to add an import nobody measured.
+    from blackbox import constants as C
     from blackbox.codec import cbor
     from blackbox.hooks import events as events_mod
 
