@@ -74,9 +74,12 @@ three states rather than two, across seven provider conventions, a stream whose 
 recorded as `unverified` and reported as **cannot tell** — never as complete — and a convention is matched to the *end* of
 the path, so a batch listing is not judged as a stream — defects 68 and 70, `tests/test_stream_termination.py` (30). The
 zero-capture sentence now offers the base URL as **one possible cause** rather than asserting it, naming the alternative (a
-call that never left the process). What remains open is B4, B5, B6 and B8.
+call that never left the process). (4) `blackbox verify` takes **one capsule or many**: a quoted pattern is expanded by
+the command (so the same line works on POSIX, `cmd.exe` and PowerShell), every capsule is verified and printed, the exit
+code is the worst outcome of the batch, and a pattern matching nothing is named rather than silently shrinking the set —
+B8, `tests/test_verify_cli.py` (23, five new). What remains open is B4, B5 and B6.
 
-Suite: **Total: 1237 tests** — 1236 pass here and 1 is skipped on POSIX by name
+Suite: **Total: 1242 tests** — 1241 pass here and 1 is skipped on POSIX by name
 (`test_an_open_view_blocks_the_unlink_only_on_windows`: POSIX permits unlinking a file another fd still holds, so
 the open-view case exists only on Windows). The number is for the dependency set CI installs,
 `.[dev,capture,capture-sdks]`: sixteen tests live behind `anthropic`, so a venv with only `httpx` and `openai`

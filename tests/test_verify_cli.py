@@ -245,3 +245,55 @@ def test_nothing_is_written_by_a_failed_verification(tmp_path):
 def test_capsule_id_derivation_is_the_one_recovery_uses(run_id):
     assert manifest_mod.capsule_id_for(run_id, "0" * 32) == \
         "c_" + __import__("hashlib").blake2b(f"{run_id}|{'0' * 32}".encode()).hexdigest()[:16]
+
+
+def test_two_capsules_named_at_once_are_both_verified(tmp_path, capsys):
+    """B8: `ls` shows two capsules for one run, so the command a user types next names both of them."""
+    first = _capsule(tmp_path)
+    second = _rewrite(first, first.with_name("c_second.bbx"))
+    assert verify_main([str(first), str(second)]) == 0
+    out = capsys.readouterr().out
+    assert str(first) in out and str(second) in out
+    assert "2 capsule(s) verified" in out, out
+
+
+def test_a_quoted_pattern_is_expanded_by_the_command(tmp_path, capsys):
+    """The README's habit, on a platform whose shell does not glob: `verify "capsules/*.bbx"` must work on Windows too."""
+    first = _capsule(tmp_path)
+    _rewrite(first, first.with_name("c_second.bbx"))
+    pattern = str(first.parent / "*.bbx")
+    assert verify_main([pattern]) == 0
+    out = capsys.readouterr().out
+    assert out.count(".bbx") >= 2 and "2 capsule(s) verified" in out, out
+
+
+def test_one_bad_capsule_in_a_batch_is_the_exit_code(tmp_path, capsys):
+    """A batch is not a way to hide a failure: one tampered capsule makes the whole command exit 9 and says which."""
+    good = _capsule(tmp_path)
+    tampered = _rewrite(good, good.with_name("c_tampered.bbx"),
+                        manifest_edit=lambda manifest: manifest.__setitem__("chain_root", "0" * 64))
+    assert verify_main([str(good), str(tampered)]) == manifest_mod.EXIT_DRIFT
+    out = capsys.readouterr().out
+    assert f"blackbox verify: {tampered} failed a check" in out, out
+    assert f"blackbox verify: {good} failed a check" not in out
+
+
+def test_a_pattern_that_matches_nothing_is_named(tmp_path, capsys):
+    """Silence would shrink the set being verified: a pattern with no match is reported and only fails alone."""
+    first = _capsule(tmp_path)
+    missing = str(first.parent / "c_*.nothing")
+    assert verify_main([str(first), missing]) == 0
+    out = capsys.readouterr().out
+    assert f"{missing} matched no capsule and was skipped" in out, out
+    assert verify_main([missing]) == 2
+    assert "nothing matches" in capsys.readouterr().out
+
+
+def test_a_batch_naming_one_unreadable_file_exits_2(tmp_path, capsys):
+    """A path that cannot be read is not a failed check (9) and not a pass (0): the plan's third code, 2."""
+    first = _capsule(tmp_path)
+    absent = str(first.parent / "c_absent.bbx")
+    assert verify_main([str(first), absent]) == 2
+    out = capsys.readouterr().out
+    assert "cannot read" in out and absent in out, out
+    assert "could not be read" in out, out

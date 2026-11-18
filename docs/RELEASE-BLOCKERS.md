@@ -7,8 +7,9 @@ would measure it.
 
 Order is by what a real user hits first, not by ticket number. **B1 was fixed on this branch** (defects 66 and 67) after
 the list was first written, then **B2 and B3** (defects 68 and 69); the ids are kept stable so a comment, a defect entry
-or `docs/STATE.json` that names "B4" still points at the same thing. What remains open is **B4, B5, B6 and B8** — two of
-which only the release machine can settle (B6) and one of which is the owner's call on graph edges (B4).
+or `docs/STATE.json` that names "B4" still points at the same thing. What remains open is **B4, B5 and B6** — two of
+which only the release machine can settle (B6, and the macOS cells it cannot acquire) and one of which is the owner's call
+on graph edges (B4). B8 was closed after the first review round, when `verify` learned to take many capsules.
 
 ---
 
@@ -304,11 +305,28 @@ A capsule outside the newest run is never preferred, so "the newest run" still d
 is now about content rather than mtime. Test: `test_a_directory_with_a_run_s_two_capsules_picks_the_one_with_the_model_calls`
 (the helper tape is written last, so mtime alone would pick it).
 
-## B8 — `verify` takes exactly one capsule, and the README's habit is a glob
+## B8 — `verify` took exactly one capsule, and the README's habit is a glob — FIXED
 
-`blackbox verify capsules/*.bbx` is `error: unrecognized arguments`. The README shows a single path, so this is a paper
-cut rather than a lie, but it is the command a user types after `ls` shows two capsules. Either accept many capsules or
-say so in `--help`.
+`blackbox verify capsules/*.bbx` was `error: unrecognized arguments` (a shell that expands the glob) and, on a shell that
+does not expand it, a path that does not exist. The README shows a single path, so this was a paper cut rather than a lie,
+but it is the command a user types after `ls` shows two capsules.
+
+**Fixed.** The positional is `nargs="*"` and the command expands a pattern itself, so the quoted form works on POSIX,
+Windows and PowerShell alike. Every capsule is verified and printed; the exit code is the worst outcome of the batch
+(**9** any check failed, **2** any target unreadable, **0** all verified), and a pattern that matches nothing is named
+rather than silently shrinking the set. Measured on a real run's two capsules:
+
+```
+$ blackbox verify '/tmp/b8/capsules/*.bbx'
+...
+blackbox verify: 2 capsule(s) verified; 1 check(s) declared, not checkable from a capsule      # exit 0
+$ blackbox verify /tmp/b8/capsules/*.bbx                                                       # shell-expanded, same
+blackbox verify: 2 capsule(s) verified; 1 check(s) declared, not checkable from a capsule      # exit 0
+```
+
+Tests: `tests/test_verify_cli.py` (23, five new) — two capsules named at once, a quoted pattern, one tampered capsule in a
+batch making the exit code 9 and naming only that one, a pattern that matches nothing (a warning beside a good file, and
+exit 2 alone), and an unreadable path in a batch exiting 2. Defect 74 in `docs/defects.md`.
 
 ---
 
@@ -322,6 +340,7 @@ say so in `--help`.
 | 450 concurrent requests (descriptor ceiling) | accept fails, in-flight probe **4 s timeout** | all served, probe **2 ms** | `tests/test_proxy_limits.py` (4) |
 | an empty capsule's manifest | `coverage: FULL`, completeness `full`, silence | `coverage: NONE`, `model_calls: 0`, an observed finding + the `--force-proxy` hint | `tests/test_diagnose.py`, `tests/test_capsule.py` |
 | `redaction.content_mode` | `full` (a lie) for a capsule whose frames say `hash` | `hash` / `mixed` / `unknown`, derived from the frames | same |
+| `verify` with more than one capsule (B8) | `error: unrecognized arguments` | one or many, quoted pattern or shell-expanded, worst exit code wins | `tests/test_verify_cli.py` (+5) |
 
 Defect entries: `docs/defects.md` 64 (hook path imports), 65 (a manifest that described a recording it had not made),
 62 (the descriptor ceiling, still open for the policy half), 61 and 63 (the previous branch's teardown and probe fixes).

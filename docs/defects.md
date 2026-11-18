@@ -1196,3 +1196,22 @@ the abandoned request may already have reached the provider. That is now written
 
 **Tests.** `tests/test_proxy_backpressure.py` (14), including the mid-stream case, which needed an origin that streams
 slowly (`GatedOrigin(stream=True)`: chunked SSE, one chunk every 50 ms) so a disconnect can land inside the response.
+
+## Defect 74 — the verifier refused the command a user types after `ls` shows two capsules (2026-11-16, B8)
+
+**Found by** following the blocker list rather than the code: `blackbox verify capsules/*.bbx` — the natural next command
+after a run leaves two capsules with one run id — was `error: unrecognized arguments`, because the positional was
+`nargs="?"`. On a shell that does not expand patterns (`cmd.exe`, PowerShell) the same habit arrives as a literal path and
+would have been read as a missing file.
+
+**Fix.** The positional is `nargs="*"`, and the command expands a pattern itself with `glob`, so one line works on every
+platform. Every capsule is verified and printed; the exit code is the **worst** outcome of the batch (9 any check failed,
+2 any target unreadable, 0 all verified), which keeps the plan's three codes meaningful when more than one capsule is
+named. A pattern that matches nothing is reported as a warning when another argument matched — a typo must not silently
+shrink the set being verified — and is a `2` on its own.
+
+**Measured** on a real run's two capsules: quoted pattern → `2 capsule(s) verified`, exit 0; shell-expanded paths → the
+same; one tampered capsule in the batch → exit 9 and only that capsule named; one unreadable path → exit 2 with
+`cannot read` and the path.
+
+**Tests.** `tests/test_verify_cli.py` (23, five new).

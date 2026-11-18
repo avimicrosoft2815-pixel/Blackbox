@@ -1,8 +1,14 @@
 """`blackbox verify` — one command, three ways to name a target, five checks (P4-16).
 
     blackbox verify data/capsules/c_<id>.bbx
+    blackbox verify capsules/*.bbx                  # every capsule, which is what `ls` shows
     blackbox verify --run r_0123456789abcdef --data DIR
     blackbox verify --writer <uuid> --data DIR
+
+The positional form takes **one or more** paths and expands a quoted pattern itself (`glob`), because the shell expands
+`*.bbx` on POSIX and neither `cmd.exe` nor PowerShell does: `verify "capsules/*.bbx"` is the same command on all three.
+Each capsule is verified and printed; the exit code is the worst outcome — **9** if any check failed, else **2** if any
+target could not be read, else **0**.
 
 Exit codes follow the plan: **0** every check passed, **9** a check failed (`BBX-E412` for a derived part, the capsule's
 own integrity root for a raw one), **2** the target cannot be read or does not exist. A check the capsule cannot answer —
@@ -35,14 +41,30 @@ def _capsules_in(data_dir: str) -> list[str]:
     return sorted(glob.glob(os.path.join(data_dir, "capsules", "*.bbx")))
 
 
-def _resolve(args: argparse.Namespace) -> tuple[list[str], str | None]:
-    """The capsule paths to verify, or an error string. `--run`/`--writer` search `capsules/` and explain a miss."""
+def _resolve(args: argparse.Namespace) -> tuple[list[str], str | None, list[str]]:
+    """The capsule paths to verify, an error string, and any pattern that matched nothing.
+
+    `--run`/`--writer` search `capsules/`; a positional may be a path or a pattern. A pattern that matches nothing is not
+    an error when another argument matched — it is reported, because a typo in one of several names would otherwise
+    silently shrink the set being verified.
+    """
     if args.capsule:
-        return [args.capsule], None
+        paths: list[str] = []
+        empty: list[str] = []
+        for given in args.capsule:
+            expanded = sorted(glob.glob(given)) if any(ch in given for ch in "*?[") else [given]
+            if not expanded:
+                empty.append(given)
+            for path in expanded:
+                if path not in paths:
+                    paths.append(path)
+        if not paths:
+            return [], f"nothing matches {', '.join(empty) or 'the given path'}", empty
+        return paths, None, empty
     data_dir = default_data_dir(args.data)
     paths = _capsules_in(data_dir)
     if not paths:
-        return [], f"no capsules under {os.path.join(data_dir, 'capsules')}"
+        return [], f"no capsules under {os.path.join(data_dir, 'capsules')}", []
     wanted: list[str] = []
     mismatch: list[str] = []
     for path in paths:
@@ -67,10 +89,10 @@ def _resolve(args: argparse.Namespace) -> tuple[list[str], str | None]:
     if args.writer and not wanted:
         detail = ("; ".join(mismatch) if mismatch else
                   f"no capsule under {data_dir} derives from writer {args.writer}")
-        return [], detail
+        return [], detail, []
     if not wanted:
-        return [], f"no capsule under {data_dir} names run {args.run}"
-    return wanted, None
+        return [], f"no capsule under {data_dir} names run {args.run}", []
+    return wanted, None, []
 
 
 def _print(path: str, report: dict[str, Any]) -> None:
@@ -106,7 +128,8 @@ def main(argv: list[str] | None = None) -> int:
         description="Verify a capsule against its own bytes: integrity root, chain root, derived parts, capture seam and "
                     "links summary. `capture_vantage` is printed as declared: a capsule carries no meta page, so it "
                     "cannot be recomputed and is not counted as a pass. Exit 0 verified, 9 a check failed, 2 unreadable.")
-    ap.add_argument("capsule", nargs="?", help="path to a .bbx capsule")
+    ap.add_argument("capsule", nargs="*", help="one or more .bbx capsules, or a pattern such as 'capsules/*.bbx' (quoted "
+                                               "on POSIX; expanded here so Windows behaves the same)")
     ap.add_argument("--run", help="verify every capsule of this run id under --data")
     ap.add_argument("--writer", help="verify the capsule the given writer uuid derives (checked, not looked up)")
     ap.add_argument("--data", help="data directory to search with --run/--writer (default $BLACKBOX_DATA_DIR, "
@@ -116,10 +139,12 @@ def main(argv: list[str] | None = None) -> int:
     if not args.capsule and not (args.run or args.writer):
         ap.error("name a capsule, or pass --run/--writer with --data")
 
-    paths, error = _resolve(args)
+    paths, error, empty = _resolve(args)
     if error:
         print(f"blackbox verify: {error}", flush=True)
         return 2
+    for pattern in empty:
+        print(f"blackbox verify: warning: {pattern} matched no capsule and was skipped", flush=True)
     bodies: list[dict[str, Any]] = []
     unreadable = 0
     for path in paths:
