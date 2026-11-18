@@ -55,6 +55,11 @@ class FailOpenReceiver(Receiver):
         self.failures: list[str] = []
         self._carries_call_id = _accepts(inner.open_call, "call_id")
         self._carries_node_slot = _accepts(inner.open_call, "node_slot")
+        # The ending fields are newer than the wrapper's first contract, so a receiver written before them must keep
+        # working: the wrapper asks the signature which of the three it can take instead of closing with a `TypeError`
+        # that fail-open would then count as a recorder failure (defect 80).
+        self._close_accepts = {name for name in ("partial", "ending", "end_reason")
+                               if _accepts(inner.close_call, name)}
 
     # ── state the seams and the tests read through the wrapper ───────────────
     @property
@@ -92,9 +97,12 @@ class FailOpenReceiver(Receiver):
             self._note("receive", exc)
 
     def close_call(self, call: ModelCall, *, status: int = 0, total_ms: float | None = None,
-                   error: str | None = None) -> None:
+                   error: str | None = None, partial: bool | None = None, ending: str | None = None,
+                   end_reason: str | None = None) -> None:
+        hints: dict[str, Any] = {"partial": partial, "ending": ending, "end_reason": end_reason}
+        hints = {key: value for key, value in hints.items() if key in self._close_accepts}
         try:
-            self.inner.close_call(call, status=status, total_ms=total_ms, error=error)
+            self.inner.close_call(call, status=status, total_ms=total_ms, error=error, **hints)
         except Exception as exc:
             self._note("close_call", exc)
 

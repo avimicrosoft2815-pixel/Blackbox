@@ -21,6 +21,7 @@ What the edge may then say, and what these tests hold it to:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import http.client
 import json
 import threading
@@ -359,3 +360,64 @@ def test_the_two_writers_on_one_tape_have_disjoint_slot_bands() -> None:
     source = Path(__file__).resolve().parents[1] / "src" / "blackbox" / "hooks" / "inbox.py"
     assert "NODE_SLOT_HOOK_MAX" in source.read_text(), (
         "the hook folder must bound itself at the top of its band, not at 0xFFFF")
+
+
+# ── defect 77: a complete body must not be recorded as a cut stream ────────────────────────────────────────────────
+class _Truncating:
+    """An upstream that promises 100 bytes and sends 10, then closes: the shape a cut response actually has."""
+
+    def __init__(self) -> None:
+        self.port = 0
+        self._server: asyncio.AbstractServer | None = None
+
+    async def start(self) -> _Truncating:
+        self._server = await asyncio.start_server(self._handle, "127.0.0.1", 0)
+        self.port = int((self._server.sockets or ())[0].getsockname()[1])
+        return self
+
+    async def close(self) -> None:
+        if self._server is not None:
+            self._server.close()
+            self._server = None
+
+    async def _handle(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        with contextlib.suppress(Exception):
+            await reader.readuntil(b"\r\n\r\n")
+            writer.write(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 100\r\n\r\n")
+            writer.write(b'{"partial')
+            await writer.drain()
+            writer.close()
+
+
+def _responses(frames: list[dict[str, Any]], kind: int = C.KIND_MODEL_RESPONSE) -> list[dict[str, Any]]:
+    """The call's closing frame as a dict: a `MODEL_RESPONSE`, or a `MODEL_ERROR` when the writer recorded a failure."""
+    return [json.loads(frame["payload"]) for frame in frames if frame["kind"] == kind]
+
+
+def test_a_body_that_ended_inside_its_content_length_is_not_a_partial_call(tmp_path: Path) -> None:
+    """Defect 77: `partial: True` on every proxied call made `diagnose` report a cut stream for a complete 404."""
+    with SpanBench(tmp_path) as bench:
+        assert _call(bench.port, "call-complete") == 200
+    responses = _responses(bench.frames())
+    assert len(responses) == 1, responses
+    assert responses[0]["partial"] is False, responses[0]
+    assert responses[0]["ending"] == "terminated", responses[0]
+    assert responses[0]["error"] is None, responses[0]
+
+
+def test_a_body_that_stopped_before_its_content_length_is_partial_and_unverified(tmp_path: Path) -> None:
+    """The other direction: a genuinely short body must not be recorded as complete either."""
+    class Truncated(SpanBench):
+        def __init__(self, tmp_path: Path) -> None:
+            super().__init__(tmp_path)
+            self.origin = _Truncating()                    # type: ignore[assignment]
+
+    # The client sees the cut — that is the point of the case — and what it raises is not what is under test here.
+    with Truncated(tmp_path) as bench, contextlib.suppress(Exception):
+        _call(bench.port, "call-cut", timeout=20)
+    responses = _responses(bench.frames(), C.KIND_MODEL_ERROR)
+    assert len(responses) == 1, responses
+    assert responses[0]["partial"] is True, responses[0]
+    assert responses[0]["ending"] == "unverified", responses[0]
+    assert responses[0]["end_reason"], responses[0]
+    assert responses[0]["error"], "a cut body has to be recorded as an error, not as a quiet short answer"

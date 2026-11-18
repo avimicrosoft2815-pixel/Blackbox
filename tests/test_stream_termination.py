@@ -46,7 +46,10 @@ class _Recorder:
         self.chunks.append(chunk)
 
     def close_call(self, call: ModelCall, **kwargs: object) -> None:
-        self.closed = {"partial": call.partial, "end_reason": call.end_reason, **kwargs}
+        # The kwargs are what the tee *told* the receiver, so a key it did not fill in must not overwrite the call's own
+        # value with `None` — `None` means "nothing to add", and the assertion below is about the call either way.
+        told = {key: value for key, value in kwargs.items() if value is not None}
+        self.closed = {"partial": call.partial, "end_reason": call.end_reason, **told}
 
 
 def _sync_stream(chunks: list[bytes]) -> object:
@@ -90,6 +93,37 @@ def test_an_openai_stream_with_done_is_complete() -> None:
     assert call.ending == "terminated" and call.ending_provider == "openai"
     assert call.end_reason is None
     assert recorder.closed["partial"] is False
+
+
+def test_a_non_streaming_json_body_is_not_a_stream_with_a_missing_terminator() -> None:
+    """Defect 78: a plain JSON response was read against the SSE table, so every ordinary call looked cut.
+
+    Measured first in the fresh-install journey: `client.chat.completions.create(...)` without `stream=True` produced a
+    `MODEL_RESPONSE` with `partial: true` and the reason "the stream ended without the provider terminator ([DONE])",
+    and `blackbox diagnose` reported, as `observed` and high-confidence, that the stream had ended before the provider
+    finished it — about a body that arrived complete under its own `content-length`.
+    """
+    call = ModelCall(provider="127.0.0.1", path="/v1/chat/completions", stream=False)
+    recorder = _Recorder()
+    body = [b'{"id":"chatcmpl-1","choices":[{"message":{"content":"hi"}}]}']
+    tee = wrap_stream(_sync_stream(body), recorder, call, 200, 0)   # type: ignore[arg-type]
+    for _ in tee:
+        pass
+    assert call.partial is False, "a complete JSON body was recorded as a partial call"
+    assert call.ending is None, "a call that was not a stream has no stream ending to claim"
+    assert call.end_reason is None
+    assert recorder.closed["partial"] is False
+
+
+def test_the_same_bytes_are_still_judged_as_a_stream_when_the_call_says_so() -> None:
+    """The rule is about the call, not about the shape of the bytes: an SSE call keeps the three-valued answer."""
+    call = ModelCall(provider="127.0.0.1", path="/v1/chat/completions", stream=True)
+    recorder = _Recorder()
+    tee = wrap_stream(_sync_stream([b'data: {"choices":[]}\n\n']), recorder, call, 200, 0)   # type: ignore[arg-type]
+    for _ in tee:
+        pass
+    assert call.partial is True and call.ending == "unterminated"
+    assert call.end_reason is not None and "[DONE]" in call.end_reason
 
 
 def test_a_marker_split_across_two_chunks_is_still_seen() -> None:

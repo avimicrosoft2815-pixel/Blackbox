@@ -1253,3 +1253,72 @@ on.
 **Measured** by `tests/test_proxy_spans.py::test_a_span_wraps_the_call_and_every_frame_carries_its_slot` (frame order and
 one slot per frame) and `::test_the_proxy_counts_the_spans_it_opened` (`spans: 1`, `spans_capped: 0`, no record errors),
 both read from a real tape written by a real proxy with a real upstream.
+
+## Defect 77 — every proxied call was recorded as a cut stream (2026-11-18, found by the fresh-install journey)
+
+**Found by** running the user journey: a proxied 404 arrived complete under its `content-length`, and `blackbox diagnose`
+reported — as `observed`, confidence high — *"the response stream at node N ended before the provider finished it"*.
+
+**Cause.** `ProxyServer._open_call` passed `partial=True` for every call it opened, unconditionally, and nothing ever
+cleared it. `partial` is the flag that says "the writer saw part of this call"; on a body read to its own framing it is
+false, and the proxy is one of the few writers that *can* know: `_relay_body` already returned whether the body ended
+inside its `content-length` or at a chunked terminator (it used the answer only to decide whether the upstream socket
+could be pooled).
+
+**Fix.** The proxy closes each call with what it observed: a body that ended inside its framing is
+`partial: False, ending: "terminated"`; a body that ended at the connection's close — no length, no chunked terminator —
+is `partial: True, ending: "unverified"` with a reason that says the question is unanswered rather than answered; a
+client disconnect and an upstream cut each carry their own reason. `Receiver.close_call` grew the three optional fields,
+and `FailOpenReceiver` probes the inner receiver's signature so a receiver written before them still works (defect 80).
+
+**Measured** by `tests/test_proxy_spans.py::test_a_body_that_ended_inside_its_content_length_is_not_a_partial_call` and
+`::test_a_body_that_stopped_before_its_content_length_is_partial_and_unverified` (a real proxy, a real upstream that
+promises 100 bytes and sends 10), and by the journey report, which lost the false finding.
+
+## Defect 78 — a plain JSON response was judged against the SSE terminator table (2026-11-18, found by the journey)
+
+**Found by** the same run, one layer down: the **app's** capsule, from the SDK seam, recorded `partial: true` and
+`end_reason: "the stream ended without the provider terminator ([DONE])"` for a `chat.completions.create(...)` that was
+not a stream at all — so the report said a stream had been cut that never existed.
+
+**Cause.** `TeeStream._finish` ran `TerminatorWatch` — the SSE table — over the body of *every* response, because the
+tee wraps `response.stream` whether or not the call asked for a stream. A JSON body has no `data: [DONE]`, so the watch
+concluded the terminator never came.
+
+**Fix.** The rule is about the call, not the bytes: `call.stream` (which the seam sets from the response's
+`content-type: text/event-stream`) decides. A non-streaming body that reached the end of its iteration ended inside its
+framing — httpx raises rather than returning a short read of one — so it is recorded `partial: False, ending: None`, which
+is what "this was not a stream" means in the format. A streaming call keeps the three-valued answer unchanged.
+
+**Measured** by `tests/test_stream_termination.py::test_a_non_streaming_json_body_is_not_a_stream_with_a_missing_terminator`
+and `::test_the_same_bytes_are_still_judged_as_a_stream_when_the_call_says_so`, and by a real `openai` 3.51.0 call in the
+journey.
+
+## Defect 79 — the report did not mention the failure the user had (2026-11-18, found by the journey)
+
+**Found by** reading the journey's incident report: the app had crashed on a 404 with the exception text on the tape, and
+the report's findings were about *identifiers* — nothing said the provider had answered 404, and nothing said the step
+had ended with an error. The evidence table showed `status=404` and `outcome=error`; no rule turned either into a finding.
+
+**Fix.** Two producers in `diagnose/findings.py`: `provider-status-N` (`observed`, high) when a terminal `MODEL_RESPONSE`
+carries a status ≥ 400 — with the model named, the provider's-body caveat, and three alternatives — and
+`node-outcome-error-N` (`observed`, high) when a node's own `NODE_CLOSE` says `outcome: error`, quoting the recorded
+error text. Their checks do not advise a blind retry: a 4xx repeated unchanged is refused unchanged, and a failed node's
+cause is the finding above it, not a second attempt.
+
+**Measured** by `tests/test_diagnose.py::test_a_provider_error_status_is_an_observed_finding`,
+`::test_a_node_that_closed_with_an_error_is_an_observed_finding`, and the journey, where the two reports now name the 404
+and the failed step — and where the *post-repair* run's report names neither.
+
+## Defect 80 — a receiver written before the ending fields failed open into a `TypeError` (2026-11-18, same increment)
+
+**Found by** the fail-open suite after defect 77's change: `FailOpenReceiver` passed `partial`/`ending`/`end_reason` to
+any inner receiver, so one with the older `close_call` signature raised `TypeError`, which the wrapper counted as a
+recorder failure while the application carried on — a call that closed with no ending recorded and a blame line pointing
+at the recorder.
+
+**Fix.** The wrapper asks the signature which of the three names the inner receiver takes and passes only those, the same
+capability probe it already used for `call_id` and `node_slot` on `open_call`.
+
+**Measured** by `tests/test_capture_failopen.py` (`test_a_receiver_written_before_d053_still_records_its_calls` and the
+hostile-receiver cases, which now report no failures for a receiver that raises somewhere else).

@@ -182,7 +182,16 @@ def tee_stream_class(module_name: str = "httpx") -> Any:
             if self.done:
                 return
             self.done = True
-            if completed and error is None:
+            if completed and error is None and not _is_stream(self.call):
+                # A body that is not an event stream has no provider terminator to look for, and httpx raises rather
+                # than handing back a short read of one: reaching the end of the iteration means the body ended inside
+                # its own framing. Looking for `[DONE]` in a JSON body made every ordinary call read as a cut stream
+                # (defect 78) — the same mistake the proxy made in the other direction (defect 77).
+                self.call.ending = None
+                self.call.ending_provider = None
+                self.call.end_reason = None
+                self.call.partial = False
+            elif completed and error is None:
                 self.call.ending = self.watch.ending()
                 self.call.ending_provider = self.watch.provider
                 missing = self.watch.reason()
@@ -254,7 +263,16 @@ def async_tee_stream_class(module_name: str = "httpx") -> Any:
             if self.done:
                 return
             self.done = True
-            if completed and error is None:
+            if completed and error is None and not _is_stream(self.call):
+                # A body that is not an event stream has no provider terminator to look for, and httpx raises rather
+                # than handing back a short read of one: reaching the end of the iteration means the body ended inside
+                # its own framing. Looking for `[DONE]` in a JSON body made every ordinary call read as a cut stream
+                # (defect 78) — the same mistake the proxy made in the other direction (defect 77).
+                self.call.ending = None
+                self.call.ending_provider = None
+                self.call.end_reason = None
+                self.call.partial = False
+            elif completed and error is None:
                 self.call.ending = self.watch.ending()
                 self.call.ending_provider = self.watch.provider
                 missing = self.watch.reason()
@@ -279,6 +297,12 @@ def async_tee_stream_class(module_name: str = "httpx") -> Any:
 
     _ASYNC_TEE_STREAMS[module_name] = AsyncTeeStream
     return AsyncTeeStream
+
+
+def _is_stream(call: Any) -> bool:
+    """Was this call a stream? The seam says so from the response's `content-type`; `wrap_stream` callers that do not
+    say are treated as streams, which is the conservative reading (a terminator is looked for rather than assumed)."""
+    return bool(getattr(call, "stream", True))
 
 
 def wrap_stream(stream: Any, recorder: Receiver, call: ModelCall, status: int, started: int) -> Any:

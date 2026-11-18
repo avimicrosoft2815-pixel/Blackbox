@@ -317,8 +317,10 @@ class SinkRecorder(Receiver):
         self._forward("on_chunk", call, chunk, first_byte_ms=first_byte_ms)
 
     def close_call(self, call: ModelCall, *, status: int = 0, total_ms: float | None = None,
-                   error: str | None = None) -> None:
-        self._recorder.close_call(call, status=status, total_ms=total_ms, error=error)
+                   error: str | None = None, partial: bool | None = None, ending: str | None = None,
+                   end_reason: str | None = None) -> None:
+        self._recorder.close_call(call, status=status, total_ms=total_ms, error=error, partial=partial, ending=ending,
+                                  end_reason=end_reason)
         self._forward("on_close", call)
 
     def _forward(self, attr: str, *args: Any, **kwargs: Any) -> bool:

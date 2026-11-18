@@ -637,17 +637,29 @@ class ProxyServer:
             self.stats.client_gone += 1
             self._close_call(call, status=0, error=disconnects.classify(
                 closed_first="client", status=0, client_received_bytes=gone.tally.to_client,
-                proxy_received_bytes=gone.tally.from_upstream).as_error())
+                proxy_received_bytes=gone.tally.from_upstream).as_error(),
+                partial=True, ending="unverified",
+                end_reason="the client disconnected while the body was still arriving")
             return False, False
         except (ConnectionError, OSError, asyncio.IncompleteReadError):
             self.stats.upstream_errors += 1
             self.stats.upstream_gone += 1
             self._close_call(call, status=status, error=disconnects.classify(
                 closed_first="upstream", status=status, client_received_bytes=tally.to_client,
-                proxy_received_bytes=tally.from_upstream).as_error())
+                proxy_received_bytes=tally.from_upstream).as_error(),
+                partial=True, ending="unverified",
+                end_reason="the upstream connection ended before the body's own framing did")
             return False, False
         self.stats.streamed += 1 if streamed else 0
-        self._close_call(call, status=status)
+        if complete:
+            self._close_call(call, status=status, partial=False, ending="terminated")
+        else:
+            # A body with no `content-length` and no chunked framing ends when the connection does. That is a legitimate
+            # HTTP/1.0 shape, and it is also what a cut looks like: nothing in the bytes says which happened, so the
+            # frame says `unverified` and the reason names the ambiguity instead of resolving it.
+            self._close_call(call, status=status, partial=True, ending="unverified",
+                             end_reason="the body ended at the connection's close: no length, no chunked terminator, "
+                                        "so whether it was complete is not recorded")
         return keep, upstream_keeps and complete
 
     # -- plumbing ------------------------------------------------------------------------------------------------
@@ -958,7 +970,7 @@ class ProxyServer:
                 request={"method": request.method, "path": target_path,
                          "headers": {k.lower(): v for k, v in request.headers if not is_ours(k)},
                          "body_sha256": hashlib.sha256(body or b"").hexdigest()},
-                stream=stream, partial=True, linked_run=linked_run, call_id=call_id, node_slot=node_slot)
+                stream=stream, partial=False, linked_run=linked_run, call_id=call_id, node_slot=node_slot)
         except Exception:
             self.stats.record_errors += 1
             return None
@@ -971,11 +983,21 @@ class ProxyServer:
         except Exception:
             self.stats.record_errors += 1
 
-    def _close_call(self, call: Any, *, status: int, error: str | None = None) -> None:
+    def _close_call(self, call: Any, *, status: int, error: str | None = None, partial: bool = False,
+                    ending: str | None = None, end_reason: str | None = None) -> None:
+        """Close a proxied call, saying what this writer could see about the body's ending.
+
+        The proxy reads the response's framing itself, so it has an answer a seam cannot always give: a body that ended
+        inside its `content-length`, or at a chunked terminator, *finished where the provider said it would*
+        (`partial: False`, `ending: "terminated"`). Before this, every proxied call was recorded `partial: True`, and
+        `diagnose` reported "the response stream ended before the provider finished it" for a 404 that arrived complete
+        (defect 77).
+        """
         if call is None or self.receiver is None:
             return
         try:
-            self.receiver.close_call(call, status=status, error=error)
+            self.receiver.close_call(call, status=status, error=error, partial=partial, ending=ending,
+                                     end_reason=end_reason)
         except Exception:
             self.stats.record_errors += 1
         slot = getattr(call, "node_slot", None)

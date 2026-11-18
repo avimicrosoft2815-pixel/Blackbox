@@ -81,7 +81,7 @@ the command (so the same line works on POSIX, `cmd.exe` and PowerShell), every c
 code is the worst outcome of the batch, and a pattern matching nothing is named rather than silently shrinking the set —
 B8, `tests/test_verify_cli.py` (23, five new). What remains open is B4, B5 and B6.
 
-Suite: **Total: 1251 tests** — 1250 pass here and 1 is skipped on POSIX by name
+Suite: **Total: 1258 tests** — 1257 pass here and 1 is skipped on POSIX by name
 (`test_an_open_view_blocks_the_unlink_only_on_windows`: POSIX permits unlinking a file another fd still holds, so
 the open-view case exists only on Windows). The number is for the dependency set CI installs,
 `.[dev,capture,capture-sdks]`: sixteen tests live behind `anthropic`, so a venv with only `httpx` and `openai`
@@ -217,6 +217,31 @@ nothing from a proposal is ever executed.
 | Real-provider capture (day-14 rule) | not testable here | No provider keys in the environment; the gate is the mock provider, as the plan allows. |
 | Licence decision, release tag, merge to `main` | requires humans | `release.yml` is prepared and **not** triggered; no tag, no `LICENSE`, no licence field. |
 | P10, P12 | blocked (not started by design) | P10 starts only after every v1.0 gate is green; P12 never without instruction. |
+
+## The fresh-install journey, measured (2026-11-18)
+
+`bench/journey.py` → `bench/results/2026-11-18-journey.json`: install from a **wheel** into a **new venv** (no
+`PYTHONPATH`, no editable install), attach a real `openai` 3.51.0 app under `blackbox run`, capture, `ls`, `verify`,
+`diagnose`, `view`, then a repair proposal (approval token → apply → `verify --test`) and a second run afterwards. The
+provider is a **loopback origin** standing in for OpenAI — stated in the artefact — and the app's mistake is a model name
+the origin refuses with a 404. Every row below is a measured exit code, not an intention:
+
+| step | result |
+|---|---|
+| install from the wheel in a fresh venv | works (`blackbox-recorder`, `openai`, `httpx`, `anthropic` versions recorded) |
+| attach + capture under `blackbox run` | works: the child reached the origin through the launcher, crashed on the 404, exit 1, two capsules |
+| `ls` / `verify` | works: both capsules listed, `verify` exit 0, `capture_vantage` printed as declared-not-checkable |
+| `diagnose` | works, and now says **the failure the user had**: "the provider answered HTTP 404 for the call at node 16385 (model gpt-4o-mni)" on the proxy's capsule and "the step 'support-agent' ended with an error" on the app's (defect 79) |
+| `view` | works: 57 KB single page, no request of any kind (the page is checked for `http://` in the journey *and* by the viewer suite) |
+| repair preview → apply → verify | works: preview printed a token, apply wrote the file and saved a backup, `verify --test` reran the app and exited 0 |
+| a second run after the fix | works: exit 0, both calls succeed, and its diagnosis names no 404 |
+
+What this run **found and fixed** — three defects no unit test was going to produce: 77 (the proxy marked every call
+`partial`, so `diagnose` reported a cut stream for a complete 404), 78 (the seam judged a plain JSON body against the SSE
+terminator table, so a non-streaming call looked cut), and 79 (the report did not mention a 404 status or a node that
+closed with an error). What it does **not** show: `repair verify --test` runs in *your* environment, not the launcher's,
+so a test that needs the variables `blackbox run` exports has to be given them (the journey sets `OPENAI_BASE_URL` for
+that step and says so); the repair is a human-written proposal, not a model's; and no real provider key is used.
 
 ## Measurements
 

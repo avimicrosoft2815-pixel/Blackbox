@@ -87,7 +87,15 @@ class Receiver:
         raise NotImplementedError
 
     def close_call(self, call: ModelCall, *, status: int = 0, total_ms: float | None = None,
-                   error: str | None = None) -> None:
+                   error: str | None = None, partial: bool | None = None, ending: str | None = None,
+                   end_reason: str | None = None) -> None:
+        """Close a call, with what the caller *observed* about its ending.
+
+        The three optional fields exist because a writer that can see the framing has to be able to say so: a proxy
+        that read a whole `content-length` body knows the body ended where the provider said it would, and recording it
+        as `partial` made `diagnose` report a cut stream for a call that arrived complete (defect 77). `None` means "this
+        caller has nothing to add", never "no".
+        """
         raise NotImplementedError
 
 
@@ -115,10 +123,17 @@ class Recorder(Receiver):
             call.first_byte_ms = first_byte_ms
 
     def close_call(self, call: ModelCall, *, status: int = 0, total_ms: float | None = None,
-                   error: str | None = None) -> None:
+                   error: str | None = None, partial: bool | None = None, ending: str | None = None,
+                   end_reason: str | None = None) -> None:
         call.status = status
         call.total_ms = total_ms
         call.error = error
+        if partial is not None:
+            call.partial = partial
+        if ending is not None:
+            call.ending = ending
+        if end_reason is not None:
+            call.end_reason = end_reason
         call.response_fp = fingerprint(f"{call.chunks}:{call.bytes_received}:{status}:{error or ''}")
 
 
