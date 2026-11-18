@@ -55,4 +55,25 @@ def raise_fd_limit(target: int = DEFAULT_TARGET) -> tuple[int, int] | None:
     return None
 
 
-__all__ = ["DEFAULT_TARGET", "raise_fd_limit"]
+def fd_budget() -> int | None:
+    """The descriptors this process may hold *right now*, or `None` where the platform has no such budget.
+
+    Read, not assumed, and read **after** `raise_fd_limit()` has had its chance: the caps in `proxy/server.py` are derived
+    from this number, so a host that refused the raise gets smaller caps instead of a documented 808 that silently exceeds
+    the 256 a macOS shell starts with. `None` is the honest answer for Windows (no `RLIMIT_NOFILE`; the handle table is
+    bounded by memory rather than by a number a process can read) and for an already-unlimited soft limit.
+    """
+    try:
+        import resource
+    except ImportError:                                   # Windows
+        return None
+    try:
+        soft, _hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+    except (OSError, ValueError):
+        return None
+    if soft == resource.RLIM_INFINITY or int(soft) <= 0:
+        return None
+    return int(soft)
+
+
+__all__ = ["DEFAULT_TARGET", "fd_budget", "raise_fd_limit"]

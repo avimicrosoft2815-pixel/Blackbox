@@ -56,16 +56,23 @@ them would require, and the owner's decision (2026-11-16) is that P3B-03 and def
 measurement.** (1) A run that captured nothing now says so: `blackbox run` prints one sentence after the summary when the
 run had a proxy, recovered capsules, and recorded zero model calls, naming the cause (an adopted base URL) and the flag
 that fixes it (`--force-proxy`) — B2, `tests/test_launcher_capture_warning.py` (5), verified end-to-end through the
-installed CLI. (2) The connection ceiling has a policy instead of an accident: a request past `MAX_INFLIGHT` (200) waits
-for a slot, a wait past 60 s is answered `503 queue-timeout`, a client past `MAX_CONNECTIONS` (512) is answered `503
-connection-limit` in milliseconds, and the caps fit the 1024-descriptor stock budget by arithmetic rather than by hope —
-B3, `tests/test_proxy_backpressure.py` (5), measured in `bench/results/2026-11-16-b3-connection-limit.json` (450 of 450
-served, probe answered in 1053.8 ms instead of timing out at 4 s, 96 surplus clients refused in a median 4.4 ms). (3)
-Stream termination is recorded in three states rather than two, across seven provider conventions, and a stream whose
-ending this recorder does not recognise is recorded as `unverified` and reported as **cannot tell** — never as complete
-— defect 68, `tests/test_stream_termination.py` (23). What remains open is B4, B5, B6 and B8.
+installed CLI. (2) The connection ceiling has a policy instead of an accident: a request past `MAX_INFLIGHT` waits
+for a slot, a wait past 60 s is answered `503 queue-timeout`, a client past `MAX_CONNECTIONS` is answered `503
+connection-limit` in milliseconds — and both caps are **planned from the descriptor budget the host actually has**
+(`limits.fd_budget()` → `server.plan_caps()`), shrinking to fit a 256-descriptor macOS shell or a hard-limited container,
+stopping at floors with the reason recorded when the budget is below what the proxy needs, and stated as policy rather
+than arithmetic on Windows, where no such budget is published. A delay and a rejection are named separately in the run's
+sentence, and the rejected request's body says what to do — B3, `tests/test_proxy_backpressure.py` (7),
+`tests/test_proxy_limits.py` (7), measured in `bench/results/2026-11-16-b3-connection-limit.json` (450 of 450 served,
+probe answered in 948.9 ms instead of timing out at 4 s, 96 surplus clients refused in a median 4.0 ms) and end to end on
+a hard-200-descriptor host (62 connections + 42 in flight, 8 of 8 requests served). (3) Stream termination is recorded in
+three states rather than two, across seven provider conventions, a stream whose ending this recorder does not recognise is
+recorded as `unverified` and reported as **cannot tell** — never as complete — and a convention is matched to the *end* of
+the path, so a batch listing is not judged as a stream — defects 68 and 70, `tests/test_stream_termination.py` (30). The
+zero-capture sentence now offers the base URL as **one possible cause** rather than asserting it, naming the alternative (a
+call that never left the process). What remains open is B4, B5, B6 and B8.
 
-Suite: **Total: 1218 tests** — 1217 pass here and 1 is skipped on POSIX by name
+Suite: **Total: 1230 tests** — 1229 pass here and 1 is skipped on POSIX by name
 (`test_an_open_view_blocks_the_unlink_only_on_windows`: POSIX permits unlinking a file another fd still holds, so
 the open-view case exists only on Windows). The number is for the dependency set CI installs,
 `.[dev,capture,capture-sdks]`: sixteen tests live behind `anthropic`, so a venv with only `httpx` and `openai`

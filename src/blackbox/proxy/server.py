@@ -38,6 +38,7 @@ from typing import Any
 from blackbox.cap_sdk import headers as cap_headers
 from blackbox.errors import bbx
 from blackbox.proxy import disconnects
+from blackbox.proxy.limits import fd_budget
 from blackbox.proxy.routes import (
     MAX_BODY_BYTES,
     Route,
@@ -71,6 +72,10 @@ WORST_CASE_FDS = MAX_CONNECTIONS + MAX_INFLIGHT
 # requires the total to fit below.
 PROXY_LOCAL_SLACK_FDS = 96
 FD_BUDGET = 1024
+# Floors, for the host that refused even `raise_fd_limit()`: a proxy with no concurrency is not a smaller proxy, it is a
+# broken one. Below this the caps stop tracking the budget and the explicit `503` is what protects the process.
+MIN_INFLIGHT = 8
+MIN_CONNECTIONS = 16
 WRITE_HIGH_WATER = 64 * 1024           # stop reading upstream while the client is this far behind, so RSS stays flat
 WILDCARD_V4 = ".".join(["0"] * 4)      # written this way so the wildcard bind is not a literal in the source
 SCHEME = "http"                        # the listener is plain loopback; TLS is upstream's business
@@ -201,6 +206,7 @@ class ProxyStats:
     queued: int = 0                    # requests that waited for a slot: backpressure, not a failure (B3)
     max_queue_wait_ms: float = 0.0
     refused_reasons: dict[str, int] = field(default_factory=dict)
+    caps: dict[str, Any] = field(default_factory=dict)   # the ceilings in force, and where they came from
     upstream_errors: int = 0
     uncertain: int = 0                 # a request that may have reached the upstream and got no response
     client_gone: int = 0               # the client hung up while the upstream was still sending (§14.4a)
@@ -219,6 +225,7 @@ class ProxyStats:
         return {"requests": self.requests, "streamed": self.streamed, "refused": self.refused,
                 "refused_reasons": dict(sorted(self.refused_reasons.items())),
                 "queued": self.queued, "max_queue_wait_ms": round(self.max_queue_wait_ms, 1),
+                "caps": dict(self.caps),
                 "upstream_errors": self.upstream_errors, "uncertain": self.uncertain,
                 "client_gone": self.client_gone, "upstream_gone": self.upstream_gone,
                 "record_errors": self.record_errors,
@@ -247,12 +254,53 @@ class _Request:
         return "close" not in connection
 
 
+@dataclass(frozen=True)
+class Caps:
+    """The two ceilings this listener uses, and the sentence that says where they came from."""
+
+    max_inflight: int
+    max_connections: int
+    budget: int | None
+    reason: str
+
+
+def plan_caps(budget: int | None) -> Caps:
+    """Derive the ceilings from the descriptor budget the process actually has *now*.
+
+    The documented pair (`MAX_INFLIGHT` 200, `MAX_CONNECTIONS` 512) is what a host with 1024 descriptors can hold
+    (`512 + 200 + 96 = 808`). A host that refused `raise_fd_limit()` — a macOS shell starting at 256, a container with a
+    hard limit nobody can pass — must not be handed that pair: the caps shrink to fit what it has, and the reason says so.
+    On Windows there is no readable budget (`fd_budget()` is `None`), so the documented pair stands as a *policy* number
+    and the `503` past it is what bounds the host; the reason says that too, rather than implying arithmetic that does not
+    exist there.
+    """
+    if budget is None:
+        return Caps(MAX_INFLIGHT, MAX_CONNECTIONS, None,
+                    f"this platform publishes no descriptor budget, so {MAX_CONNECTIONS} connections and "
+                    f"{MAX_INFLIGHT} in flight are policy numbers; the 503 at the ceiling is what bounds the process")
+    room = budget - PROXY_LOCAL_SLACK_FDS
+    if room >= MAX_CONNECTIONS + MAX_INFLIGHT:
+        return Caps(MAX_INFLIGHT, MAX_CONNECTIONS, budget,
+                    f"{MAX_CONNECTIONS} connections + {MAX_INFLIGHT} in flight + {PROXY_LOCAL_SLACK_FDS} for the process "
+                    f"fits the {budget} descriptors this host allows")
+    connections = min(MAX_CONNECTIONS, max(MIN_CONNECTIONS, room * 3 // 5))
+    inflight = min(MAX_INFLIGHT, max(MIN_INFLIGHT, room - connections))
+    if room < MIN_CONNECTIONS + MIN_INFLIGHT:
+        return Caps(inflight, connections, budget,
+                    f"this host allows only {budget} descriptors, below the {PROXY_LOCAL_SLACK_FDS + MIN_CONNECTIONS + MIN_INFLIGHT} "
+                    f"the proxy needs: the caps are the floors ({connections} connections, {inflight} in flight) and the "
+                    f"503 at them is what protects the process")
+    return Caps(inflight, connections, budget,
+                f"this host allows {budget} descriptors, so the caps are {connections} connections + {inflight} in flight "
+                f"+ {PROXY_LOCAL_SLACK_FDS} for the process")
+
+
 class ProxyServer:
     """One loopback listener. `start()` is async; `serve_forever()` is for the launcher's thread (P3B-03)."""
 
     def __init__(self, routes: Routes, *, receiver: Any = None, port: int = 0, host: str | None = None,
                  retry_transmitted: bool = False, clock: Any = time.monotonic,
-                 max_inflight: int = MAX_INFLIGHT, max_connections: int = MAX_CONNECTIONS,
+                 max_inflight: int | None = None, max_connections: int | None = None,
                  queue_wait_s: float = QUEUE_WAIT_S) -> None:
         self.routes = routes
         self.receiver = receiver                      # anything with open_call/receive/close_call (a SinkRecorder)
@@ -264,10 +312,14 @@ class ProxyServer:
         self._server: asyncio.AbstractServer | None = None
         self.stats = ProxyStats()
         # The numbers are parameters so a test can be a *real* burst at a *real* ceiling without 512 sockets: the
-        # behaviour at the limit is the thing under test, and it does not depend on the size of the limit.
-        self.max_inflight = max(1, int(max_inflight))
-        self.max_connections = max(1, int(max_connections))
+        # behaviour at the limit is the thing under test, and it does not depend on the size of the limit. Left unset,
+        # they are *derived* from this host's descriptor budget — a plan, not a constant a smaller host cannot honour.
+        self.caps = plan_caps(fd_budget())
+        self.max_inflight = max(1, int(max_inflight if max_inflight is not None else self.caps.max_inflight))
+        self.max_connections = max(1, int(max_connections if max_connections is not None else self.caps.max_connections))
         self.queue_wait_s = max(0.0, float(queue_wait_s))
+        self.stats.caps = {"max_inflight": self.max_inflight, "max_connections": self.max_connections,
+                           "fd_budget": self.caps.budget, "why": self.caps.reason}
         self._inflight = asyncio.Semaphore(self.max_inflight)
         self._tls: dict[bool, ssl.SSLContext] = {}
         self._writers: set[asyncio.StreamWriter] = set()
@@ -399,8 +451,10 @@ class ProxyServer:
         with contextlib.suppress(Exception):
             await asyncio.wait_for(self._read_request_head(reader), timeout=2.0)
         await self._fail(writer, 503,
-                         f"connection-limit: at most {self.max_connections} connections are held at once",
-                         keep=False)
+                         f"connection-limit: the recorder already holds its {self.max_connections} connections",
+                         keep=False,
+                         hint="this is the recorder's ceiling, not the provider's: retry when its in-flight requests "
+                              "finish, or run fewer at once")
 
     # -- one request ---------------------------------------------------------------------------------------------
     async def _serve(self, request: _Request, reader: asyncio.StreamReader,
@@ -415,7 +469,9 @@ class ProxyServer:
             self.stats.max_queue_wait_ms = max(self.stats.max_queue_wait_ms, self.queue_wait_s * 1000.0)
             await self._fail(writer, 503,
                              f"queue-timeout: no slot within {self.queue_wait_s:.0f}s "
-                             f"({self.max_inflight} requests already in flight)", request.keep_alive)
+                             f"(the recorder already has {self.max_inflight} requests in flight)", request.keep_alive,
+                             hint="the requests already in flight are slower than the recorder's queue allowance: retry, "
+                                  "or run fewer at once")
             return request.keep_alive
         waited_ms = (self._clock() - started) * 1000.0
         self.stats.max_queue_wait_ms = max(self.stats.max_queue_wait_ms, waited_ms)
@@ -802,8 +858,12 @@ class ProxyServer:
             await self._flush(writer, tally)
 
     async def _fail(self, writer: asyncio.StreamWriter, status: int, reason: str, keep: bool,
-                    *, note: str | None = None) -> None:
-        text = f"{status} {reason}\n".encode() + (f"{note}\n".encode() if note else b"")
+                    *, note: str | None = None, hint: str | None = None) -> None:
+        """Answer with a status, a machine-readable reason in `x-blackbox-error`, and — optionally — a sentence for the
+        developer reading the failed request. `hint` is not a header: it is the body line that says what to do, which is
+        the difference between a recorder that refuses a request and one that refuses it silently."""
+        text = (f"{status} {reason}\n".encode() + (f"{hint}\n".encode() if hint else b"")
+                + (f"{note}\n".encode() if note else b""))
         head = [
             f"HTTP/1.1 {status} {STATUS_TEXT.get(status, 'Error')}",
             "Content-Type: text/plain; charset=utf-8",

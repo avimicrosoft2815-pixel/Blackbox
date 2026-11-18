@@ -22,7 +22,14 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from blackbox.cap_sdk.base import ModelCall
-from blackbox.cap_sdk.tee import TAIL_BYTES, TerminatorWatch, expected_terminators, wrap_stream
+from blackbox.cap_sdk.tee import (
+    TAIL_BYTES,
+    TerminatorWatch,
+    convention_for,
+    expected_provider,
+    expected_terminators,
+    wrap_stream,
+)
 
 
 class _Recorder:
@@ -129,9 +136,43 @@ def test_the_watch_keeps_only_a_tail() -> None:
 
 
 def test_the_terminator_table_names_what_it_covers() -> None:
-    assert expected_terminators("/v1/chat/completions") == [b"[DONE]", b"[DONE]"]
+    """One path, one convention: the longest suffix wins, so the chat endpoint is not also judged as legacy completions."""
+    assert expected_terminators("/v1/chat/completions") == [b"[DONE]"]
+    assert expected_terminators("/v1/completions") == [b"[DONE]"]
     assert expected_terminators("/v1/messages") == [b"message_stop"]
     assert expected_terminators("/v1/embeddings") == []
+    assert convention_for("/v1/chat/completions?stream=true") == ("/chat/completions", b"[DONE]", "openai")
+
+
+@pytest.mark.parametrize(("path", "body"), [
+    # Cohere v2: its own `message-end` event, which this build has no row for.
+    ("/v2/chat", b'event: message-end\ndata: {"type":"message-end"}\n\n'),
+    # Mistral's chat endpoint, which is NOT OpenAI's `/v1/chat/completions` even when it says `[DONE]`.
+    ("/v1/chat", b'data: {"choices":[{"delta":{"content":"hi"}}]}\n\ndata: [DONE]\n\n'),
+    # Bedrock's binary event stream, whose finish reason is inside a base64 `bytes` envelope.
+    ("/model/anthropic.claude/invoke-with-response-stream", b'{"bytes":"eyJ0eXBlIjoibWVzc2FnZV9zdG9wIn0="}\n'),
+    # A gateway that proxies `[DONE]` on a path nobody declared.
+    ("/gateway/openai", b'data: [DONE]\n\n'),
+])
+def test_an_unfamiliar_format_is_recorded_as_unknown(path: str, body: bytes) -> None:
+    """The rule, applied to providers this build has never had a row for: no claim, and the reason says so.
+
+    A familiar-looking marker on an undeclared endpoint is not evidence — `[DONE]` on `/v1/chat` (Mistral) or after a
+    gateway prefix says nothing about a convention this build has not verified, and the capsule must not read it as
+    "complete".
+    """
+    assert convention_for(path) is None and expected_provider(path) == "unrecognised"
+    call, _ = _stream_through(path, [body])
+    assert (call.ending, call.ending_provider, call.partial) == ("unverified", "unrecognised", False)
+    assert call.end_reason is not None and "not recorded" in call.end_reason
+
+
+@pytest.mark.parametrize("path", ["/v1/messages/batches", "/v1/chat/completions/extra", "/v1/responses/input_items"])
+def test_a_path_that_only_contains_a_known_suffix_is_not_judged_by_it(path: str) -> None:
+    """`/v1/messages/batches` is a listing, not a stream: the convention belongs to the endpoint, which is the path's end."""
+    assert expected_terminators(path) == [] and expected_provider(path) == "unrecognised"
+    call, _ = _stream_through(path, [b"data: [DONE]\n\n"])
+    assert call.ending == "unverified", call.end_reason
 
 
 @pytest.mark.parametrize(("path", "marker", "provider"), [

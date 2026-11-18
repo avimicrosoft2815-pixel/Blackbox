@@ -61,9 +61,27 @@ ENDING_UNTERMINATED = "unterminated"   # a known convention, and its terminator 
 ENDING_UNVERIFIED = "unverified"       # no convention this build knows: **no claim either way**
 
 
+def convention_for(path: str) -> tuple[str, bytes, str] | None:
+    """The row that describes this path's stream convention, or `None` when this build has none for it.
+
+    **The path must end with the suffix**, and the longest matching suffix wins. Two earlier drafts got this wrong and
+    both were the same mistake in different clothes: a substring test made `/v1/messages/batches` "Anthropic messages"
+    (a batch listing is not a stream), and it made `/v1/chat/completions` match the legacy `/completions` row as well, so
+    one path carried two providers' markers. A convention is a claim about a specific endpoint, and the endpoint is the
+    end of the path.
+    """
+    bare = (path or "").split("?", 1)[0]
+    best: tuple[str, bytes, str] | None = None
+    for suffix, marker, provider in TERMINATORS:
+        if bare.endswith(suffix) and (best is None or len(suffix) > len(best[0])):
+            best = (suffix, marker, provider)
+    return best
+
+
 def expected_terminators(path: str) -> list[bytes]:
     """The markers this path's stream must end with, or an empty list when the path's convention is not known here."""
-    return [marker for suffix, marker, _provider in TERMINATORS if suffix in (path or "")]
+    row = convention_for(path)
+    return [row[1]] if row is not None else []
 
 
 def expected_provider(path: str) -> str:
@@ -72,10 +90,8 @@ def expected_provider(path: str) -> str:
     The word is recorded in the capsule: a reader has to be able to tell "the provider finished" from "this build had no
     convention to judge this stream by", and `unrecognised` is the honest second answer.
     """
-    for suffix, _marker, provider in TERMINATORS:
-        if suffix in (path or ""):
-            return provider
-    return "unrecognised"
+    row = convention_for(path)
+    return row[2] if row is not None else "unrecognised"
 
 
 class TerminatorWatch:

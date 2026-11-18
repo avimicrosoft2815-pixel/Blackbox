@@ -47,13 +47,22 @@ def test_a_run_that_made_no_model_call_says_so(tmp_path: Path) -> None:
     assert result.exit_code == 0
     assert WARNING in text, text
     assert result.captured["model_calls"] == 0
-    assert "not a failure" in text, "the line must not read as an error for a command that makes no model call"
+    assert "not a failure by itself" in text, "the line must not read as an error for a command that makes no model call"
 
 
-def test_the_warning_names_the_cause_and_the_flag_that_fixes_it(tmp_path: Path) -> None:
+def test_the_base_url_is_offered_as_one_possible_cause_not_as_the_cause(tmp_path: Path) -> None:
+    """The recorder cannot see the child's network, so it cannot know why nothing arrived: a command that talks to no
+    model API and a call that never left the process look identical from here. The sentence has to say "one possible
+    cause" and keep the alternatives, or it is a diagnosis the capsule does not support."""
     _result, text = _run(tmp_path, sys.executable, "-c", "print('hello')")
-    assert "adopted as an upstream" in text, text
+    assert "the base URL is one possible cause" in text, text
+    assert "adopted as an upstream rather than overwritten" in text, text
     assert "--force-proxy" in text, text
+    assert "a mock, or a client that ignores the variable" in text, (
+        "the other way a call can fail to arrive has to be named, not implied")
+    assert "not a verdict on it" in text, text
+    for certainty in ("because its base URL", "its base URL was not the recorder's", "the cause is"):
+        assert certainty not in text, f"the line asserts a cause it cannot see: {certainty!r}"
 
 
 def test_a_run_that_reached_the_recorder_is_not_warned_about(tmp_path: Path) -> None:
@@ -78,20 +87,34 @@ def test_the_run_report_says_what_happened_at_the_ceiling() -> None:
     `tests/test_proxy_backpressure.py` for the behaviour itself; this is the sentence the user reads)."""
     import types
 
+    caps = {"max_inflight": 200, "max_connections": 512, "fd_budget": 1024}
     refused = types.SimpleNamespace(proxy={"stats": {
-        "refused": 2, "refused_reasons": {"connection-limit": 2}, "queued": 3, "max_queue_wait_ms": 812.5}})
+        "refused": 2, "refused_reasons": {"connection-limit": 2}, "queued": 3, "max_queue_wait_ms": 812.5,
+        "caps": caps}})
     text = _limit_warning(refused)
     assert text is not None
-    assert "answered 2 requests itself instead of passing them through" in text
-    assert "connection-limit: 2" in text
-    assert "3 requests waited for a slot at the 200-request ceiling, the longest 812 ms" in text
-    assert "never reached a provider" in text
+    # a delay and a rejection are different facts, named separately and never added together
+    assert "delay, nothing lost: 3 requests waited for one of the recorder's 200 in-flight slots" in text, text
+    assert "the longest 812 ms" in text and "every one of them was passed through" in text
+    assert "rejection: the recorder answered 2 requests itself instead of passing them through" in text, text
+    assert "connection-limit: 2" in text and "never reached a provider" in text
+    assert "a retry is the action" in text
+    assert "derived from this host's 1024-descriptor budget" in text
 
-    queued_only = types.SimpleNamespace(proxy={"stats": {"refused": 0, "queued": 1, "max_queue_wait_ms": 4.0}})
+    queued_only = types.SimpleNamespace(proxy={"stats": {"refused": 0, "queued": 1, "max_queue_wait_ms": 4.0,
+                                                         "caps": caps}})
     single = _limit_warning(queued_only)
-    assert single is not None and "1 request waited for a slot" in single
+    assert single is not None and "1 request waited" in single
+    assert "rejection" not in single, "nothing was rejected, so nothing may say it was"
+
+    # a host that publishes no descriptor budget (Windows) must not be told arithmetic it does not have
+    no_budget = types.SimpleNamespace(proxy={"stats": {
+        "refused": 1, "refused_reasons": {"connection-limit": 1}, "queued": 0, "max_queue_wait_ms": 0.0,
+        "caps": {"max_inflight": 200, "max_connections": 512, "fd_budget": None}}})
+    windows = _limit_warning(no_budget)
+    assert windows is not None and "publishes no descriptor budget" in windows, windows
+    assert "descriptor budget rather than set by hand" not in windows
 
     quiet = types.SimpleNamespace(proxy={"stats": {"refused": 0, "queued": 0, "max_queue_wait_ms": 0.0}})
     assert _limit_warning(quiet) is None
-    assert _limit_warning(types.SimpleNamespace(proxy={})) is None
     assert _limit_warning(types.SimpleNamespace(proxy={})) is None

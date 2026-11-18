@@ -37,9 +37,12 @@ from blackbox.proxy.server import (
     FD_BUDGET,
     MAX_CONNECTIONS,
     MAX_INFLIGHT,
+    MIN_CONNECTIONS,
+    MIN_INFLIGHT,
     PROXY_LOCAL_SLACK_FDS,
     WORST_CASE_FDS,
     ProxyServer,
+    plan_caps,
 )
 
 BODY = b'{"id":"chatcmpl-test","choices":[{"message":{"content":"hi"}}]}'
@@ -188,13 +191,14 @@ class Bench:
         return asyncio.run_coroutine_threadsafe(read(), self.loop).result(10)
 
 
-def _request(port: int, *, timeout: float = 15.0, path: str = "/v1/chat/completions") -> tuple[int, dict[str, str]]:
+def _request(port: int, *, timeout: float = 15.0, path: str = "/v1/chat/completions"
+             ) -> tuple[int, dict[str, str], bytes]:
     connection = http.client.HTTPConnection("127.0.0.1", port, timeout=timeout)
     try:
         connection.request("POST", path, body=b"{}", headers={"content-type": "application/json"})
         response = connection.getresponse()
-        response.read()
-        return response.status, {key.lower(): value for key, value in response.getheaders()}
+        body = response.read()
+        return response.status, {key.lower(): value for key, value in response.getheaders()}, body
     finally:
         connection.close()
 
@@ -208,12 +212,13 @@ class Caller(threading.Thread):
         self.timeout = timeout
         self.status: int | None = None
         self.headers: dict[str, str] = {}
+        self.body: bytes = b""
         self.error: BaseException | None = None
         self.finished_at: float | None = None
 
     def run(self) -> None:
         try:
-            self.status, self.headers = _request(self.port, timeout=self.timeout)
+            self.status, self.headers, self.body = _request(self.port, timeout=self.timeout)
         except BaseException as exc:                        # a hang shows up as a timeout, which is the point
             self.error = exc
         finally:
@@ -249,10 +254,13 @@ def test_a_connection_past_the_limit_is_answered_in_milliseconds() -> None:
             holder.start()
         assert bench.origin.await_parked(2, timeout=10)
         started = time.monotonic()
-        status, headers = _request(bench.port, timeout=10)
+        status, headers, body = _request(bench.port, timeout=10)
         elapsed = time.monotonic() - started
         assert status == 503, (status, headers)
         assert headers.get(ERROR_HEADER, "").startswith("connection-limit"), headers
+        assert "holds its 2 connections" in headers[ERROR_HEADER], headers
+        # a rejection has to be readable by the developer whose request it was, not only by a status code
+        assert b"retry when its in-flight requests finish, or run fewer at once" in body, body
         assert elapsed < 2.0, f"a refused connection took {elapsed:.2f}s; the point is that it does not wait"
         stats = bench.stats()
         assert stats["refused_reasons"].get("connection-limit") == 1, stats
@@ -268,10 +276,11 @@ def test_a_wait_that_would_outlive_the_bound_is_answered_not_stalled() -> None:
         first.start()
         assert bench.origin.await_parked(1, timeout=10)
         started = time.monotonic()
-        status, headers = _request(bench.port, timeout=10)
+        status, headers, body = _request(bench.port, timeout=10)
         elapsed = time.monotonic() - started
         assert status == 503, (status, headers)
         assert headers.get(ERROR_HEADER, "").startswith("queue-timeout"), headers
+        assert b"slower than the recorder's queue allowance: retry, or run fewer at once" in body, body
         assert 0.2 <= elapsed < 5.0, f"answered in {elapsed:.2f}s for a 0.3s bound"
         assert bench.stats()["refused_reasons"].get("queue-timeout") == 1
         bench.origin.release()
@@ -304,3 +313,51 @@ def test_the_caps_fit_the_smallest_descriptor_budget_we_meet() -> None:
     assert MAX_CONNECTIONS >= 256
     assert WORST_CASE_FDS + PROXY_LOCAL_SLACK_FDS <= FD_BUDGET, (
         f"{WORST_CASE_FDS} + {PROXY_LOCAL_SLACK_FDS} exceeds the {FD_BUDGET}-descriptor default soft limit")
+
+
+def test_a_host_that_could_not_raise_its_limit_gets_caps_that_fit_it() -> None:
+    """The documented pair is a *plan for 1024 descriptors*, not a constant: a macOS shell starting at 256, or a container
+    whose hard limit nobody can pass, must not be promised 808 descriptors it does not have.
+
+    Every row is arithmetic the proxy can check about itself before it accepts a connection.
+    """
+    plan = plan_caps(FD_BUDGET)
+    assert (plan.max_inflight, plan.max_connections) == (MAX_INFLIGHT, MAX_CONNECTIONS)
+    assert "fits the 1024 descriptors this host allows" in plan.reason
+
+    generous = plan_caps(65536)
+    assert (generous.max_inflight, generous.max_connections) == (MAX_INFLIGHT, MAX_CONNECTIONS)
+    assert generous.budget == 65536
+
+    macos_shell = plan_caps(256)                    # the number in limits.py's docstring, and the case that made this a plan
+    assert macos_shell.max_connections < MAX_CONNECTIONS and macos_shell.max_inflight < MAX_INFLIGHT
+    assert macos_shell.max_connections + macos_shell.max_inflight + PROXY_LOCAL_SLACK_FDS <= 256, macos_shell
+    assert "256 descriptors" in macos_shell.reason
+
+    small = plan_caps(128)
+    assert small.max_connections + small.max_inflight + PROXY_LOCAL_SLACK_FDS <= 128, small
+    assert small.max_connections >= MIN_CONNECTIONS and small.max_inflight >= MIN_INFLIGHT
+
+    # Below the floors there is no pair that fits; the caps stop tracking the budget and the reason says so, because the
+    # 503 at them is the only thing left protecting the process.
+    tiny = plan_caps(64)
+    assert (tiny.max_connections, tiny.max_inflight) == (MIN_CONNECTIONS, MIN_INFLIGHT), tiny
+    assert "below the" in tiny.reason and "protects the process" in tiny.reason
+
+    # Windows: no readable budget. The documented pair stands as policy, and the sentence does not claim arithmetic.
+    windows = plan_caps(None)
+    assert (windows.max_inflight, windows.max_connections, windows.budget) == (MAX_INFLIGHT, MAX_CONNECTIONS, None)
+    assert "no descriptor budget" in windows.reason
+
+
+def test_a_server_built_on_a_small_host_uses_the_plan_and_says_so(monkeypatch: Any) -> None:
+    """The planning is wired into construction, not just exported: `stats.caps` is what the run's sentence reads."""
+    import blackbox.proxy.server as server_module
+
+    monkeypatch.setattr(server_module, "fd_budget", lambda: 256)
+    table = Routes([Route(name="openai", base="http://127.0.0.1:9")], default="openai")
+    server = ProxyServer(table)
+    assert server.max_connections + server.max_inflight + PROXY_LOCAL_SLACK_FDS <= 256
+    caps = server.stats.as_dict()["caps"]
+    assert caps["fd_budget"] == 256 and caps["max_connections"] == server.max_connections
+    assert "256 descriptors" in caps["why"]

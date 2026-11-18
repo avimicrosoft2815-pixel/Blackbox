@@ -43,7 +43,6 @@ from typing import IO, Any
 
 from blackbox import constants as C
 from blackbox.codec import cbor
-from blackbox.proxy.server import MAX_INFLIGHT
 from blackbox.rec import discover, recovery
 from blackbox.tape import head as head_mod
 from blackbox.tape import segments
@@ -453,40 +452,57 @@ def _capture_totals(capsules: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def _limit_warning(result: RunResult) -> str | None:
-    """Say what happened at the proxy's ceiling, when it happened (B3 in `docs/RELEASE-BLOCKERS.md`).
+    """Say what happened at the proxy's ceiling, and which of the two things it was (B3, `docs/RELEASE-BLOCKERS.md`).
 
-    The proxy decides this now instead of inheriting it from the descriptor table: a request past `MAX_INFLIGHT` waits
-    for a slot, and one past `MAX_QUEUE_WAIT_S` or `MAX_CONNECTIONS` is answered with a `503` and `x-blackbox-error`
-    rather than left to hang. Both are visible in `stats`, and a run that hit either has to say so — a run report that
-    omits "two of your requests never reached the provider" is the silence this blocker is about.
+    A **delay** and a **rejection** are different facts and a user cannot act on them the same way, so they are named
+    separately and never added together: a request that waited for a slot was still answered, and a request the recorder
+    refused never reached a provider and came back as a `503`. The ceilings in the sentence are read from the proxy's own
+    `stats.caps`, so a host that had to shrink them prints the numbers it actually used rather than the documented pair.
     """
     stats = (result.proxy or {}).get("stats") or {}
+    caps = stats.get("caps") or {}
     refused = int(stats.get("refused") or 0)
     queued = int(stats.get("queued") or 0)
     if not refused and not queued:
         return None
+    in_flight = caps.get("max_inflight")
+    connections = caps.get("max_connections")
+    budget = caps.get("fd_budget")
     parts: list[str] = []
+    if queued:
+        parts.append("delay, nothing lost: {n} request{s} waited for one of the recorder's {cap} in-flight slots, the "
+                     "longest {ms:.0f} ms; every one of them was passed through".format(
+                         n=queued, s="" if queued == 1 else "s", cap=in_flight or "?",
+                         ms=float(stats.get("max_queue_wait_ms") or 0.0)))
     if refused:
         reasons = stats.get("refused_reasons") or {}
         detail = ", ".join(f"{name}: {count}" for name, count in sorted(reasons.items())) or "no reason recorded"
-        parts.append("the recorder answered {n} request{s} itself instead of passing {them} through ({detail}); those "
-                     "requests never reached a provider, and the client was given a 503 naming the ceiling".format(
+        parts.append("rejection: the recorder answered {n} request{s} itself instead of passing {them} through "
+                     "({detail}); those never reached a provider, and the client was given a 503 naming the ceiling, "
+                     "so a retry is the action".format(
                          n=refused, s="" if refused == 1 else "s", them="it" if refused == 1 else "them", detail=detail))
-    if queued:
-        waited = float(stats.get("max_queue_wait_ms") or 0.0)
-        parts.append("{n} request{s} waited for a slot at the {cap}-request ceiling, the longest {ms:.0f} ms".format(
-            n=queued, s="" if queued == 1 else "s", cap=MAX_INFLIGHT, ms=waited))
-    return ("blackbox: " + "; ".join(parts) + ". The numbers are derived from a descriptor budget, not a preference "
-            "(`docs/RELEASE-BLOCKERS.md` B3).")
+    if in_flight and connections and budget:
+        parts.append(f"the ceilings are {in_flight} in flight and {connections} connections, derived from this host's "
+                     f"{budget}-descriptor budget rather than set by hand")
+    elif in_flight and connections:
+        parts.append(f"the ceilings are {in_flight} in flight and {connections} connections; this platform publishes no "
+                     f"descriptor budget, so they are policy numbers and the 503 at them is what bounds the process")
+    return "blackbox: " + "; ".join(parts) + "."
 
 
 def _empty_capture_warning(result: RunResult) -> str:
     count = result.captured.get("capsules", len(result.capsules))
+    # A possible cause, never a finding: this recorder writes the capsule it is given and cannot see the child's network.
+    # A command that talks to no model API produces exactly this line, and so does a call that never left the process
+    # (a mock client, an SDK that ignores the variable). Only the first of the causes below is a recorder problem, and the
+    # sentence is written so a reader can tell them apart instead of being told which one happened.
     return ("blackbox: this run recorded no model call — the {n} capsule{s} of run {run} {hold} no request and no "
-            "response. If this command talks to a model API, its base URL was not the recorder's (a base URL your "
-            "environment or code sets is adopted as an upstream rather than overwritten), and `blackbox run "
-            "--force-proxy` points every base-URL variable at the recorder and names each one it displaces. A command "
-            "that makes no model call is fine; this line describes the run, not a failure."
+            "response. That is not a failure by itself: a command that talks to no model API is exactly this. If this "
+            "one was meant to talk to a model API, the base URL is one possible cause (a base URL your environment or "
+            "code sets is adopted as an upstream rather than overwritten, so the traffic never arrives), and `blackbox "
+            "run --force-proxy` points every base-URL variable at the recorder and names each one it displaces. A call "
+            "that never left the process — a mock, or a client that ignores the variable — would look the same from "
+            "here. This line describes the run, not a verdict on it."
             ).format(n=count, s="" if count == 1 else "s", hold="holds" if count == 1 else "hold",
                      run=result.run_id)
 

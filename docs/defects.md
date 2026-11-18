@@ -1089,3 +1089,61 @@ numbers are a descriptor budget rather than a preference. Deliberately silent wh
 **What is still open, and is the owner's.** Whether the caps become flags (a safe range is one budget interval, so a flag
 needs its own validation story), and whether a `503` the recorder issued belongs in the capsule as a frame — today it is
 in `stats` and in the run's sentence only.
+
+## Defect 70 — a convention was matched by substring, so a listing endpoint was judged as a stream (2026-11-16, defect 68 follow-up)
+
+**Found by** writing the test for an unfamiliar format and asking what `/v1/messages/batches` would be. It answered
+`anthropic`. `expected_terminators` tested `suffix in path`, so:
+
+* `/v1/messages/batches` — Anthropic's batch-listing endpoint, which returns a JSON object and no stream at all — was
+  judged against `message_stop`. If it had arrived as a stream and ended without one, the capsule would have said the
+  stream was **cut**, which is a claim about a call that has no stream to cut. The mirror image of the defect 68 mistake,
+  in the other direction, and the same root cause: a convention belongs to an *endpoint*, and the endpoint is the end of
+  the path.
+* `/v1/chat/completions` matched both the `/chat/completions` and the legacy `/completions` row, so one path carried two
+  markers and `expected_terminators` returned `[b"[DONE]", b"[DONE]"]`. Harmless by luck (same marker, same provider) and
+  wrong by construction.
+
+**Fix.** `convention_for(path)` strips the query string and requires `path.endswith(suffix)`, choosing the longest matching
+suffix. One path, one row, one provider. `/v1/messages/batches`, `/v1/chat/completions/extra` and `/v1/responses/input_items`
+now resolve to **unrecognised**, i.e. `unverified`, i.e. no claim.
+
+**Tests.** `tests/test_stream_termination.py` (30): the table test asserts one marker per path and that a query string does
+not change the answer; `test_a_path_that_only_contains_a_known_suffix_is_not_judged_by_it` covers the three paths above;
+and `test_an_unfamiliar_format_is_recorded_as_unknown` adds four endpoints this build has never had a row for — Cohere
+`/v2/chat`, Mistral `/v1/chat` (which does emit `[DONE]`), a Bedrock
+`invoke-with-response-stream` envelope, and a gateway path — each asserted `unverified`, `unrecognised`, not partial, and
+with the reason that says the ending is not recorded.
+
+## Defect 71 — the caps were a plan for one host, printed on every host (2026-11-16, B3 platform review)
+
+**Found by** walking the arithmetic across the platforms this project actually runs on. `512 + 200 + 96 = 808 < 1024` is
+true of a Linux box with the stock soft limit, and it was written down as though it were true everywhere. It is not:
+
+* a **macOS** shell starts at a soft limit of **256** (the number in `proxy/limits.py`'s own docstring), and
+  `raise_fd_limit` can be refused — for instance under a hard limit the user cannot pass;
+* a container or CI sandbox can have any hard limit at all, including ones below the slack;
+* **Windows** has no `RLIMIT_NOFILE` at all, so the number the sentence was derived from does not exist there.
+
+On the first two, the proxy would have promised 808 descriptors it did not have: the caps would have *been* the cliff, with
+a documented number in front of it.
+
+**Fix.** `limits.fd_budget()` reads the soft limit the process has *after* the raise attempt (`None` on Windows and for an
+unlimited soft limit), and `server.plan_caps()` derives the pair from it — shrinking to fit, stopping at floors (16
+connections, 8 in flight) when the budget is below what the proxy needs, and saying so in `ProxyStats.caps["why"]`. The
+documented 200/512 is now what a 1024-descriptor host gets, not a constant every host is told.
+
+**Measured, end to end, on a host that cannot raise its limit** (hard 200, so `setrlimit` returns 200→200): caps planned at
+**62 connections + 42 in flight + 96 = 200**, 8 concurrent requests through the real listener, **8 answered `200`**.
+
+**What the user reads now.** The run's sentence is built from `stats.caps`, so it prints the numbers that were in force —
+`the ceilings are 62 in flight and 42 connections…` — or, on Windows, that they are policy numbers because the platform
+publishes no budget. A rejection also carries a body line for the developer whose request it was
+(`this is the recorder's ceiling, not the provider's: retry when its in-flight requests finish, or run fewer at once`), and
+a delay is labelled a delay rather than folded into the same count.
+
+**Tests.** `tests/test_proxy_backpressure.py` (7) covers the plan table row by row (65536, 1024, 256, 128, 64, `None`),
+asserts `connections + inflight + slack <= budget` wherever a fitting pair exists, and asserts that a server built on a
+256-descriptor host uses the plan and publishes it; `tests/test_proxy_limits.py` (7) reads the budget in a subprocess at
+200 descriptors and asserts the plan fits. `tests/test_launcher_capture_warning.py` (5) asserts the sentence separates
+delay from rejection and that the Windows wording makes no arithmetic claim.

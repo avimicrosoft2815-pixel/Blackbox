@@ -21,7 +21,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from blackbox.proxy.limits import DEFAULT_TARGET, raise_fd_limit
+from blackbox.proxy.limits import DEFAULT_TARGET, fd_budget, raise_fd_limit
 
 #: Windows has no `RLIMIT_NOFILE` and no soft/hard descriptor budget, so the two tests that *measure* one are POSIX
 #: tests: they would otherwise assert the absence of a mechanism rather than a bug. The Windows behaviour (`None`, no
@@ -130,3 +130,59 @@ def test_the_default_target_is_a_number_the_kernel_can_honour() -> None:
     assert 1024 <= DEFAULT_TARGET <= 1 << 20, (
         "the target must be far above the 2-descriptors-per-request budget of §15.1's 200 streams and small enough that "
         "`setrlimit` against a finite hard limit has something to clamp")
+
+
+@posix_only
+def test_the_descriptor_budget_is_read_from_this_process() -> None:
+    """The caps are derived from a number read at start-up, so that number has to be the truth, not a constant.
+
+    Read in a subprocess with a deliberately lower soft limit: the point is that `fd_budget()` follows the process, not
+    that this machine happens to allow 65536.
+    """
+    probe = textwrap.dedent("""
+        import json, resource, sys
+        sys.path.insert(0, "src")
+        from blackbox.proxy.limits import fd_budget
+        soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+        resource.setrlimit(resource.RLIMIT_NOFILE, (200, hard))
+        print(json.dumps({"budget": fd_budget(), "soft": resource.getrlimit(resource.RLIMIT_NOFILE)[0]}))
+    """)
+    finished = subprocess.run([sys.executable, "-c", probe], cwd=ROOT, capture_output=True, text=True, timeout=60,
+                              env={"PYTHONPATH": "src", "PATH": "/usr/bin:/bin"})
+    assert finished.returncode == 0, finished.stderr[-800:]
+    answer = json.loads(finished.stdout.strip().splitlines()[-1])
+    assert answer["soft"] == 200 and answer["budget"] == 200, answer
+
+
+def test_a_platform_without_a_descriptor_budget_says_so(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Windows publishes no such number; `None` is the answer, and `plan_caps` turns it into policy rather than a claim."""
+    monkeypatch.setitem(sys.modules, "resource", None)
+    assert fd_budget() is None
+
+
+@posix_only
+def test_a_host_that_allows_200_descriptors_gets_caps_that_fit_200() -> None:
+    """The cross-platform half of B3: a `setrlimit` that is refused must shrink the caps, not break the proxy.
+
+    A macOS shell starts at 256 and a container can have any hard limit at all; both are covered by the same arithmetic.
+    """
+    probe = textwrap.dedent("""
+        import json, resource, sys
+        sys.path.insert(0, "src")
+        from blackbox.proxy.limits import fd_budget
+        from blackbox.proxy.server import PROXY_LOCAL_SLACK_FDS, plan_caps
+        _soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+        resource.setrlimit(resource.RLIMIT_NOFILE, (200, hard))     # as if the raise had been refused
+        caps = plan_caps(fd_budget())
+        print(json.dumps({"budget": caps.budget, "connections": caps.max_connections,
+                          "inflight": caps.max_inflight, "slack": PROXY_LOCAL_SLACK_FDS,
+                          "reason": caps.reason}))
+    """)
+    finished = subprocess.run([sys.executable, "-c", probe], cwd=ROOT, capture_output=True, text=True, timeout=60,
+                              env={"PYTHONPATH": "src", "PATH": "/usr/bin:/bin"})
+    assert finished.returncode == 0, finished.stderr[-800:]
+    answer = json.loads(finished.stdout.strip().splitlines()[-1])
+    assert answer["budget"] == 200, answer
+    assert answer["connections"] + answer["inflight"] + answer["slack"] <= 200, answer
+    assert answer["connections"] < 512 and answer["inflight"] < 200, answer
+    assert "200 descriptors" in answer["reason"], answer

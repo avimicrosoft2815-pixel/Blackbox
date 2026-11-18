@@ -20,15 +20,15 @@
     "statuses": {
       "200": 450
     },
-    "wall_ms": 1388.5,
-    "median_ms": 957.9,
-    "max_ms": 1916.0,
-    "origin_peak_in_flight": 192,
+    "wall_ms": 1187.1,
+    "median_ms": 805.8,
+    "max_ms": 1491.5,
+    "origin_peak_in_flight": 165,
     "served_by_origin": 451
   },
   "probe_during_burst": {
     "status": 200,
-    "ms": 1053.8,
+    "ms": 948.9,
     "reason": ""
   },
   "stats_after_burst": {
@@ -36,8 +36,14 @@
     "streamed": 451,
     "refused": 0,
     "refused_reasons": {},
-    "queued": 444,
-    "max_queue_wait_ms": 887.2,
+    "queued": 383,
+    "max_queue_wait_ms": 734.7,
+    "caps": {
+      "max_inflight": 200,
+      "max_connections": 512,
+      "fd_budget": 65536,
+      "why": "512 connections + 200 in flight + 96 for the process fits the 65536 descriptors this host allows"
+    },
     "upstream_errors": 0,
     "uncertain": 0,
     "client_gone": 0,
@@ -54,10 +60,10 @@
     "statuses": {
       "503": 96
     },
-    "median_ms": 4.4,
-    "max_ms": 7.7,
+    "median_ms": 4.0,
+    "max_ms": 9.6,
     "reasons": [
-      "connection-limit: at most 512 connections are held at once"
+      "connection-limit: the recorder already holds its 512 connections"
     ]
   },
   "stats_after_surplus": {
@@ -67,8 +73,14 @@
     "refused_reasons": {
       "connection-limit": 96
     },
-    "queued": 719,
-    "max_queue_wait_ms": 887.2,
+    "queued": 717,
+    "max_queue_wait_ms": 734.7,
+    "caps": {
+      "max_inflight": 200,
+      "max_connections": 512,
+      "fd_budget": 65536,
+      "why": "512 connections + 200 in flight + 96 for the process fits the 65536 descriptors this host allows"
+    },
     "upstream_errors": 0,
     "uncertain": 0,
     "client_gone": 0,

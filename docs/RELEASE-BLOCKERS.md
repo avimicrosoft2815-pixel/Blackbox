@@ -120,12 +120,20 @@ with the cause and the fix (`blackbox run --force-proxy` names every variable it
   'echo hi'`):
 
   ```
-  blackbox: this run recorded no model call — the 1 capsule of run r_d188348b679e0c11 holds no request and no
-  response. If this command talks to a model API, its base URL was not the recorder's (a base URL your environment or
-  code sets is adopted as an upstream rather than overwritten), and `blackbox run --force-proxy` points every base-URL
-  variable at the recorder and names each one it displaces. A command that makes no model call is fine; this line
-  describes the run, not a failure.
+  blackbox: this run recorded no model call — the 1 capsule of run r_a0a8950b142d52c4 holds no request and no
+  response. That is not a failure by itself: a command that talks to no model API is exactly this. If this one was
+  meant to talk to a model API, the base URL is one possible cause (a base URL your environment or code sets is adopted
+  as an upstream rather than overwritten, so the traffic never arrives), and `blackbox run --force-proxy` points every
+  base-URL variable at the recorder and names each one it displaces. A call that never left the process — a mock, or a
+  client that ignores the variable — would look the same from here. This line describes the run, not a verdict on it.
   ```
+
+  **The wording is deliberate, and it was corrected after review.** An earlier draft said *"its base URL was not the
+  recorder's"*, which is a diagnosis this recorder cannot make: it writes the capsule it is handed and cannot see the
+  child's network, and a command that talks to no model API produces byte-identical evidence. The sentence now offers the
+  base URL as **one possible cause**, names the other one (a call that never left the process — a mock, a client that
+  ignores the variable), and calls itself a description rather than a verdict. The test asserts the hedge words and
+  asserts that the three certain phrasings are **absent**, so the stronger claim cannot come back by edit.
 
   and the same command with a client that reaches the recorder prints nothing (`model_calls: 1`). The count comes from
   each capsule's own manifest (`RunResult.captured`), not from the proxy's counters, because `blackbox ls` will show
@@ -160,38 +168,73 @@ request the provider would have answered has broken the thing it exists for. The
 
 | situation | answer | cost |
 |---|---|---|
-| request in flight already equals `MAX_INFLIGHT` (200) | the request **waits** for a slot; its socket stays open | the wait is counted (`stats.queued`) and its length recorded |
+| requests in flight already equal `MAX_INFLIGHT` (200, or the planned number) | the request **waits** for a slot; its socket stays open | the wait is counted (`stats.queued`) and its length recorded |
 | the wait exceeds `QUEUE_WAIT_S` (60 s) | `503` + `x-blackbox-error: queue-timeout: …` | never leaves a request parked forever |
-| more than `MAX_CONNECTIONS` (512) clients held open | `503` + `x-blackbox-error: connection-limit: …` in milliseconds | the one case the recorder cannot serve, so it says so |
+| more than `MAX_CONNECTIONS` (512, or the planned number) clients held open | `503` + `x-blackbox-error: connection-limit: …` and a body line saying what to do | the one case the recorder cannot serve, so it says so |
 
-Why **200** and **512**, rather than a flag: the caps are derived from a descriptor budget, not a preference. One
-descriptor per held connection plus one per in-flight request is the whole model, so the worst case is
-`512 + 200 + 96` (the 96 counts the listener, the idle pool at `2 * routes`, the tape, and stdio) = **808**, under the
-smallest default soft limit this project meets (1024 on Linux and macOS) — which means the caps hold *even on a host
-where `limits.py` could not raise anything*, Windows included. `tests/test_proxy_backpressure.py` asserts that
-arithmetic so the numbers cannot drift apart from the reason for them. There is deliberately no `--max-connections` yet:
-a knob whose safe range is one budget interval invites the exact failure this replaces, and adding it is a decision with
-a validation story of its own.
+**The caps are planned per host, not hard-coded.** One descriptor per held connection plus one per in-flight request is
+the whole model, so `512 + 200 + 96 = 808` (the 96 counts the listener, the idle pool at `2 * routes`, the tape and
+stdio) fits a host that allows 1024 — but a macOS shell starts at **256** and a container can have any hard limit at all,
+and promising those numbers to such a host would be the same silent cliff in a smaller size. `plan_caps()` therefore reads
+the budget the process actually has (`limits.fd_budget()`, *after* the raise attempt) and shrinks both caps to fit, or
+says that the budget is below what the proxy needs and stops at floors (16 connections, 8 in flight):
+
+| budget the process has | connections | in flight | what the run's sentence says |
+|---|---|---|---|
+| 65536 (this sandbox, after the raise) | 512 | 200 | "512 connections + 200 in flight + 96 for the process fits the 65536 descriptors this host allows" |
+| 1024 (stock Linux/macOS soft limit) | 512 | 200 | "fits the 1024 descriptors this host allows" |
+| 256 (a macOS shell that refused the raise) | 96 | 64 | "this host allows 256 descriptors, so the caps are 96 connections + 64 in flight + 96 for the process" |
+| 200 (a hard limit nobody can pass) | 62 | 42 | same sentence, with those numbers — **measured end to end**: 8 concurrent requests, 8 served `200` |
+| 64 (below the floors) | 16 | 8 | "this host allows only 64 descriptors, below the 120 the proxy needs: the caps are the floors … and the 503 at them is what protects the process" |
+| `None` (**Windows**: no readable budget) | 512 | 200 | "this platform publishes no descriptor budget, so 512 connections and 200 in flight are policy numbers; the 503 at the ceiling is what bounds the process" |
+
+That last row is the platform review in one line: on Windows the arithmetic above does not exist, so the caps are stated
+as policy rather than claimed as a budget, and the explicit `503` remains what bounds the process. `ProxyStats.caps`
+carries all four numbers plus the sentence, so nothing about the ceilings has to be reconstructed from documentation.
+`tests/test_proxy_backpressure.py` (7) asserts the whole table including Windows and the floors;
+`tests/test_proxy_limits.py` (7) reads the real budget in a subprocess at 200 descriptors and asserts the plan fits.
+
+There is deliberately no `--max-connections` yet: a knob whose safe range is one budget interval invites the exact
+failure this replaces, and adding it is a decision with a validation story of its own.
 
 **Measured after** (`bench/bench_connection_limit.py` → `bench/results/2026-11-16-b3-connection-limit.json`; same 2-vCPU
-Linux sandbox, origin sleeping 300 ms per request, soft limit raised the way a launcher raises it):
+Linux sandbox, origin sleeping 300 ms per request, soft limit raised the way a launcher raises it — re-run for this
+revision, so the file and the sentence below are the same measurement):
 
 | measurement | result |
 |---|---|
-| 450 concurrent requests | **450 of 450 answered 200**, 0 refused, 444 queued, longest queue wait 887 ms, origin peak 192 in flight |
-| a probe issued during that burst | **200**, in 1053.8 ms — it waited ~0.9 s for a slot instead of timing out after 4 s with nothing |
-| 96 clients beyond `MAX_CONNECTIONS` | **96 of 96 answered `503`** with `connection-limit: at most 512 connections are held at once`, median **4.4 ms**, max 7.7 ms |
+| 450 concurrent requests | **450 of 450 answered `200`**, 0 refused, 383 queued, longest queue wait 735 ms, origin peak 165 in flight |
+| a probe issued during that burst | **`200` in 948.9 ms** — it waited for a slot instead of timing out after 4 s with nothing |
+| 96 clients beyond `MAX_CONNECTIONS` | **96 of 96 answered `503`** with `connection-limit: the recorder already holds its 512 connections`, median **4.0 ms**, max 9.6 ms |
 
-**What a user reads.** A run that hit either rule says so once, after the summary — the same discipline as B2's sentence:
-`the recorder answered 2 requests itself instead of passing them through (connection-limit: 2); 3 requests waited for a
-slot at the 200-request ceiling, the longest 812 ms`, followed by the note that the numbers are a descriptor budget.
-`ProxyStats` carries `queued`, `max_queue_wait_ms` and `refused_reasons` so the sentence is derived, not guessed.
+**What a user reads, and why the two are not the same sentence.** A **delay** is not a **rejection**, and a user cannot
+act on them identically, so the run's sentence names them separately and never adds them together:
 
-**Tests.** `tests/test_proxy_backpressure.py` (5), with the ceilings turned down so a test *is* a real burst at a real
+* `delay, nothing lost: 3 requests waited for one of the recorder's 200 in-flight slots, the longest 812 ms; every one of
+  them was passed through`
+* `rejection: the recorder answered 2 requests itself instead of passing them through (connection-limit: 2); those never
+  reached a provider, and the client was given a 503 naming the ceiling, so a retry is the action`
+
+followed by the ceilings and where they came from (`derived from this host's 1024-descriptor budget`, or the
+no-budget-on-this-platform sentence). The request that *is* rejected gets a body a developer can act on as well as the
+header a program can switch on:
+
+```
+503 connection-limit: the recorder already holds its 512 connections
+this is the recorder's ceiling, not the provider's: retry when its in-flight requests finish, or run fewer at once
+```
+
+and the queue case says `the requests already in flight are slower than the recorder's queue allowance: retry, or run
+fewer at once`. `ProxyStats` carries `queued`, `max_queue_wait_ms`, `refused_reasons` and `caps`, so every clause of every
+sentence is derived from what happened rather than guessed from a constant.
+
+**Tests.** `tests/test_proxy_backpressure.py` (7), with the ceilings turned down so a test *is* a real burst at a real
 ceiling: six requests against `max_inflight=2` are all served, two at a time, none refused; a connection past
-`max_connections=2` gets its `503` in under two seconds; a wait past a 0.3 s bound is answered, not stalled; a client
-that connects and says nothing past the limit is told and closed; and the descriptor arithmetic above. `ProxyServer` takes
-the three numbers as parameters so the behaviour is testable without 512 sockets; the defaults are the documented ones.
+`max_connections=2` gets its `503` in under two seconds **including the body line quoted above**; a wait past a 0.3 s
+bound is answered, not stalled; a client that connects and says nothing past the limit is told and closed; the descriptor
+arithmetic; the `plan_caps` table row by row; and a server built on a 256-descriptor host that uses the plan and says so.
+`ProxyServer` takes the numbers as parameters so the behaviour is testable without 512 sockets; left unset they are
+derived, never assumed.
 
 **Still the owner's call.** Whether the caps should be configurable, and whether a `503` the recorder issued should be
 counted in the *capsule* (today it is in `stats` and in the run's sentence, not in a frame). Neither blocks: both
