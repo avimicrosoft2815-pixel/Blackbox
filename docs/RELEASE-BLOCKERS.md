@@ -299,11 +299,30 @@ What this does **not** settle, and why the blocker stays open as the owner's dec
 ticket passes on a request-level measurement (worst 53.98 ms, 0 of 240 over the 100 ms budget —
 `bench/results/2026-11-18-rebind-instrumented.json`). Defects 75 and 76 are the two bugs measuring this uncovered.
 
-## B5 — OTLP importers other than Phoenix are untested
+## B5 — OTLP importers other than Phoenix: **two more measured, five still unmeasured and named**
 
 Phoenix 21.0.0 accepts `otlp/spans.pb` (200, read back intact) and rejects `otlp/spans.json` (its receiver is
-protobuf-only). Langfuse, the OpenTelemetry Collector's OTLP/JSON receiver and Phoenix's gRPC port 4317 have never been
-exercised, and none of them can be installed offline here. Evidence: `bench/results/2026-11-16-otlp-pb-importer.json`.
+protobuf-only) — `bench/results/2026-11-16-otlp-pb-importer.json`. Measured on 2026-11-18
+(`bench/results/2026-11-18-otlp-importers.json`), with the capsule's own bytes and the versions that read them:
+
+| importer / consumer | version | setup | result |
+|---|---|---|---|
+| the official OTLP message definitions | `opentelemetry-proto` 1.45.2, `protobuf` 7.36.2 | `ParseFromString` on `otlp/spans.pb` | **accepted**: 3 spans, names `bbx.run` / `invoke_agent agent` / `chat gpt-4`, trace id `50444de0…`, every `parent_span_id` resolves to a span in the message |
+| the same definitions, proto3-JSON | `protobuf` 7.36.2 `json_format.Parse(..., ignore_unknown_fields=False)` | `otlp/spans.json` | **accepted**: no unknown fields, 3 spans, same names — so the JSON part is the message OTel defines, not merely JSON we invented |
+| an OTLP/**gRPC** `TraceService` (4317 semantics) | `grpcio` 1.85.3 + the official servicer | loopback gRPC server, capsule bytes sent through the stub | **accepted**: 3 spans, same names and trace id, `ExportTraceServiceResponse` returned |
+
+The gRPC row closes the transport half of B5's question — the capsule's bytes are not just "parseable", they survive the
+framing an exporter puts them in — but it is a receiver built from OTel's own generated code, **not** a product. Still
+unmeasured, with the reason recorded in the artefact rather than an adjective:
+
+* **OpenTelemetry Collector (otelcol)**, **Grafana Tempo**, **Jaeger** — all need a released Go binary; the download is a
+  302 to `objects.githubusercontent.com`, which this sandbox cannot reach (the fetch stops at 0 bytes).
+* **Langfuse** — a TypeScript server with Postgres behind it; no pip package, no image pull.
+* **Phoenix's own gRPC listener on 4317** — the 2026-11-16 measurement started `phoenix serve` and used its HTTP receiver;
+  the gRPC listener was not exercised.
+
+The capsule verifies itself (exit 0) in the same run, so the bytes handed to those readers are the bytes the capsule ships.
+B5 stays open: three real products and one product's second transport are still unmeasured.
 
 ## B6 — Two rows that only the release machine can settle
 

@@ -1,0 +1,138 @@
+{
+  "artifact": "OTLP importers: what accepted the capsule's bytes here, and what could not be run",
+  "capsule": {
+    "built": {
+      "capsule_id": "c_4e41408fbba7018e.bbx",
+      "json_names": [
+        "bbx.run",
+        "invoke_agent agent",
+        "chat gpt-4"
+      ],
+      "json_spans": 3,
+      "json_trace_id": "50444de04d35c6f7240486f96a9041f8",
+      "parts": [],
+      "path": "/tmp/bbx-otlp-vli0kfjw/data/capsules/c_4e41408fbba7018e.bbx",
+      "pb_bytes": 792,
+      "pb_sha256": "91024cb11dcb1f69f34939380f971c8b71b7fc023dc2fe754572fef00c803a12"
+    },
+    "verify": {
+      "exit_code": 0,
+      "output": [
+        "events/events.jsonl: sha256 85945fc2275a4320\u2026 (declared, generator blackbox 0.1.0.dev0)",
+        "  graph.json: sha256 f102cb78b6019026\u2026 (declared, generator blackbox 0.1.0.dev0)",
+        "  otlp/spans.json: sha256 cc0190d53c378248\u2026 (declared, generator blackbox 0.1.0.dev0)",
+        "  otlp/spans.pb: sha256 91024cb11dcb1f69\u2026 (declared, generator blackbox 0.1.0.dev0)",
+        "blackbox capsule: derived parts verify"
+      ]
+    }
+  },
+  "date": "2026-11-18",
+  "environment": {
+    "packages": {
+      "arize-phoenix": null,
+      "grpcio": "1.85.3",
+      "opentelemetry-proto": "1.45.2",
+      "protobuf": "7.36.2"
+    },
+    "platform": "Linux-6.1.158+-x86_64-with-glibc2.36",
+    "python": "3.11.2"
+  },
+  "not_measured": [
+    {
+      "evidence": "curl -sIL https://github.com/open-telemetry/opentelemetry-collector-releases/releases/download/v0.115.0/otelcol_0.115.0_linux_amd64.tar.gz -> 302 to objects.githubusercontent.com, which this sandbox cannot reach (download stopped at 0 bytes)",
+      "name": "OpenTelemetry Collector (otelcol)",
+      "why": "needs the released Go binary",
+      "would_measure": "otelcol --config with an otlp receiver and the debug exporter, then POST the capsule's bytes"
+    },
+    {
+      "evidence": "pip has no server package; the docker-compose deployment needs images this sandbox cannot pull",
+      "name": "Langfuse",
+      "why": "server is a TypeScript app with Postgres behind it",
+      "would_measure": "POST /api/public/otel/v1/traces with basic auth, read the trace back over the public API"
+    },
+    {
+      "evidence": "same release-asset block as otelcol",
+      "name": "Grafana Tempo",
+      "why": "Go binary",
+      "would_measure": "tempo -config.file=... and the trace-by-id HTTP API"
+    },
+    {
+      "evidence": "same release-asset block as otelcol",
+      "name": "Jaeger",
+      "why": "Go binary",
+      "would_measure": "jaeger all-in-one with the OTLP receiver on 4318 and its /api/traces endpoint"
+    },
+    {
+      "evidence": "bench/results/2026-11-16-otlp-pb-importer.json measured the HTTP receiver only",
+      "name": "Phoenix, OTLP/gRPC on 4317",
+      "why": "a real Phoenix server is a large optional install and its gRPC listener was not up in the 2026-11-16 HTTP measurement",
+      "would_measure": "phoenix serve, then the gRPC stub in this script pointed at 127.0.0.1:4317"
+    }
+  ],
+  "previous_measurement": "bench/results/2026-11-16-otlp-pb-importer.json (Phoenix 21.0.0, HTTP/protobuf: spans.pb 200, spans.json 415)",
+  "results": {
+    "official_protobuf_schema": {
+      "available": true,
+      "binary": {
+        "accepted": true,
+        "names": [
+          "bbx.run",
+          "invoke_agent agent",
+          "chat gpt-4"
+        ],
+        "parents_resolve": true,
+        "spans": 3,
+        "trace_ids": [
+          "50444de04d35c6f7240486f96a9041f8"
+        ]
+      },
+      "json": {
+        "accepted": true,
+        "names": [
+          "bbx.run",
+          "invoke_agent agent",
+          "chat gpt-4"
+        ],
+        "spans": 3
+      }
+    },
+    "otlp_grpc_receiver": {
+      "available": true,
+      "port": 42821,
+      "received": {
+        "names": [
+          "bbx.run",
+          "invoke_agent agent",
+          "chat gpt-4"
+        ],
+        "partial_success": true,
+        "spans": 3,
+        "trace_ids": [
+          "50444de04d35c6f7240486f96a9041f8"
+        ]
+      },
+      "response_has_partial_success_field": true,
+      "status": "OK",
+      "transport": "OTLP/gRPC (application/grpc, protobuf)"
+    }
+  },
+  "ticket": "B5 (P4-14/P4-20's importer clause)",
+  "verdict": {
+    "capsule_verifies": true,
+    "grpc_receiver_accepted_it": true,
+    "importers_measured": [
+      "official schema",
+      "grpc receiver"
+    ],
+    "importers_unmeasured": [
+      "OpenTelemetry Collector (otelcol)",
+      "Langfuse",
+      "Grafana Tempo",
+      "Jaeger",
+      "Phoenix, OTLP/gRPC on 4317"
+    ],
+    "names_match_the_capsule": true,
+    "otlp_binary_is_the_official_message": true,
+    "otlp_json_parses_as_proto3_json": true
+  }
+}

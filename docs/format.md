@@ -499,8 +499,16 @@ carries counters, fingerprints and names only: no prompt or completion text, no 
 back all three spans with the trace id `50444de0…` byte for byte, both children naming `bbx.run`'s span id as parent,
 `bbx.model.bytes_received` still an integer, and Phoenix's `llm.system`/`llm.model_name` derived from our `gen_ai.*`
 names. Its OTLP/HTTP receiver still answers **415** to `otlp/spans.json` — the JSON part stays for readers that want
-JSON, and the protobuf part is what a Phoenix-class receiver takes. Langfuse, the Collector's OTLP/JSON receiver and
-Phoenix's gRPC port remain **untested**; `bench/results/2026-11-16-otlp-pb-importer.json` lists them.
+JSON, and the protobuf part is what a Phoenix-class receiver takes.
+
+**Wider on 2026-11-18** (`bench/results/2026-11-18-otlp-importers.json`): the capsule's own bytes were handed to the
+official OTLP messages (`opentelemetry-proto` 1.45.2, `protobuf` 7.36.2) and to an OTLP/**gRPC** `TraceService` built from
+OTel's own servicer (`grpcio` 1.85.3) on a loopback port. All three readings agree: 3 spans, names `bbx.run` /
+`invoke_agent agent` / `chat gpt-4`, trace id `50444de0…`, every `parent_span_id` resolving inside the message, and the
+JSON part parsing as proto3 JSON with `ignore_unknown_fields=False` (no unknown field anywhere). So the bytes are the
+message OTel defines and survive gRPC framing, not merely an HTTP POST. Still **untested**, with the failing command
+recorded: the Collector, Tempo and Jaeger (Go release binaries behind `objects.githubusercontent.com`, unreachable here),
+Langfuse (TypeScript server plus Postgres) and Phoenix's own gRPC listener (that measurement used its HTTP receiver).
 
 ## 9. Conformance vectors
 
