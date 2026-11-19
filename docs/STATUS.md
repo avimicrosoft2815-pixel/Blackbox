@@ -86,6 +86,26 @@ and B4's remaining part is an owner's tick while B6 and the macOS rows need a ma
 evidenced, 12 partial, 5 with no code in the tree at all (the I8 index rebuild, the capsule attack corpus, the Go reader,
 the trigger rules and the serverless wrapper), 3 needing people and 2 needing another OS.
 
+## The index exists, and I8 is measured (2026-11-16)
+
+`docs/gates/READINESS.md` listed four rows of §24/§24a with no code or artefact in the tree. This one moves the first of
+them: **the 500-run index rebuild (I8)**.
+
+`src/blackbox/index/` builds `data/index/main.sqlite` from the sealed capsules — five `STRICT` tables (`run`, `node`,
+`event`, `artifact`, `index_meta`), `INSERT ... ON CONFLICT DO NOTHING` so re-ingesting is always safe, and no absolute
+path, pid or timestamp in any compared table. `blackbox index [--rebuild] [--dump] [--json]` is the command;
+`canonical_dump` is the comparable form (four tables, every row, ordered by primary key, JSON Lines, paths reduced to file
+names, `index_meta` excluded because it holds `built_at_ns`).
+
+Measured, and committed as `bench/results/2026-11-16-i8-index-rebuild.json`:
+**500 runs → 500 capsules → 6 001 dump rows (500 run, 500 node, 4 500 event, 500 artifact); incremental build 891.5 ms,
+rebuild 885.9 ms; the two canonical dumps have the same sha256
+`8a65260426d6438b6272e6f7384e83b2994478bc64afcd6c1b3e3151a7359a02`; re-indexing adds 0 rows.** The index file is
+measured at the same time (see the JSON) so a reader can see the storage cost of the property rather than only its
+correctness. `tests/test_index_rebuild.py` (9 tests) asserts the same equality in the suite, plus the three ways this
+could have been false: an unchanged corpus rebuilt twice, a new capsule changing only its own rows, and two tapes of one
+run producing one run row and two artifacts.
+
 Suite: **Total: 1414 tests** — 1413 pass here and 1 is skipped on POSIX by name
 (`test_an_open_view_blocks_the_unlink_only_on_windows`: POSIX permits unlinking a file another fd still holds, so
 the open-view case exists only on Windows). The 42 added since the last line are the desktop flows and the two things that
