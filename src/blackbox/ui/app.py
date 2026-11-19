@@ -69,14 +69,29 @@ def _badge(row: library_mod.Row) -> str:
     return f'<span class="badge {kind}">{html.escape(status)}</span>'
 
 
+def _size(count: int | None) -> str:
+    """A size a person reads: bytes under a kilobyte, one decimal above a megabyte."""
+    value = float(count or 0)
+    if value < 1024:
+        return f"{int(value)} B"
+    if value < 1024 * 1024:
+        return f"{value / 1024:.0f} kB"
+    return f"{value / (1024 * 1024):.1f} MB"
+
+
+def _noun(count: int, word: str) -> str:
+    """The word for a tile, in the number the tile's value shows."""
+    return word if count == 1 else f"{word}s"
+
+
 def _tiles(found: library_mod.Library) -> str:
     counts = found.counts
     tiles = [
-        ("capsules", counts.get("capsules", 0), False),
-        ("runs", counts.get("runs", 0), False),
+        (_noun(counts.get("capsules", 0), "capsule"), counts.get("capsules", 0), False),
+        (_noun(counts.get("runs", 0), "run"), counts.get("runs", 0), False),
         ("events", counts.get("events", 0), False),
         ("need attention", counts.get("attention", 0), True),
-        ("on disk", f"{counts.get('bytes', 0) / 1024 / 1024:.1f} MB", False),
+        ("on disk", _size(counts.get("bytes", 0)), False),
     ]
     cells = "".join(
         f'<div class="tile{" attention" if attention else ""}"><div class="n">{html.escape(str(value))}</div>'
@@ -119,10 +134,13 @@ def _rows(found: library_mod.Library, token: str) -> str:
     body = []
     for row in found.rows:
         title = html.escape(str(row.capsule_id or row.name))
-        href = "" if not row.readable else f'{token}/run/{html.escape(str(row.capsule_id))}'
+        href = "" if not row.readable else f"{token}/run/{html.escape(row.name)}"
         name = f'<a class="run" href="{href}">{title}</a>' if href else f'<span class="run">{title}</span>'
-        sub = html.escape(str(row.run_id or "no run id"))
-        if row.providers:
+        # The file name is what a row is addressed by, and two files can hold one capsule: it belongs in the row.
+        sub = html.escape(f"{row.run_id or 'no run id'} · {row.name}")
+        if not row.readable:
+            providers = "—"                        # nothing was read, so nothing may be claimed about what was captured
+        elif row.providers:
             providers = ", ".join(row.providers)
         elif row.model_calls:
             providers = f"{row.model_calls} model call(s), provider not attributed"
@@ -132,7 +150,7 @@ def _rows(found: library_mod.Library, token: str) -> str:
         captured = html.escape(providers) + (f'<span class="sub">{html.escape(models)}</span>' if models else "")
         reasons = "".join(f"<li>{html.escape(reason)}</li>" for reason in row.attention)
         attention = f'<ul class="reasons">{reasons}</ul>' if reasons else '<span class="badge ok">none</span>'
-        size = f"{(row.bytes or 0) / 1024:.0f} kB"
+        size = _size(row.bytes)
         body.append(
             f"<tr><td>{name}<span class=\"sub\">{sub}</span></td><td>{_badge(row)}</td>"
             f"<td>{html.escape(row.when)}</td><td>{captured}</td>"
@@ -222,19 +240,14 @@ BACK_BAR = ('<div style="position:fixed;left:14px;bottom:14px;z-index:20">'
             '<a class="navlink" href="{token}/library" style="text-decoration:none">← recorded runs</a></div>')
 
 
-def run_page(data_dir: str, token: str, capsule_id: str, *, single: str | None = None) -> str | None:
-    from blackbox.cap import format as cap
+def run_page(data_dir: str, token: str, name: str, *, single: str | None = None) -> str | None:
     from blackbox.ui.model import document_for_capsule
     from blackbox.ui.viewer import build_html
 
-    path = library_mod.find(data_dir, capsule_id)
+    path = library_mod.find_by_name(data_dir, name)
     if path is None and single and os.path.isfile(single):
         # A capsule named directly on the command line, outside any data directory: the one run the app was asked for.
-        try:
-            if cap.read_manifest(single).get("capsule_id") == capsule_id:
-                path = single
-        except Exception:
-            path = None
+        path = single if os.path.basename(single) == name else None
     if path is None:
         return None
     page = build_html(document_for_capsule(path))

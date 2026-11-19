@@ -176,7 +176,9 @@ def read_row(path: str) -> Row:
     try:
         manifest = cap.read_manifest(path)
     except Exception as exc:                      # a broken capsule is a row with a reason, not a 500
-        row = _unreadable(path, f"{exc.code if hasattr(exc, 'code') else type(exc).__name__}: {exc}")
+        # `str(exc)` already carries the refusal code ("BBX-E402: …"); prefixing it again doubled it in the row.
+        reason = str(exc) if hasattr(exc, "code") else f"{type(exc).__name__}: {exc}"
+        row = _unreadable(path, reason)
     else:
         row = _row_from_manifest(path, manifest, size=stat.st_size, mtime=stat.st_mtime)
     if len(_CACHE) >= CACHE_MAX:
@@ -288,6 +290,20 @@ def scan(data_dir: str, *, query: str = "", status: str = "", sort: str = "newes
     return Library(data_dir=os.path.abspath(data_dir), rows=page, total=len(ordered), offset=offset, limit=limit,
                    query=query, status=status, sort=sort, counts=counts, statuses=statuses, providers=providers,
                    elapsed_ms=(time.perf_counter() - started) * 1000.0)
+
+
+def find_by_name(data_dir: str, name: str) -> str | None:
+    """Resolve a row's file name to a path **inside** `data_dir`. The name comes from a URL, so it is matched, not joined.
+
+    Rows are addressed by file name rather than by capsule id because two files can hold the same capsule (a copy, a
+    backup): a library that linked by id would open the first one for both rows and hide the duplicate.
+    """
+    if not name or name in (".", "..") or "/" in name or "\\" in name:
+        return None
+    for path in capsules_in(data_dir):
+        if os.path.basename(path) == name:
+            return path
+    return None
 
 
 def find(data_dir: str, capsule_id: str) -> str | None:

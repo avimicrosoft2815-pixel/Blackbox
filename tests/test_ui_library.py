@@ -72,7 +72,9 @@ def test_a_broken_capsule_is_a_row_with_a_reason_not_a_crash(data_dir: Path) -> 
     broken = next(row for row in found.rows if row.name == "broken.bbx")
     assert broken.readable is False
     assert broken.attention and broken.attention[0].startswith("unreadable:")
-    assert "BBX-E402" in broken.attention[0]
+    # The refusal code appears once: `str(exception)` already carries it, and prefixing it again read
+    # "unreadable: BBX-E402: BBX-E402: …" in the row.
+    assert broken.attention[0].count("BBX-E402") == 1, broken.attention[0]
 
 
 def test_the_cache_serves_a_second_scan_without_re_reading(data_dir: Path) -> None:
@@ -122,11 +124,23 @@ def test_sorting_is_stable_and_total_order_independent(data_dir: Path) -> None:
     assert (largest[0].bytes or 0) >= (largest[-1].bytes or 0)
 
 
-def test_a_capsule_id_from_a_url_is_matched_not_joined(data_dir: Path) -> None:
+def test_a_name_from_a_url_is_matched_not_joined(data_dir: Path) -> None:
     row = library.scan(str(data_dir)).rows[0]
-    assert library.find(str(data_dir), row.capsule_id or "") is not None
-    for hostile in ("../capsules/x.bbx", "..", "/etc/passwd", "c_/../../x", ""):
-        assert library.find(str(data_dir), hostile) is None, hostile
+    assert library.find_by_name(str(data_dir), row.name) == row.path
+    for hostile in ("../capsules/x.bbx", "..", "/etc/passwd", "x/../../x", "", "c_/x.bbx"):
+        assert library.find_by_name(str(data_dir), hostile) is None, hostile
+
+
+def test_two_copies_of_one_capsule_are_two_rows_each_with_its_own_link(data_dir: Path) -> None:
+    """A copied capsule keeps its id. Linking rows by id would open the first file for both and hide the duplicate."""
+    source = next((data_dir / "capsules").glob("*.bbx"))
+    shutil.copyfile(source, data_dir / "capsules" / "copy.bbx")
+    library.forget()
+    rows = library.scan(str(data_dir), limit=10).rows
+    assert len(rows) == 2 and len({row.name for row in rows}) == 2
+    assert len({row.capsule_id for row in rows}) == 1, "the two files really do carry one capsule id"
+    paths = {library.find_by_name(str(data_dir), row.name) for row in rows}
+    assert paths == {row.path for row in rows} and len(paths) == 2
 
 
 def test_the_manifest_only_reader_agrees_with_the_full_one(data_dir: Path) -> None:
@@ -190,8 +204,8 @@ def test_the_app_serves_the_library_and_a_run_and_refuses_a_wrong_token(data_dir
         assert "Find a run" in page and "c_" in page
         assert f'{srv.token}/onboarding' in page
 
-        capsule_id = library.scan(str(data_dir)).rows[0].capsule_id or ""
-        status, run = _get(srv.url + f"run/{capsule_id}")
+        name = library.scan(str(data_dir)).rows[0].name
+        status, run = _get(srv.url + f"run/{name}")
         assert status == 200 and "<!doctype html>" in run.lower()
         assert "recorded runs" in run, "a run page must offer a way back to the library"
 

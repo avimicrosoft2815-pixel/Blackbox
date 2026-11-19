@@ -398,7 +398,7 @@
       "run": "src/blackbox/ui/viewer.py — the existing offline viewer, with a bar back to the library",
       "routes": "src/blackbox/ui/app.py — GET-only, loopback HOST from ui.server, per-process token path, CSP default-src 'none', no logging"
     },
-    "tests": "tests/test_desktop.py (14), tests/test_ui_library.py (18), tests/test_cap_read_manifest.py (17), tests/test_desktop_package.py (6)",
+    "tests": "tests/test_desktop.py (14), tests/test_ui_library.py (19), tests/test_cap_read_manifest.py (17), tests/test_desktop_package.py (6)",
     "packages": {
       "linux_deb": "tools/package/linux/build_deb.sh -> dist/blackbox_<version>_<arch>.deb; built and extracted here, launcher run from the extracted tree",
       "windows": "tools/package/windows/{blackbox.iss,build_windows.ps1}; NOT built and NOT run (no Windows here); UNSIGNED by design of this environment",

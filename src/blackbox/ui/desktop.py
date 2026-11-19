@@ -145,7 +145,6 @@ def run(path: str, *, port: int = 0, window: bool = True, as_json: bool = False,
     until it has been idle for `timeout_s` seconds. The first version waited for a fetch while the caller printed the URL
     afterwards — a fallback nobody could reach (defect 87).
     """
-    from blackbox.cap import format as cap
     from blackbox.ui import app as app_mod
     from blackbox.ui import library as library_mod
 
@@ -157,9 +156,8 @@ def run(path: str, *, port: int = 0, window: bool = True, as_json: bool = False,
         # A capsule file: open the library it belongs to, with that run in front. If it belongs to no library, the app
         # still serves that one file by path — `blackbox desktop some/capsule.bbx` must work on a capsule alone.
         data_dir = library_mod.data_root(path)
-        manifest = cap.read_manifest(path)
-        start_route = f"run/{manifest.get('capsule_id', '')}"
-        if library_mod.find(data_dir, str(manifest.get('capsule_id', ''))) is None:
+        start_route = f"run/{os.path.basename(path)}"
+        if library_mod.find_by_name(data_dir, os.path.basename(path)) is None:
             single = os.path.abspath(path)
     srv = app_mod.start(data_dir, port=port, force_onboarding=onboarding, single=single)
     url = srv.url + start_route
