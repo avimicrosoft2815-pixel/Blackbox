@@ -109,7 +109,12 @@ def test_six_concurrent_recoverers_elect_one_winner(data_dir, tmp_path):
     for result in completed:
         if result.returncode != 0:
             # A loser may be refused rather than silently second — but only with a declared code, never a traceback.
-            assert "BBX-E" in result.stderr, f"a concurrent recoverer failed without a code: {result.stderr[-1200:]}"
+            # The message is the *exception line*, not the last 1200 characters of a traceback: a CI annotation is cut at
+            # 600 characters, and the end of `stderr` is the part that gets dropped (defect 105 needed two CI runs to
+            # name a `PermissionError` because this used to end in a caret line).
+            lines = [line for line in result.stderr.strip().splitlines() if line.strip()]
+            assert "BBX-E" in result.stderr, (
+                f"a concurrent recoverer failed without a code: {lines[-1] if lines else '<empty stderr>'}")
             continue
         payload = json.loads(result.stdout.strip().splitlines()[-1])
         assert payload["path"] == str(capsules[0]), payload

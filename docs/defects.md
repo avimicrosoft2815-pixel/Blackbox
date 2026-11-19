@@ -1809,3 +1809,31 @@ only, the marker is registered in `pyproject.toml`, and the watchdog's message p
 test stays at 250 invocations everywhere, so the breadth the row measures is unchanged; nothing else in the suite asks for
 more than 120 s. A marker is the narrow fix: if more than a handful of tests need one, the suite is too slow and that is
 the problem to fix.
+
+## Defect 105 — a concurrent recoverer died with a traceback on Windows instead of a code (2026-11-16, CI, partly diagnosed)
+
+At `4afba25` the three Windows cells still failed `test_six_concurrent_recoverers_elect_one_winner`, but with a different
+assertion from defect 103's: "a concurrent recoverer failed without a code". One of six processes exited non-zero with no
+`BBX-E…` in its stderr — a traceback, and the annotation's 600 characters carried a `^^^` anchor line from it and nothing
+that named the exception, so the *cause* is not yet measured.
+
+**What is measured**: the Ubuntu cells were green at the same commit (defect 103's fix holds), and this is a
+Windows-only, concurrency-only, uncoded failure. The one construct on this path that behaves differently between the two
+systems is `os.replace` onto a file another process has open: CPython opens files without `FILE_SHARE_DELETE`, so on
+Windows the rename is refused (`WinError` 5/32) for as long as that handle lives, while on POSIX it is atomic and
+invisible. Recovery renames its own state files — markers, `recovery.json`, the capsule — and every other recoverer in the
+race is *reading* exactly those files. That is the likely mechanism, not a proven one, and this entry says so.
+
+**Fixed as far as it can be without a Windows machine**:
+
+* `blackbox.platform.replace` replaces the bare `os.replace` in the recovery state writer and the capsule writer: the two
+  Windows codes are retried with a doubling delay inside a 2 s budget, and if the peer never lets go the refusal is coded
+  `BBX-E210` ("writer is alive; recovery refused" — the plan's own meaning for "another process owns this run") instead of
+  escaping as a `PermissionError`. Any other error, `ENOSPC` included, is raised untouched and never retried.
+* Three tests measure that here by simulating a sharing violation: it is retried and then succeeds; a permanent one ends
+  in `BBX-E210`; `ENOSPC` is neither retried nor relabelled.
+* The concurrency test's own failure message now names the **exception line** rather than the last 1 200 characters of a
+  traceback — the third CI cycle spent on this defect was spent reading a caret.
+
+**Not claimed**: the cause is not proven and the Windows cell is not green. If the next run fails the same way, the
+annotation will now name the exception, and that is what the next fix will be based on rather than the guess above.

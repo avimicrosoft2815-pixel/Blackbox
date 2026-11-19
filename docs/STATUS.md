@@ -163,6 +163,16 @@ green. The same Windows cell also tripped the 120 s hung-test watchdog on the 25
 40 s here, over three minutes there (defect 104) — which now declares `@pytest.mark.slow_budget(300)` instead of sharing
 one flat bound with a hang detector.
 
+At `4afba25` the Ubuntu cells are green on all three versions — defect 103's fix holds where it was found — but the three
+Windows cells still failed the same test, now with "a concurrent recoverer failed without a code": one process died with a
+traceback. The annotation could not name the exception, so defect 105 records what *is* measured (a Windows-only, race-only,
+uncoded failure) and what is not (the cause). The one Windows-only rename hazard on that path is `os.replace` onto a file a
+peer has open, which CPython refuses because it opens without `FILE_SHARE_DELETE`; recovery renames its own state files
+while every other recoverer is reading them. `blackbox.platform.replace` now retries the two Windows sharing codes inside a
+2 s budget and, if the peer never lets go, refuses with `BBX-E210` rather than a `PermissionError`; `ENOSPC` and friends are
+raised untouched. Three tests simulate the violation here. **The Windows cells are not green and this paragraph is not a
+claim that they will be.**
+
 **The CLI contract** (`docs/cli.md`, `tests/test_cli_contract.py`, 21). Every command, its machine-readable form and its
 exit codes in one table, checked against the binary: the table's set equals the front door's, every `--json` row is
 accepted, and the documented code is measured on a failing invocation (`diagnose`'s `1` for "nothing readable" against
@@ -239,11 +249,12 @@ correctness. `tests/test_index_rebuild.py` (9 tests) asserts the same equality i
 could have been false: an unchanged corpus rebuilt twice, a new capsule changing only its own rows, and two tapes of one
 run producing one run row and two artifacts.
 
-Suite: **Total: 1531 tests** — 1529 pass here and 2 are skipped on POSIX by name
+Suite: **Total: 1534 tests** — 1532 pass here and 2 are skipped on POSIX by name
 (`test_an_open_view_blocks_the_unlink_only_on_windows`: POSIX permits unlinking a file another fd still holds, so the
 open-view case exists only on Windows; and `test_on_windows_no_broad_principal_has_access`: mode bits are not access on
-Windows and `icacls` does not exist here). Measured on this machine: **1 531 collected, 0 failed,
-0 errors, 2 skipped, 433.2 s** (`/tmp/full18.xml`). The 117 added since the 1414-line are the desktop flows and the two things that
+Windows and `icacls` does not exist here). Measured on this machine: **1 534 collected, 0 failed,
+0 errors, 2 skipped, 413.0 s** (`/tmp/full20.xml`) — the three added this round are the Windows rename-retry tests
+(defect 105). The 117 added since the 1414-line are the desktop flows and the two things that
 could previously only be checked by a person with a screen or a Windows machine:
 
 * `tests/test_ui_flows.py` (14) — the window's four flows over real HTTP: check, diagnose, review a proposal, apply

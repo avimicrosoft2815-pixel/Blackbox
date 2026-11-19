@@ -38,6 +38,7 @@ from blackbox.codec.ids import blake2b
 from blackbox.errors import bbx
 from blackbox.platform import current as _plat_current
 from blackbox.platform import perms as perms_mod
+from blackbox.platform import replace as _replace
 from blackbox.rec import correlate, discover
 from blackbox.tape import chain as chain_mod
 from blackbox.tape import frame as frame_mod
@@ -79,7 +80,9 @@ def _write_atomic(path: str, blob: bytes) -> None:
         _plat.fdatasync(fd)
     finally:
         os.close(fd)
-    os.replace(tmp, path)
+    # Not `os.replace`: a peer recoverer reading this state file stops the rename on Windows, and that is a race to wait
+    # out, not a failure (defect 105).
+    _replace(tmp, path)
     with contextlib.suppress(OSError):        # Windows has no directory fsync; its shim says so
         _plat.fsync_dir(directory)
 

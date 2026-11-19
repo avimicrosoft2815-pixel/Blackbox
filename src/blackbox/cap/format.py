@@ -37,6 +37,7 @@ from typing import Any
 
 from blackbox.errors import bbx
 from blackbox.platform import current as _plat_current
+from blackbox.platform import replace as _replace
 
 _plat = _plat_current()
 
@@ -350,7 +351,9 @@ def write_capsule(dest: str, entries: dict[str, bytes], manifest: dict[str, Any]
         _plat.fdatasync(fd)
     finally:
         os.close(fd)
-    os.replace(tmp, dest)
+    # A `verify`/`diagnose` that has the old capsule open stops the rename on Windows; the shim waits that out and
+    # refuses with a code if it never ends (defect 105).
+    _replace(tmp, dest)
     # The directory entry is what makes the capsule survive a power cut; a platform without directory fsync
     # (Windows) says so in its own docstring, and that is the one case where there is nothing to do.
     with contextlib.suppress(OSError):
