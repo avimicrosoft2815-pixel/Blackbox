@@ -139,6 +139,15 @@ archive contains anyway. `ingest` is now compared against `blackbox --version` (
 delta is what `ingest` costs), and a needle containing a zero byte is not used. Defects 99 and 100; the machine-independent
 half of both assertions (the import list, `manifest.created_ns == 0`) was already there and is untouched.
 
+**CI, observed rather than hoped** (2026-11-16, `c0684a9`): the new **`go-reader` job is green on both workflow runs**
+(`44593741838` push, `44593755018` PR) — Go 1.22 built `tools/readers/go/`, it read a capsule the Python build wrote, and
+it produced the three named refusals. That is the first measurement of the second-language reader, and it moves P11-15
+from "written, never compiled" to "compiled and run in CI". `docs` green, **Ubuntu 3/3 green on both runs**, and
+**Windows `py3.11` red** on the new concurrency test: six recoverers racing on Windows crashed with an uncoded exception
+because the claim path only caught `FileExistsError` (defect 101). Fixed here with `_lock_conflict`
+(`FileExistsError` or WinError 5/32/33, with a failed unlink treated as the same race); the Windows cells are the cells
+that will confirm it. macOS cells were still queued when this was written.
+
 **The CLI contract** (`docs/cli.md`, `tests/test_cli_contract.py`, 21). Every command, its machine-readable form and its
 exit codes in one table, checked against the binary: the table's set equals the front door's, every `--json` row is
 accepted, and the documented code is measured on a failing invocation (`diagnose`'s `1` for "nothing readable" against

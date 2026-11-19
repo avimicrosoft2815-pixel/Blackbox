@@ -1736,3 +1736,19 @@ absence of a pid.
 **Fixed** by refusing to use a needle that contains a zero byte: the decimal form (`1280`), the eight-byte form and a
 `pid=` prefix are always checked, and the four-byte form only when it is distinctive. The wall-clock half of the same test
 (`manifest.created_ns == 0`) is untouched and is the part that actually proves no clock leaks.
+
+## Defect 101 — six concurrent recoverers crashed on Windows instead of electing a winner (2026-11-16, CI)
+
+`c0684a9`'s `py3.11 / windows-latest` cell failed the new `test_six_concurrent_recoverers_elect_one_winner` with "a
+concurrent recoverer failed without a code" and a traceback. The claim path caught only `FileExistsError`, which is the
+POSIX answer. On Windows a lock file another process has open fails differently: `O_EXCL` raises a sharing violation
+(`PermissionError`, WinError 32), and unlinking the stale lock while the owner still has it open raises the same. So the
+loser of the race — the ordinary outcome the test is *for* — escaped as an unhandled exception instead of `BBX-E210`.
+
+**Fixed** with one predicate, `_lock_conflict`: `FileExistsError`, or WinError 5/32/33. Every claim path that meets it now
+returns `False`, which `step_claimed` turns into the coded refusal — "the lock is held by a live recoverer" — and an
+unlink that fails because the owner still has the file is treated as the same race rather than as an error. Nothing is
+stolen, and nothing escapes uncoded.
+
+**Verified on Linux** (the test, three consecutive runs) and **not yet on Windows**: the fix is in this branch, and the
+cell that found the defect will be the cell that confirms it. Until it is green there, `docs/STATUS.md` says so.

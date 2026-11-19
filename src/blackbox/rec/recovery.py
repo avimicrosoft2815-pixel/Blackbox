@@ -661,20 +661,34 @@ class Recovery:
         return blake2b(content).hex()
 
     def _take_lock(self, lock_path: str, content: bytes) -> bool:
-        """`O_EXCL`, with the same staleness rules as the writer lease: dead pid, other boot, or another start time."""
+        """`O_EXCL`, with the same staleness rules as the writer lease: dead pid, other boot, or another start time.
+
+        Two processes claiming one run is the case this is for, so every way the operating system can say "somebody else
+        has it" has to end in `False` (a coded `BBX-E210` from the caller) and not in a traceback. On Windows that is not
+        one errno: `O_EXCL` on a file another process holds raises a *sharing violation*, `PermissionError` with WinError
+        32, and unlinking the stale lock can raise the same. The first version only caught `FileExistsError`, which is why
+        six concurrent recoverers on Windows crashed in `test_recovery_identity.py` (defect 101).
+        """
         perms_mod.private_dir(os.path.dirname(self.run_dir))      # `<data>/runs`
         perms_mod.private_dir(self.run_dir)
         try:
             fd = _plat.open_fd(lock_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        except FileExistsError:
+        except OSError as exc:
+            if not _lock_conflict(exc):
+                raise
             held = _read_json(lock_path)
             if held and self._lock_is_live(held):
                 return False
-            os.unlink(lock_path)                      # stale: a dead recoverer left it behind
+            try:
+                os.unlink(lock_path)                  # stale: a dead recoverer left it behind
+            except OSError:
+                return False                          # a live one still has it open: that is the race, not an error
             try:
                 fd = _plat.open_fd(lock_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-            except FileExistsError:
-                return False                          # lost the race to another recoverer, which is fine
+            except OSError as again:
+                if _lock_conflict(again):
+                    return False                      # lost the race to another recoverer, which is fine
+                raise
         try:
             _plat.pwrite(fd, memoryview(content), 0)
             _plat.fdatasync(fd)
@@ -952,6 +966,17 @@ class Recovery:
             if len(self.result.steps_skipped) == before:
                 self.result.steps_run.append(step)
         return self.result
+
+
+def _lock_conflict(exc: OSError) -> bool:
+    """`True` when the OS refused a claim because the lock is already there or held by another process.
+
+    `FileExistsError` is the POSIX answer; Windows adds `PermissionError` (WinError 5, 32 sharing violation, 33 lock
+    violation) for the same situation when the other process has the file open.
+    """
+    if isinstance(exc, FileExistsError):
+        return True
+    return getattr(exc, "winerror", None) in (5, 32, 33)
 
 
 def run_id_for(data_dir: str, writer_uuid_hex: str) -> str:
