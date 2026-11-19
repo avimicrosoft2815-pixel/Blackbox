@@ -60,6 +60,30 @@ def replace(src: str, dst: str, *, budget_s: float = 2.0) -> None:
             delay = min(delay * 2, 0.05)
 
 
+def read(path: str, *, budget_s: float = 2.0) -> bytes:
+    """Read a whole file, waiting out the Windows window in which a peer's rename makes the open fail.
+
+    The other half of the race `replace` handles (defects 105 and 106). A rename onto `path` — the way every recovery
+    marker and every capsule is published — briefly refuses readers on Windows with `ERROR_ACCESS_DENIED` (which arrives
+    as `PermissionError`, `errno` 13, and names `path`, not a source/destination pair). On POSIX the reader sees the old
+    file or the new one and nothing else, so this loop runs once there. If the window never closes the last refusal is
+    raised: a caller that cannot read its state has to decide, and this shim does not decide for it.
+    """
+    deadline = time.monotonic() + budget_s
+    delay = 0.002
+    while True:
+        try:
+            with open(path, "rb") as handle:
+                return handle.read()
+        except OSError as exc:
+            if not _sharing_violation(exc):
+                raise
+            if time.monotonic() > deadline:
+                raise
+            time.sleep(delay)
+            delay = min(delay * 2, 0.05)
+
+
 def capabilities() -> dict[str, object]:
     mod = current()
     if hasattr(mod, "capabilities"):

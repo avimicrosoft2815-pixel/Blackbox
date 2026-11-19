@@ -1847,3 +1847,24 @@ refused with a code.
 the retry in place. That is consistent with the inference and is not a proof of it: a race that does not happen leaves no
 evidence of which side fixed it. The `replace` shim and its three tests stay regardless — the Windows rename behaviour it
 handles is real whether or not it was this failure.
+
+## Defect 106 — the retry was on the wrong side of the rename: recovery markers failed to *read* (2026-11-16, CI)
+
+`e86e14a` says exactly what `1d42e0c` could not, because the concurrency test now prints the exception line: two Windows
+cells failed with `PermissionError: [Errno 13] Permission denied: …\runs\r_…\recovery.done.DISCOVERED` and
+`…\recovery.done.CLAIMED`. So defect 105's inference was half right and half wrong. The gate really is a Windows sharing
+refusal on recovery state — but it is the **read** that is refused, not the rename. `DISCOVERED` runs *before* the claim,
+so all six processes publish that marker and read it at the same time; a reader that arrives inside a peer's
+`MoveFileEx` window is refused with `ERROR_ACCESS_DENIED` (`errno` 13, naming the path rather than a source/destination
+pair, which is why 105's guess pointed at `os.replace` and this one is not a guess). Nothing retried it, so it escaped as a
+traceback — exactly what the test forbids.
+
+**Fixed** with `blackbox.platform.read`: the same predicate and the same 2 s budget as `replace`, applied to the open.
+`recovery._read_json` and `_artifact_hash` use it, so every marker, the lock file and every artifact hash is read through
+the retry. A file that is still refused after the budget reads as **absent**, which is the conservative direction — absent
+means the step runs again — and `_artifact_hash` returns `None` for the same reason. Anything that is not a sharing
+refusal (`FileNotFoundError`, `ENOSPC`) is raised or swallowed exactly as before, untouched.
+
+**Measured here**: two tests simulate the refusal — one that clears after three attempts and one that is an ordinary
+`FileNotFoundError` and is neither retried nor swallowed. **Not yet measured on Windows**: the cells that produced this
+traceback are the cells that will confirm it, and until they are green this entry stays open.

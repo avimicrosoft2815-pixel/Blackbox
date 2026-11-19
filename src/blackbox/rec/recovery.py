@@ -38,6 +38,7 @@ from blackbox.codec.ids import blake2b
 from blackbox.errors import bbx
 from blackbox.platform import current as _plat_current
 from blackbox.platform import perms as perms_mod
+from blackbox.platform import read as _read
 from blackbox.platform import replace as _replace
 from blackbox.rec import correlate, discover
 from blackbox.tape import chain as chain_mod
@@ -88,10 +89,12 @@ def _write_atomic(path: str, blob: bytes) -> None:
 
 
 def _read_json(path: str) -> dict[str, Any] | None:
+    # `_read`, not `open`: a peer publishing the same marker is renaming onto this path, and on Windows a reader that
+    # arrives inside that window is refused for a few microseconds (defect 106). A state file that cannot be read after
+    # the budget is treated as absent — the conservative direction, because "absent" means the step runs again.
     try:
-        with open(path, "rb") as fh:
-            loaded = json.loads(fh.read().decode("utf-8"))
-    except (FileNotFoundError, UnicodeDecodeError, json.JSONDecodeError):
+        loaded = json.loads(_read(path).decode("utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
         return None
     return loaded if isinstance(loaded, dict) else None
 
@@ -596,9 +599,8 @@ class Recovery:
         if not path:
             return None
         try:
-            with open(path, "rb") as fh:
-                return blake2b(fh.read()).hex()
-        except FileNotFoundError:
+            return blake2b(_read(path)).hex()
+        except OSError:
             return None
 
     def _skip(self, step: str, input_hash: str) -> bool:

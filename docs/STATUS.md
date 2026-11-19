@@ -269,12 +269,12 @@ correctness. `tests/test_index_rebuild.py` (9 tests) asserts the same equality i
 could have been false: an unchanged corpus rebuilt twice, a new capsule changing only its own rows, and two tapes of one
 run producing one run row and two artifacts.
 
-Suite: **Total: 1534 tests** — 1532 pass here and 2 are skipped on POSIX by name
+Suite: **Total: 1536 tests** — 1534 pass here and 2 are skipped on POSIX by name
 (`test_an_open_view_blocks_the_unlink_only_on_windows`: POSIX permits unlinking a file another fd still holds, so the
 open-view case exists only on Windows; and `test_on_windows_no_broad_principal_has_access`: mode bits are not access on
-Windows and `icacls` does not exist here). Measured on this machine: **1 534 collected, 0 failed,
-0 errors, 2 skipped, 413.0 s** (`/tmp/full20.xml`) — the three added this round are the Windows rename-retry tests
-(defect 105). The 117 added since the 1414-line are the desktop flows and the two things that
+Windows and `icacls` does not exist here). Measured on this machine: **1 536 collected, 0 failed,
+0 errors, 2 skipped, 422.9 s** (`/tmp/full21.xml`) — the five added this round are the Windows rename- and read-retry
+tests (defects 105–106). The 117 added since the 1414-line are the desktop flows and the two things that
 could previously only be checked by a person with a screen or a Windows machine:
 
 * `tests/test_ui_flows.py` (14) — the window's four flows over real HTTP: check, diagnose, review a proposal, apply

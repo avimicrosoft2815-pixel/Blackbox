@@ -273,3 +273,31 @@ def test_replace_lets_any_other_error_through_unchanged(monkeypatch, tmp_path):
     with pytest.raises(OSError) as caught:
         replace(str(tmp_path / "c.tmp"), str(tmp_path / "c.json"))
     assert caught.value.errno == 28               # not retried, not relabelled: the caller has to see ENOSPC
+
+
+def test_read_waits_out_the_window_a_peer_is_renaming_into(monkeypatch, tmp_path):
+    """The other half of the race in defect 105: a reader arriving during a rename is refused on Windows (defect 106)."""
+    from blackbox.platform import read
+
+    target = tmp_path / "marker.json"
+    target.write_bytes(b'{"step": "CLAIMED"}')
+    real, refusals = open, []
+
+    def refused(path, mode="r", *args, **kwargs):
+        if path == str(target) and len(refusals) < 3:
+            refusals.append(1)
+            error = PermissionError(13, "Permission denied", str(target))
+            error.winerror = 5                      # type: ignore[attr-defined]
+            raise error
+        return real(path, mode, *args, **kwargs)
+
+    monkeypatch.setattr("builtins.open", refused)
+    assert read(str(target)) == b'{"step": "CLAIMED"}'
+    assert len(refusals) == 3
+
+
+def test_read_gives_up_on_a_refusal_that_is_not_about_renaming(tmp_path):
+    from blackbox.platform import read
+
+    with pytest.raises(FileNotFoundError):
+        read(str(tmp_path / "absent.json"))             # an ordinary refusal is not retried and not swallowed
