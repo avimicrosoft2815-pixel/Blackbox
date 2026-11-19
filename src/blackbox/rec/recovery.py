@@ -964,8 +964,14 @@ class Recovery:
 
     # ── the machine ─────────────────────────────────────────────────────────
     def _adopt_archive(self) -> RecoveryResult:
-        """Report the archive somebody else produced, without doing any of the work again."""
+        """Report the archive somebody else produced, without doing any of the work again.
+
+        `steps_run` is **emptied**, not left as it was. A recoverer that adopted after the claim had already run
+        `DISCOVERED` (it happens before the lock), and leaving that in the list made it a second process that "did the
+        work" — which is exactly the duplicate claim defect 103 was about, one layer up (defect 107).
+        """
         self.result.state = "ARCHIVED"
+        self.result.steps_run = []
         self.result.steps_skipped = list(STEPS)
         archived = _read_json(os.path.join(self.run_dir, "recovery.json")) or {}
         self.result.capsule_path = archived.get("capsule_path")

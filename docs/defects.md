@@ -1868,3 +1868,23 @@ refusal (`FileNotFoundError`, `ENOSPC`) is raised or swallowed exactly as before
 **Measured here**: two tests simulate the refusal — one that clears after three attempts and one that is an ordinary
 `FileNotFoundError` and is neither retried nor swallowed. **Not yet measured on Windows**: the cells that produced this
 traceback are the cells that will confirm it, and until they are green this entry stays open.
+
+## Defect 107 — the adopting recoverer still said it had done the work (2026-11-16, CI)
+
+`bc26dce`'s `py3.11 / ubuntu-latest` cell failed the concurrency test with "2 recoverers each claimed to have done the
+work" — defect 103's symptom, back at a commit whose Windows and macOS cells were green. The cause is in defect 103's own
+fix: `_adopt_archive` reported the winner's capsule and filled `steps_skipped` with every step, but it did not touch
+`steps_run`, which the adopting process had already appended to. `DISCOVERED` runs **before** the lock, so a process that
+loses the race legitimately has `["DISCOVERED"]` in `steps_run` by the time it adopts. Two processes then each returned a
+capsule *and* a non-empty `steps_run`: the duplicate claim the whole test exists to forbid, moved one layer up from "two
+capsules" to "two workers".
+
+**Fixed** by emptying `steps_run` in `_adopt_archive`: adopting somebody else's archive means this process did none of the
+work, and saying otherwise is a lie the caller cannot check. The `state`, `steps_skipped`, capsule path and root are
+unchanged.
+
+**Measured here**: a new single-process test forces the first `_already_archived()` to answer "not yet", so the machine runs
+exactly the loser's sequence — `DISCOVERED`, then the claim, then adoption — and asserts `steps_run == []`, every step in
+`steps_skipped`, the winner's capsule, and still one capsule on disk. Six consecutive runs of the whole file are green, and
+this is the kind of defect that only a single-process test can hold down: the concurrency test found it twice in eleven
+cells and missed it in the rest.

@@ -125,3 +125,32 @@ def test_six_concurrent_recoverers_elect_one_winner(data_dir, tmp_path):
     assert winners, "every concurrent recoverer failed"
     assert worked <= 1, f"{worked} recoverers each claimed to have done the work"
     assert len({payload["root"] for payload in winners}) == 1
+
+
+def test_a_recoverer_that_adopts_after_the_claim_reports_no_work_of_its_own(data_dir, monkeypatch):
+    """The adoption path (defect 103) must not read as a second worker (defect 107).
+
+    `DISCOVERED` runs before the lock, so a process that loses the race and adopts the winner's archive has already
+    appended one step to `steps_run`. Left there, two processes report having done the work — the duplicate claim again,
+    one layer up. The first `_already_archived()` is forced to say "not yet" so that this process runs exactly the
+    sequence a loser runs, and the rest of the machine is real.
+    """
+    directory, uuid = data_dir
+    winner = recovery.recover(directory, uuid, now_ns=NOW)
+    assert winner.steps_run and winner.capsule_path
+
+    real = recovery.Recovery._already_archived
+    calls = {"n": 0}
+
+    def not_yet_once(self):
+        calls["n"] += 1
+        return False if calls["n"] == 1 else real(self)
+
+    monkeypatch.setattr(recovery.Recovery, "_already_archived", not_yet_once)
+    adopted = recovery.recover(directory, uuid, now_ns=NOW)
+
+    assert adopted.state == "ARCHIVED"
+    assert adopted.steps_run == [], f"the adopter claims it ran {adopted.steps_run}"
+    assert set(adopted.steps_skipped) == set(recovery.STEPS)
+    assert adopted.capsule_path == winner.capsule_path and adopted.capsule_root == winner.capsule_root
+    assert len(list((Path(directory) / "capsules").glob("*.bbx"))) == 1

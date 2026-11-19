@@ -173,6 +173,12 @@ while every other recoverer is reading them. `blackbox.platform.replace` now ret
 raised untouched. Three tests simulate the violation here. **The Windows cells were not green at that commit and this
 paragraph was not a claim that they would be** — the next section is the run that measured it.
 
+Anti-divergence, one layer down: `bc26dce`'s Ubuntu cell then failed the same test with defect 103's symptom at a commit
+whose Windows and macOS cells were green, because the fix for 103 reported the winner's capsule but left the adopter's own
+`DISCOVERED` in `steps_run` — two processes, one capsule each, both saying they worked (defect 107). `_adopt_archive` now
+empties `steps_run`, and a single-process test forces the loser's sequence instead of waiting for six processes to
+interleave badly.
+
 ## All twenty-two cells green, macOS included (2026-11-16)
 
 `1d42e0c` is the first commit on this branch where every cell finished and passed: 3 OSes × 3 Python versions on both the
@@ -269,12 +275,12 @@ correctness. `tests/test_index_rebuild.py` (9 tests) asserts the same equality i
 could have been false: an unchanged corpus rebuilt twice, a new capsule changing only its own rows, and two tapes of one
 run producing one run row and two artifacts.
 
-Suite: **Total: 1536 tests** — 1534 pass here and 2 are skipped on POSIX by name
+Suite: **Total: 1537 tests** — 1535 pass here and 2 are skipped on POSIX by name
 (`test_an_open_view_blocks_the_unlink_only_on_windows`: POSIX permits unlinking a file another fd still holds, so the
 open-view case exists only on Windows; and `test_on_windows_no_broad_principal_has_access`: mode bits are not access on
-Windows and `icacls` does not exist here). Measured on this machine: **1 536 collected, 0 failed,
-0 errors, 2 skipped, 422.9 s** (`/tmp/full21.xml`) — the five added this round are the Windows rename- and read-retry
-tests (defects 105–106). The 117 added since the 1414-line are the desktop flows and the two things that
+Windows and `icacls` does not exist here). Measured on this machine: **1 537 collected, 0 failed,
+0 errors, 2 skipped, 431.3 s** (`/tmp/full22.xml`) — the six added this round are the Windows rename- and read-retry
+tests (defects 105–106) and the adoption test that holds defect 107 down. The 117 added since the 1414-line are the desktop flows and the two things that
 could previously only be checked by a person with a screen or a Windows machine:
 
 * `tests/test_ui_flows.py` (14) — the window's four flows over real HTTP: check, diagnose, review a proposal, apply
