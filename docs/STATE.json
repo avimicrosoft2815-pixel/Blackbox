@@ -5,8 +5,8 @@
     "docs/STATUS.md",
     "bench/results/*.json"
   ],
-  "next_ticket": "P4-05",
-  "next_note": "**P4-12 is done**: `tools/readers/bbx-read.mjs` reads a real capsule from `docs/format.md` alone (Node, no dependencies), agrees with the Python reader on entries, root and all 46 frames, refuses ten hostile inputs with the same codes, and reproduces the published CRC-32 vectors. Writing it found defect 85 - three gaps in the document itself, now amended. **Next: P4-05**, the `blackbox` console script and its `--help` surface, which the readiness review names as the entry point a stranger meets first. Still open and named: the Go reader (P11-15, needs a Go toolchain), I8's 500-run index rebuild, the trigger rules, the serverless wrapper, B5's five unmeasured importers, and every owner-gated step (licence, tag, merge).",
+  "next_ticket": "P5-10",
+  "next_note": "**Six \u00a724 rows moved on 2026-11-16**: recovery identity (10 recoveries \u2192 1 capsule; six concurrent processes \u2192 1 winner), the four-fault code table (E222/E220/E224 and the torn-frame outcome), retention's dry run with the new `blackbox retention` command, the eleven redaction sinks, the twenty-payload XSS corpus, netguard at run time (a child process included) and `docs/cli.md`'s contract \u2014 and writing them found defects 93\u201396 (the report quoting recorded text unescaped, a torn last frame hiding its whole segment, a dry run committing the GAP it described, and five paths written 0644/0755). **Next: P5-10**, ingest throughput and query latencies against \u00a715.1's budgets, which is the last unmeasured Data row that needs no machine. Still open and named: P11-15's CI cell (the Go reader has never been compiled here), the Windows ACL arm of the permissions row, the Windows installer journey, a Linux desktop with a display, and every owner-gated step (licence, tag, merge).",
   "last_green_commit": "af6023f",
   "last_green_commit_note": "Runs 44463187708 (push) and 44463193283 (PR) at af6023f are both **ten of ten green** - docs, 3/3 Ubuntu, 3/3 Windows and 3/3 macOS, each macOS cell executing 11 steps - and they carry defects 81 and 82, the two CI-found test repairs. Two steps back: fa5d616 was ten of ten on its push run (44462471620) and 2/3 on its PR run (44462478169), the py3.11/macos cell hanging in test_proxy_limits.py's burst test both there and at d842397 - the same commit producing both outcomes is what made it a test defect rather than a product one. d842397's py3.13/windows cell passed, so the supervisor precondition repair at 228097f holds. main f4a9abb (run 44400312163) still has all three macOS cells cancelled at 0 steps.",
   "gates": {
@@ -22,7 +22,7 @@
     "G-Sec": "pending",
     "G-Release": "pending"
   },
-  "gate_note": "a gate flips to pass only with a reviewer-signed docs/gates/G-<name>.md (AGENT_FINAL.md §4); the builder never ticks its own gate",
+  "gate_note": "a gate flips to pass only with a reviewer-signed docs/gates/G-<name>.md (AGENT_FINAL.md \u00a74); the builder never ticks its own gate",
   "open_blockers": [
     "**P3B-03's node-level edges are measured but the ticket is the owner's call** (B4): `bench/results/2026-11-18-p3b03-acceptance.json` runs seven clients and all verdicts are true - `anthropic` 2.8.0 inside `api.run` 2 node-level edges (`exact`), two concurrent `openai.AsyncOpenAI` calls 4 edges joined to two distinct proxy spans (`exact`), `openai` inside `api.run` 2, and 0 for uninstrumented `urllib`/Node and for a client that repeats one call id (which is refused with `level: call` and no node, proving the ambiguous path with a run rather than a fixture). Totals: edges_recorded 22, edges_naming_a_node 10, all seven clients exit 0, every capsule root verifies. Earlier artefact: `2026-11-18-b4-node-edges.json`. Unmeasured: any Node node-level edge (`api.run` is Python-only), and macOS for this harness (CI runs the tests, not the bench). Shape (b) of `docs/node-edges.md` and a launcher process span are proposals.",
     "**OTLP importers other than Phoenix: two more measured, three products plus Phoenix's gRPC listener still unmeasured** (B5): `bench/results/2026-11-18-otlp-importers.json` shows the capsule's `otlp/spans.pb` accepted by the official OTLP messages (opentelemetry-proto 1.45.2 / protobuf 7.36.2: 3 spans, correct names, parents resolving, trace id 50444de0...), by an OTLP/gRPC TraceService built from OTel's servicer (grpcio 1.85.3), and `otlp/spans.json` parsing as proto3 JSON with no unknown fields. Unmeasured and named with their failing command: the OpenTelemetry Collector, Tempo and Jaeger (Go release binaries behind objects.githubusercontent.com, unreachable here), Langfuse (TypeScript + Postgres) and Phoenix's gRPC 4317 listener.",
@@ -304,7 +304,7 @@
   "extra_work": [
     {
       "id": "P3-13MP",
-      "name": "loopback mock provider (required by G-Capture, no row in the plan's §18.5 table)",
+      "name": "loopback mock provider (required by G-Capture, no row in the plan's \u00a718.5 table)",
       "status": "done",
       "commit": "714554c",
       "tests": "tests/test_mock_provider.py (9)",
@@ -341,20 +341,20 @@
     },
     {
       "id": "P3-11c",
-      "name": "the §15.1 capture rows (Disabled, content=off, content=hash, provider Δ p95, install) and the content modes they needed",
+      "name": "the \u00a715.1 capture rows (Disabled, content=off, content=hash, provider \u0394 p95, install) and the content modes they needed",
       "status": "done",
       "commit": "HEAD",
       "tests": "tests/test_content_modes.py (9), bench/bench_capture.py",
       "measurement": "bench/results/2026-11-15-capture-overhead.json",
-      "note": "the sink ignored the configured content mode (defect 30): default `hash` in Appendix A, body written anyway. Now full/hash/off with the byte count in a payload header so recovery still answers \"how much arrived\"; redaction skipped in off mode. All five §15.1 rows measured on ext4 with tmpfs as a labelled second column; the content=hash worst case (a body containing `token`) is published beside the row rather than behind it",
+      "note": "the sink ignored the configured content mode (defect 30): default `hash` in Appendix A, body written anyway. Now full/hash/off with the byte count in a payload header so recovery still answers \"how much arrived\"; redaction skipped in off mode. All five \u00a715.1 rows measured on ext4 with tmpfs as a labelled second column; the content=hash worst case (a body containing `token`) is published beside the row rather than behind it",
       "label": "self"
     },
     {
       "id": "P4-20",
-      "name": "otlp/spans.pb — the protobuf encoding a real OTLP receiver takes",
+      "name": "otlp/spans.pb \u2014 the protobuf encoding a real OTLP receiver takes",
       "status": "done",
       "tests": "tests/test_export_otlp_pb.py (12)",
-      "note": "D-059: the capsule's own otlp/spans.pb was accepted by Phoenix 21.0.0 (200) and read back with the trace id, parent chain, integer types and every bbx.* attribute intact — which is also the evidence that closes P4-14's importer clause. Langfuse, the Collector's OTLP/JSON receiver and Phoenix's gRPC port remain untested (bench/results/2026-11-16-otlp-pb-importer.json)"
+      "note": "D-059: the capsule's own otlp/spans.pb was accepted by Phoenix 21.0.0 (200) and read back with the trace id, parent chain, integer types and every bbx.* attribute intact \u2014 which is also the evidence that closes P4-14's importer clause. Langfuse, the Collector's OTLP/JSON receiver and Phoenix's gRPC port remain untested (bench/results/2026-11-16-otlp-pb-importer.json)"
     },
     {
       "id": "P4-21",
@@ -387,20 +387,20 @@
   },
   "ci": {
     "last_green_commit": "af6023f",
-    "note": "`af6023f` remains the last **ten of ten** commit (both runs). `5cdb742` is Linux 3/3, Windows 0/3, docs green, macOS cancelled: all three Windows cells failed `test_desktop_journey.py::test_the_script_is_valid_posix_shell`, which asserted an executable bit Git on Windows does not store (defect 92). `8f3f1bd` — the repair — is **Linux 3/3, Windows 3/3, docs green in both its runs** (44574442998 push, 44574461038 PR), with all three macOS cells cancelled at 0 steps, so macOS stays unmeasured and the run's `failure` conclusion is capacity alone. `6256118` and `eb67828` were the same Linux 3/3 + Windows 3/3 shape with macOS cancelled. `a72db91` (docs only: this note, defect 92, the PR table) is **Linux 3/3 + Windows 3/3 + docs green** (run 44578192525), macOS cancelled. A queued or cancelled cell is never a pass."
+    "note": "`af6023f` remains the last **ten of ten** commit (both runs). `5cdb742` is Linux 3/3, Windows 0/3, docs green, macOS cancelled: all three Windows cells failed `test_desktop_journey.py::test_the_script_is_valid_posix_shell`, which asserted an executable bit Git on Windows does not store (defect 92). `8f3f1bd` \u2014 the repair \u2014 is **Linux 3/3, Windows 3/3, docs green in both its runs** (44574442998 push, 44574461038 PR), with all three macOS cells cancelled at 0 steps, so macOS stays unmeasured and the run's `failure` conclusion is capacity alone. `6256118` and `eb67828` were the same Linux 3/3 + Windows 3/3 shape with macOS cancelled. `a72db91` (docs only: this note, defect 92, the PR table) is **Linux 3/3 + Windows 3/3 + docs green** (run 44578192525), macOS cancelled. A queued or cancelled cell is never a pass."
   },
   "desktop": {
     "command": "blackbox desktop [path]",
     "module": "src/blackbox/ui/desktop.py",
     "pages": {
-      "setup": "src/blackbox/ui/onboarding.py — runtime, window stack, data dir, SDKs, provider keys (presence only), recordings; the recorded / not-recorded lists",
-      "library": "src/blackbox/ui/library.py — one row per capsule from cap.format.read_manifest (header checks, no body decompressed, no integrity verify), search, status filter, five sorts, 25 a page",
-      "run": "src/blackbox/ui/viewer.py — the existing offline viewer, with an action bar (check, diagnose, repair)",
-      "check": "src/blackbox/ui/flows.py verify_capsule — the integrity index recomputed, root and every problem shown",
-      "diagnose": "src/blackbox/ui/flows.py diagnose_capsule — findings in the brief's vocabulary, plus the brief as copyable text",
-      "repair": "src/blackbox/ui/flows.py review_proposal/apply_reviewed/run_tests — diff, risk, suggested tests, typed-token approval, verified backup, separate button to execute tests",
-      "routes": "src/blackbox/ui/app.py — pages are GET; the only writes are POST repair/apply and POST repair/tests, behind the path token, an Origin check, a form token and 256 KiB body cap; results shown by unguessable id",
-      "export": "src/blackbox/ui/app.py _export — the brief and the report as text/markdown attachments; the app writes no file, the browser saves the one the person asked for"
+      "setup": "src/blackbox/ui/onboarding.py \u2014 runtime, window stack, data dir, SDKs, provider keys (presence only), recordings; the recorded / not-recorded lists",
+      "library": "src/blackbox/ui/library.py \u2014 one row per capsule from cap.format.read_manifest (header checks, no body decompressed, no integrity verify), search, status filter, five sorts, 25 a page",
+      "run": "src/blackbox/ui/viewer.py \u2014 the existing offline viewer, with an action bar (check, diagnose, repair)",
+      "check": "src/blackbox/ui/flows.py verify_capsule \u2014 the integrity index recomputed, root and every problem shown",
+      "diagnose": "src/blackbox/ui/flows.py diagnose_capsule \u2014 findings in the brief's vocabulary, plus the brief as copyable text",
+      "repair": "src/blackbox/ui/flows.py review_proposal/apply_reviewed/run_tests \u2014 diff, risk, suggested tests, typed-token approval, verified backup, separate button to execute tests",
+      "routes": "src/blackbox/ui/app.py \u2014 pages are GET; the only writes are POST repair/apply and POST repair/tests, behind the path token, an Origin check, a form token and 256 KiB body cap; results shown by unguessable id",
+      "export": "src/blackbox/ui/app.py _export \u2014 the brief and the report as text/markdown attachments; the app writes no file, the browser saves the one the person asked for"
     },
     "tests": "tests/test_desktop.py (15), tests/test_ui_library.py (19), tests/test_ui_flows.py (14), tests/test_ui_safety.py (13), tests/test_cap_read_manifest.py (18), tests/test_desktop_journey.py (3), tests/test_windows_definition.py (11), tests/test_desktop_package.py (6)",
     "harness": "tools/desktop_journey.sh --automated-only runs here (records, lists, checks, diagnoses; verdict automated-only); tools/desktop_smoke.sh is the short first-launch check",

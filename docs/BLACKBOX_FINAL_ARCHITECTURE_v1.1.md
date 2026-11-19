@@ -2710,6 +2710,7 @@ Removed keys: `ring_bytes`, `[rules]` (replaced by `[[trigger]]`). Precedence un
 | `BBX-E162` | blob body does not match its hash | the blob was corrupted or modified; do not trust it, re-record |
 | `BBX-E230` | diagnosis: nothing readable to diagnose | pass a `.bbx` capsule, or a data dir that holds one (2026-11-16 build) |
 | `BBX-E231` | repair proposal refused; nothing was written | read `blackbox repair preview` and fix the proposal (2026-11-16 build) |
+| `BBX-E170` | trigger rule refused; nothing was recorded for it | name a built-in metric (or `custom:<name>`), a numeric threshold, an op from `>= > == <= <` and an action from `mark,freeze,snapshot`; see `docs/triggers.md` (2026-11-16 build) |
 
 `BBX-E140` was briefly reused for "segment preallocation failed" in this build; that is `BBX-E132` and the
 registry now matches this appendix in both directions (`tests/test_errors.py`).

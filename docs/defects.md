@@ -1605,3 +1605,109 @@ still fails if it is cleared (`chmod -x` was checked after the change).
 **Kept as a record of the cost:** the branch's previous two commits were green on Ubuntu and Windows and were read as
 "Windows 3/3" in this PR — that reading was right for those commits and wrong for this one, which is why each commit's row
 in the CI table below names the commit rather than the pull request.
+
+## Defect 93 — the Markdown report quoted recorded text without escaping it (2026-11-16, the 20-payload corpus)
+
+`tests/test_xss_corpus.py` puts twenty payloads through a **real capsule** — a tape whose node names, model text, marks
+and exception messages all contain them — and then reads what three renderers do with it: the offline viewer page, the
+desktop library and run pages, and `blackbox diagnose`'s Markdown report and repair brief.
+
+The viewer was already safe: the payloads arrive as characters in a JSON data block and `app.js` builds text nodes.
+The **report was not**. Its timeline table escaped only `|`, so a capsule containing `<script>alert('script')</script>`
+produced a line like
+
+```
+| 2 | `NODE_OPEN` | 1 | name=<script>alert('script')</script>; kind=step |
+```
+
+and the same raw text appeared in bullet lines ("what the evidence shows", alternatives, checks) and inside single
+backticks for the recorded `argv`. Markdown renderers differ on raw HTML — several pass it through, some sanitise —
+which is exactly the wrong thing to depend on for a document whose whole purpose is to be attached to a ticket and opened
+by someone else. The report is a rendering of untrusted text; it needed the same rule the viewer has.
+
+**Fixed** with one function, `inline()`, applied at every place recorded text sits outside a fence: it masks credentials
+(`scrub`) and then escapes `&`, `<`, `>`, backtick and `|`, flattening newlines. Fenced blocks keep `fence()`, which is
+the right shape for multi-line evidence. The test now fails if any unescaped `<` from a payload appears outside a fence,
+if the escaping is applied twice, or if a Markdown image or link target is built from recorded text.
+
+**What this defect was not:** it was not exploitable on the viewer page, in the library, on the run page, in the
+page's data block, or in the capsule itself — the corpus checks all five. It was a sink in the one output designed to
+leave the machine.
+
+## Defect 94 — a torn last frame hid the whole active segment (2026-11-16, the four-fault table)
+
+Building the fault table for `tests/test_fault_codes.py` turned up a recovery defect with a much worse shape than the
+row asked about. A tape whose last committed frame was partly lost — the ordinary result of a power cut during a write —
+scanned as **zero frames**. The scanner walks backwards from the offset the header commits; when that offset lands inside
+a frame, the trailer it looks for is not there, the walk stops at its first step, and everything earlier on the segment
+became invisible. One interrupted write in the last 88 bytes hid the entire run: a recorder failing precisely when the
+machine crashed.
+
+**Fixed** by `frame.last_valid_frame_end`: when the backward walk from the committed cursor yields nothing, find the last
+frame *before* it that decodes with a good CRC, walk backwards from there, and record what was lost —
+`truncated_tail`, `truncated_bytes` (a new field, so the size of the torn tail is a number rather than a word) and
+`lost_from_seq`. The resync only runs on that failure path; an intact tape still takes the single backward walk.
+
+`tests/test_fault_codes.py` now asserts the recovery: five of six frames kept, the last one reported lost, the capsule
+sealing with `root_ok`, `truncated_tail: true` and `lost_from_seq` naming the first missing sequence number.
+
+## Defect 95 — `retention.apply(dry_run=True)` committed the GAP it was only supposed to describe (2026-11-16)
+
+A dry run that mutates the tape is the one bug a dry run exists to prevent, and it was there: `apply` appended the `GAP`
+frame and published it *before* the `dry_run` branch inside the per-segment loop, so asking what retention would delete
+declared a retention hole over frames that were still on disk. Every later scan of that tape would have reported a hole
+in evidence that had never been deleted — a tape that lies about itself, written by the command whose job is looking
+without touching.
+
+**Fixed**: `dry_run` returns before any write, reporting the same plan plus `would_declare` — the span the real pass would
+commit. `tests/test_retention_dry_run.py` runs a dry run and then asserts the segment files, the frame count, the tail seq
+and the absence of a `GAP` are all unchanged, and separately that the real pass declares exactly the span the dry run
+named.
+
+The same file adds what the gate asked for in the first place: `retention.explain()` and the new `blackbox retention`
+command give one row per segment — `delete`, `keep`, `pinned` or `active` — with the reason and the numbers behind it
+(the keep window, the budget, the tape's own size). It cannot delete: deletion has to commit a `GAP`, and only the tape's
+writer can do that.
+
+## Defect 96 — five paths a recording writes were readable by every user on the machine (2026-11-16, the permissions row)
+
+Measured on a real run rather than reasoned from the code, and the code was the problem: `capsules/` and `tape/<uuid>/`
+were created `0700` and the capsule and segment files `0600`, but `meta`, `seal` and `runs/<id>/index.sqlite` were
+`0644`, and the two directories that hold everything — `tape/` and `runs/` — were `0755`. `os.makedirs(child, mode=0o700)`
+does not tighten an implicitly created parent, and a plain `open(path, "wb")` takes the umask. So the promise covered the
+tree's leaves and not its branches: another user on the same box could list the tape directory, read the metadata page,
+read every seal, and read the index — which carries run ids, node names and timings.
+
+**Fixed** with `platform/perms.private_dir` and `private_file`: create the parent explicitly at `0700` and `chmod` it
+(POSIX) rather than trusting the mode argument, and tighten the files SQLite and `open()` make. A second pass found one
+more, `<data>/index/` at `0755` the first time `blackbox index` ran; the test now runs `blackbox index` as part of its
+fixture, so the audit covers the index directory and not only the run that precedes it. **Verified** by
+`tests/test_permissions.py`, which walks **every** path a real run wrote and requires exactly `0600`/`0700` — not "at
+least as tight", which would accept `0640` and with it a second reader. The same measurement now runs inside the first-run
+doctor, so a data directory unpacked with the wrong modes warns its owner instead of failing silently.
+
+Windows is a different question and is not claimed here: mode bits there do not describe access, so the test reads the
+ACL with `icacls` and fails on `Everyone`/`BUILTIN\Users`/`Authenticated Users`/`INTERACTIVE`. **That arm has never run.**
+
+## Defect 97 — `install(content=…)` swallowed a capture policy the wrapper could not pass (2026-11-16, serverless)
+
+Building `serverless.wrap` exposed a fail-open trap in the API it wraps: `api.install()` accepts only writer keywords, so
+`install(content="full")` raised `TypeError`, and `install`'s own fail-open caught it and disabled the whole tape. The
+user asked for content capture, got no error, no warning and no content — a recorder that had stopped recording. **Fixed**
+in the wrapper, which does not pass capture policy through `install`; the policy reaches the sink instead. The lesson is
+kept in `docs/serverless.md`: a constructor argument that cannot exist is worse than one that is refused, because
+fail-open hides it.
+
+## Defect 98 — every cold start re-emitted the previous invocation's capsule, quadratically (2026-11-16, serverless)
+
+`recover_leftovers()` scanned the whole data directory and sealed every unsealed tape it found, including tapes it had
+already sealed on an earlier cold start: the number of callbacks grew with the square of the invocation count (100
+invocations produced 5 050 `on_capsule` calls in 28 s). Beyond the cost, the semantics were wrong — a sealed invocation
+was being handed to the user's durability callback again, as if it had just finished. **Fixed**: `recover_leftovers` prunes
+sealed tapes before it scans, and `tests/test_serverless.py` asserts one callback per invocation across the 250-invocation
+random-failure test; the 1 000-invocation bench (`bench/results/2026-11-16-serverless-1000.json`) reports exactly 1 000
+documents for 1 000 invocations.
+
+*(Numbers 91 and 92 were already used for two other findings; these two were reported in the session's notes under
+those numbers and are recorded here as 97 and 98 so the log has no duplicate. Both are also described in
+`docs/serverless.md`.)*

@@ -86,6 +86,107 @@ and B4's remaining part is an owner's tick while B6 and the macOS rows need a ma
 evidenced, 12 partial, 5 with no code in the tree at all (the I8 index rebuild, the capsule attack corpus, the Go reader,
 the trigger rules and the serverless wrapper), 3 needing people and 2 needing another OS.
 
+## Six gate rows moved from "not found" to measured, and four defects came out of it (2026-11-16)
+
+The §24 rows this build was furthest from were all *review findings*: behaviours the code may well have had, none of
+which had a test that could fail. Each new file below was written to fail on a plausible version of the code, and four of
+them did — defects 93, 94, 95 and 96, in `docs/defects.md`, each with the fix and its regression assertion.
+
+**Recovery identity** (`tests/test_recovery_identity.py`, 2). Ten recoveries of one tape produce **one** capsule with one
+sha256 and nine `steps_run == []` results that say they skipped; six **processes** recovering at once elect one winner,
+agree on its root, and never produce a second file.
+
+**The four-fault table** (`tests/test_fault_codes.py`, 7). Corrupt `meta` → `BBX-E222` on a direct read and `BBX-E220`
+through recovery (the head commits that checksum, so the earlier check fires); a zeroed `head` → `BBX-E220`; a flipped
+body byte after sealing → `BBX-E224`; a torn last frame → **no exception**, `recovered`/`PROCESS_DEATH` with
+`truncated_tail`, `truncated_bytes` and `lost_from_seq`. Writing it found **defect 94**: a torn last frame made the whole
+active segment scan as empty — a crash in the final 88 bytes hid the entire run. `frame.last_valid_frame_end` resyncs to
+the last frame that verifies, and the test asserts five of six frames survive.
+
+**Retention's dry run** (`tests/test_retention_dry_run.py`, 6). It found **defect 95**: `retention.apply(dry_run=True)`
+committed the `GAP` it was only meant to describe, so looking at a plan declared a hole over data still on disk. The dry
+run now returns before any write, reporting `would_declare`; the test asserts the files, the frame count, the tail seq and
+the absence of a `GAP` are unchanged, and that the real pass declares exactly the span the dry run named. New:
+`retention.explain()` and **`blackbox retention`**, one row per segment — `delete`/`keep`/`pinned`/`active` with the reason
+(the keep window, the budget, the tape's size). It cannot delete, by design: deletion has to commit a `GAP` first.
+
+**Twenty payloads, eleven sinks** (`tests/test_xss_corpus.py` 5, `tests/test_redaction_every_sink.py` 11 now). The corpus
+goes through a real capsule into the viewer, the desktop's `/`, `/library` and `/run/<capsule>` pages, the Markdown report
+and the brief, and the capsule's own bytes. It found **defect 93**: the report's timeline escaped `|` and nothing else, so
+`<script>` reached a Markdown renderer as HTML. `report.inline()` now escapes `& < > \`` and `|` for every recorded string
+outside a fence. The redaction file now enumerates the eleven sinks the row names — adding the tape's frames and the
+desktop pages, which were the two missing from the previous nine.
+
+**Netguard at run time** (`tests/test_netguard_reads.py`, 9). `test_no_egress.py` is static; this installs a `sitecustomize`
+that replaces `connect`, `connect_ex`, `create_connection`, `getaddrinfo` and `HTTPConnection.connect` with a logger that
+refuses, then runs `verify`, `view`, `diagnose`, `capsule verify`, `ls`, `desktop --selftest`, `serve` and a `run` whose
+child is its own process: every one finishes normally with **zero** attempts in the log. A guard that never fires would
+make those tautologies, so one test proves it refuses `getaddrinfo('example.invalid', 80)`.
+
+**Permissions measured after a real run** (`tests/test_permissions.py`, 4 + 1 Windows-only). It found **defect 96**:
+`meta`, `seal`, `index.sqlite` were `0644` and `tape/`, `runs/` were `0755`, while the leaf directory was `0700` — the
+promise covered the tree's leaves, not its branches. `platform/perms.private_dir`/`private_file` fix it, and the test now
+requires **every** path a real run writes to be exactly `0600`/`0700`. The Windows arm reads the ACL with `icacls` and
+fails on `Everyone`/`BUILTIN\Users`/`Authenticated Users`/`INTERACTIVE`; **it has never run** — that is the cell a Windows
+machine still owns. The first-run doctor reports the same measurement, so a data directory unpacked with the wrong modes
+warns the user instead of failing only in CI.
+
+**The CLI contract** (`docs/cli.md`, `tests/test_cli_contract.py`, 21). Every command, its machine-readable form and its
+exit codes in one table, checked against the binary: the table's set equals the front door's, every `--json` row is
+accepted, and the documented code is measured on a failing invocation (`diagnose`'s `1` for "nothing readable" against
+everyone else's `2` is documented *because* it differs). `status`, `run` and `serve` gained `--json`; `link` was already
+JSON and `ingest` prints one line naming the inbox file, and both are stated rather than flagged.
+
+## A Go reader exists, and CI is its compiler (2026-11-16)
+
+The last of §24a's four missing rows. `tools/readers/go/` is `bbx-read`: a reader written from `docs/format.md` §4/§5/§7/
+§8.1 and §13.4's attacker table, stdlib-only, that verifies a capsule's names, limits, duplicates, per-entry sha256, root
+and frame structure. Its own header marks every place the document was silent with `// DOC:`.
+
+**It has not been compiled or run here** — this machine has no Go toolchain and no way to fetch one. It is compiled and
+executed by a new `go-reader` CI job, which builds it, reproduces the seven CRC-32 conformance vectors, verifies a capsule
+written by the Python implementation, and expects three named refusals (tampered entry → exit 4, non-ZIP → 3, traversal
+→ 3). The row is therefore **written and reviewed, not measured**, until that cell is seen green;
+`tests/test_go_reader.py` (7 tests) checks only what a compiler is not needed for — stdlib-only imports,
+registry-declared refusal codes, the selftest's shell syntax, and that CI runs the same script a person would.
+
+## The serverless wrapper exists, with 1 000 invocations measured (2026-11-16)
+
+The third missing row of §24a. `src/blackbox/serverless.py` implements `wrap(handler)` / `@wrap(...)`, the `serverless`
+mode (2 MiB segments, a sync per invocation), cold-start recovery of a killed invocation, a marker file that is the only
+thing able to survive a sandbox teardown, and `on_capsule` as the user's own durability hook. Design, gaps and the
+`unknown_serverless` semantics are in **`docs/serverless.md`**.
+
+Measured, and committed as `bench/results/2026-11-16-serverless-1000.json`:
+**1 000 simulated invocations — 751 returned, 101 timeouts, 81 errors, 67 killed outright — produced 1 000 documents
+(933 `sealed`, 67 `unknown_serverless`, every one of the 67 recovered by the next cold start), 1 000 capsules that all
+verify against their own roots, 0 open runs, 205.7 s (205.73 ms per invocation).** `tests/test_serverless.py` (10 tests)
+asserts the same properties over 250 invocations, plus the boundary, the re-raised exception, the defaults, a captured
+model call inside the handler, a raising callback and the fail-open path.
+
+**What is not claimed:** a destroyed sandbox is unrecoverable and the wrapper says so rather than inventing a gap event;
+the capsule is durable only if `on_capsule` ships it; and 205.73 ms of added latency per invocation is a real cost, not a
+detail.
+
+## Triggers exist, with every limit tested against a mocked clock (2026-11-16)
+
+The second missing row of §24a: `stop_delay`, `cooldown` and `max_per_24h` had no module, no test and no configuration
+key. `src/blackbox/trigger/` now has the rule schema (`rules.py`, refusals with `BBX-E170` by name), the engine
+(`engine.py`), the `[[trigger]]` configuration path, and the keeper writes each decision as a `MARK` frame. The design and
+its honest gaps are in **`docs/triggers.md`**; the gaps are repeated here because a status page that only lists the
+working half is the thing this project keeps refusing to be:
+
+* **wired**: parsing and refusal, every timed field with a hand-moved clock, windowed counted metrics, edge-triggering,
+  per-fingerprint dedupe, the 24 h cap persisted in `triggers.json` across a restart, fail-open (`trigger_error`, one rule
+  disabled, keeper and app unaffected), and an end-to-end `blackbox run` whose `exit_code` rule fires and lands a
+  `trigger` MARK **inside the sealed capsule**;
+* **not wired**: only `exit_code` and `stall_ms` have producers in a real run today — the six seam-side metrics validate
+  and never fire until the capture seams feed them; `freeze` schedules the deadline and records `freeze_due` but does not
+  seal a second capsule mid-run; `snapshot` writes no stack dump or env snapshot.
+
+Measured by `tests/test_triggers.py`: **27 tests**, all green here, none of them sleeping (24 hours of cap behaviour is an
+integer addition).
+
 ## The index exists, and I8 is measured (2026-11-16)
 
 `docs/gates/READINESS.md` listed four rows of §24/§24a with no code or artefact in the tree. This one moves the first of
@@ -106,9 +207,9 @@ correctness. `tests/test_index_rebuild.py` (9 tests) asserts the same equality i
 could have been false: an unchanged corpus rebuilt twice, a new capsule changing only its own rows, and two tapes of one
 run producing one run row and two artifacts.
 
-Suite: **Total: 1414 tests** — 1413 pass here and 1 is skipped on POSIX by name
+Suite: **Total: 1531 tests** — 1530 pass here and 1 is skipped on POSIX by name
 (`test_an_open_view_blocks_the_unlink_only_on_windows`: POSIX permits unlinking a file another fd still holds, so
-the open-view case exists only on Windows). The 42 added since the last line are the desktop flows and the two things that
+the open-view case exists only on Windows). The 117 added since the 1414-line are the desktop flows and the two things that
 could previously only be checked by a person with a screen or a Windows machine:
 
 * `tests/test_ui_flows.py` (14) — the window's four flows over real HTTP: check, diagnose, review a proposal, apply
@@ -429,6 +530,20 @@ last thing switched off in `mypy`; nothing is switched off now. Format-freeze de
 row in the same commit.
 
 ## What is next
+
+0a. **What the 2026-11-16 additions still need, stated so a machine's absence is not mistaken for a pass.**
+    * **Windows, a real machine or CI with a GUI**: the `icacls` arm of `tests/test_permissions.py` has never run; the
+      unsigned installer's install → launch → attach → record → view → diagnose → uninstall journey is still unrun; the
+      desktop's own flows on Windows remain unmeasured (the window is the only untested part of the product that a user
+      touches first). **Nothing in this turn claims any of that.**
+    * **Linux with a display**: this sandbox has none, so `blackbox desktop --selftest` still reports `gtk_ready:false`
+      and exits 3. The window's flows are covered over HTTP by `tests/test_ui_flows.py`, which is not the same thing.
+    * **CI**: every file named in the six sections above is a builder run on this machine. The workflows have not run
+      them (`1628d5a` and the local commits after it are unpolled; the `go-reader` job is new and has never been
+      observed green). A reviewer should read the cells as "written and measured here", never as "measured on the
+      matrix".
+    * **People**: the reviewer's signatures (`docs/gates/`), the three-person onboarding measurement, and the owner's
+      decisions — merge, tag, publish, licence — are outside this branch by direction.
 
 0. **The reviewer's three P0s are fixed and reproduced first** (`ecf8b88`): a receiver exception no longer reaches
    the application through any callback (defect 27 — reproduced at `ee210ae` with the reviewer's script, which printed
