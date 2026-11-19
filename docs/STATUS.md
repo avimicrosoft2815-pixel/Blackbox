@@ -170,8 +170,28 @@ uncoded failure) and what is not (the cause). The one Windows-only rename hazard
 peer has open, which CPython refuses because it opens without `FILE_SHARE_DELETE`; recovery renames its own state files
 while every other recoverer is reading them. `blackbox.platform.replace` now retries the two Windows sharing codes inside a
 2 s budget and, if the peer never lets go, refuses with `BBX-E210` rather than a `PermissionError`; `ENOSPC` and friends are
-raised untouched. Three tests simulate the violation here. **The Windows cells are not green and this paragraph is not a
-claim that they will be.**
+raised untouched. Three tests simulate the violation here. **The Windows cells were not green at that commit and this
+paragraph was not a claim that they would be** — the next section is the run that measured it.
+
+## All twenty-two cells green, macOS included (2026-11-16)
+
+`1d42e0c` is the first commit on this branch where every cell finished and passed: 3 OSes × 3 Python versions on both the
+push run and the PR run of the commit, plus `docs` and `go-reader` — twenty-two check runs, twenty-two green, no timeout
+and no `hung yes` line. It follows `4afba25`, whose three Windows cells were red on defect 105, and it is the run that
+measures that fix (all-green at the next commit, with the retry in place, plus three tests that simulate a sharing
+violation here). Two things that were open are now closed by measurement rather than by argument:
+
+* **macOS has finally run.** Eleven commits of macOS cells spent the whole time in `queued` — a queue that long is not a
+  result, and nothing here ever claimed one. At `1d42e0c` all three macOS cells executed the suite and passed.
+* **The Windows arms of two tests ran for the first time.** `test_an_open_view_blocks_the_unlink_only_on_windows` and
+  `test_on_windows_no_broad_principal_has_access` are the two skips this Linux box names by name; on `windows-latest` they
+  are not skipped (the `icacls` arm skips only if `icacls` cannot be run, and it can), so the green cells are those two
+  tests passing. That is what moves the permissions row's Windows half out of "never run".
+
+What this does **not** measure, and still does not: a Windows **installer** — nothing here compiled or ran one — the
+desktop journey on either non-Linux OS (`desktop --selftest` needs a display and CI has none), or a macOS *installer*.
+`docs/gates/READINESS.md` now reads 36 rows → **27 evidenced / 7 partial / 0 with nothing behind them / 2 needing
+people**, and the two rows that moved are the Go reader (its cell is green) and permissions (its other two OSes are).
 
 **The CLI contract** (`docs/cli.md`, `tests/test_cli_contract.py`, 21). Every command, its machine-readable form and its
 exit codes in one table, checked against the binary: the table's set equals the front door's, every `--json` row is

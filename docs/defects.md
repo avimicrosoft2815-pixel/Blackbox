@@ -1793,9 +1793,10 @@ the winner's capsule, marked as somebody else's work. The unlink on release now 
 only `FileNotFoundError`: on Windows a releasing peer's handle is a sharing violation, and losing that race to *yourself*
 is not an error.
 
-**Verified here**: the concurrency test eight consecutive times without a failure, plus `test_recovery_identity.py` and
-`test_recovery_tape_resume.py` whole. **Verified on Windows**: no — the cells that found it are the cells that confirm it,
-and this entry stays open until they are green.
+**Verified here**: the concurrency test eight consecutive times without a failure, plus the recovery and determinism
+modules whole. **Verified on Windows** at `1d42e0c`: the `py3.11`/`py3.12`/`py3.13` Windows cells and all three Ubuntu
+cells are green on both workflow runs of that commit, and the test that failed with "2 recoverers each claimed to have
+done the work" is the test they ran. Confirmed, not inferred — the fix is what those cells measured.
 
 ## Defect 104 — the hung-test watchdog bounded a test that was long by design (2026-11-16, CI)
 
@@ -1809,6 +1810,9 @@ only, the marker is registered in `pyproject.toml`, and the watchdog's message p
 test stays at 250 invocations everywhere, so the breadth the row measures is unchanged; nothing else in the suite asks for
 more than 120 s. A marker is the narrow fix: if more than a handful of tests need one, the suite is too slow and that is
 the problem to fix.
+
+**Confirmed at `1d42e0c`**: the Windows cells ran the 250 invocations and finished, with no `hung yes` line and no
+`fdatasync` dump in the annotation. The bound was the defect; the seal time was not.
 
 ## Defect 105 — a concurrent recoverer died with a traceback on Windows instead of a code (2026-11-16, CI, partly diagnosed)
 
@@ -1835,5 +1839,11 @@ race is *reading* exactly those files. That is the likely mechanism, not a prove
 * The concurrency test's own failure message now names the **exception line** rather than the last 1 200 characters of a
   traceback — the third CI cycle spent on this defect was spent reading a caret.
 
-**Not claimed**: the cause is not proven and the Windows cell is not green. If the next run fails the same way, the
-annotation will now name the exception, and that is what the next fix will be based on rather than the guess above.
+**Not claimed**: the mechanism is still an inference — no Windows machine here can prove that the rename was the
+`PermissionError` the cell saw, only that the one Windows-only construct on the path is now waited out and, failing that,
+refused with a code.
+
+**Outcome at `1d42e0c`**: all three Windows cells and all three macOS cells are green, so the failure did not recur with
+the retry in place. That is consistent with the inference and is not a proof of it: a race that does not happen leaves no
+evidence of which side fixed it. The `replace` shim and its three tests stay regardless — the Windows rename behaviour it
+handles is real whether or not it was this failure.

@@ -56,7 +56,7 @@ Nothing here is a tick, and the builder may not tick (`docs/gates/README.md` rul
 | Capsule attack corpus (12) rejected with correct codes in < 50 ms | `tests/test_capsule_attacks.py` (25 cases): every §13.4 check the reader implements has an attack behind it — E401, E402 (non-zip and 5 001 entries), E403 (traversal, absolute, drive letter, backslash, empty component, symlink), E404, E405, E406 (encrypted and bzip2), E407 (six unreadable manifests, a newer version), E408, and the check-9 counter against a lying archive. Worst rejection **15.718 ms**, the rest under 1 ms. Writing it found defect 83 and closed three gaps. Checks 10 and 11 of §13.4 have nothing to exercise yet (no derived-part line reader, no generated tests) and are named as such | **evidenced** — builder run, awaiting a reviewer |
 | 20-payload XSS corpus inert in viewer and Markdown export | `tests/test_xss_corpus.py` (5) sends twenty payloads through a **real capsule** into the viewer page, the desktop's `/`, `/library` and `/run/<capsule>` pages, the Markdown report and the brief, and the capsule's own bytes; the strings must survive as characters and no renderer may act on them. Writing it found defect 93 (the report escaped `\|` and nothing else) | **evidenced** (builder run; CI has not run this file) |
 | Netguard: replay produces zero outbound connection attempts, including from child processes | **two layers**: `tests/test_no_egress.py` (5) statically forbids socket imports and URL literals in `src`; `tests/test_netguard_reads.py` (9) installs a runtime guard over `connect`/`connect_ex`/`create_connection`/`getaddrinfo`/`HTTPConnection.connect` and runs `verify`, `view`, `diagnose`, `capsule verify`, `ls`, `serve`, `desktop --selftest` and a `run` whose child is its own process — all complete, **none** attempts a connection, and a control proves the guard refuses | **evidenced** (builder run; CI has not run this file) |
-| Data dir `0700` / files `0600` verified at startup on all three OSes | `platform/perms.py` (`inspect`, `audit`, `windows_findings`), used by the first-run doctor; `tests/test_permissions.py` measures **every** path a real run writes after the run (POSIX: exactly `0600`/`0700`) and reads the ACL with `icacls` on Windows. Writing it found defect 96 (`meta`, `seal`, `index.sqlite` at `0644`; `tape/`, `runs/` at `0755`) | **partial** — **Linux measured**; the Windows arm exists and has never run, and macOS is untested (**OS**) |
+| Data dir `0700` / files `0600` verified at startup on all three OSes | `platform/perms.py` (`inspect`, `audit`, `windows_findings`), used by the first-run doctor; `tests/test_permissions.py` measures **every** path a real run writes after the run (POSIX: exactly `0600`/`0700`) and reads the ACL with `icacls` on Windows. Writing it found defect 96 (`meta`, `seal`, `index.sqlite` at `0644`; `tape/`, `runs/` at `0755`) | **evidenced** (CI, 2026-11-16) — Linux measured here; the Windows arm runs only when `sys.platform == "win32"` and skips only if `icacls` cannot be run, so the green `py3.11`/`py3.12`/`py3.13 / windows-latest` cells at `1d42e0c` are that arm passing; the POSIX half is `perms.is_posix()`, true on macOS, and the three macOS cells are green at the same commit for the first time |
 
 ## §24 Usability
 
@@ -91,7 +91,7 @@ Nothing here is a tick, and the builder may not tick (`docs/gates/README.md` rul
 |---|---|---|
 | Kill stages S14–S18 green in all modes; S17 proves no `SIGBUS` reaches the app | S16/S18 are tests; S17 needs a sparse file on a full filesystem and the `sudo` control (`tools/s17_control.sh`) is **humans** | **partial** + **humans** |
 | `blackbox verify` detects a one-byte change in any sealed segment and names the segment and seq; a retention `GAP` verifies as a declared hole | `tests/test_verify_cli.py`, `tests/test_retention.py` | **evidenced** |
-| A Go reader written from `docs/format.md` alone decodes the conformance vectors (P11-15) | **`tools/readers/go/` (2026-11-16)**: `main.go`, `go.mod`, `selftest.sh`, README; 7 tests in `tests/test_go_reader.py` check stdlib-only imports, registry-declared refusal codes, the selftest's shell syntax and that the `go-reader` CI job runs it. **Not compiled or run on this machine** (no Go toolchain): the CI cell is the measurement and it is not yet observed green. What does exist (2026-11-19) is a reader in a **different language** written from the same document — `tools/readers/bbx-read.mjs`, Node, no dependencies — which verifies a real capsule, reproduces the 7 CRC-32 vectors and refuses ten hostile inputs with the same codes as the Python reader (`tests/test_independent_reader.py`, 16 tests). It found defect 85, three gaps in the document. That is the property the row is after; the Go reader now exists and CI compiles it — until that cell is seen green the row is **written, unmeasured here** | **partial** |
+| A Go reader written from `docs/format.md` alone decodes the conformance vectors (P11-15) | **`tools/readers/go/` (2026-11-16)**: `main.go`, `go.mod`, `selftest.sh`, README; 7 tests in `tests/test_go_reader.py` check stdlib-only imports, registry-declared refusal codes, the selftest's shell syntax and that the `go-reader` CI job runs it. **Not compiled or run on this machine** (no Go toolchain): the CI cell is the measurement and it is not yet observed green. What does exist (2026-11-19) is a reader in a **different language** written from the same document — `tools/readers/bbx-read.mjs`, Node, no dependencies — which verifies a real capsule, reproduces the 7 CRC-32 vectors and refuses ten hostile inputs with the same codes as the Python reader (`tests/test_independent_reader.py`, 16 tests). It found defect 85, three gaps in the document. That is the property the row is after. **2026-11-16: the `go-reader` job is green** at `c0684a9`, `8ba986e` and now `1d42e0c` (both workflow runs): it compiled the reader, reproduced the seven CRC-32 vectors, read a capsule the Python build wrote and produced the three named refusals. The reader is still not compiled on this machine — no Go toolchain here — but the row's measurement exists | **evidenced** |
 
 ## §24a Triggers and parts
 
@@ -107,13 +107,17 @@ Nothing here is a tick, and the builder may not tick (`docs/gates/README.md` rul
 unmeasured readers) and B6 (two rows that need a named machine). Reading §24 and §24a says that list is not the release
 list, and the difference is not small:
 
-As of the 2026-11-16 build, of the 36 rows §24 and §24a lay out this index finds **25 evidenced**, **9 partial**, **no row
+As of the 2026-11-16 build, of the 36 rows §24 and §24a lay out this index finds **27 evidenced**, **7 partial**, **no row
 with nothing behind it at all**, and **2 that need people** (counted by each row's *final* state below, so a row that is
 partial on one half and needs a machine on the other is counted once — several of the partial rows still need Windows,
-macOS or a quiet host, which is why 25 + 9 + 2 comes to 36 and not to more). Six of the movements in this revision — the
+macOS or a quiet host, which is why 27 + 7 + 2 comes to 36 and not to more). **Two rows moved on 2026-11-16 evening, both
+on evidence this sandbox cannot produce**: the Go reader's CI cell (P11-15) went green and stayed green across three
+commits, and the permissions row's Windows and macOS halves stopped being "never run" — the `1d42e0c` run is the first in
+this branch's history where all eleven suite cells (3 OSes × 3 Pythons) plus `docs` and `go-reader` are green, macOS
+included, after eleven commits of macOS cells sitting in `queued`. Six of the movements in this revision — the
 four-fault code table, retention's dry run, the eleven sinks, the twenty-payload corpus, netguard at run time and the CLI
 contract — came with defects found by writing them (93–96, `docs/defects.md`), and one of the six rows that moved is still
-partial on purpose: the permissions row is measured on Linux and its Windows arm has never run.
+partial on purpose: it has since moved, when the Windows and macOS cells of `1d42e0c` ran its other two halves.
 
 * **Four rows had no code or artefact in this tree at all**: the 500-run index rebuild (I8), `docs/format.md`'s Go
   reader (P11-15), the trigger rules (`stop_delay` / `cooldown` / `max_per_24h`) and the serverless wrapper. **On
@@ -122,10 +126,10 @@ partial on purpose: the permissions row is measured on Linux and its Windows arm
   measured invocations. The Go reader exists and CI compiles and runs it; that cell has not yet been seen green. The capsule
   attack corpus was the fifth until 2026-11-19, when `tests/test_capsule_attacks.py` moved it out of this list. None of these appear in `docs/RELEASE-BLOCKERS.md`, because none of them is something a user of the
   current build would hit — which is exactly why the blocker list cannot be read as the gate list.
-* **Nine rows are partial**, each with the uncovered part named in its cell. The ones worth a reviewer's time first are the
-  rows whose remaining half is a *machine*: the Windows permissions arm (`tests/test_permissions.py`'s `icacls` test), the
-  Windows desktop journey, and the two matrix rows.
-* **Twenty-five rows are evidenced** on this branch — a test or a committed artefact exists, and a reviewer still has to
+* **Seven rows are partial**, each with the uncovered part named in its cell. The ones worth a reviewer's time first are the
+  rows whose remaining half is a *machine*: the Windows desktop journey (an installer that has never been compiled) and the
+  two matrix rows. The Windows permissions arm is no longer one of them — it ran green at `1d42e0c`.
+* **Twenty-seven rows are evidenced** on this branch — a test or a committed artefact exists, and a reviewer still has to
   re-read it. That is the honest sense in which this branch is close: close on the mechanism, not on the paperwork.
 * **Three rows need people** (the 3-person onboarding test, the blinded diagnosis benchmark, the S17 `sudo` control) and
   the licence/tag/merge decision is a fourth that lives outside them; **the release machine** owns the two B6 rows plus
