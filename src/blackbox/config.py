@@ -46,6 +46,9 @@ class Config:
     inherit_threads: bool = False
     tape: TapeConfig = field(default_factory=TapeConfig)
     retention: RetentionConfig = field(default_factory=RetentionConfig)
+    #: `[[trigger]]` tables, kept as written and parsed (and refused) by `trigger.rules.parse_rules` in `validate`.
+    #: A tuple so a `Config` stays hashable and a caller cannot edit the rules it was validated with.
+    triggers: tuple[dict[str, Any], ...] = ()
 
     # ── validation ──────────────────────────────────────────────────────────
     def validate(self) -> Config:
@@ -64,6 +67,10 @@ class Config:
             raise bbx("BBX-E100", "sync_ms and sync_bytes must be positive")
         if self.blob_inline < 0 or self.blob_max < self.blob_inline:
             raise bbx("BBX-E100", "blob_max must be >= blob_inline")
+        # §10.5: a trigger rule this build cannot honour is refused here, by name, rather than ignored at run time.
+        from blackbox.trigger.rules import parse_rules
+
+        parse_rules(list(self.triggers))
         return self
 
     # ── (de)serialisation: round-trip is a property test (P0-12) ─────────────
@@ -82,6 +89,8 @@ class Config:
         tape = TapeConfig(**{k: v for k, v in tape_raw.items() if k in {f.name for f in dataclasses.fields(TapeConfig)}})
         ret = RetentionConfig(**{k: v for k, v in ret_raw.items() if k in {f.name for f in dataclasses.fields(RetentionConfig)}})
         simple = {k: v for k, v in data.items() if k not in ("tape", "retention")}
+        if "triggers" in simple:
+            simple["triggers"] = tuple(simple["triggers"] or ())
         return cls(tape=tape, retention=ret, **simple)
 
     def resolve_data_dir(self) -> Path:
@@ -128,6 +137,12 @@ def _flatten_document(doc: dict[str, Any]) -> dict[str, Any]:
     if ret:
         out.setdefault("retention", {}).update({k: v for k, v in ret.items()
                                                 if k in {f.name for f in dataclasses.fields(RetentionConfig)}})
+    # Appendix A writes rules as `[[trigger]]` — a TOML array of tables under the singular key. `/trigger` is the
+    # plural name this Config field uses; `migrate_alias` below is the one place the two are joined.
+    if isinstance(doc.get("trigger"), list):
+        out["triggers"] = doc["trigger"]
+    elif isinstance(doc.get("triggers"), list):
+        out["triggers"] = doc["triggers"]
     # top-level [tape]/[retention] forms are also accepted (Appendix A' delta)
     for section, target in (("tape", "tape"), ("retention", "retention")):
         if section in doc and isinstance(doc[section], dict):

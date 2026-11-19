@@ -194,7 +194,14 @@ DEFAULT_BLOB_INLINE = 1024
 DEFAULT_BLOB_MAX = 32 << 20
 DEFAULT_QUEUE_MAX = 65536
 DEFAULT_SAMPLE = 1.0
-MODES = ("volatile", "process", "kernel", "paranoid")
+# `serverless` is a mode of its own (§11.11): one run per invocation, sealed at the boundary, 2 MiB segments under
+# /tmp and a sync at the end of each invocation. It is listed here so `blackbox run` and the wrapper accept it, and it
+# behaves like `kernel` for the two places the writer decides whether to sync.
+MODES = ("volatile", "process", "kernel", "paranoid", "serverless")
+
+#: §11.11: a serverless invocation's segment budget. Payloads bigger than one segment are refused, so the cap is a
+#: statement about what fits in an invocation rather than a tuning knob.
+SERVERLESS_SEGMENT_BYTES = 2 * 1024 * 1024
 CONTENTS = ("full", "hash", "off")
 DURABILITY_CLASS = {"volatile": "F1-weak", "process": "F1", "kernel": "F1+F2", "paranoid": "F1+F2"}
 LEASE_MAX_BYTES = 512

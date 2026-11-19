@@ -48,6 +48,8 @@ from blackbox.tape import head as head_mod
 from blackbox.tape import segments
 from blackbox.tape.keeper import Keeper
 from blackbox.tape.writer import TapeWriter
+from blackbox.trigger.engine import Engine
+from blackbox.trigger.rules import parse_rules
 
 STALL_FILE = "stall.json"
 STALL_TXT = "stall_tb.txt"
@@ -75,6 +77,7 @@ class RunResult:
     captured: dict[str, Any] = field(default_factory=dict)   # B2: what the capsules of this run actually hold
     sdk: dict[str, Any] = field(default_factory=dict)        # P3B-03: the temp .pth, what it is, whether it was used
     hooks: dict[str, Any] = field(default_factory=dict)      # P3B-07: inbox, tape, events, frames, quarantined
+    triggers: dict[str, Any] = field(default_factory=dict)   # P8-10: rules, hits, suppressed, errors, disabled
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -83,7 +86,21 @@ class RunResult:
             "stalled": self.stalled, "stall_ms": self.stall_ms, "stall_last_seq": self.stall_last_seq,
             "stall": self.stall_path, "stall_tb": self.dump_path, "writer_uuid": self.writer_uuid,
             "recovered": self.recovered, "recovery_error": self.recovery_error,
+            "hooks": self.hooks, "triggers": self.triggers,
         }
+
+
+def _on_freeze_deadline(writer: Any) -> Any:
+    """What a `stop_delay` deadline does: record that it passed. Sealing mid-run is not implemented (see docs)."""
+    from blackbox.codec import cbor as _cbor
+
+    def _apply(activity: Any) -> None:
+        with contextlib.suppress(Exception):     # a trigger must never be able to hurt the app or the tape
+            writer.append(C.KIND_MARK, _cbor.encode({
+                "name": "freeze_due", "rule": activity.rule, "fingerprint": activity.fingerprint,
+                "note": "the run is sealed once, at the end; this build does not seal a second capsule here"}),
+                priority=2)
+    return _apply
 
 
 def _newest_tape_head(data_dir: str) -> tuple[str | None, int | None]:
@@ -285,7 +302,7 @@ def launch(argv: list[str], *, data_dir: str | None = None, stall_ms: int = 5_00
            run_id: str | None = None, proxy: bool = False, proxy_routes: Any = None,
            proxy_port: int = 0, proxy_receiver: Any = None,
            proxy_retry_transmitted: bool = False, proxy_force: bool = False,
-           sdk: bool = True, hooks: bool = True) -> RunResult:
+           sdk: bool = True, hooks: bool = True, triggers: list[dict[str, Any]] | None = None) -> RunResult:
     """Run `argv` under the recorder, watch for a stall, then recover the tape that the child left behind."""
     if not argv:
         raise ValueError("launch() needs a command")
@@ -296,7 +313,13 @@ def launch(argv: list[str], *, data_dir: str | None = None, stall_ms: int = 5_00
     # That is what makes the plan's acceptance line work — `sh -c 'kill -9 $$'` still leaves a tape, a RUN_END and
     # therefore a recovered run, instead of an empty directory and a shrug.
     writer = TapeWriter(data_dir, mode="process").open()
-    keeper = Keeper(writer).start()
+    # §10.5: rules from `[[trigger]]` in blackbox.toml. The engine is fed by whoever sees a metric and decides in the
+    # keeper's thread; `on_trigger` records that a freeze deadline passed. What this build does *not* do is seal a second
+    # capsule at that deadline — the run is sealed once, at the end — so a `freeze` names the events to look at rather
+    # than producing a superset capsule mid-run. That is stated in `docs/triggers.md` rather than implied here.
+    trigger_rules = parse_rules(triggers) if triggers else []
+    engine = (Engine(trigger_rules, store=os.path.join(data_dir, "triggers.json")) if trigger_rules else None)
+    keeper = Keeper(writer, triggers=engine, on_trigger=_on_freeze_deadline(writer)).start()
     # one run id, derived from the tape, so the frames, the env the child sees and the recovery all agree
     run_id = run_id or recovery.run_id_for(data_dir, writer.writer_uuid.hex())
     child_env["BLACKBOX_RUN_ID"] = run_id
@@ -386,6 +409,12 @@ def launch(argv: list[str], *, data_dir: str | None = None, stall_ms: int = 5_00
         if not hooks:
             result.hooks = {"inbox": None, "tape": None, "events": 0, "frames": 0, "quarantined": [], "errors": [],
                             "enabled": False, "reason": "--no-hooks"}
+        # §10.5: the launcher evaluates `exit_code` and `stall_ms` from what it alone can see, then lets the keeper write
+        # what the engine decided. This is the backstop: a starved keeper cannot blind the engine to a run's own ending.
+        if engine is not None:
+            engine.observe_all("exit_code", float(result.exit_code))
+            engine.observe_all("stall_ms", float(result.duration_s * 1000.0) if watch.stalled else 0.0)
+            keeper.evaluate_triggers(force=True)
         writer.emit(C.KIND_RUN_END, cbor.encode({"run_id": run_id, "exit_code": result.exit_code,
                                                  "signaled": result.signaled, "stalled": watch.stalled,
                                                  "duration_ms": int(result.duration_s * 1000)}))
@@ -398,6 +427,7 @@ def launch(argv: list[str], *, data_dir: str | None = None, stall_ms: int = 5_00
     result.stall_path = watch.stall_path
     result.dump_path = watch.dump_path
     result.writer_uuid = writer.writer_uuid.hex()
+    result.triggers = keeper.stats().get("triggers") or {"rules": []}
     if recover:
         try:
             primary = writer.writer_uuid.hex()
@@ -769,6 +799,9 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--no-hooks", action="store_true",
                     help="do not export BLACKBOX_INBOX and do not fold a hook inbox for this run")
     ap.add_argument("--proxy-port", type=int, default=0)
+    ap.add_argument("--json", action="store_true",
+                    help="print the run result as one JSON object on stdout after the child exits "
+                         "(the child's own stdout is untouched; the human summary still goes to stderr)")
     ap.add_argument("--proxy-retry-transmitted", action="store_true",
                     help="retry GET/HEAD/OPTIONS once when the upstream dies after the request was sent; some "
                          "upstreams give a GET side effects, so this is off by default")
@@ -787,10 +820,22 @@ def main(argv: list[str]) -> int:
         from blackbox.proxy.routes import Routes
 
         routes = Routes.from_specs(args.upstream, unverified=tuple(args.insecure_upstream), default=None)
+    try:                                     # `[[trigger]]` rules come from config; a bad one is refused by name
+        from blackbox.config import load_config
+
+        trigger_tables = list(load_config().triggers)
+    except Exception as exc:
+        print(f"blackbox run: configuration refused: {type(exc).__name__}: {exc}", file=sys.stderr)
+        return 2
     result = launch(cmd, data_dir=args.data_dir, stall_ms=args.stall_ms, out=sys.stderr,
                     recover=not args.no_recover, proxy=not args.no_proxy, proxy_routes=routes,
                     proxy_port=args.proxy_port, proxy_retry_transmitted=args.proxy_retry_transmitted,
-                    proxy_force=args.force_proxy, sdk=not args.no_sdk, hooks=not args.no_hooks)
+                    proxy_force=args.force_proxy, sdk=not args.no_sdk, hooks=not args.no_hooks,
+                    triggers=trigger_tables)
+    if args.json:
+        import json
+
+        print(json.dumps(result.as_dict(), sort_keys=True), flush=True)   # one line: the child owns the rest of stdout
     return result.exit_code
 
 
