@@ -253,6 +253,7 @@ tested, the pixels are not. `docs/desktop.md` carries the platform matrix and sa
 
 | ref | docs | Ubuntu | Windows | macOS |
 |---|---|---|---|---|
+| branch `6256118` (library rows by name; run 44562203122) | green | **3/3 green** | **3/3 green** | **still queued ~10 min after dispatch** — none of the three macOS cells was acquired; neither pass nor fail, unmeasured |
 | branch `87cc056` (setup + library; run 44557174647) | green | **3/3 green** | **3/3 green** | **still queued when this was written, ~20 min after dispatch** — none of the three macOS cells was acquired, so the run's overall status stays `queued`; neither pass nor fail, unmeasured |
 | branch `6674ab8`, `1ec8be9` (desktop app + packaging) | green | **3/3 green** — including the job that builds the `.deb` and runs the installed launcher from an extracted tree | **3/3 green** — the suite runs on Windows, the desktop package test skips there by name (no `dpkg-deb`) | **queued, then not acquired**: the three macOS cells sat in the runner queue and were cancelled for capacity; unmeasured |
 | branch `0427242` (runs 44534156643 push, 44534172473 PR) | green | **3/3 green** | **3/3 green** — both Windows repairs held (defect 86) | **not measured**: all three cells cancelled / "not acquired by Runner of type hosted" (capacity). The push run's overall conclusion is `failure` for that reason alone |
