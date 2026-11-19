@@ -364,9 +364,19 @@ B5 stays open: three real products and one product's second transport are still 
 
 ## B6 — Two rows that only the release machine can settle
 
-* **P3B-07's bench-box cold start.** The gate is ≤ 40 ms p95 on the bench box. This branch measures **p50 30.3 / p95 38.3
-  ms** for `blackbox ingest` on a 2-vCPU Linux sandbox after defect 64, from a wheel install — inside the gate, on the
-  wrong machine. The row stays owed until it is run on the named box.
+* **P3B-07's bench-box cold start.** The gate is ≤ 40 ms p95 on the bench box, and there is now a **protocol** rather than
+  two prose numbers: `bench/bench_ingest_cold_start.py` spawns a real process per sample, randomises the column order per
+  trial, empties the inbox between samples and writes an artefact with `n`, MAD and the hardware. On this 2-vCPU sandbox
+  (n = 60 per column, `bench/results/2026-11-19-ingest-cold-start.json`) the command costs **p50 33.0 / p95 44.5 /
+  p99 53.9 ms**, of which the bare interpreter is p50 10.9 ms and the CLI's own imports take the floor to p50 32.2 ms —
+  `ingest` adds **0.85 ms** p50 on top of the CLI. So the p95 **misses 40 ms here**, and it misses it in the part that is
+  not ours; the artefact's verdict says `on_the_bench_box: false` and `row_satisfied_here: false` in those words. The
+  earlier prose figures (32.0 / 40.2 in STATUS and progress, 30.3 / 38.3 in this file) had no artefact behind them and
+  disagreed with each other; they are superseded by the JSON, which is why the protocol is committed.
+  **What the bench box must provide for this row**: a quiet, non-shared host (the row is a p95, and this sandbox's MAD is
+  1.7 ms with a 53.9 ms maximum — a shared container cannot answer it), the same command
+  `python bench/bench_ingest_cold_start.py --n 60 --where bench-box`, and nothing else: the row needs no fault injection
+  and no privileges.
 * **The rebind numbers are local.** No CI runner contributes a rebind sample, and none will: `bench/bench_rebind.py`
   needs one busy process per CPU and a quiet loop, which a shared runner cannot give. macOS is now measured *for the
   test suite* (ten of ten on `ad3a783`, `f46dac1`, `66fc174`), never *for the bench*.
