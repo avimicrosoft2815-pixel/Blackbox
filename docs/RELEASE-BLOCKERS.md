@@ -430,10 +430,12 @@ exit 2 alone), and an unreadable path in a batch exiting 2. Defect 74 in `docs/d
 
 ## B9 — The Windows desktop app: installer definition written, install journey **not run**
 
-**What exists.** `blackbox desktop` (a real window, not a tab), a `.deb` that installs it on Debian/Ubuntu, and
+**What exists.** `blackbox desktop` (a real window, not a tab) with its three pages — first-run setup, the incident
+library, and a run — on top of `ui/app.py`'s loopback routes; a `.deb` that installs it on Debian/Ubuntu; and
 `tools/package/windows/{blackbox.iss,build_windows.ps1}` — an Inno Setup definition and a staging script that downloads
 the Windows embeddable Python, the package wheel and `pywebview`/`pythonnet`, so the installer needs no Python on the
-user's machine.
+user's machine. The Windows installer is **unsigned**: signing is the owner's separate task and no certificate exists in
+this environment.
 
 **What has not happened.** The installer has never been built and the journey has never been done: this build environment
 is Linux, with no Windows machine, no `wine`, no Inno Setup and no Authenticode certificate. So the Windows rows read:

@@ -37,8 +37,10 @@ LOOPBACK = ("cap_sdk/mock_provider.py",)
 # allowed `http.server`/`socket`/`socketserver` and NOTHING else — no `ssl`, no `urllib`, no client socket call. The
 # scope is asserted, not assumed: `tests/test_ui_server.py` checks the bind tuple is a loopback literal, that the module
 # has no `connect`/`create_connection`/`urlopen` call at all, and that no `0.0.0.0` appears in it.
-SERVERS = ("ui/server.py",)
+SERVERS = ("ui/server.py", "ui/app.py")
 SERVER_MODULES = frozenset({"http", "socket", "socketserver"})
+# `urllib.parse` splits a request path; `urllib.request` would fetch one and stays banned. Same permission the proxy has.
+SERVER_DOTTED = frozenset({"urllib.parse"})
 
 # The proxy (P3B-01/02) is a server *and* a client by design: it listens on loopback and connects to a configured
 # upstream. It is exempt for `asyncio` and `ssl` — and for nothing else — because its reachable destinations are

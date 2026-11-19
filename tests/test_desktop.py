@@ -75,9 +75,11 @@ def test_a_window_opens_on_loopback_and_serves_the_real_page(capsule: Path) -> N
     url = fake.windows[0]["url"]
     assert url.startswith("http://127.0.0.1:"), url
     assert fake.statuses == [200], "the window fetched the page and got something else"
-    assert b"BlackBox" in fake.body and len(fake.body) == report["bytes"]
-    assert report["served"] >= 1
-    assert report["capsule"] and report["events"] > 0
+    assert b"BlackBox" in fake.body and len(fake.body) > 20_000
+    assert report["requests"] >= 1
+    assert report["capsules"] == 1 and report["events"] > 0
+    # Given a capsule file the window opens on that run, and the run page offers the way back to the library.
+    assert "/run/" in url and "recorded runs" in fake.body.decode()
 
 
 def test_the_server_stops_when_the_window_closes(capsule: Path) -> None:
@@ -85,7 +87,7 @@ def test_the_server_stops_when_the_window_closes(capsule: Path) -> None:
     report = desktop.run(str(capsule), webview_module=fake)
     port = int(fake.windows[0]["url"].split(":")[2].split("/")[0])
     assert _port_closed(port), f"a listener on {port} outlived the window"
-    assert report["url"].endswith("/")
+    assert report["url"].startswith("http://127.0.0.1:")
 
 
 def test_the_window_is_not_a_debug_console(capsule: Path) -> None:
@@ -108,7 +110,7 @@ def test_the_url_is_a_secret_path_not_a_query_string(capsule: Path) -> None:
     assert "?" not in report["url"], "a token in a query string reaches logs and Referer headers"
 
 
-def test_a_directory_of_capsules_opens_as_a_run_list(tmp_path: Path) -> None:
+def test_a_directory_of_capsules_opens_as_the_library(tmp_path: Path) -> None:
     data_dir = tmp_path / "data"
     uuid_hex = _record(data_dir)
     _capsule_bytes(data_dir, uuid_hex)
@@ -116,6 +118,28 @@ def test_a_directory_of_capsules_opens_as_a_run_list(tmp_path: Path) -> None:
     report = desktop.run(str(data_dir), webview_module=fake)
     assert report["capsules"] == 1
     assert fake.statuses == [200]
+    page = fake.body.decode()
+    assert "Find a run" in page and "recorded on this machine" in page
+    assert fake.windows[0]["url"].endswith("/"), "the library is the app's front page, not a run"
+
+
+def test_an_empty_data_directory_opens_onboarding(tmp_path: Path) -> None:
+    """A first run lands on the setup page: an empty table teaches a new user nothing."""
+    data_dir = tmp_path / "empty"
+    data_dir.mkdir()
+    fake = FakeWebview()
+    desktop.run(str(data_dir), webview_module=fake)
+    page = fake.body.decode()
+    assert "first run" in page and "What is recorded" in page and "Find a run" not in page
+
+
+def test_onboarding_can_be_asked_for_even_with_recordings(tmp_path: Path) -> None:
+    data_dir = tmp_path / "data"
+    uuid_hex = _record(data_dir)
+    _capsule_bytes(data_dir, uuid_hex)
+    fake = FakeWebview()
+    desktop.run(str(data_dir), webview_module=fake, onboarding=True)
+    assert "first run" in fake.body.decode()
 
 
 # ── what it refuses ─────────────────────────────────────────────────────────
@@ -175,9 +199,9 @@ def test_the_browser_fallback_announces_the_url_before_it_waits(capsule: Path) -
         seen["url"] = url
         threading.Thread(target=lambda: urllib.request.urlopen(url, timeout=10).read(), daemon=True).start()
 
-    report = desktop.run(str(capsule), window=False, announce=announce, timeout_s=30)
+    report = desktop.run(str(capsule), window=False, announce=announce, timeout_s=1.0)
     assert seen.get("url", "").startswith("http://127.0.0.1:")
-    assert report["window"] is False and report["served"] == 1, report
+    assert report["window"] is False and report["requests"] == 1, report
 
 
 def test_main_prints_the_fallback_url_as_json_before_waiting(capsule: Path, monkeypatch: pytest.MonkeyPatch,
@@ -192,9 +216,10 @@ def test_main_prints_the_fallback_url_as_json_before_waiting(capsule: Path, monk
         return real_run(*args, **{**kwargs, "announce": announce})
 
     monkeypatch.setattr(desktop, "run", run_and_fetch)
-    assert desktop.main([str(capsule), "--no-window", "--json"]) == 0
+    assert desktop.main([str(capsule), "--no-window", "--json", "--idle", "1"]) == 0
     lines = [json.loads(line) for line in capsys.readouterr().out.splitlines() if line.strip()]
     assert "serving" in lines[0], lines
+    assert lines[-1]["requests"] >= 1, lines
     assert lines[0]["serving"].startswith("http://127.0.0.1:")
     assert lines[-1]["ok"] is True and lines[-1]["window"] is False
 

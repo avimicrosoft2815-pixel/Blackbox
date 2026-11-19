@@ -333,3 +333,43 @@ def test_stopping_while_a_handler_is_pending_does_not_abandon_it(tmp_path: Path)
     finally:
         asyncio_log.removeHandler(handler)
         hole.close()
+
+
+def test_shutdown_is_bounded_even_when_a_handler_ignores_its_cancellation() -> None:
+    """Defect 89: `stop()` must not wait forever for a task that refuses to die.
+
+    `_drain_and_close` used to `gather` its cancelled tasks, and `gather` waits for a task that caught `CancelledError`
+    and awaited again. A burst of 40 connections left a handler parked on a black-hole upstream, and the proxy then hung
+    in `run_until_complete` for over 20 s — the suite's 60 s subprocess timeout was the only thing that ended it. The
+    drain now uses `asyncio.wait(..., timeout=DRAIN_S)`: a stubborn task is counted in `undrained_at_stop`, not awaited.
+
+    The task here is the worst case, built by hand so it cannot be excused as a flaky network: it swallows its first
+    cancellation and parks on an event that is never set.
+    """
+    from blackbox.proxy.supervisor import DRAIN_S, ProxyThread
+
+    proxy = ProxyThread(Routes([Route(name="openai", base="http://127.0.0.1:9")], default="openai"))
+    loop = asyncio.new_event_loop()
+    never = asyncio.Event()
+
+    async def stubborn() -> None:
+        while True:
+            try:
+                await never.wait()
+            except asyncio.CancelledError:
+                continue                # the shape that made `gather` wait forever
+
+    task = loop.create_task(stubborn())
+    loop.run_until_complete(asyncio.sleep(0.01))
+    assert not task.done()
+
+    started = time.monotonic()
+    proxy._drain_and_close(loop)         # the method under test, on a loop that is not running
+    elapsed = time.monotonic() - started
+    assert elapsed < DRAIN_S * 4 + 5.0, f"shutdown waited {elapsed:.1f} s for a task that ignores cancellation"
+    assert proxy.undrained_at_stop >= 1, "the stubborn task must be counted, not silently forgotten"
+
+    # The drain closed the loop with this task still pending, which is the documented outcome and is why the count is
+    # asserted above. Nothing to unwind; `proxy.stop()` is idempotent and releases the thread objects.
+    assert loop.is_closed()
+    proxy.stop()

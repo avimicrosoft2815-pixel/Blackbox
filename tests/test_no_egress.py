@@ -33,10 +33,13 @@ def _allowed_import(path: Path, name: str) -> bool:
     """Two narrow permissions, both listed in `_capture_policy.py` and both checked for scope, not just presence.
 
     * the seam/tee files may import `httpx`, but only inside a function — that is what keeps it optional;
-    * the mock provider may import `socket`/`http.server` at module scope, because it *is* a server, on loopback.
+    * the mock provider and the two loopback page servers may import `socket`/`http.server`, because they *are* servers,
+      on loopback; the servers may also use `urllib.parse`, which parses a path and cannot fetch one.
     """
     root = name.split(".")[0]
     if _capture_policy.is_server(path):
+        if name in _capture_policy.SERVER_DOTTED:
+            return True
         return name.split(".")[0] in _capture_policy.SERVER_MODULES
     if _capture_policy.is_proxy(path):
         # `urllib.parse` is a parser; every other `urllib` submodule, and the root, stay banned below.

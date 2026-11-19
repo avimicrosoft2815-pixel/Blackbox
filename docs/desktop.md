@@ -48,6 +48,12 @@ the window does not appear.
 build and hand-off steps. **No Windows installer has been built or run in this build environment**, and the Windows
 desktop journey is therefore *unverified* here — see the matrix below.
 
+Re-checked on 2026-11-19 before writing this line: `uname -sm` is `Linux x86_64`, and `command -v makensis iscc wine
+wine64 winecfg pwsh powershell` finds **none of them**. There is no Windows host, no Inno Setup, no Wine and no
+PowerShell, so the unsigned installer cannot be built or exercised from here — the attempt is recorded instead of
+inferred, and the hand-off in `tools/package/windows/README.md` is what a Windows machine needs. Signing is the owner's
+separate task: nothing in this repository is signed.
+
 ### macOS
 
 **Experimental and untested.** `pywebview` drives WKWebView there and the code path is the same, but nothing in this
@@ -55,26 +61,51 @@ repository has been run on a Mac. Do not read the missing warning as support.
 
 ## What opening it gives you
 
-`blackbox desktop [path]`:
+The window opens on one of three pages, and which one is a decision the app makes for you:
 
-* with no argument, opens the standard data directory — the run list;
-* with a `.bbx` capsule, opens that capsule;
-* with a data directory, opens every capsule in it as a run rail with the linked tapes joined by `exact` links.
+**1. Setup, on a machine with nothing recorded.** The first screen is not an empty table — it is four answers: whether
+this machine can run the window at all, what will be recorded and *what will not*, which SDK is installed (with the exact
+command for the one you have), and where the recordings live. Each check shows the value it observed (`python 3.11.9`,
+`0.4 GB free`, `OPENAI_API_KEY is set — its value is never read`) and every check that is not fine carries a command or a
+sentence naming what to install. Three states: *blocked*, *ready*, *complete*.
 
-The page is the same offline viewer `blackbox view` writes: black-and-gold glass, keyboard-first (roving tabindex, skip
-link, `?` for the shortcut dialog, `prefers-reduced-motion` honoured), every capsule value inserted with `textContent`
-so recorded text cannot become markup, and a failed integrity root shown as a red banner rather than a timeline.
+The two lists are the honest core. **Recorded:** model calls the recorder can see, the node tree your code opens, stream
+chunks including a stream the provider cut short, tool calls and errors, and every gap the recorder knows about.
+**Not recorded:** nothing leaves the machine (no account, cloud, telemetry or update check); prompts and completions only
+under your content policy, with secrets redacted by default; other programs' traffic; browser AI websites (this build
+records SDK and HTTP clients, not an extension); and your source code.
+
+**2. The library, once there is something to open.** One row per capsule, newest first — the run, its recovery status,
+when it was recorded, which provider and model were seen, how many events, how big, and a *needs attention* column that
+names the reason: unreadable (with the refusal code), a cut-short tail, evidence lost from a sequence, a declared gap, a
+status that is not clean, no model call recorded, or a capture that was not full. Search across run, capsule, provider,
+model and status; filter by status; sort by newest, oldest, largest, status or run; 25 rows a page.
+
+The library reads **manifests only** — `cap.format.read_manifest`, which makes every header check the full reader makes
+(same refusal codes, proven in `tests/test_cap_read_manifest.py`) and decompresses no entry body. That is what makes a
+directory of a hundred runs a page rather than a wait. The trade is stated in the footer and in the row: a capsule listed
+here is **unverified** until you open it, and opening it recomputes the integrity index exactly as `blackbox verify` does.
+
+**3. A run.** The existing offline viewer — black-and-gold glass, keyboard-first (roving tabindex, skip link, `?` for the
+shortcut dialog, `prefers-reduced-motion` honoured), every capsule value inserted as text so recorded text cannot become
+markup, a failed integrity root shown as a red banner rather than a timeline — with a bar back to the library.
 
 **What the window adds over the file:** nothing is written to disk, no browser profile is touched, the page cannot
-navigate anywhere (there is one URL and it is served by this process), and closing the window stops the server.
+navigate anywhere (three routes, all served by this process under one secret path), and closing the window stops the
+server. Pages are server-rendered: the library and setup pages need no JavaScript at all, and the only script is the
+viewer's own keyboard tree on a run page.
 
 ## How it works, in one paragraph
 
-The app builds the page in memory, starts the same loopback server `blackbox serve` uses — bound to `127.0.0.1` on a
-port the kernel chooses, serving one secret path that is generated per process and never logged — points a window at
-that URL, and stops the server when the window closes. Nothing listens on a network interface, nothing is reachable from
-another machine, and there is no daemon left behind. `tests/test_desktop.py` asserts the loopback URL, the secret path,
-`debug=False` on the window, and that the listening socket is closed afterwards.
+The app reads the manifests under the data directory to decide whether to open setup or the library, starts a loopback
+server — bound to `127.0.0.1` on a port the kernel chooses, serving **three routes** under one secret path that is
+generated per process and never logged — points a window at the front page, and stops the server when the window closes.
+Every route is a `GET`: there is nothing in the app that writes, records or deletes, so a guessed token can read what the
+token protects and cannot change anything. A capsule id in a URL is *matched* against the manifests, never joined onto a
+path, so `../` is not a request the server can serve. Nothing listens on a network interface, nothing is reachable from
+another machine, and there is no daemon left behind. `tests/test_desktop.py` and `tests/test_ui_library.py` assert the
+loopback bind, the secret path, `debug=False` on the window, the same refusals from both capsule readers, that no secret
+appears in the setup page, that the page references no external URL, and that the listening socket is closed afterwards.
 
 ## Privacy, stated plainly
 
@@ -91,9 +122,9 @@ another machine, and there is no daemon left behind. `tests/test_desktop.py` ass
 
 | Target | CLI + viewer page | Desktop window | Installer | Notes |
 |---|---|---|---|---|
-| **Debian 12 (bookworm), x86_64** | **run here**: 1307-test suite, `blackbox view/serve`, `desktop --selftest` | **not launched here** — the build machine has no display, no GTK and no WebKit | **`.deb` built and extracted here**; `usr/bin/blackbox --version` runs from the extracted tree | The window path is covered by `tests/test_desktop.py` with a fake webview; the real window needs a machine with `python3-gi` + `gir1.2-webkit2-4.1` |
+| **Debian 12 (bookworm), x86_64** | **run here**: the full suite, `blackbox view/serve`, `desktop --selftest`, the library and setup pages fetched over loopback | **not launched here** — the build machine has no display, no GTK and no WebKit | **`.deb` built and extracted here**; `usr/bin/blackbox --version` runs from the extracted tree | The window path is covered by `tests/test_desktop.py` with a fake webview; the real window needs a machine with `python3-gi` + `gir1.2-webkit2-4.1` |
 | **Ubuntu 24.04 LTS, x86_64** | same code, CI's `ubuntu-latest` cells | **not launched** | same `.deb` recipe (`gir1.2-webkit2-4.1` is the package name there too) | `ubuntu-latest` CI runs the CLI, not a GUI |
-| **Windows 10/11, x64** | **CI only**: `windows-latest` cells run the suite (3/3 at `0427242`) | **not run** — no Windows machine or GUI CI in this environment | installer definition written, **not built** | Read as *unverified*: no Windows desktop journey has happened |
+| **Windows 10/11, x64** | **CI only**: `windows-latest` cells run the suite (3/3 at `1ec8be9`, the CLI — not the window) | **not run** — no Windows machine, no `makensis`/`iscc`, no `wine`, no PowerShell here (re-checked 2026-11-19) | installer definition written, **not built**, **unsigned** | Read as *unverified*: no Windows desktop journey has happened |
 | **macOS** | CI `macos-latest` cells when a runner is granted (cancelled by capacity at the last two commits) | **not run** | none | **Experimental / unsupported** |
 
 The distinction that matters: *"the code path is tested on Linux"* is not *"the app has been used on Windows"*. The
@@ -148,5 +179,5 @@ desktop app.
   this environment.
 * **A real window on Linux**: the build machine cannot open one, so the first launch on a desktop Linux host is an
   unperformed step. `blackbox desktop --selftest` turns that into a five-second check.
-* **A library view over thousands of capsules** is a page that loads every capsule it is given; the viewer is verified
-  on tens, not thousands, and no lazy loading exists yet.
+* **A library over thousands of capsules** is paginated and manifest-only, but it is verified on tens of capsules here,
+  not thousands: `tests/test_ui_library.py` scans 20, and no measured figure for 5 000 runs exists yet.

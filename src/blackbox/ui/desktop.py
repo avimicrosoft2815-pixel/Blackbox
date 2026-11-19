@@ -33,6 +33,7 @@ from __future__ import annotations
 import os
 import platform
 import sys
+import time
 from typing import Any
 
 from blackbox import __version__
@@ -133,48 +134,77 @@ def open_window(url: str, *, title: str = "BlackBox", webview_module: Any | None
 
 def run(path: str, *, port: int = 0, window: bool = True, as_json: bool = False,
         webview_module: Any | None = None, timeout_s: float = 900.0,
-        announce: Any | None = None) -> dict[str, Any]:
-    """Serve `path` on loopback and show it in a window. Returns the report; raises on the paths that cannot work.
+        announce: Any | None = None, onboarding: bool = False) -> dict[str, Any]:
+    """Serve the app pages on loopback and show them in a window. Returns the report.
 
-    With `window=False` this is the browser fallback: one-shot serving, `announce(url)` called **before** the wait, and
-    then a block until somebody fetches the page — the same contract as `blackbox serve`, because a fallback that exits
-    before anyone can open the URL is not a fallback. (The first version of this function waited *and* left announcing to
-    the caller, which deadlocked for as long as the timeout: `announce` exists because the test said so.)
+    The window opens on the **library** — or on onboarding when there is nothing recorded yet, because a first run that
+    lands on an empty table teaches nothing. Given a capsule file rather than a directory, the window opens on that run
+    and the library is one click away.
+
+    With `window=False` this is the browser fallback: the URL is announced **before** the wait, and the process serves
+    until it has been idle for `timeout_s` seconds. The first version waited for a fetch while the caller printed the URL
+    afterwards — a fallback nobody could reach (defect 87).
     """
-    from blackbox.ui import server as server_mod
-    from blackbox.ui.model import document_for_path
-    from blackbox.ui.viewer import build_html
+    from blackbox.cap import format as cap
+    from blackbox.ui import app as app_mod
+    from blackbox.ui import library as library_mod
 
-    document = document_for_path(path)
-    page = build_html(document)
-    # `one_shot=False`: a window may reload (a resize, a back navigation, a resumed session). The token is still secret
-    # and per-process; it is the *path*, and `server` keeps it out of every log line.
-    srv = server_mod.start(page, port=port, one_shot=not window)
+    start_route = ""
+    single = None
+    if os.path.isdir(path):
+        data_dir = path
+    else:
+        # A capsule file: open the library it belongs to, with that run in front. If it belongs to no library, the app
+        # still serves that one file by path — `blackbox desktop some/capsule.bbx` must work on a capsule alone.
+        data_dir = library_mod.data_root(path)
+        manifest = cap.read_manifest(path)
+        start_route = f"run/{manifest.get('capsule_id', '')}"
+        if library_mod.find(data_dir, str(manifest.get('capsule_id', ''))) is None:
+            single = os.path.abspath(path)
+    srv = app_mod.start(data_dir, port=port, force_onboarding=onboarding, single=single)
+    url = srv.url + start_route
+    found = library_mod.scan(data_dir, limit=1)
     report: dict[str, Any] = {
-        "url": srv.url,
-        # The byte count, not the character count: the page carries em dashes and ellipses, so `len(page)` was 3.4 kB
-        # short of what the socket sends. The test that compares the served body with this number is what noticed.
-        "bytes": len(page.encode("utf-8")),
+        "url": url,
         "window": window,
-        "capsule": document.get("viewer", {}).get("capsule_id"),
-        "capsules": len(document.get("tapes") or []) or 1,
-        "events": len(document.get("events") or []),
-        "served": 0,
+        "data_dir": os.path.abspath(data_dir),
+        "capsules": found.counts.get("capsules", 0),
+        "runs": found.counts.get("runs", 0),
+        "events": found.counts.get("events", 0),
+        "attention": found.counts.get("attention", 0),
+        "requests": 0,
+        "seconds": 0.0,
     }
+    started = time.monotonic()
     try:
         if window:
-            open_window(srv.url, title=f"BlackBox — {report['capsule'] or path}", webview_module=webview_module)
+            open_window(url, title="BlackBox — recorded runs", webview_module=webview_module)
         else:
             if announce is not None:
-                announce(srv.url)
-            report["served"] = int(srv.wait(timeout_s=timeout_s).get("served") or 0)
+                announce(url)
+            _serve_until_idle(srv, timeout_s)
     finally:
-        # Whatever happened to the window, the loopback server stops with it. A desktop app that leaves a listening
-        # socket behind is a desktop app that has to be killed.
-        if window:
-            report["served"] = int(srv.served)
-            srv.stop()
+        report["requests"] = int(srv.requests)
+        report["seconds"] = round(time.monotonic() - started, 2)
+        srv.stop()
     return report
+
+
+def _serve_until_idle(srv: Any, idle_s: float) -> None:
+    """Keep a browser session alive while it is being used, and stop a forgotten one.
+
+    `idle_s` is the gap after the last request. A first request starts the clock, so a URL nobody opens stops the process
+    after the same gap rather than waiting for a page that will never load.
+    """
+    last = time.monotonic()
+    seen = 0
+    while True:
+        time.sleep(0.05)
+        if srv.requests != seen:
+            seen = srv.requests
+            last = time.monotonic()
+        if time.monotonic() - last > max(0.2, float(idle_s)):
+            return
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -189,6 +219,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--selftest", action="store_true", help="report whether this machine can open a window, then exit")
     ap.add_argument("--no-window", action="store_true",
                     help="serve and print the URL instead of opening a window (the browser fallback, said out loud)")
+    ap.add_argument("--onboarding", action="store_true",
+                    help="open on the setup page even when recordings exist")
+    ap.add_argument("--idle", type=float, default=900.0,
+                    help="with --no-window: stop after this many seconds without a request (default 900)")
     ap.add_argument("--json", action="store_true", help="machine-readable output")
     args = ap.parse_args(sys.argv[1:] if argv is None else argv)
 
@@ -240,7 +274,8 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         out = run(path, port=args.port, window=not args.no_window, as_json=args.json,
-                  announce=None if args.no_window is False else announce)
+                  announce=None if args.no_window is False else announce, timeout_s=args.idle,
+                  onboarding=args.onboarding)
     except Exception as exc:                              # a page that cannot be built is a capsule that cannot be read
         message = f"{type(exc).__name__}: {exc}"
         if args.json:
@@ -254,5 +289,6 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps({"ok": True, **out}, sort_keys=True) if args.no_window
               else json.dumps({"ok": True, **out}, indent=2, sort_keys=True))
     else:
-        print(f"opened {out['capsules']} capsule(s), {out['events']} events; window closed, server stopped")
+        print(f"opened the library: {out['capsules']} capsule(s), {out['runs']} run(s), {out['events']} event(s), "
+              f"{out['attention']} needing attention; window closed after {out['seconds']:g}s, server stopped")
     return 0

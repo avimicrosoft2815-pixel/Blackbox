@@ -1489,3 +1489,59 @@ Two bugs in the new `blackbox desktop`, both found by its own tests before eithe
 
 Neither reached a release. Both are recorded because the pattern is the one worth remembering: a shell around an
 existing component reintroduces the bugs that component already paid for, unless it is tested the same way.
+
+## Defect 88 — the library's fast path was a second, weaker reader (2026-11-19, the desktop library)
+
+`read_manifest` exists so the library can list a hundred capsules without decompressing a hundred archives. Its first
+version made every **header** check `read_capsule` makes and then stopped, and `tests/test_cap_read_manifest.py` — which
+runs the whole hostile corpus through both readers and compares the refusal code — found the gap on its first run:
+
+* **A manifest that lists a part the archive does not carry was accepted by the library reader.** `read_capsule` refuses
+  it as `BBX-E408` (§13.4 check 8: the hashes verify over the entries that exist, so only a check of the *claim* about
+  what exists can catch it). The library would have drawn that capsule as a healthy row and the window would have failed
+  when it was opened. The check is a set lookup, so `read_manifest` now makes it too, through one shared function; the
+  test that caught it is `test_both_readers_refuse_with_the_same_code[manifest lists a part the archive lacks]`.
+
+Two more bugs the same tests found before the pages shipped:
+
+* **A readable row carried an "unreadable" reason.** `_row_from_manifest` computed the attention list while the row still
+  said `readable=False`, so every healthy capsule in the library was labelled `unreadable: no reason given`. The flag is
+  now set in the row's constructor and the reasons are computed once, after it.
+* **A capsule file opened a library of nothing.** `blackbox desktop path/to/capsules/x.bbx` took the capsule's own
+  directory as the data directory, so the app scanned `capsules/capsules/` and served 404 for the run it had just been
+  pointed at. `library.data_root()` now walks up from a file inside a `capsules/` directory, and a capsule outside any
+  data directory is served by path instead.
+
+**What this says.** The optimisation was correct about *which bytes it may skip* and wrong about *which checks are
+therefore skippable* — a distinction no amount of reading the diff would have settled. The corpus that proved it already
+existed for `read_capsule`; pointing both readers at it was the whole test.
+
+## Defect 89 — a proxy shutdown could wait forever for a task that refuses to be cancelled (2026-11-19)
+
+Found by the full suite, not by reading: `tests/test_proxy_limits.py::test_a_burst_larger_than_the_old_soft_limit_is_still_served`
+opens 40 connections at the proxy against a black-hole upstream and then stops it. It failed twice — once under load, once
+alone — with the *subprocess* timeout (60 s) as the only thing that ended it, and a hand-written reproduction showed where
+the time went:
+
+```
+Thread ... (most recent call first):
+  File "asyncio/base_events.py", line 1884 in _run_once
+  File "asyncio/base_events.py", line 640 in run_until_complete
+  File "supervisor.py", line 269 in _drain_and_close
+  File "supervisor.py", line 242 in stop
+```
+
+`_drain_and_close` cancelled the pending handler tasks and then `gather`ed them. `gather` waits for a task that catches
+`CancelledError` and awaits again — which a handler parked mid-request can do — so `stop()` had no bound at all. The drain
+now uses `asyncio.wait(tasks, timeout=…)` under **one** deadline for the whole drain (2 s, `DRAIN_S`), and counts what is
+still pending in `undrained_at_stop` instead of waiting for it.
+
+The second half of the same measurement matters: the first fix bounded each round at 2 s, and eleven rounds made 22 s. A
+per-round timeout is not a shutdown budget; the deadline is computed once. `test_shutdown_is_bounded_even_when_a_handler_
+ignores_its_cancellation` builds the worst case by hand (a task that swallows its cancellation and parks on an event that
+is never set) and asserts both halves: the drain returns in bounded time **and** the surviving task is counted.
+
+**Not fixed, and stated:** a task that ignores cancellation is left for the collector, which may print `Task was destroyed
+but it is pending!`. That is a message about a handler that was already broken; the alternative was a recorder that would
+not exit. The condition is counted, and `tests/test_proxy_supervisor.py` asserts `undrained_at_stop == 0` for the normal
+shutdown paths.

@@ -86,13 +86,16 @@ and B4's remaining part is an owner's tick while B6 and the macOS rows need a ma
 evidenced, 12 partial, 5 with no code in the tree at all (the I8 index rebuild, the capsule attack corpus, the Go reader,
 the trigger rules and the serverless wrapper), 3 needing people and 2 needing another OS.
 
-Suite: **Total: 1329 tests** — 1328 pass here and 1 is skipped on POSIX by name
+Suite: **Total: 1370 tests** — 1369 pass here and 1 is skipped on POSIX by name
 (`test_an_open_view_blocks_the_unlink_only_on_windows`: POSIX permits unlinking a file another fd still holds, so
-the open-view case exists only on Windows). The three new ones are `tests/test_redaction_every_sink.py`, the corpus
-against every artefact the product renders (this section's evidence). Measured through `--junitxml` because `pytest -q`
-prints no summary here: **1261 tests, 0 failures, 0 errors, 1 skip, 289.7 s** — the first run of this increment failed this
-very line (it said 1258), and the pinned number is checked by collection, not by trusting the sentence.
-The number is for the dependency set CI installs,
+the open-view case exists only on Windows). The 41 added since the last line are the desktop increment's evidence:
+`tests/test_ui_library.py` (17 — the library model, the setup page, and the three loopback routes with a wrong token, a
+traversal path, a planted secret and an external-reference scan), `tests/test_cap_read_manifest.py` (17 — the hostile
+corpus refused with *identical* codes by `read_capsule` and `read_manifest`, plus the measurement that the fast reader
+decompresses no segment), `tests/test_desktop.py` (+2 — the library is the front page, an empty directory opens setup),
+and one bounded-shutdown test in `tests/test_proxy_supervisor.py` (defect 89). Measured through `--junitxml` because
+`pytest -q` prints no summary here: **1370 tests, 0 failures, 0 errors, 1 skip, 300.9 s** (`/tmp/full9.xml`, this
+checkout, 2026-11-19). The pinned number is checked by collection, not by trusting the sentence. The number is for the dependency set CI installs,
 `.[dev,capture,capture-sdks]`: sixteen tests live behind `anthropic`, so a venv with only `httpx` and `openai`
 collects 1146 (D-062 — the 1146 in this sentence was measured in exactly that lighter venv, and CI said 1162).
 Measured in a depth-1 clone, 4 tests cannot run (`test_forbidden_words`'s `git log` scan, `test_state_consistency`'s
