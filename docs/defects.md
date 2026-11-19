@@ -1471,3 +1471,21 @@ step** with two errors that neither the new reader nor the corpus has anything t
 visible from this machine. It is the third time a POSIX-shaped assumption in a *test* (not the product) cost a Windows
 cell — after defect 81's sleep and the `SIGKILL`-as-137 assertion — which is why the Windows cells are read as part of the
 signal rather than as a formality.
+
+## Defect 87 — the fallback announced its URL after the wait it was waiting for (2026-11-19, the desktop shell)
+
+Two bugs in the new `blackbox desktop`, both found by its own tests before either shipped:
+
+* **The browser fallback deadlocked.** `run(path, window=False)` served the page and then waited for a fetch, while the
+  URL — the only thing a user needs — was printed by the caller *after* `run()` returned. So the fallback could only be
+  used by someone who already knew the URL: it waited for a fetch nobody could make, for the full 900 s timeout. The
+  test that caught it hung, which is what a deadlock looks like from the outside. Fixed by passing an `announce(url)`
+  callback into `run()`, called before the wait, and by printing that line flushed — the same failure `blackbox serve`
+  had (defect 40) arriving again in a new caller.
+* **The byte count was a character count.** `report["bytes"]` was `len(page)`, and the page carries em dashes and
+  ellipses: 56 536 characters, 59 951 bytes on the wire. A test comparing the served body with the reported size is what
+  noticed; the number is now `len(page.encode("utf-8"))`, because a size a user reads should be the size of the file they
+  would save.
+
+Neither reached a release. Both are recorded because the pattern is the one worth remembering: a shell around an
+existing component reintroduces the bugs that component already paid for, unless it is tested the same way.

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+  <!-- A capsule is a zip with a manifest; the magic below is the zip local header plus the first entry name every
+       capsule this build writes carries (`INTEGRITY.sha256` sorts first). Matching on the member name is what makes
+       double-clicking a capsule open the viewer instead of an archive manager. -->
+  <mime-type type="application/x-blackbox-capsule">
+    <comment>BlackBox capsule</comment>
+    <comment xml:lang="en">BlackBox capsule</comment>
+    <sub-class-of type="application/zip"/>
+    <magic priority="60">
+      <match type="string" value="PK\x03\x04" offset="0"/>
+      <match type="string" value="INTEGRITY.sha256" offset="30"/>
+    </magic>
+    <glob pattern="*.bbx"/>
+    <icon name="blackbox"/>
+  </mime-type>
+</mime-info>

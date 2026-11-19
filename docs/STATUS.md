@@ -86,7 +86,7 @@ and B4's remaining part is an owner's tick while B6 and the macOS rows need a ma
 evidenced, 12 partial, 5 with no code in the tree at all (the I8 index rebuild, the capsule attack corpus, the Go reader,
 the trigger rules and the serverless wrapper), 3 needing people and 2 needing another OS.
 
-Suite: **Total: 1307 tests** — 1306 pass here and 1 is skipped on POSIX by name
+Suite: **Total: 1329 tests** — 1328 pass here and 1 is skipped on POSIX by name
 (`test_an_open_view_blocks_the_unlink_only_on_windows`: POSIX permits unlinking a file another fd still holds, so
 the open-view case exists only on Windows). The three new ones are `tests/test_redaction_every_sink.py`, the corpus
 against every artefact the product renders (this section's evidence). Measured through `--junitxml` because `pytest -q`
@@ -227,6 +227,23 @@ nothing from a proposal is ever executed.
 | Real-provider capture (day-14 rule) | not testable here | No provider keys in the environment; the gate is the mock provider, as the plan allows. |
 | Licence decision, release tag, merge to `main` | requires humans | `release.yml` is prepared and **not** triggered; no tag, no `LICENSE`, no licence field. |
 | P10, P12 | blocked (not started by design) | P10 starts only after every v1.0 gate is green; P12 never without instruction. |
+
+## The desktop app (2026-11-19)
+
+`blackbox desktop [path]` opens the offline viewer in a window of its own, using the **system** webview (WebKitGTK on
+Linux, WebView2 on Windows) rather than bundling a browser engine. The core stays stdlib-only; `pywebview` is an optional
+extra imported only by the window code, and `tests/test_stdlib_only.py` still holds.
+
+| What | Where | Evidence |
+|---|---|---|
+| The shell: loopback URL, secret path, `debug=False`, server stopped on close, refusal instead of a browser tab | `src/blackbox/ui/desktop.py` | `tests/test_desktop.py` (12) with a fake webview backend; `desktop --selftest --json` on a real machine |
+| Linux package: `.deb` with launcher, `.desktop` entry, icon, `.bbx` MIME type, vendored `pywebview`, `Depends: python3 (>= 3.11), python3-gi, gir1.2-webkit2-4.1` | `tools/package/linux/build_deb.sh`, `debian/` | `tests/test_desktop_package.py` (6): built here, extracted with `dpkg-deb -x`, `usr/bin/blackbox --version` and `desktop --selftest` run from the extracted tree |
+| Windows installer | `tools/package/windows/{blackbox.iss,build_windows.ps1}` | **not built, not run**: no Windows, no Inno Setup, no wine here. The journey is the open gate row |
+| macOS | — | experimental and untested; no package |
+
+**Not claimed:** that a window has appeared on any machine. This environment has no display, no `python3-gi` and no
+WebKit, so `desktop --selftest` correctly reports `missing: python3-gi + gir1.2-webkit2-4.1` and exits 3 — the code path is
+tested, the pixels are not. `docs/desktop.md` carries the platform matrix and says the same thing to a user.
 
 ## CI as observed, not as hoped (2026-11-18)
 

@@ -388,5 +388,21 @@
   "ci": {
     "last_green_commit": "af6023f",
     "note": "`af6023f` is still the last **ten of ten** commit (both runs). `0427242` is Linux 3/3 and Windows 3/3 with every macOS cell cancelled at 0 steps for runner capacity — the Windows cells passing is the new fact, since `47ecb8c` was 2/3 there (defect 86). A cancelled cell is never counted as a pass."
+  },
+  "desktop": {
+    "command": "blackbox desktop [path]",
+    "module": "src/blackbox/ui/desktop.py",
+    "tests": "tests/test_desktop.py (13), tests/test_desktop_package.py (6)",
+    "packages": {
+      "linux_deb": "tools/package/linux/build_deb.sh -> dist/blackbox_<version>_<arch>.deb; built and extracted here, launcher run from the extracted tree",
+      "windows": "tools/package/windows/{blackbox.iss,build_windows.ps1}; NOT built and NOT run (no Windows here)",
+      "macos": "none; experimental and untested"
+    },
+    "verified": {
+      "window_wiring": "fake webview backend: loopback URL, secret path, debug=False, socket closed on close",
+      "packaged_launcher": "usr/bin/blackbox --version and desktop --selftest --json run from the extracted .deb",
+      "real_window": "NOT run: this machine has no display, no GTK and no WebKit"
+    },
+    "owner_action": "a person on Windows must build the installer, sign it with the owner's certificate and run the install/launch/record/open/uninstall journey before the Windows row can be called verified"
   }
 }

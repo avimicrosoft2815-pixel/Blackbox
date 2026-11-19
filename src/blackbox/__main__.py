@@ -15,6 +15,7 @@ from blackbox import __version__
 from blackbox import constants as C
 
 HELP = ("`status` prints the build line; `run -- cmd` runs a command under the recorder; "
+        "`desktop [path]` opens the viewer in a window of its own; "
         "`view <capsule>` writes one offline HTML page; `serve <capsule>` serves it on loopback once; "
         "`diagnose <capsule>` reports what a capsule's evidence supports; "
         "`repair preview|apply|verify` reviews and applies a proposal under an approval token; "
@@ -40,6 +41,7 @@ COMMANDS: dict[str, tuple[str, str]] = {
     "capsule": ("blackbox.cap.cli", "main"),
     "verify": ("blackbox.cli.cmd_verify", "main"),
     "ls": ("blackbox.cli.cmd_ls", "main"),
+    "desktop": ("blackbox.ui.desktop", "main"),
 }
 
 
@@ -50,7 +52,8 @@ def _load(name: str) -> Callable[[list[str]], int]:
     return entry
 
 
-KNOWN = ("run", "ingest", "hook", "view", "serve", "diagnose", "repair", "link", "capsule", "verify", "ls")
+KNOWN = ("run", "ingest", "hook", "view", "serve", "diagnose", "repair", "link", "capsule", "verify", "ls",
+         "desktop")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -76,8 +79,8 @@ def main(argv: list[str] | None = None) -> int:
               f"Tape format v{C.FORMAT_VERSION}.")
         print("See docs/STATUS.md for what is green, what is pending and what is not testable here.")
         return 0
-    print(f"unknown command {args.command!r}; this build implements --version, status, run, view, serve, diagnose, "
-          f"repair, link, capsule, verify, ls, ingest and hook", file=sys.stderr)
+    print(f"unknown command {args.command!r}; this build implements --version, status, run, desktop, view, serve, "
+          f"diagnose, repair, link, capsule, verify, ls, ingest and hook", file=sys.stderr)
     return 2
 
 

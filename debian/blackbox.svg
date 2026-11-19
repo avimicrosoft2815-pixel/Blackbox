@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="BlackBox">
+  <title>BlackBox</title>
+  <!-- The product's own colours: a near-black field, a gold ring, a gold waveform. Drawn from primitives so the file is
+       a few hundred bytes and scales to any icon size without a raster fallback. -->
+  <rect x="2" y="2" width="60" height="60" rx="14" fill="#0b0b0d"/>
+  <rect x="2.75" y="2.75" width="58.5" height="58.5" rx="13.4" fill="none" stroke="#c8a04a" stroke-width="1.5" opacity="0.85"/>
+  <path d="M14 36 L20 36 L24 26 L30 44 L36 20 L42 40 L46 32 L50 32"
+        fill="none" stroke="#e6c46a" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

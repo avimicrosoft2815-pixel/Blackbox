@@ -15,8 +15,8 @@ unmeasured (see B4).
 
 **This list is not the gate list.** `docs/gates/` holds one file per gate and a full gate review is the only authority
 on what can be ticked — and `docs/gates/READINESS.md` is the builder's row-by-row index of the release checklist in
-`docs/BLACKBOX_FINAL_ARCHITECTURE_v1.1.md` §24/§24a (14 evidenced, 12 partial, 5 missing, 3 needing people, 2 needing
-another OS, as of 2026-11-19); B4, B5 and B6 are the entries *here* that are still open, and reading only this file would miss
+`docs/BLACKBOX_FINAL_ARCHITECTURE_v1.1.md` §24/§24a (16 evidenced, 14 partial, 4 with nothing in the tree, 2 needing people, as of
+2026-11-19); B4, B5 and B6 are the entries *here* that are still open, and reading only this file would miss
 rows a release needs — `G-Capture` is still unsigned (its 60-secret row and its §15.1 table), and the release-machine
 rows need the host described in B6. So: "B4, B5 and B6" is a summary of this file, not a claim that nothing else is
 open.
@@ -427,6 +427,30 @@ batch making the exit code 9 and naming only that one, a pattern that matches no
 exit 2 alone), and an unreadable path in a batch exiting 2. Defect 74 in `docs/defects.md`.
 
 ---
+
+## B9 — The Windows desktop app: installer definition written, install journey **not run**
+
+**What exists.** `blackbox desktop` (a real window, not a tab), a `.deb` that installs it on Debian/Ubuntu, and
+`tools/package/windows/{blackbox.iss,build_windows.ps1}` — an Inno Setup definition and a staging script that downloads
+the Windows embeddable Python, the package wheel and `pywebview`/`pythonnet`, so the installer needs no Python on the
+user's machine.
+
+**What has not happened.** The installer has never been built and the journey has never been done: this build environment
+is Linux, with no Windows machine, no `wine`, no Inno Setup and no Authenticode certificate. So the Windows rows read:
+
+| Row | State |
+|---|---|
+| Build `BlackBox-Setup-<version>.exe` | **not built** |
+| Install on Windows 10/11, launch, record with a real SDK client, open the capsule, uninstall | **not run** |
+| Data kept on uninstall (the installer says where it is) | designed and stated; unverified on Windows |
+| Signature so SmartScreen does not warn | **no certificate** — the owner's |
+
+**What would close it**, exactly: on a Windows 10 and a Windows 11 machine (or two real Windows VMs), run
+`build_windows.ps1`, then `iscc …`, install, launch `blackbox desktop`, record `openai` with the user's own key, open the
+capsule in the window, uninstall, and check that the recordings are still there. Then move the row in `docs/desktop.md`
+from *not run* to the observed result with the installer hash. Until then, "Windows desktop" is **unverified**, and
+nothing in this repository claims otherwise — the Linux `.deb` is verified by extraction and by a launcher run, and the
+window's code path is verified with a fake backend, which is a test and not a desktop.
 
 ## Fixed on this branch, with the numbers
 

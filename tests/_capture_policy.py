@@ -98,3 +98,42 @@ def function_scoped_modules(path: Path) -> set[str]:
             elif isinstance(child, ast.ImportFrom) and child.module and not child.level:
                 scoped.add(child.module.split(".")[0])
     return scoped
+
+
+#: The **desktop shell** is the second declared exception, and it is narrower than the first: it may name the window
+#: toolkit, and only inside functions, so `import blackbox` never needs it.
+#:
+#: A window needs a webview, and no webview is in the standard library. The alternative to this list is either a second
+#: UI in a toolkit that ships with Python (a second design to keep honest, and a worse one) or a bundled browser engine
+#: (a 100 MB download for a page that is already tested). So: one file, two module names, deferred imports, and three
+#: tests that hold it — `test_only_stdlib_imports` allows these names only in this file, `test_the_desktop_shell_imports_
+#: the_window_only_inside_functions` fails a module-scope import, and `test_importing_the_package_needs_no_window_toolkit`
+#: proves `import blackbox` still works on a machine that has neither.
+OPTIONAL_DESKTOP = {"blackbox/ui/desktop.py": {"webview", "gi"}}
+
+
+def function_scoped_desktop_modules(path: Path) -> set[str]:
+    """The names `OPTIONAL_DESKTOP` grants this file, but only the ones it actually imports inside a function."""
+    try:
+        rel = path.resolve().relative_to(SRC.resolve()).as_posix()      # e.g. "blackbox/ui/desktop.py"
+    except (OSError, ValueError):
+        return set()
+    names = OPTIONAL_DESKTOP.get(rel, set())
+    return names & function_scoped_modules(path)
+
+
+def module_scoped_desktop_imports(path: Path) -> set[str]:
+    """The names from `OPTIONAL_DESKTOP` this file imports at module scope — every one of these is a bug."""
+    try:
+        rel = path.resolve().relative_to(SRC.resolve()).as_posix()      # e.g. "blackbox/ui/desktop.py"
+    except (OSError, ValueError):
+        return set()
+    names = OPTIONAL_DESKTOP.get(rel, set())
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    out: set[str] = set()
+    for node in tree.body:                        # the module's own statements, not a function's
+        if isinstance(node, ast.Import):
+            out.update(alias.name.split(".")[0] for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
+            out.add(node.module.split(".")[0])
+    return out & names
