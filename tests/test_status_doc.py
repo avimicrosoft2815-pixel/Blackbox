@@ -155,9 +155,9 @@ def test_the_test_count_line_matches_the_suite_size() -> None:
     missing = [name for name in ("httpx", "openai", "anthropic") if importlib.util.find_spec(name) is None]
     if missing:
         pytest.skip(f"the pinned count is the CI dependency set; no {', '.join(missing)} in this environment")
-    match = re.search(r"\*\*Total: (\d+) tests\*\* — (\d+) pass here", _text())
-    assert match, "STATUS must state the suite size"
-    total, passed = int(match.group(1)), int(match.group(2))
+    match = re.search(r"\*\*Total: (\d+) tests\*\* — (\d+) pass here and (\d+) (?:is|are) skipped", _text())
+    assert match, "STATUS must state the suite size, how many pass here and how many are skipped"
+    total, passed, skipped = (int(value) for value in match.groups())
     proc = subprocess.run([sys.executable, "-m", "pytest", "tests", "-q", "--collect-only"],
                           cwd=ROOT, capture_output=True, text=True, timeout=600,
                           env={**os.environ, "PYTHONPATH": "src"})
@@ -165,7 +165,11 @@ def test_the_test_count_line_matches_the_suite_size() -> None:
     assert counts, proc.stdout[-500:] + proc.stderr[-500:]
     collected = sum(int(n) for n in counts)
     assert collected == total, f"STATUS says {total} tests, collection found {collected}"
-    assert passed == total - 1, "the one skip is named in the same sentence"
+    assert passed + skipped == total, f"{passed} passed + {skipped} skipped is not {total}"
+    # Every skip is named, in backticks, in the same sentence: a skip is a hole in the evidence and has to be findable.
+    sentence = _text()[match.start():match.start() + 600]
+    named = re.findall(r"`([^`]*test_[a-z0-9_]+)`", sentence)
+    assert len(named) == skipped, f"{skipped} skip(s) but {len(named)} named: {named}"
 
 
 def test_the_gate_file_and_state_agree_about_the_open_gates() -> None:
