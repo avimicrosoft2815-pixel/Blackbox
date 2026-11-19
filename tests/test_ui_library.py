@@ -270,3 +270,23 @@ def test_the_app_server_cannot_connect_outward_or_bind_a_wildcard() -> None:
     hits = [node.attr for node in ast.walk(ast.parse(source))
             if isinstance(node, ast.Attribute) and node.attr in banned]
     assert not hits, f"an outward-capable call in the page server: {hits}"
+
+
+def test_every_static_asset_travels_with_the_package() -> None:
+    """A page is built from files next to the module; a wheel that ships the code and not the template 500s after install.
+
+    `pyproject.toml` declares `blackbox.ui = ["static/*.html", "static/*.css", "static/*.js"]`. This checks the two ways
+    that goes wrong without a build: a new asset with an extension those globs do not match, and a page name the code
+    reads that is not on disk.
+    """
+    import re
+
+    static = ROOT / "src" / "blackbox" / "ui" / "static"
+    declared = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    globs = re.findall(r'"(static/\*\.\w+)"', declared)
+    assert globs, "the package-data line for blackbox.ui has moved; this test needs its new spelling"
+    for asset in sorted(static.iterdir()):
+        assert f"static/*{asset.suffix}" in globs, f"{asset.name} is not matched by any package-data glob"
+    for source in sorted((ROOT / "src" / "blackbox" / "ui").glob("*.py")):
+        for name in re.findall(r'_static\("([^"]+)"\)', source.read_text(encoding="utf-8")):
+            assert (static / name).is_file(), f"{source.name} reads static/{name}, which does not exist"
