@@ -387,7 +387,7 @@
   },
   "ci": {
     "last_green_commit": "af6023f",
-    "note": "`af6023f` remains the last **ten of ten** commit (both runs). `6256118` and `87cc056` are **Linux 3/3, Windows 3/3, docs green**, with all three macOS cells queued for more than ten minutes and never acquired — a queued or cancelled cell is never a pass, so macOS stays unmeasured. `6674ab8`/`1ec8be9` were Linux 3/3 + Windows 3/3 with macOS cancelled for capacity."
+    "note": "`af6023f` remains the last **ten of ten** commit (both runs). `5cdb742` is Linux 3/3, Windows 0/3, docs green, macOS cancelled: all three Windows cells failed `test_desktop_journey.py::test_the_script_is_valid_posix_shell`, which asserted an executable bit Git on Windows does not store (defect 92). `8f3f1bd` — the repair — is **Linux 3/3, Windows 3/3, docs green in both its runs** (44574442998 push, 44574461038 PR), with all three macOS cells cancelled at 0 steps, so macOS stays unmeasured and the run's `failure` conclusion is capacity alone. `6256118` and `eb67828` were the same Linux 3/3 + Windows 3/3 shape with macOS cancelled. A queued or cancelled cell is never a pass."
   },
   "desktop": {
     "command": "blackbox desktop [path]",
