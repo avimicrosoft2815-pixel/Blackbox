@@ -387,7 +387,7 @@
   },
   "ci": {
     "last_green_commit": "af6023f",
-    "note": "`af6023f` remains the last **ten of ten** commit (both runs). `6674ab8`/`1ec8be9` are **Linux 3/3 and Windows 3/3**, with all three macOS cells cancelled for runner capacity — a cancelled cell is never a pass, and macOS stays unmeasured."
+    "note": "`af6023f` remains the last **ten of ten** commit (both runs). `87cc056` is **Linux 3/3, Windows 3/3, docs green**, with all three macOS cells still queued and never acquired when this was written — a queued or cancelled cell is never a pass, and macOS stays unmeasured. `6674ab8`/`1ec8be9` were Linux 3/3 + Windows 3/3 with macOS cancelled for capacity."
   },
   "desktop": {
     "command": "blackbox desktop [path]",
