@@ -109,7 +109,18 @@ def test_no_clock_no_pid_and_no_path_reaches_the_capsule(tmp_path: Path) -> None
     # different file, and every comparison a diff of timestamps.
     assert capsule.manifest["created_ns"] == 0, capsule.manifest["created_ns"]
     # The tape's own directory is on every one of these bytes' provenance, and none of it belongs inside them.
-    for needle in (str(tmp_path).encode(), os.getpid().to_bytes(4, "big"), os.getpid().to_bytes(8, "big")):
+    # The pid needs care as a *needle*: a four-byte integer on a machine whose pid is small (1280 on the Windows runner
+    # in run 44581057445) is `\x00\x00\x05\x00`, which occurs in structural bytes by chance. Asserting that pattern is
+    # absent tests the archive format's zero bytes, not whether a pid leaked — so a needle with a zero byte in it is not a
+    # needle, and the decimal form is used instead.
+    pid = os.getpid()
+    needles = [str(tmp_path).encode(), str(pid).encode(), b"pid=" + str(pid).encode(),
+               pid.to_bytes(8, "big")]
+    for width in (4, 8):
+        encoded = pid.to_bytes(width, "big")
+        if b"\x00" not in encoded:
+            needles.append(encoded)
+    for needle in needles:
         assert needle not in blob, f"{needle!r} is in the capsule"
     assert b"/tmp/" not in blob and b"\\\\?\\" not in blob, "an absolute path reached the capsule"
 

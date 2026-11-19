@@ -1711,3 +1711,28 @@ documents for 1 000 invocations.
 *(Numbers 91 and 92 were already used for two other findings; these two were reported in the session's notes under
 those numbers and are recorded here as 97 and 98 so the log has no duplicate. Both are also described in
 `docs/serverless.md`.)*
+
+## Defect 99 — a hook-latency test measured the runner, not the product (2026-11-16, CI on Windows)
+
+`44581057445`'s `py3.11 / windows-latest` cell failed at `1628d5a` with
+`one hook event cost 160 ms over a bare interpreter (191 vs 31 ms)`. The product was fine: `ingest` imports only what it
+uses — `test_the_ingest_path_imports_only_what_it_uses` asserts that from `sys.modules` and has never failed — and what
+the test actually compared was "a bare interpreter" against "an interpreter plus the whole package layout", which on that
+runner costs 160 ms before `ingest` runs at all. A threshold on that difference is a claim about the runner's disk.
+
+**Fixed** by measuring against the product's own floor: `blackbox --version` imports the front door and the constants and
+nothing else, so `ingest - --version` is the part `ingest` owns. The bound (80 ms) and the defect-64 rationale are
+unchanged, the number in the failure message now names all three measurements, and the machine-independent half of the
+same assertion (the import list) sits beside it.
+
+## Defect 100 — a determinism needle with a zero byte in it (2026-11-16, CI on Windows)
+
+In the same cell: `b'\x00\x00\x05\x00' is in the capsule`, from
+`test_no_clock_no_pid_and_no_path_reaches_the_capsule`, which asserted that the process's pid, in four and eight big-endian
+bytes, appears nowhere in a capsule. On that runner the pid was 1280, so the "needle" was `00 00 05 00` — a sequence any
+archive contains by coincidence. The test was asserting the absence of a byte pattern the format itself produces, not the
+absence of a pid.
+
+**Fixed** by refusing to use a needle that contains a zero byte: the decimal form (`1280`), the eight-byte form and a
+`pid=` prefix are always checked, and the four-byte form only when it is distinctive. The wall-clock half of the same test
+(`manifest.created_ns == 0`) is untouched and is the part that actually proves no clock leaks.

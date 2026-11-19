@@ -131,6 +131,14 @@ fails on `Everyone`/`BUILTIN\Users`/`Authenticated Users`/`INTERACTIVE`; **it ha
 machine still owns. The first-run doctor reports the same measurement, so a data directory unpacked with the wrong modes
 warns the user instead of failing only in CI.
 
+**Two CI failures from `1628d5a`, repaired as tests rather than by relaxing a product bound.** The Windows `py3.11` cell
+in run `44581057445` failed two tests, and both were measuring the runner: the hook-latency test compared `ingest`
+against a *bare interpreter* (160 ms of Windows interpreter and package layout before any of our imports ran) and the
+determinism test used a pid as a needle when that pid was 1280, making the needle `00 00 05 00` — a byte pattern the
+archive contains anyway. `ingest` is now compared against `blackbox --version` (the same machine's own front door, so the
+delta is what `ingest` costs), and a needle containing a zero byte is not used. Defects 99 and 100; the machine-independent
+half of both assertions (the import list, `manifest.created_ns == 0`) was already there and is untouched.
+
 **The CLI contract** (`docs/cli.md`, `tests/test_cli_contract.py`, 21). Every command, its machine-readable form and its
 exit codes in one table, checked against the binary: the table's set equals the front door's, every `--json` row is
 accepted, and the documented code is measured on a failing invocation (`diagnose`'s `1` for "nothing readable" against
