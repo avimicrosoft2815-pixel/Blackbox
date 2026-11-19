@@ -115,6 +115,20 @@ blackbox ls                      # what is recorded, and how big
 blackbox gc --dry-run            # what a cleanup would remove, and why
 ```
 
+## Turning "tested" into "seen" — the first launch
+
+Everything below the window has an automated test; the window itself needs a machine with a display. On the machine you
+intend to support:
+
+```sh
+sh tools/desktop_smoke.sh                 # checks the CLI, the window stack, opens a window, closes it
+sh tools/desktop_smoke.sh capsule.bbx     # or point it at one capsule
+```
+
+It prints one line per check and stops at the first failure, so the output can go straight into the platform matrix
+above. Over SSH or in a container it will stop at check 2 and say what is missing, which is the correct answer for a
+desktop app.
+
 ## Troubleshooting
 
 | Symptom | Cause | Fix |
