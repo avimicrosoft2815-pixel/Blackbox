@@ -1586,3 +1586,22 @@ staying redacted through a real recorded run; four hostile capsules refused with
 including on the check page and the run page; a capsule *name* from the URL never reaching outside the data directory; the
 data directory byte-identical after loading every page twice; a non-form `POST` refused; and a run whose process was killed
 still listing, opening, verifying and diagnosing.
+
+## Defect 92 — a test of the journey script asserted a Windows-impossible file mode (2026-11-16, CI)
+
+`tests/test_desktop_journey.py::test_the_script_is_valid_posix_shell` asserted `SCRIPT.stat().st_mode & 0o111` — that
+`tools/desktop_journey.sh` is executable. On a POSIX filesystem with this checkout it is. On GitHub's Windows runners Git
+does not store or restore a POSIX permission bit, so the file arrives mode `0o666` and the assertion failed in **all three
+Windows cells** (`py3.11`, `py3.12`, `py3.13`; run 44570138085, and the PR run 44570119233) while Ubuntu was 3/3 green. The
+failure is real evidence and it is not a product defect: every invocation of the script here, in `docs/desktop.md` and in
+the test file itself is `sh tools/desktop_journey.sh`, which needs no bit at all.
+
+What was wrong is the shape of the check: it tested what the checkout preserved rather than what makes the script runnable.
+It now asserts the two things that are the script's own — that `sh -n` parses it, and that its first line is `#!/bin/sh` —
+and asserts the permission bit only when `os.name == "posix"`, with the reason in the docstring so the next person does
+not read the conditional as an attempt to go green. Nothing was weakened on Linux: the bit assertion still runs here and
+still fails if it is cleared (`chmod -x` was checked after the change).
+
+**Kept as a record of the cost:** the branch's previous two commits were green on Ubuntu and Windows and were read as
+"Windows 3/3" in this PR — that reading was right for those commits and wrong for this one, which is why each commit's row
+in the CI table below names the commit rather than the pull request.

@@ -37,9 +37,18 @@ def _env(tmp_path: Path, *, display: bool = False) -> dict[str, str]:
 
 
 def test_the_script_is_valid_posix_shell() -> None:
+    """It parses, it names the shell that runs it, and on a POSIX filesystem it is executable.
+
+    The permission bit is checked only where a permission bit survives a checkout. Git on Windows does not store one, so
+    asserting it there tests the checkout rather than the script — which is exactly how this test failed on all three
+    Windows cells on 2026-11-16 (defect 92). Every invocation in this file and in `docs/desktop.md` is `sh <script>`, so
+    the bit is a convenience, not the thing that makes it runnable.
+    """
     completed = subprocess.run(["sh", "-n", str(SCRIPT)], capture_output=True, text=True, timeout=60)
     assert completed.returncode == 0, completed.stderr
-    assert SCRIPT.stat().st_mode & 0o111, "the script is meant to be runnable"
+    assert SCRIPT.read_text(encoding="utf-8").splitlines()[0] == "#!/bin/sh", "the shebang names the interpreter"
+    if os.name == "posix":
+        assert SCRIPT.stat().st_mode & 0o111, "on a POSIX filesystem the script is meant to be executable"
 
 
 def test_it_refuses_on_a_machine_with_no_display_and_says_why(tmp_path: Path) -> None:
