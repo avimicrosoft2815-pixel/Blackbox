@@ -20,7 +20,6 @@
 #endif
 #define AppName "BlackBox"
 #define AppPublisher "BlackBox contributors"
-#define AppExe "win64\python\pythonw.exe"
 
 [Setup]
 AppId={{7A1E2C6B-5D4C-4F0E-9A2E-3B5C7D9E1F20}

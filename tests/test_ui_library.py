@@ -5,7 +5,8 @@ Two kinds of test live here and they check different things:
 * **the model** — `ui/library.py` and `ui/onboarding.py` are ordinary functions over a directory and an environment, so
   they are tested as such: a real capsule, a corrupt one, a hundred of them, a planted secret in the environment.
 * **the pages** — `ui/app.py` serves them on loopback; the tests fetch them the way a window would, assert the loopback
-  bind and the token, and check that a page with no run in it says so instead of drawing an empty table.
+  bind and the token, and check that a page with no run in it says so instead of drawing an empty table. The two writes
+  the app can make (`POST repair/apply`, `POST repair/tests`) and their gate are in `tests/test_ui_flows.py`.
 
 Anything about pixels, scrolling or a real webview is not here: there is no display in this environment, and
 `docs/desktop.md` says which rows are unverified because of it.

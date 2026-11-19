@@ -395,23 +395,30 @@
     "pages": {
       "setup": "src/blackbox/ui/onboarding.py — runtime, window stack, data dir, SDKs, provider keys (presence only), recordings; the recorded / not-recorded lists",
       "library": "src/blackbox/ui/library.py — one row per capsule from cap.format.read_manifest (header checks, no body decompressed, no integrity verify), search, status filter, five sorts, 25 a page",
-      "run": "src/blackbox/ui/viewer.py — the existing offline viewer, with a bar back to the library",
-      "routes": "src/blackbox/ui/app.py — GET-only, loopback HOST from ui.server, per-process token path, CSP default-src 'none', no logging"
+      "run": "src/blackbox/ui/viewer.py — the existing offline viewer, with an action bar (check, diagnose, repair)",
+      "check": "src/blackbox/ui/flows.py verify_capsule — the integrity index recomputed, root and every problem shown",
+      "diagnose": "src/blackbox/ui/flows.py diagnose_capsule — findings in the brief's vocabulary, plus the brief as copyable text",
+      "repair": "src/blackbox/ui/flows.py review_proposal/apply_reviewed/run_tests — diff, risk, suggested tests, typed-token approval, verified backup, separate button to execute tests",
+      "routes": "src/blackbox/ui/app.py — pages are GET; the only writes are POST repair/apply and POST repair/tests, behind the path token, an Origin check, a form token and 256 KiB body cap; results shown by unguessable id",
+      "export": "src/blackbox/ui/app.py _export — the brief and the report as text/markdown attachments; the app writes no file, the browser saves the one the person asked for"
     },
-    "tests": "tests/test_desktop.py (14), tests/test_ui_library.py (19), tests/test_cap_read_manifest.py (17), tests/test_desktop_package.py (6)",
+    "tests": "tests/test_desktop.py (15), tests/test_ui_library.py (19), tests/test_ui_flows.py (14), tests/test_ui_safety.py (13), tests/test_cap_read_manifest.py (18), tests/test_desktop_journey.py (3), tests/test_windows_definition.py (11), tests/test_desktop_package.py (6)",
+    "harness": "tools/desktop_journey.sh --automated-only runs here (records, lists, checks, diagnoses; verdict automated-only); tools/desktop_smoke.sh is the short first-launch check",
     "packages": {
       "linux_deb": "tools/package/linux/build_deb.sh -> dist/blackbox_<version>_<arch>.deb; built and extracted here, launcher run from the extracted tree",
-      "windows": "tools/package/windows/{blackbox.iss,build_windows.ps1}; NOT built and NOT run (no Windows here); UNSIGNED by design of this environment",
+      "windows": "tools/package/windows/{blackbox.iss,build_windows.ps1,make_icon.py,blackbox.ico}; definition checked here by tests/test_windows_definition.py, NOT built and NOT run (no Windows, no Inno Setup, no wine, no PowerShell)",
       "macos": "none; experimental and untested"
     },
     "verified": {
       "window_wiring": "fake webview backend: loopback URL, secret path, debug=False, socket closed on close",
-      "pages_over_loopback": "library, setup and a run page fetched with urllib here; a wrong token is 404, a traversal path is 404, no secret or external URL in the page",
+      "pages_over_loopback": "library, setup, run, check, diagnose, repair fetched with urllib here; wrong token 404, traversal 404, GET on an apply route 404",
+      "repair_gate": "unticked box, missing token and wrong token each refuse with the repository byte-identical; the right token applies once; a second attempt refuses because the tree moved",
+      "privacy_and_hostile_input": "no planted secret on seven pages, no external reference in any page, four hostile capsules refused with codes, data dir unchanged by reads",
       "both_capsule_readers": "the hostile corpus refused with identical codes by read_capsule and read_manifest (tests/test_cap_read_manifest.py)",
       "packaged_launcher": "usr/bin/blackbox --version and desktop --selftest --json run from the extracted .deb",
-      "real_window": "NOT run: this machine has no display, no GTK and no WebKit",
-      "windows_install": "NOT built and NOT run: no Windows host, no makensis, no wine"
+      "real_window": "NOT run: this machine has no display, no GTK and no WebKit; tools/desktop_journey.sh is the harness that would record it",
+      "windows_install": "NOT built and NOT run: no Windows host, no makensis/iscc, no wine, no pwsh"
     },
-    "owner_action": "a person on Windows must build the installer, sign it with the owner's certificate and run the install/launch/record/open/uninstall journey before the Windows row can be called verified; on Linux, the first real window needs a machine with python3-gi + gir1.2-webkit2-4.1"
+    "owner_action": "a person on a Linux desktop runs `sh tools/desktop_journey.sh` (it writes the evidence file); a person on Windows builds the installer with Inno Setup 6, signs it with the owner's certificate and runs install/launch/record/open/diagnose/uninstall. Neither row can be called verified from this machine."
   }
 }

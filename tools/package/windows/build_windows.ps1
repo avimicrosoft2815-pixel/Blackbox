@@ -41,10 +41,27 @@ Write-Host '== 4/5 install into the embedded interpreter'
 & "$py\python.exe" -m pip install --no-index --find-links $wheelDir --target "$py\Lib\site-packages" blackbox-recorder pywebview
 
 Write-Host '== 5/5 launcher'
+# A .cmd whose interpreter is `pythonw.exe`: pythonw is the GUI-subsystem build, so no console window appears beside the
+# app. Its stderr goes to a log, because a silent window that fails to open is the worst support case there is; on a
+# non-zero exit the launcher prints where the log is and waits, rather than vanishing.
 @'
 @echo off
-rem BlackBox launcher. The window needs WebView2, which ships with Windows 10/11.
-"%~dp0python\python.exe" -c "import sys; sys.path[:0] = [r'%~dp0python\Lib\site-packages']; from blackbox.__main__ import main; raise SystemExit(main(sys.argv[1:]))" %*
+setlocal
+rem BlackBox launcher. The window needs WebView2, which ships with Windows 10 and 11.
+if not defined LOCALAPPDATA set "LOCALAPPDATA=%USERPROFILE%\AppData\Local"
+set "BBX_HOME=%LOCALAPPDATA%\BlackBox"
+if not exist "%BBX_HOME%" mkdir "%BBX_HOME%" >nul 2>&1
+set "BBX_LOG=%BBX_HOME%\launcher.log"
+"%~dp0python\pythonw.exe" -c "import sys; sys.path[:0] = [r'%~dp0python\Lib\site-packages']; from blackbox.__main__ import main; raise SystemExit(main(sys.argv[1:]))" %* 2>>"%BBX_LOG%"
+if errorlevel 1 (
+  echo BlackBox could not start, or exited with an error. 1>&2
+  echo The log is: "%BBX_LOG%" 1>&2
+  if exist "%BBX_LOG%" (
+    echo ---- last lines ---- 1>&2
+    powershell -NoProfile -Command "Get-Content -Tail 20 -LiteralPath '%BBX_LOG%'" 1>&2
+  )
+  pause
+)
 '@ | Set-Content -Encoding ASCII (Join-Path $stage 'blackbox.cmd')
 
 Write-Host "staged: $stage"

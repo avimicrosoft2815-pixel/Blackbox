@@ -86,23 +86,36 @@ and B4's remaining part is an owner's tick while B6 and the macOS rows need a ma
 evidenced, 12 partial, 5 with no code in the tree at all (the I8 index rebuild, the capsule attack corpus, the Go reader,
 the trigger rules and the serverless wrapper), 3 needing people and 2 needing another OS.
 
-Suite: **Total: 1372 tests** — 1371 pass here and 1 is skipped on POSIX by name
+Suite: **Total: 1414 tests** — 1413 pass here and 1 is skipped on POSIX by name
 (`test_an_open_view_blocks_the_unlink_only_on_windows`: POSIX permits unlinking a file another fd still holds, so
-the open-view case exists only on Windows). The 43 added since the last line are the desktop increment's evidence:
-`tests/test_ui_library.py` (18 — the library model, the setup page, the three loopback routes with a wrong token, a
-traversal path, a planted secret and an external-reference scan, that two copies of one capsule are two rows each
-addressed by its own file name, and that every static asset is matched by the package-data globs), `tests/test_cap_read_manifest.py` (17 — the hostile
-corpus refused with *identical* codes by `read_capsule` and `read_manifest`, plus the measurement that the fast reader
-decompresses no segment), `tests/test_desktop.py` (+2 — the library is the front page, an empty directory opens setup),
-and one bounded-shutdown test in `tests/test_proxy_supervisor.py` (defect 89). Measured through `--junitxml` because
-`pytest -q` prints no summary here: **1372 tests, 0 failures, 0 errors, 1 skip, 305.8 s** (`/tmp/full12.xml`, this
-checkout, 2026-11-19) — the run after the last test was added, so the number and the run agree. The pinned number is checked by collection, not by trusting the sentence. The number is for the dependency set CI installs,
-`.[dev,capture,capture-sdks]`: sixteen tests live behind `anthropic`, so a venv with only `httpx` and `openai`
-collects 1146 (D-062 — the 1146 in this sentence was measured in exactly that lighter venv, and CI said 1162).
-Measured in a depth-1 clone, 4 tests cannot run (`test_forbidden_words`'s `git log` scan, `test_state_consistency`'s
-ancestry check and two in `test_status_doc` call `tools/git_history.commit_count()`, which refuses rather than inspect
-one commit and call it a history; CI checks out with `fetch-depth: 0`, and this checkout was `--unshallow`ed before the
-run above so those four ran). ruff 0.17.5 and mypy 2.4.1 (`strict = true`,
+the open-view case exists only on Windows). The 42 added since the last line are the desktop flows and the two things that
+could previously only be checked by a person with a screen or a Windows machine:
+
+* `tests/test_ui_flows.py` (14) — the window's four flows over real HTTP: check, diagnose, review a proposal, apply
+  it, run the tests, and save the brief or the report as a file. An unticked box, a missing token and a **wrong** token each refuse with the repository byte-identical
+  afterwards; the right token applies once and a second attempt refuses because the tree moved; a cross-origin `POST` and
+  a wrong form token are refused before any flow runs.
+* `tests/test_ui_safety.py` (13) — no secret from the environment on any of seven pages; no page referencing anything
+  outside the loopback server; a redacted value staying redacted through a real recorded run; four hostile capsules
+  refused with `BBX-` codes and no traceback; a capsule name from the URL never reaching outside the data directory; the
+  data directory byte-identical after every page load; a non-form `POST` refused; and a run whose process was killed still
+  listing, opening, verifying and diagnosing.
+* `tests/test_windows_definition.py` (11) — the Windows installer definition checked as far as Linux allows: every
+  `Source:` exists, the icon is a real ICO with the product's colours, the installer is per-user, `HKCU`-only, deletes
+  only its own directory, claims no signature, and the staging script and the definition agree on the launcher. **This is
+  a definition that would compile, not an installer that has been run.**
+* `tests/test_desktop_journey.py` (3) — the harness a person with a Linux desktop runs refuses on a headless machine, and
+  its `--automated-only` mode records a real incident, lists it, checks it, diagnoses it, and writes
+  `"verdict": "automated-only"` with every window answer `"not-attempted"`.
+* `tests/test_desktop.py` (+1), `tests/test_ui_library.py` (+1), `tests/test_cap_read_manifest.py` (+1) — the run page's
+  action bar, the repair link on the library, and the manifest reader's last refusal case.
+
+Measured through `--junitxml` because `pytest -q` prints no summary here: **1414 tests, 0 failures, 0 errors, 1 skip,
+320.7 s** (`/tmp/full15.xml`) — the one skip is named above, and this paragraph's own number is asserted by a test that
+failed when it said 1372 and collection found 1413, exactly as the note below says it would. The number is for the
+dependency set CI installs, `.[dev,capture,capture-sdks]`: sixteen tests live behind `anthropic`, so a venv with only
+`httpx` and `openai` collects 1146 (D-062).: sixteen tests live behind `anthropic`, so a venv with only `httpx` and `openai`
+collects 1146 (D-062). ruff 0.17.5 and mypy 2.4.1 (`strict = true`,
 nothing disabled): 0 findings.
 
 **The demo path, run end to end on 2026-11-17 (D-060, D-061).** `pip install -e .` now produces a `blackbox` command
