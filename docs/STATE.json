@@ -384,5 +384,9 @@
     "branch_d842397_run_44461898689": "docs + 3/3 Ubuntu + 3/3 Windows green - the py3.13/windows cell that failed at 228097f passed, so the supervisor precondition repair holds - and 2/3 macOS: py3.11 was killed by the 120 s per-test watchdog inside tests/test_proxy_limits.py::test_a_burst_larger_than_the_old_soft_limit_is_still_served (select() at 120 s), which is defect 82: that test's own subprocess timeout was 180 s, above the watchdog, and 40 sequential 5 s connects could take 200 s, so the stall could never report itself. Fixed by one deadline bounding every wait in the child, recorded (not raised) connect failures, bounded polling instead of a sleep, and a 60 s outer timeout below the watchdog.",
     "branch_fa5d616_runs_44462471620_44462478169": "push run ten of ten green; PR run 2/3 with py3.11/macos-latest hung >120 s inside test_a_burst_larger_than_the_old_soft_limit_is_still_served (selectors.select) - the same test and the same commit as the green run, so the failure is a test that could hang, not a product regression (defect 82).",
     "branch_af6023f_runs_44463187708_44463193283": "both runs ten of ten green, carrying the defect-81 and defect-82 repairs. The macOS stall in the burst test is not reproduced here and its cause is still unknown; what is proven is that the test can no longer hang without reporting."
+  },
+  "ci": {
+    "last_green_commit": "af6023f",
+    "note": "`af6023f` is still the last **ten of ten** commit (both runs). `0427242` is Linux 3/3 and Windows 3/3 with every macOS cell cancelled at 0 steps for runner capacity — the Windows cells passing is the new fact, since `47ecb8c` was 2/3 there (defect 86). A cancelled cell is never counted as a pass."
   }
 }
