@@ -104,9 +104,26 @@ def _data_dir_check(data_dir: str) -> dict[str, Any]:
         detail = f"{path} — {free_gb:.1f} GB free"
         if free_gb < 1.0:
             return _check("data_dir", "warn", "Almost no space left for recordings", detail,
-                          command="blackbox gc --dry-run   # then decide what to delete")
+                          command="blackbox retention   # explains every deletion, deletes nothing")
     except OSError as exc:
         detail = f"{path} — free space unknown ({exc})"
+    # Measured, not assumed: walk what is actually on disk and report any path another user on this machine could read.
+    from blackbox.platform import perms as perms_mod
+
+    audit = perms_mod.audit(path)
+    findings = list(audit["findings"])                                   # type: ignore[call-overload]
+    if findings:
+        first = findings[0]
+        shown = ", ".join(str(entry.get("mode") or entry.get("broad_principals")) for entry in findings[:3])
+        return _check("data_dir", "warn", "Recordings are readable by other users on this machine",
+                      f"{path} — {len(findings)} of {audit['paths_checked']} path(s) are looser than "
+                      f"0700/0600 ({shown}); the first is {first['path']}",
+                      command=f"chmod -R go-rwx {path}" if audit["platform"] != "win32"
+                      else f"icacls {path} /inheritance:r /grant:r %USERNAME%:(OI)(CI)F",
+                      docs="docs/desktop.md")
+    detail += f" — permissions {audit['platform']}: " + (
+        "0700/0600 on every path checked" if not audit["truncated"]
+        else f"first {audit['paths_checked']} paths checked, all private")
     return _check("data_dir", "ok", "Recordings live here", detail)
 
 

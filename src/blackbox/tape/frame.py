@@ -121,6 +121,34 @@ def decode(buf: bytes, off: int = 0) -> tuple[dict[str, Any], int]:
     }, off + total
 
 
+def last_valid_frame_end(buf: bytes, cursor: int, *, min_offset: int = C.SEGMENT_HEADER_BYTES) -> int | None:
+    """The end offset of the last frame that ends at or before `cursor` and decodes with a good CRC.
+
+    This exists for one situation, and it is the common one: a machine loses power, or a container is killed, in the
+    middle of a write. The committed head then names an offset that is *inside* a frame — the frame's bytes after that
+    point were never written, so the trailer at `cursor - 16` is not a trailer and `scan_backwards` stops at the first
+    step. Without this helper the whole active segment reads as empty: a crash in the last 88 bytes would hide every
+    earlier frame on the tape, which is the opposite of what a recorder is for.
+
+    Walking backwards from the frame magic instead is cheap enough for the 2 MiB default segment and only runs on the
+    recovery path (the fast path is `scan_backwards` from an intact head). Frames that start after `cursor`, or that
+    would end past it, are not candidates: a partial write is not evidence of anything.
+    """
+    position = cursor
+    while position - C.FRAME_OVERHEAD_BYTES >= min_offset:
+        start = buf.rfind(C.MAGIC_FRAME, min_offset, position)
+        if start < min_offset:
+            return None
+        try:
+            _, end = decode(buf, start)
+        except FrameError:
+            end = -1
+        if min_offset <= start and 0 < end <= cursor:
+            return end
+        position = start
+    return None
+
+
 def scan_backwards(buf: bytes, cursor: int, *, min_offset: int = C.SEGMENT_HEADER_BYTES) -> list[dict[str, Any]]:
     """Walk frames backwards from `cursor` (exclusive end). Stops at the first invalid frame."""
     frames: list[dict[str, Any]] = []

@@ -24,6 +24,8 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
+from blackbox.platform import perms as perms_mod
+
 SCHEMA_VERSION = 1
 INDEX_DIR = "index"
 INDEX_NAME = "main.sqlite"
@@ -72,10 +74,11 @@ def connect(data_dir: str | os.PathLike[str], *, create: bool = False) -> sqlite
     """Open the index. `create=True` makes the directory and schema; otherwise a missing index is an error."""
     path = main_path(data_dir)
     if create:
-        path.parent.mkdir(parents=True, exist_ok=True)
+        perms_mod.private_dir(str(path.parent))      # `<data>/index`, which `mkdir` would leave at the umask's 0755
     elif not path.exists():
         raise FileNotFoundError(str(path))
     con = sqlite3.connect(str(path), isolation_level=None)
+    perms_mod.private_file(str(path))                # sqlite creates the file with the umask's mode, not ours
     con.row_factory = sqlite3.Row
     con.execute("PRAGMA foreign_keys = OFF")          # no cross-table FKs by design (§9.5: enforced in code)
     con.execute("PRAGMA synchronous = NORMAL")

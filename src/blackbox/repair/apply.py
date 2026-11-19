@@ -72,27 +72,6 @@ def _sha_bytes(data: bytes) -> str:
 MODES_ARE_REAL = os.name == "posix"
 
 
-#: Whether `chmod` mode bits describe access on this platform. On Windows they do not: `os.chmod` can only toggle the
-#: read-only attribute, and `os.stat` synthesises `0o666`/`0o777` whatever the ACL actually says. A "0700 backup
-#: directory" is therefore not expressible there, and `apply()` reports which guarantee the caller got instead of
-#: asserting one that does not exist.
-MODES_ARE_REAL = os.name == "posix"
-
-
-#: Whether `chmod` mode bits describe access on this platform. On Windows they do not: `os.chmod` can only toggle the
-#: read-only attribute, and `os.stat` synthesises `0o666`/`0o777` whatever the ACL actually says. A "0700 backup
-#: directory" is therefore not expressible there, and `apply()` reports which guarantee the caller got instead of
-#: asserting one that does not exist.
-MODES_ARE_REAL = os.name == "posix"
-
-
-#: Whether `chmod` mode bits describe access on this platform. On Windows they do not: `os.chmod` can only toggle the
-#: read-only attribute, and `os.stat` synthesises `0o666`/`0o777` whatever the ACL actually says. A "0700 backup
-#: directory" is therefore not expressible there, and `apply()` reports which guarantee the caller got instead of
-#: asserting one that does not exist.
-MODES_ARE_REAL = os.name == "posix"
-
-
 def _assert_safe_target(path: str, *, repo_real: str) -> None:
     """The path checks that have to hold at *write* time, not only at read time."""
     real = os.path.realpath(path)

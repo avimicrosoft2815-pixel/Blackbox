@@ -37,6 +37,7 @@ from blackbox.codec import cbor
 from blackbox.codec.ids import blake2b
 from blackbox.errors import bbx
 from blackbox.platform import current as _plat_current
+from blackbox.platform import perms as perms_mod
 from blackbox.rec import correlate, discover
 from blackbox.tape import chain as chain_mod
 from blackbox.tape import frame as frame_mod
@@ -661,7 +662,8 @@ class Recovery:
 
     def _take_lock(self, lock_path: str, content: bytes) -> bool:
         """`O_EXCL`, with the same staleness rules as the writer lease: dead pid, other boot, or another start time."""
-        os.makedirs(self.run_dir, mode=0o700, exist_ok=True)
+        perms_mod.private_dir(os.path.dirname(self.run_dir))      # `<data>/runs`
+        perms_mod.private_dir(self.run_dir)
         try:
             fd = _plat.open_fd(lock_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         except FileExistsError:
@@ -884,6 +886,7 @@ class Recovery:
         input_hash = _hash(self.writer_uuid_hex, self.capsule_id)
         if not self._skip("INDEXED", input_hash):
             con = sqlite3.connect(path)
+            perms_mod.private_file(path)                   # sqlite creates 0644 under the default umask
             try:
                 con.execute("CREATE TABLE IF NOT EXISTS event (seq INTEGER PRIMARY KEY, kind INTEGER NOT NULL, "
                             "wall_ns INTEGER NOT NULL, len INTEGER NOT NULL)")

@@ -9,6 +9,23 @@ So this file does the boring thing the row asks for: put all sixty secrets throu
 recover a **real** capsule, render everything the product renders from it, and grep every artefact for every secret. The
 assertion that something *was* redacted is there for the same reason it is in the tape test: a test that passes on an
 empty stream proves nothing.
+
+**The eleven sinks**, enumerated here so a reviewer does not have to reconstruct the count:
+
+1. the tape's frames (what the writer put on disk),
+2. the capsule file as a whole (the archive's own bytes),
+3. `otlp/spans.json`,
+4. `otlp/spans.pb`,
+5. `events/events.jsonl`,
+6. `graph.json`,
+7. `manifest.json`,
+8. the offline viewer page,
+9. the diagnosis report (Markdown),
+10. the repair brief (Markdown),
+11. the desktop app's pages (`/`, `/library`, `/run/<capsule>`) — the strings the window a person actually uses.
+
+The tape was previously covered in `tests/test_redaction.py` and the desktop pages were not covered at all, which is how
+a row that says *eleven* could be satisfied by nine.
 """
 from __future__ import annotations
 
@@ -35,7 +52,7 @@ from blackbox.tape import scanner
 from blackbox.ui import viewer
 
 
-def _capsule_with_the_corpus(tmp_path: Path) -> tuple[Path, Redactor]:
+def _capsule_with_the_corpus(tmp_path: Path) -> tuple[Path, Redactor, Path, str]:
     """One streamed call whose whole body is the corpus, through the real sink, on a real tape."""
     api.install(data_dir=str(tmp_path), publish_ms=0.0)
     redactor = Redactor("full")
@@ -57,10 +74,28 @@ def _capsule_with_the_corpus(tmp_path: Path) -> tuple[Path, Redactor]:
     assert result is not None and result.capsule_path
     assert redactor.counts, "nothing was redacted, so a clean artefact would prove nothing"
     assert sum(redactor.counts.values()) == 60, redactor.counts
-    return Path(result.capsule_path), redactor
+    return Path(result.capsule_path), redactor, tmp_path, uuid
 
 
-def _artefacts(capsule_path: Path) -> dict[str, bytes]:
+def _desktop_pages(data_dir: Path) -> bytes:
+    """The three pages the window serves, fetched over its loopback socket — the bytes a browser would receive."""
+    import urllib.request
+
+    from blackbox.ui import app as app_mod
+
+    capsule = next((data_dir / "capsules").glob("*.bbx"))
+    served = app_mod.start(str(data_dir))
+    try:
+        blob = b""
+        for route in ("", "library", "run/" + capsule.name):
+            with urllib.request.urlopen(served.url + route, timeout=60) as response:
+                blob += response.read()
+        return blob
+    finally:
+        served.stop()
+
+
+def _artefacts(capsule_path: Path, data_dir: Path, uuid: str) -> dict[str, bytes]:
     """Every byte the product can produce from this capsule, by the name a reader would find it under.
 
     No `continue` on a missing entry: an artefact that silently fails to materialise would turn this into a test of
@@ -80,6 +115,8 @@ def _artefacts(capsule_path: Path) -> dict[str, bytes]:
         "graph.json": capsule.entry("graph.json"),
         "manifest.json": capsule.entry("manifest.json"),
         "viewer page": viewer.build_html(ui_model.document_for_path(str(capsule_path))).encode("utf-8"),
+        "tape (frames)": b"".join(frame["payload"] for frame in scanner.scan(str(data_dir), uuid).frames),
+        "desktop pages": _desktop_pages(data_dir),
     }
     report = build_report(load_evidence(str(capsule_path)))
     out["diagnose report"] = report.markdown().encode("utf-8")
@@ -88,11 +125,12 @@ def _artefacts(capsule_path: Path) -> dict[str, bytes]:
 
 
 def test_no_secret_reaches_any_artefact_the_product_renders(tmp_path: Path) -> None:
-    caps, redactor = _capsule_with_the_corpus(tmp_path)
-    artefacts = _artefacts(caps)
+    caps, redactor, data_dir, uuid = _capsule_with_the_corpus(tmp_path)
+    artefacts = _artefacts(caps, data_dir, uuid)
+    assert len(artefacts) == 11, sorted(artefacts)
     assert set(artefacts) == {
-        "capsule (whole file)", cap.OTLP_NAME, cap.OTLP_PB_NAME, "events/events.jsonl", "graph.json",
-        "manifest.json", "viewer page", "diagnose report", "repair brief",
+        "tape (frames)", "capsule (whole file)", cap.OTLP_NAME, cap.OTLP_PB_NAME, "events/events.jsonl", "graph.json",
+        "manifest.json", "viewer page", "diagnose report", "repair brief", "desktop pages",
     }, sorted(artefacts)
     for name, blob in artefacts.items():
         for raw in SECRETS_BYTES:

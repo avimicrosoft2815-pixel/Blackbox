@@ -179,6 +179,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--keep-open", action="store_true",
                     help="keep serving until interrupted, instead of stopping after the first page load")
     ap.add_argument("--timeout", type=float, default=900.0, help="seconds to wait for the fetch (default 900)")
+    ap.add_argument("--json", action="store_true",
+                    help="print {url, bytes, one_shot, served} as JSON on stdout; the notices stay on stderr")
     args = ap.parse_args(argv)
     try:
         document = document_for_path(args.path)
@@ -189,7 +191,14 @@ def main(argv: list[str] | None = None) -> int:
     srv = start(page, port=args.port, one_shot=not args.keep_open)
     # `flush=True` because this line is the only way a user learns the URL; buffering it behind a pipe would print the
     # secret after the server had already stopped, which is exactly how the first version of this command failed.
-    print(f"serving {len(page)} B on {srv.url}", flush=True)
+    if args.json:
+        import json
+        import sys as _sys
+
+        print(json.dumps({"url": srv.url, "bytes": len(page), "one_shot": not args.keep_open}), flush=True)
+        print(f"serving {len(page)} B on loopback; the JSON line on stdout is the address", file=_sys.stderr, flush=True)
+    else:
+        print(f"serving {len(page)} B on {srv.url}", flush=True)
     print("this URL is a one-time secret: open it, and the server stops once the page has loaded."
           if not args.keep_open else "serving until interrupted (Ctrl-C). The URL is a secret: anyone who has it can read "
                                      "this capsule while the server runs.", flush=True)
