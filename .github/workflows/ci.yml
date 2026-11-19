@@ -35,7 +35,15 @@ jobs:
         # 3.11 and 3.13 finished in three minutes, and the only way to learn which test it was would have been to
         # guess. `faulthandler_timeout` dumps every thread's stack once a test exceeds the bound, and
         # `timeout-minutes` turns the hang into a red cell that names itself.
-        timeout-minutes: 15
+        #
+        # The budget was 15 minutes until 2026-11-16, when 940577a's Windows cells began to *time out* rather than fail:
+        # py3.13 finished in 14.6 and 13.2 minutes (it fitted, barely) while py3.11 and py3.12 were killed at the bound.
+        # The suite had grown from 1 414 to 1 531 tests, and the new ones are subprocess-heavy by design — a runtime
+        # netguard that runs the CLI, a concurrency test that starts six recoverers, a CLI contract that checks exit codes
+        # by invoking them. Linux runs the whole thing in ~7.6 minutes here; Windows is roughly twice that. 30 minutes is
+        # headroom for the slowest runner, not a licence: a *hung* test still reports itself through
+        # `faulthandler_timeout` long before this bound (defect 102).
+        timeout-minutes: 30
         # `-s`: the run's evidence has to survive the process, and a captured stdout is a buffer that `os._exit` never
         # flushes (the watchdog exits that way by design). Fixture-level `capfd`/`capsys` tests do their own capture.
         run: python tools/ci_summary.py --title "${{ matrix.python }} / ${{ matrix.os }} · unit + property" -- python -m pytest -q -rfE --tb=short -s

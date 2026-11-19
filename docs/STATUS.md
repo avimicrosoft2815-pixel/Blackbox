@@ -148,6 +148,12 @@ because the claim path only caught `FileExistsError` (defect 101). Fixed here wi
 (`FileExistsError` or WinError 5/32/33, with a failed unlink treated as the same race); the Windows cells are the cells
 that will confirm it. macOS cells were still queued when this was written.
 
+Then `940577a` showed the other half of the Windows story: `py3.11` and `py3.12` were killed at the **15-minute harness
+budget** while `py3.13` passed in 14.6 and 13.2 minutes — four green cells and two timeouts, none of them a failing test.
+The suite grew from 1 414 to 1 531 tests and the new ones run subprocesses by design, so the Windows budget no longer fits
+(defect 102). The step now has 30 minutes with the measurements in the comment; `faulthandler_timeout` still catches a
+real hang. Nowhere is this recorded as a pass: the cells that matter are the ones the next run produces.
+
 **The CLI contract** (`docs/cli.md`, `tests/test_cli_contract.py`, 21). Every command, its machine-readable form and its
 exit codes in one table, checked against the binary: the table's set equals the front door's, every `--json` row is
 accepted, and the documented code is measured on a failing invocation (`diagnose`'s `1` for "nothing readable" against

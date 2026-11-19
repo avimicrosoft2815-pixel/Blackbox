@@ -1759,3 +1759,21 @@ stolen, and nothing escapes uncoded.
 
 **Verified on Linux** (the test, three consecutive runs) and **not yet on Windows**: the fix is in this branch, and the
 cell that found the defect will be the cell that confirms it. Until it is green there, `docs/STATUS.md` says so.
+
+## Defect 102 — the suite outgrew the Windows harness budget, and the cells timed out instead of failing (2026-11-16, CI)
+
+At `940577a` both `py3.11` and `py3.12 / windows-latest` were killed with "The action 'Unit + property tests' has timed
+out after 15 minutes", while `py3.13` on the same runner fleet *passed* in 14.6 and 13.2 minutes. Nothing was wrong with
+the code: the suite had grown from 1 414 to 1 531 tests, and the 117 new ones are subprocess-heavy on purpose — a runtime
+netguard that runs eight CLI paths under a refusing `sitecustomize`, a concurrency test that starts six recoverers, a CLI
+contract that measures exit codes by invoking the binary, a permissions test that records a real run and indexes it. Linux
+runs the whole suite in 7.6 minutes here; a Windows runner is roughly twice as slow, which put every Windows cell within a
+minute of the old 15-minute bound and two of them over it.
+
+**A timeout is the worst failure mode available**: it names no test and looks like a hang. **Fixed** by raising the step
+budget to 30 minutes with the measurements in the comment, and by leaving `faulthandler_timeout` where it is, so a genuine
+hang still dumps its stacks long before the bound. This is headroom, not a licence: if the suite doubles again the answer
+is to shard the job, not to raise the number again.
+
+**Not claimed**: no Windows cell is green at this commit yet — the timeout fix is in the branch and the next run is what
+measures it.
