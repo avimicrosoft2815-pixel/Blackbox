@@ -1342,3 +1342,27 @@ consecutive local runs.
 **Not the fix.** Raising the sleep, or relaxing the abandonment assertion. The rule from `docs/STATUS.md` holds: a
 timing-shaped failure is re-run and diagnosed before it is called a flake, and an assertion is never weakened to make CI
 green.
+
+## Defect 82 — a test whose own timeout was longer than the harness's could only ever be killed, never report (2026-11-18, CI `d842397`)
+
+**Found by** run 44461898689: `py3.11 / macos-latest` failed after the 120 s watchdog killed the step inside
+`tests/test_proxy_limits.py::test_a_burst_larger_than_the_old_soft_limit_is_still_served`, at
+`selectors.py:415 in select`. The Windows py3.13 cell that reddened `228097f` passed in the same run, so the supervisor
+repair worked; this was the next thing underneath it.
+
+**Cause.** Two bounds in the wrong order. The test spawns a child that makes 40 sequential
+`socket.create_connection(..., timeout=5)` calls — 200 s worst case — and the test's own `subprocess.run(timeout=180)`
+sat *above* the 120 s per-test watchdog in `tests/conftest.py`. So when the burst stalled on that runner, the harness
+killed the process before the child's timeout could fire, which means the one thing that would have explained the stall —
+the child's stderr — was never collected. A bounded test that cannot say what it saw is a hang with extra steps.
+
+**Fix.** One deadline bounds every wait in the child (connections, the wait for the upstream to hold them, the probe), a
+failed connection is **recorded rather than raised** so the assertion carries the numbers, the `time.sleep(0.5)` before
+counting `upstream_holds` became a bounded poll on the fact it was waiting for (defect 81's lesson), and the child's
+report now includes `clients`, `connect_failures`, `upstream_holds`, `probe` and `elapsed_ms`. The outer timeout is 60 s —
+**below** the watchdog — so an overrun is reported by an assertion that knows what the burst was doing. No assertion was
+relaxed: 40 held upstream, a probe served from the middle of the burst, and the soft limit above 64 are still required.
+
+**Measured.** `tests/test_proxy_limits.py` is 7 tests, 0 failures, on three consecutive local runs, with the burst row
+taking 0.17 s here. What the macOS stall *was* is still unknown: the platform is not available in this sandbox, so the
+next macOS run of this test is the evidence, and it will now arrive with numbers attached.
