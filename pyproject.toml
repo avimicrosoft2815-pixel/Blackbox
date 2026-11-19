@@ -60,6 +60,9 @@ where = ["src"]
 testpaths = ["tests"]
 addopts = "-q"
 filterwarnings = ["error::DeprecationWarning"]
+markers = [
+    "slow_budget(seconds): this test is long on purpose; the hung-test watchdog allows this many seconds",
+]
 
 [tool.ruff]
 line-length = 120

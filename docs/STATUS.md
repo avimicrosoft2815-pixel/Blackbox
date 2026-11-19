@@ -154,6 +154,15 @@ The suite grew from 1 414 to 1 531 tests and the new ones run subprocesses by de
 (defect 102). The step now has 30 minutes with the measurements in the comment; `faulthandler_timeout` still catches a
 real hang. Nowhere is this recorded as a pass: the cells that matter are the ones the next run produces.
 
+`8ba986e` produced four green cells (Ubuntu 3/3, `py3.11` Windows, `docs`, `go-reader`) and three red ones, all on the new
+concurrency test: `py3.12` Ubuntu reported "2 recoverers each claimed to have done the work" (defect 103), and the Windows
+`py3.12`/`py3.13` cells failed the same test. The claim was exclusive but the *state* was not re-read after the lock, so a
+recoverer that lost to a winner who had already finished adopted nothing and ran the tape again; fixed by raising
+`_ArchivedElsewhere` once the archive exists and adopting the winner's capsule. Eight consecutive runs of the test here are
+green. The same Windows cell also tripped the 120 s hung-test watchdog on the 250-invocation serverless breadth test —
+40 s here, over three minutes there (defect 104) — which now declares `@pytest.mark.slow_budget(300)` instead of sharing
+one flat bound with a hang detector.
+
 **The CLI contract** (`docs/cli.md`, `tests/test_cli_contract.py`, 21). Every command, its machine-readable form and its
 exit codes in one table, checked against the binary: the table's set equals the front door's, every `--json` row is
 accepted, and the documented code is measured on a failing invocation (`diagnose`'s `1` for "nothing readable" against

@@ -132,6 +132,7 @@ def test_a_recorded_model_call_inside_the_handler_lands_in_the_invocation_capsul
     assert any(name.startswith("events/seg-") for name in capsule.entries)
 
 
+@pytest.mark.slow_budget(300)     # 250 seals is ~40 s here and ~3 minutes on a Windows runner: a measurement, not a hang
 def test_250_invocations_with_random_failures_leave_no_open_run(tmp_path: Path) -> None:
     documents: list[dict] = []
     rng = random.Random(20261116)  # noqa: S311 - reproducible failures in a test, not a security decision

@@ -512,6 +512,10 @@ def _declared_run_id(tape_dir: str) -> str | None:
 
 
 # ── the state machine ───────────────────────────────────────────────────────
+class _ArchivedElsewhere(Exception):
+    """Raised inside a step when another recoverer finished the run while we were taking the claim."""
+
+
 @dataclass
 class RecoveryResult:
     run_id: str
@@ -655,6 +659,14 @@ class Recovery:
         took = self._take_lock(lock_path, content)
         if not took:
             raise bbx("BBX-E210", f"{lock_path} is held by a live recoverer")
+        if self._already_archived():
+            # Another recoverer finished between our `run()` check and this claim: it checked the archive, was told "not
+            # yet", then waited on/raced the lock while the other process completed and *released* it. Redoing every step
+            # would produce a second claimant for one incident (defect 103), so adopt the archive that now exists.
+            self._die("CLAIMED.archived_elsewhere")
+            with contextlib.suppress(OSError):
+                os.unlink(lock_path)
+            raise _ArchivedElsewhere
         self._die("CLAIMED.mid")
         self._save_marker("CLAIMED", input_hash=input_hash, output_hash=blake2b(content).hex(), artifact=lock_path)
         self._die("CLAIMED.after")
@@ -939,32 +951,41 @@ class Recovery:
         self._save_marker("ARCHIVED", input_hash=input_hash, output_hash=blake2b(payload).hex(), artifact=out)
         self.result.state = "ARCHIVED"
         self._die("ARCHIVED.after")
-        with contextlib.suppress(FileNotFoundError):
+        # A Windows sharing violation (another reader has the file open) is the same fact as "it is gone": the lock is
+        # advisory state, and the ARCHIVED marker is the durable one.
+        with contextlib.suppress(OSError):
             os.unlink(os.path.join(self.run_dir, "recovery.lock"))
         return blake2b(payload).hex()
 
     # ── the machine ─────────────────────────────────────────────────────────
+    def _adopt_archive(self) -> RecoveryResult:
+        """Report the archive somebody else produced, without doing any of the work again."""
+        self.result.state = "ARCHIVED"
+        self.result.steps_skipped = list(STEPS)
+        archived = _read_json(os.path.join(self.run_dir, "recovery.json")) or {}
+        self.result.capsule_path = archived.get("capsule_path")
+        self.result.capsule_root = archived.get("capsule_root")
+        self.result.run_status = archived.get("run_status", "recovered")
+        self.result.node_statuses = archived.get("node_statuses") or []
+        return self.result
+
     def run(self) -> RecoveryResult:
         if self._already_archived():
             # An archived run has nothing left to do. Saying so is the difference between "idempotent" and
             # "re-runs everything and happens to agree".
-            self.result.state = "ARCHIVED"
-            self.result.steps_skipped = list(STEPS)
-            archived = _read_json(os.path.join(self.run_dir, "recovery.json")) or {}
-            self.result.capsule_path = archived.get("capsule_path")
-            self.result.capsule_root = archived.get("capsule_root")
-            self.result.run_status = archived.get("run_status", "recovered")
-            self.result.node_statuses = archived.get("node_statuses") or []
-            return self.result
-        for step, fn in (("DISCOVERED", self.step_discovered), ("CLAIMED", self.step_claimed),
-                         ("SCANNED", self.step_scanned), ("GRAPHED", self.step_graphed),
-                         ("COSTED", self.step_costed), ("SEALED", self.step_sealed),
-                         ("INDEXED", self.step_indexed), ("ARCHIVED", self.step_archived)):
-            before = len(self.result.steps_skipped)
-            self._die(f"{step}.guard")
-            fn()
-            if len(self.result.steps_skipped) == before:
-                self.result.steps_run.append(step)
+            return self._adopt_archive()
+        try:
+            for step, fn in (("DISCOVERED", self.step_discovered), ("CLAIMED", self.step_claimed),
+                             ("SCANNED", self.step_scanned), ("GRAPHED", self.step_graphed),
+                             ("COSTED", self.step_costed), ("SEALED", self.step_sealed),
+                             ("INDEXED", self.step_indexed), ("ARCHIVED", self.step_archived)):
+                before = len(self.result.steps_skipped)
+                self._die(f"{step}.guard")
+                fn()
+                if len(self.result.steps_skipped) == before:
+                    self.result.steps_run.append(step)
+        except _ArchivedElsewhere:
+            return self._adopt_archive()
         return self.result
 
 

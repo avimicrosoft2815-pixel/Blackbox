@@ -1777,3 +1777,35 @@ is to shard the job, not to raise the number again.
 
 **Not claimed**: no Windows cell is green at this commit yet — the timeout fix is in the branch and the next run is what
 measures it.
+
+## Defect 103 — two concurrent recoverers both claimed to have finished the run (2026-11-16, CI)
+
+`8ba986e`'s `py3.12 / ubuntu-latest` cell failed `test_six_concurrent_recoverers_elect_one_winner` with "2 recoverers
+each claimed to have done the work"; Windows cells failed the same test. The lock made the *claim* exclusive, but the
+claim was checked before the lock in one place and after it in another: a recoverer that lost the race to a winner which
+had already run the tape would take the claim, re-check nothing, and finish the run itself — so two callers each came back
+with a succeeded step and a different capsule. On a runner with three times the cores the window is wide enough to hit
+reliably, which is why only the fast cells found it.
+
+**Fixed** by making the post-claim state the authority: after taking the lock, `step_claimed` asks whether the run is
+already archived and, if it is, raises `_ArchivedElsewhere`, which `run()` catches and turns into the adoption result —
+the winner's capsule, marked as somebody else's work. The unlink on release now also suppresses `OSError` rather than
+only `FileNotFoundError`: on Windows a releasing peer's handle is a sharing violation, and losing that race to *yourself*
+is not an error.
+
+**Verified here**: the concurrency test eight consecutive times without a failure, plus `test_recovery_identity.py` and
+`test_recovery_tape_resume.py` whole. **Verified on Windows**: no — the cells that found it are the cells that confirm it,
+and this entry stays open until they are green.
+
+## Defect 104 — the hung-test watchdog bounded a test that was long by design (2026-11-16, CI)
+
+The `py3.12 / windows-latest` cell dumped `test_250_invocations_with_random_failures_leave_no_open_run` past 120 s inside
+`platform/windows.py:160 fdatasync`, with "hung yes". It was not hung: 250 invocations each seal a capsule, which is 40 s
+here and roughly three minutes on that runner, where every seal ends in an `fdatasync` that is the slow part. One flat
+number served two purposes — naming a hang, and capping a measurement — and the measurement lost.
+
+**Fixed** by letting a test declare its own budget: `@pytest.mark.slow_budget(300)` extends the watchdog for that node
+only, the marker is registered in `pyproject.toml`, and the watchdog's message prints the budget it actually used. The
+test stays at 250 invocations everywhere, so the breadth the row measures is unchanged; nothing else in the suite asks for
+more than 120 s. A marker is the narrow fix: if more than a handful of tests need one, the suite is too slow and that is
+the problem to fix.
