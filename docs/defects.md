@@ -1452,3 +1452,22 @@ because the Python reader does not consult the document — it *is* the document
 one disagreement about severity that turned out to be a disagreement about design — a bad root is exit 4 with a reason
 in the Node reader and `root_ok: false` on a capsule that still opens in the Python one, which is what a user with a
 drifted file actually needs.
+
+## Defect 86 — two tests written on Linux broke the Windows cell (2026-11-19, `47ecb8c`)
+
+CI on `47ecb8c` was green on all three Ubuntu cells and green on `docs`, and **py3.11/windows-latest failed in the unit
+step** with two errors that neither the new reader nor the corpus has anything to do with on POSIX:
+
+* `test_the_reader_runs_on_a_machine_with_no_blackbox_installed` built its environment by hand
+  (`PATH=/usr/local/bin:/usr/bin:/bin`) to prove the Node reader leans on nothing of ours. On Windows `node` is in
+  `C:\Program Files\nodejs`, so the hand-built PATH found no interpreter and the test failed on process start. The
+  environment is now this host's minus every `PYTHONPATH`/`BLACKBOX*` entry: what the test is about is the absence of
+  *our* variables, not the absence of PATH.
+* `test_check_7_…[deeply nested-[[[[[…` — pytest derived the test id from the parameter **body**, and the 40 kB
+  bracket string became a test name long enough that collection errored on Windows. Every case in that table now carries
+  an explicit id.
+
+**What this says about the corpus and the reader:** their Ubuntu cells were green, and neither failure would have been
+visible from this machine. It is the third time a POSIX-shaped assumption in a *test* (not the product) cost a Windows
+cell — after defect 81's sleep and the `SIGKILL`-as-137 assertion — which is why the Windows cells are read as part of the
+signal rather than as a formality.

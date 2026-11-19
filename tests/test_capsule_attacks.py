@@ -189,13 +189,15 @@ def test_check_6_a_compression_method_this_format_does_not_define_is_refused(tmp
 # ── §13.4 check 7–8: the manifest, and what it claims the archive contains ────────────────────────────────────────
 
 
+# The ids are given, not derived: without them pytest builds a test id out of the *body*, and the 40 kB deeply-nested one
+# became a test name long enough that the Windows cell errored during collection (`47ecb8c`, py3.11/windows-latest).
 @pytest.mark.parametrize(("label", "body"), [
-    ("list", b"[]"),
-    ("string", b'"capsule"'),
-    ("null", b"null"),
-    ("not json", b"{not json"),
-    ("not utf-8", b"\xff\xfe manifest"),
-    ("deeply nested", b"[" * 20_000 + b"]" * 20_000),
+    pytest.param("list", b"[]", id="list"),
+    pytest.param("string", b'"capsule"', id="string"),
+    pytest.param("null", b"null", id="null"),
+    pytest.param("not-json", b"{not json", id="not-json"),
+    pytest.param("not-utf8", b"\xff\xfe manifest", id="not-utf8"),
+    pytest.param("deeply-nested", b"[" * 20_000 + b"]" * 20_000, id="deeply-nested"),
 ])
 def test_check_7_a_manifest_that_is_not_an_object_is_a_capsule_that_cannot_be_read(tmp_path: Path, label: str,
                                                                                    body: bytes) -> None:

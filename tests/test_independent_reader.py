@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -202,9 +203,16 @@ def test_the_reader_reproduces_the_published_crc32_vectors() -> None:
 
 
 def test_the_reader_runs_on_a_machine_with_no_blackbox_installed(tmp_path: Path) -> None:
-    """`node` with an empty environment: the reader cannot be leaning on PYTHONPATH or the installed package."""
+    """`node` with nothing of this project in its environment.
+
+    The environment is the host's minus every `PYTHONPATH`/`BLACKBOX_*` entry, rather than a hand-built one: a hand-built
+    `/usr/local/bin:/usr/bin:/bin` PATH finds no `node` on Windows (where it lives in `C:\\Program Files\\nodejs`), and that
+    is what the py3.11 Windows cell reported at `47ecb8c`. What the test is about is the absence of BlackBox's own
+    variables, not the absence of PATH.
+    """
     capsule_path, python_root = _real_capsule(tmp_path)
+    env = {k: v for k, v in os.environ.items() if not k.startswith(("PYTHON", "BLACKBOX"))}
     done = subprocess.run(["node", str(READER), str(capsule_path), "--json"], capture_output=True, text=True,
-                          env={"PATH": "/usr/local/bin:/usr/bin:/bin"}, timeout=120)
+                          env=env, timeout=120)
     assert done.returncode == 0, done.stderr[:600]
     assert json.loads(done.stdout)["integrity"]["root"] == python_root
