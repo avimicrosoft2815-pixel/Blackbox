@@ -1,0 +1,1416 @@
+{
+  "host": {
+    "anthropic": "2.8.0",
+    "node": "v22.22.3",
+    "openai": "3.51.0",
+    "platform": "Linux-6.1.158+-x86_64-with-glibc2.36",
+    "python": "3.11.2"
+  },
+  "question": "does `blackbox run -- node app.js` / `-- python app.py` yield one run with linked nodes?",
+  "results": [
+    {
+      "capsule_count": 2,
+      "capsules": [
+        {
+          "call_ids": [],
+          "capsule": "c_5944a2524a24ff46.bbx",
+          "counts": {
+            "bytes": 18988,
+            "events": 13,
+            "nodes": 1,
+            "nodes_interrupted": 0,
+            "segments": 1
+          },
+          "frames": {
+            "CHAIN": 5,
+            "MODEL_CHUNK": 1,
+            "MODEL_REQUEST": 1,
+            "MODEL_RESPONSE": 1,
+            "NODE_CLOSE": 1,
+            "NODE_OPEN": 1,
+            "RUN_END": 1,
+            "RUN_START": 1,
+            "SEG_END": 1
+          },
+          "has_proxy_vantage": true,
+          "link_pairs": [
+            {
+              "class": "exact",
+              "left_run": "r_592c0ef13321709e",
+              "right_run": "r_592c0ef13321709e"
+            }
+          ],
+          "links": {
+            "declared": 0,
+            "exact": 1,
+            "inferred": 0
+          },
+          "nodes": 1,
+          "root_ok": true,
+          "run_id": "r_592c0ef13321709e",
+          "run_status": "recovered"
+        },
+        {
+          "call_ids": [],
+          "capsule": "c_8802ee1fe876b2af.bbx",
+          "counts": {
+            "bytes": 9889,
+            "events": 5,
+            "nodes": 0,
+            "nodes_interrupted": 0,
+            "segments": 1
+          },
+          "frames": {
+            "CHAIN": 2,
+            "RUN_END": 1,
+            "RUN_START": 1,
+            "SEG_END": 1
+          },
+          "has_proxy_vantage": false,
+          "link_pairs": [
+            {
+              "class": "exact",
+              "left_run": "r_592c0ef13321709e",
+              "right_run": "r_592c0ef13321709e"
+            }
+          ],
+          "links": {
+            "declared": 0,
+            "exact": 1,
+            "inferred": 0
+          },
+          "nodes": 0,
+          "root_ok": true,
+          "run_id": "r_592c0ef13321709e",
+          "run_status": "recovered"
+        }
+      ],
+      "client": "python",
+      "command": [
+        "/home/user/Blackbox/.venv/bin/python",
+        "client.py"
+      ],
+      "duration_ms": 3648.3,
+      "every_root_ok": true,
+      "exact_pairs": [
+        {
+          "class": "exact",
+          "left_run": "r_592c0ef13321709e",
+          "right_run": "r_592c0ef13321709e"
+        },
+        {
+          "class": "exact",
+          "left_run": "r_592c0ef13321709e",
+          "right_run": "r_592c0ef13321709e"
+        }
+      ],
+      "exit_code": 0,
+      "graphs": [
+        {
+          "ambiguous_edges": 0,
+          "edge_levels": [
+            "run"
+          ],
+          "edge_nodes_named": 0,
+          "graph_edges": 1,
+          "graph_nodes": 1,
+          "node_join": "unknown",
+          "node_join_reason": "no per-call identifier is recorded on both sides: `node_slot` numbers nodes inside one tape and the injected header carries only <run>/<node>, so two calls from one node are indistinguishable",
+          "node_kinds": [
+            "proxy_call"
+          ],
+          "node_level_edges": 0,
+          "node_level_pairs": [],
+          "node_owners": [
+            "proxy"
+          ],
+          "node_slots": [
+            16384
+          ],
+          "node_statuses": [
+            "closed"
+          ],
+          "open_nodes": 0,
+          "run_dir": "r_592c0ef13321709e",
+          "run_id": "r_592c0ef13321709e",
+          "writer_uuid": "48adc01f1e12305c93dbe6f20f57b21a"
+        },
+        {
+          "ambiguous_edges": 0,
+          "edge_levels": [
+            "run"
+          ],
+          "edge_nodes_named": 0,
+          "graph_edges": 1,
+          "graph_nodes": 0,
+          "node_join": "unknown",
+          "node_join_reason": "no per-call identifier is recorded on both sides: `node_slot` numbers nodes inside one tape and the injected header carries only <run>/<node>, so two calls from one node are indistinguishable",
+          "node_kinds": [],
+          "node_level_edges": 0,
+          "node_level_pairs": [],
+          "node_owners": [],
+          "node_slots": [],
+          "node_statuses": [],
+          "open_nodes": 0,
+          "run_dir": "r_ac043c72c8b75eba",
+          "run_id": "r_592c0ef13321709e",
+          "writer_uuid": "eb3c2ee6ed450da130b36edf03a6600a"
+        }
+      ],
+      "links": [
+        {
+          "class": "exact",
+          "left_run": "r_592c0ef13321709e",
+          "right_run": "r_592c0ef13321709e"
+        },
+        {
+          "class": "exact",
+          "left_run": "r_592c0ef13321709e",
+          "right_run": "r_592c0ef13321709e"
+        }
+      ],
+      "node_level_pairs": [],
+      "one_run_id_across_capsules": true,
+      "proxy_vantage_recorded": true,
+      "repeated_call_ids": {},
+      "run_ids_seen": [
+        "r_592c0ef13321709e"
+      ],
+      "stderr_tail": [
+        "blackbox: python child gets a temporary sitecustomize (/tmp/blackbox-sdk-azdj1emv); removed when it exits",
+        "blackbox: run r_592c0ef13321709e \u00b7 exit 0 \u00b7 proxy http://127.0.0.1:46329 (5 vars exported) \u00b7 sdk auto-import (sitecustomize) \u00b7 recovered r_592c0ef13321709e \u2192 /tmp/bbx-accept-ho6photi/data-python/capsules/c_5944a2524a24ff46.bbx (recovered, root 9ff6356de840) and 1 more tape (sdk)"
+      ],
+      "stdout": [
+        "python ok"
+      ],
+      "total_nodes": 1
+    },
+    {
+      "capsule_count": 1,
+      "capsules": [
+        {
+          "call_ids": [],
+          "capsule": "c_f984dd5102340206.bbx",
+          "counts": {
+            "bytes": 17917,
+            "events": 13,
+            "nodes": 1,
+            "nodes_interrupted": 0,
+            "segments": 1
+          },
+          "frames": {
+            "CHAIN": 5,
+            "MODEL_CHUNK": 1,
+            "MODEL_REQUEST": 1,
+            "MODEL_RESPONSE": 1,
+            "NODE_CLOSE": 1,
+            "NODE_OPEN": 1,
+            "RUN_END": 1,
+            "RUN_START": 1,
+            "SEG_END": 1
+          },
+          "has_proxy_vantage": true,
+          "link_pairs": [],
+          "links": {
+            "declared": 0,
+            "exact": 0,
+            "inferred": 0
+          },
+          "nodes": 1,
+          "root_ok": true,
+          "run_id": "r_d47c233a997cf8fa",
+          "run_status": "recovered"
+        }
+      ],
+      "client": "node",
+      "command": [
+        "/usr/local/bin/node",
+        "client.js"
+      ],
+      "duration_ms": 1892.9,
+      "every_root_ok": true,
+      "exact_pairs": [],
+      "exit_code": 0,
+      "graphs": [
+        {
+          "ambiguous_edges": 0,
+          "edge_levels": [],
+          "edge_nodes_named": 0,
+          "graph_edges": 0,
+          "graph_nodes": 1,
+          "node_join": "unknown",
+          "node_join_reason": "no per-call identifier is recorded on both sides: `node_slot` numbers nodes inside one tape and the injected header carries only <run>/<node>, so two calls from one node are indistinguishable",
+          "node_kinds": [
+            "proxy_call"
+          ],
+          "node_level_edges": 0,
+          "node_level_pairs": [],
+          "node_owners": [
+            "proxy"
+          ],
+          "node_slots": [
+            16384
+          ],
+          "node_statuses": [
+            "closed"
+          ],
+          "open_nodes": 0,
+          "run_dir": "r_d47c233a997cf8fa",
+          "run_id": "r_d47c233a997cf8fa",
+          "writer_uuid": "b52b3e6c5b4691ae88490b2b93a5ab50"
+        }
+      ],
+      "links": [],
+      "node_level_pairs": [],
+      "one_run_id_across_capsules": true,
+      "proxy_vantage_recorded": true,
+      "repeated_call_ids": {},
+      "run_ids_seen": [
+        "r_d47c233a997cf8fa"
+      ],
+      "stderr_tail": [
+        "blackbox: run r_d47c233a997cf8fa \u00b7 exit 0 \u00b7 proxy http://127.0.0.1:36701 (5 vars exported) \u00b7 recovered r_d47c233a997cf8fa \u2192 /tmp/bbx-accept-ho6photi/data-node/capsules/c_f984dd5102340206.bbx (recovered, root 6de7a73f46a8)"
+      ],
+      "stdout": [
+        "node ok"
+      ],
+      "total_nodes": 1
+    },
+    {
+      "capsule_count": 2,
+      "capsules": [
+        {
+          "call_ids": [
+            "e6770927e4641051"
+          ],
+          "capsule": "c_062e54f95a643bd7.bbx",
+          "counts": {
+            "bytes": 17645,
+            "events": 11,
+            "nodes": 0,
+            "nodes_interrupted": 0,
+            "segments": 1
+          },
+          "frames": {
+            "CHAIN": 5,
+            "MODEL_CHUNK": 1,
+            "MODEL_REQUEST": 1,
+            "MODEL_RESPONSE": 1,
+            "RUN_END": 1,
+            "RUN_START": 1,
+            "SEG_END": 1
+          },
+          "has_proxy_vantage": true,
+          "link_pairs": [
+            {
+              "class": "exact",
+              "left_run": "r_efa13496f25af048",
+              "right_run": "r_efa13496f25af048"
+            }
+          ],
+          "links": {
+            "declared": 0,
+            "exact": 1,
+            "inferred": 0
+          },
+          "nodes": 0,
+          "root_ok": true,
+          "run_id": "r_efa13496f25af048",
+          "run_status": "recovered"
+        },
+        {
+          "call_ids": [
+            "e6770927e4641051"
+          ],
+          "capsule": "c_7c677b97dc81ca2d.bbx",
+          "counts": {
+            "bytes": 20350,
+            "events": 13,
+            "nodes": 1,
+            "nodes_interrupted": 0,
+            "segments": 1
+          },
+          "frames": {
+            "CHAIN": 5,
+            "MODEL_CHUNK": 1,
+            "MODEL_REQUEST": 1,
+            "MODEL_RESPONSE": 1,
+            "NODE_CLOSE": 1,
+            "NODE_OPEN": 1,
+            "RUN_END": 1,
+            "RUN_START": 1,
+            "SEG_END": 1
+          },
+          "has_proxy_vantage": true,
+          "link_pairs": [
+            {
+              "class": "exact",
+              "left_run": "r_efa13496f25af048",
+              "right_run": "r_efa13496f25af048"
+            }
+          ],
+          "links": {
+            "declared": 0,
+            "exact": 1,
+            "inferred": 0
+          },
+          "nodes": 1,
+          "root_ok": true,
+          "run_id": "r_efa13496f25af048",
+          "run_status": "recovered"
+        }
+      ],
+      "client": "sdk",
+      "command": [
+        "/home/user/Blackbox/.venv/bin/python",
+        "sdk_client.py"
+      ],
+      "duration_ms": 4304.1,
+      "every_root_ok": true,
+      "exact_pairs": [
+        {
+          "class": "exact",
+          "left_run": "r_efa13496f25af048",
+          "right_run": "r_efa13496f25af048"
+        },
+        {
+          "class": "exact",
+          "left_run": "r_efa13496f25af048",
+          "right_run": "r_efa13496f25af048"
+        }
+      ],
+      "exit_code": 0,
+      "graphs": [
+        {
+          "ambiguous_edges": 0,
+          "edge_levels": [
+            "call",
+            "run"
+          ],
+          "edge_nodes_named": 1,
+          "graph_edges": 2,
+          "graph_nodes": 0,
+          "node_join": "partial",
+          "node_join_reason": "the call is inside a node on one tape only: the other writer recorded the call without a span around it, and a node is not invented for the end an edge is missing",
+          "node_kinds": [],
+          "node_level_edges": 0,
+          "node_level_pairs": [],
+          "node_owners": [],
+          "node_slots": [],
+          "node_statuses": [],
+          "open_nodes": 0,
+          "run_dir": "r_04a0016df2f5fb2e",
+          "run_id": "r_efa13496f25af048",
+          "writer_uuid": "345052bfec173275ac99813154930c83"
+        },
+        {
+          "ambiguous_edges": 0,
+          "edge_levels": [
+            "call",
+            "run"
+          ],
+          "edge_nodes_named": 1,
+          "graph_edges": 2,
+          "graph_nodes": 1,
+          "node_join": "partial",
+          "node_join_reason": "the call is inside a node on one tape only: the other writer recorded the call without a span around it, and a node is not invented for the end an edge is missing",
+          "node_kinds": [
+            "proxy_call"
+          ],
+          "node_level_edges": 0,
+          "node_level_pairs": [],
+          "node_owners": [
+            "proxy"
+          ],
+          "node_slots": [
+            16384
+          ],
+          "node_statuses": [
+            "closed"
+          ],
+          "open_nodes": 0,
+          "run_dir": "r_efa13496f25af048",
+          "run_id": "r_efa13496f25af048",
+          "writer_uuid": "16fffa4b4cfad128b83e7c11b0fbec82"
+        }
+      ],
+      "links": [
+        {
+          "class": "exact",
+          "left_run": "r_efa13496f25af048",
+          "right_run": "r_efa13496f25af048"
+        },
+        {
+          "class": "exact",
+          "left_run": "r_efa13496f25af048",
+          "right_run": "r_efa13496f25af048"
+        }
+      ],
+      "node_level_pairs": [],
+      "one_run_id_across_capsules": true,
+      "proxy_vantage_recorded": true,
+      "repeated_call_ids": {},
+      "run_ids_seen": [
+        "r_efa13496f25af048"
+      ],
+      "stderr_tail": [
+        "blackbox: python child gets a temporary sitecustomize (/tmp/blackbox-sdk-wrebc79p); removed when it exits",
+        "blackbox: run r_efa13496f25af048 \u00b7 exit 0 \u00b7 proxy http://127.0.0.1:36265 (5 vars exported) \u00b7 sdk auto-import (sitecustomize) \u00b7 recovered r_efa13496f25af048 \u2192 /tmp/bbx-accept-ho6photi/data-sdk/capsules/c_7c677b97dc81ca2d.bbx (recovered, root 553e213838ac) and 1 more tape (sdk)"
+      ],
+      "stdout": [
+        "sdk ok"
+      ],
+      "total_nodes": 1
+    },
+    {
+      "capsule_count": 2,
+      "capsules": [
+        {
+          "call_ids": [
+            "7b6e82d9aaec4c59"
+          ],
+          "capsule": "c_254523aa3fb21076.bbx",
+          "counts": {
+            "bytes": 20314,
+            "events": 13,
+            "nodes": 1,
+            "nodes_interrupted": 0,
+            "segments": 1
+          },
+          "frames": {
+            "CHAIN": 5,
+            "MODEL_CHUNK": 1,
+            "MODEL_REQUEST": 1,
+            "MODEL_RESPONSE": 1,
+            "NODE_CLOSE": 1,
+            "NODE_OPEN": 1,
+            "RUN_END": 1,
+            "RUN_START": 1,
+            "SEG_END": 1
+          },
+          "has_proxy_vantage": true,
+          "link_pairs": [
+            {
+              "class": "exact",
+              "left_run": "r_ae4aac62048ace49",
+              "right_run": "r_ae4aac62048ace49"
+            }
+          ],
+          "links": {
+            "declared": 0,
+            "exact": 1,
+            "inferred": 0
+          },
+          "nodes": 1,
+          "root_ok": true,
+          "run_id": "r_ae4aac62048ace49",
+          "run_status": "recovered"
+        },
+        {
+          "call_ids": [
+            "7b6e82d9aaec4c59"
+          ],
+          "capsule": "c_9a765ded51077867.bbx",
+          "counts": {
+            "bytes": 20653,
+            "events": 14,
+            "nodes": 1,
+            "nodes_interrupted": 0,
+            "segments": 1
+          },
+          "frames": {
+            "CHAIN": 6,
+            "MODEL_CHUNK": 1,
+            "MODEL_REQUEST": 1,
+            "MODEL_RESPONSE": 1,
+            "NODE_CLOSE": 1,
+            "NODE_OPEN": 1,
+            "RUN_END": 1,
+            "RUN_START": 1,
+            "SEG_END": 1
+          },
+          "has_proxy_vantage": true,
+          "link_pairs": [
+            {
+              "class": "exact",
+              "left_run": "r_ae4aac62048ace49",
+              "right_run": "r_ae4aac62048ace49"
+            }
+          ],
+          "links": {
+            "declared": 0,
+            "exact": 1,
+            "inferred": 0
+          },
+          "nodes": 1,
+          "root_ok": true,
+          "run_id": "r_ae4aac62048ace49",
+          "run_status": "recovered"
+        }
+      ],
+      "client": "sdk-nodes",
+      "command": [
+        "/home/user/Blackbox/.venv/bin/python",
+        "sdk_node_client.py"
+      ],
+      "duration_ms": 4273.4,
+      "every_root_ok": true,
+      "exact_pairs": [
+        {
+          "class": "exact",
+          "left_run": "r_ae4aac62048ace49",
+          "right_run": "r_ae4aac62048ace49"
+        },
+        {
+          "class": "exact",
+          "left_run": "r_ae4aac62048ace49",
+          "right_run": "r_ae4aac62048ace49"
+        }
+      ],
+      "exit_code": 0,
+      "graphs": [
+        {
+          "ambiguous_edges": 0,
+          "edge_levels": [
+            "node",
+            "run"
+          ],
+          "edge_nodes_named": 1,
+          "graph_edges": 2,
+          "graph_nodes": 1,
+          "node_join": "exact",
+          "node_join_reason": "both ends of the call are inside nodes their own writer opened: the app's node on one tape and the proxy's span on the other",
+          "node_kinds": [
+            "run"
+          ],
+          "node_level_edges": 1,
+          "node_level_pairs": [
+            {
+              "call_id": "7b6e82d9aaec4c59",
+              "from": 1,
+              "join": "exact",
+              "to": 16384
+            }
+          ],
+          "node_owners": [
+            "None"
+          ],
+          "node_slots": [
+            1
+          ],
+          "node_statuses": [
+            "closed"
+          ],
+          "open_nodes": 0,
+          "run_dir": "r_7a9719b654497602",
+          "run_id": "r_ae4aac62048ace49",
+          "writer_uuid": "ebe0296ac383b952831db5ff1fc8fd66"
+        },
+        {
+          "ambiguous_edges": 0,
+          "edge_levels": [
+            "node",
+            "run"
+          ],
+          "edge_nodes_named": 1,
+          "graph_edges": 2,
+          "graph_nodes": 1,
+          "node_join": "exact",
+          "node_join_reason": "both ends of the call are inside nodes their own writer opened: the app's node on one tape and the proxy's span on the other",
+          "node_kinds": [
+            "proxy_call"
+          ],
+          "node_level_edges": 1,
+          "node_level_pairs": [
+            {
+              "call_id": "7b6e82d9aaec4c59",
+              "from": 16384,
+              "join": "exact",
+              "to": 1
+            }
+          ],
+          "node_owners": [
+            "proxy"
+          ],
+          "node_slots": [
+            16384
+          ],
+          "node_statuses": [
+            "closed"
+          ],
+          "open_nodes": 0,
+          "run_dir": "r_ae4aac62048ace49",
+          "run_id": "r_ae4aac62048ace49",
+          "writer_uuid": "0a5c7dba0f9bb5e01eb975be39159a20"
+        }
+      ],
+      "links": [
+        {
+          "class": "exact",
+          "left_run": "r_ae4aac62048ace49",
+          "right_run": "r_ae4aac62048ace49"
+        },
+        {
+          "class": "exact",
+          "left_run": "r_ae4aac62048ace49",
+          "right_run": "r_ae4aac62048ace49"
+        }
+      ],
+      "node_level_pairs": [
+        {
+          "call_id": "7b6e82d9aaec4c59",
+          "from": 1,
+          "join": "exact",
+          "to": 16384
+        },
+        {
+          "call_id": "7b6e82d9aaec4c59",
+          "from": 16384,
+          "join": "exact",
+          "to": 1
+        }
+      ],
+      "one_run_id_across_capsules": true,
+      "proxy_vantage_recorded": true,
+      "repeated_call_ids": {},
+      "run_ids_seen": [
+        "r_ae4aac62048ace49"
+      ],
+      "stderr_tail": [
+        "blackbox: python child gets a temporary sitecustomize (/tmp/blackbox-sdk-8t9kbd64); removed when it exits",
+        "blackbox: run r_ae4aac62048ace49 \u00b7 exit 0 \u00b7 proxy http://127.0.0.1:32927 (5 vars exported) \u00b7 sdk auto-import (sitecustomize) \u00b7 recovered r_ae4aac62048ace49 \u2192 /tmp/bbx-accept-ho6photi/data-sdk-nodes/capsules/c_254523aa3fb21076.bbx (recovered, root 9859c250980a) and 1 more tape (sdk)"
+      ],
+      "stdout": [
+        "sdk-nodes ok"
+      ],
+      "total_nodes": 2
+    },
+    {
+      "capsule_count": 2,
+      "capsules": [
+        {
+          "call_ids": [
+            "cd01b27407f95c4a",
+            "3595e2bdae9cd092"
+          ],
+          "capsule": "c_a756d22874fb6847.bbx",
+          "counts": {
+            "bytes": 31007,
+            "events": 22,
+            "nodes": 2,
+            "nodes_interrupted": 0,
+            "segments": 1
+          },
+          "frames": {
+            "CHAIN": 9,
+            "MODEL_CHUNK": 2,
+            "MODEL_REQUEST": 2,
+            "MODEL_RESPONSE": 2,
+            "NODE_CLOSE": 2,
+            "NODE_OPEN": 2,
+            "RUN_END": 1,
+            "RUN_START": 1,
+            "SEG_END": 1
+          },
+          "has_proxy_vantage": true,
+          "link_pairs": [
+            {
+              "class": "exact",
+              "left_run": "r_75c3982789895807",
+              "right_run": "r_75c3982789895807"
+            }
+          ],
+          "links": {
+            "declared": 0,
+            "exact": 1,
+            "inferred": 0
+          },
+          "nodes": 2,
+          "root_ok": true,
+          "run_id": "r_75c3982789895807",
+          "run_status": "recovered"
+        },
+        {
+          "call_ids": [
+            "cd01b27407f95c4a",
+            "3595e2bdae9cd092"
+          ],
+          "capsule": "c_af916c3e5ba73749.bbx",
+          "counts": {
+            "bytes": 29787,
+            "events": 19,
+            "nodes": 2,
+            "nodes_interrupted": 0,
+            "segments": 1
+          },
+          "frames": {
+            "CHAIN": 6,
+            "MODEL_CHUNK": 2,
+            "MODEL_REQUEST": 2,
+            "MODEL_RESPONSE": 2,
+            "NODE_CLOSE": 2,
+            "NODE_OPEN": 2,
+            "RUN_END": 1,
+            "RUN_START": 1,
+            "SEG_END": 1
+          },
+          "has_proxy_vantage": true,
+          "link_pairs": [
+            {
+              "class": "exact",
+              "left_run": "r_75c3982789895807",
+              "right_run": "r_75c3982789895807"
+            }
+          ],
+          "links": {
+            "declared": 0,
+            "exact": 1,
+            "inferred": 0
+          },
+          "nodes": 2,
+          "root_ok": true,
+          "run_id": "r_75c3982789895807",
+          "run_status": "recovered"
+        }
+      ],
+      "client": "concurrent-nodes",
+      "command": [
+        "/home/user/Blackbox/.venv/bin/python",
+        "two_in_flight.py"
+      ],
+      "duration_ms": 4387.6,
+      "every_root_ok": true,
+      "exact_pairs": [
+        {
+          "class": "exact",
+          "left_run": "r_75c3982789895807",
+          "right_run": "r_75c3982789895807"
+        },
+        {
+          "class": "exact",
+          "left_run": "r_75c3982789895807",
+          "right_run": "r_75c3982789895807"
+        }
+      ],
+      "exit_code": 0,
+      "graphs": [
+        {
+          "ambiguous_edges": 0,
+          "edge_levels": [
+            "node",
+            "run"
+          ],
+          "edge_nodes_named": 2,
+          "graph_edges": 3,
+          "graph_nodes": 2,
+          "node_join": "exact",
+          "node_join_reason": "both ends of the call are inside nodes their own writer opened: the app's node on one tape and the proxy's span on the other",
+          "node_kinds": [
+            "run"
+          ],
+          "node_level_edges": 2,
+          "node_level_pairs": [
+            {
+              "call_id": "3595e2bdae9cd092",
+              "from": 2,
+              "join": "exact",
+              "to": 16385
+            },
+            {
+              "call_id": "cd01b27407f95c4a",
+              "from": 1,
+              "join": "exact",
+              "to": 16384
+            }
+          ],
+          "node_owners": [
+            "None"
+          ],
+          "node_slots": [
+            1,
+            2
+          ],
+          "node_statuses": [
+            "closed"
+          ],
+          "open_nodes": 0,
+          "run_dir": "r_3829b98fec17184b",
+          "run_id": "r_75c3982789895807",
+          "writer_uuid": "2d40806c548cd295bab4a1bb9d41343a"
+        },
+        {
+          "ambiguous_edges": 0,
+          "edge_levels": [
+            "node",
+            "run"
+          ],
+          "edge_nodes_named": 2,
+          "graph_edges": 3,
+          "graph_nodes": 2,
+          "node_join": "exact",
+          "node_join_reason": "both ends of the call are inside nodes their own writer opened: the app's node on one tape and the proxy's span on the other",
+          "node_kinds": [
+            "proxy_call"
+          ],
+          "node_level_edges": 2,
+          "node_level_pairs": [
+            {
+              "call_id": "3595e2bdae9cd092",
+              "from": 16385,
+              "join": "exact",
+              "to": 2
+            },
+            {
+              "call_id": "cd01b27407f95c4a",
+              "from": 16384,
+              "join": "exact",
+              "to": 1
+            }
+          ],
+          "node_owners": [
+            "proxy"
+          ],
+          "node_slots": [
+            16384,
+            16385
+          ],
+          "node_statuses": [
+            "closed"
+          ],
+          "open_nodes": 0,
+          "run_dir": "r_75c3982789895807",
+          "run_id": "r_75c3982789895807",
+          "writer_uuid": "d0de6a04573928b5d34eb673fedd402c"
+        }
+      ],
+      "links": [
+        {
+          "class": "exact",
+          "left_run": "r_75c3982789895807",
+          "right_run": "r_75c3982789895807"
+        },
+        {
+          "class": "exact",
+          "left_run": "r_75c3982789895807",
+          "right_run": "r_75c3982789895807"
+        }
+      ],
+      "node_level_pairs": [
+        {
+          "call_id": "3595e2bdae9cd092",
+          "from": 2,
+          "join": "exact",
+          "to": 16385
+        },
+        {
+          "call_id": "cd01b27407f95c4a",
+          "from": 1,
+          "join": "exact",
+          "to": 16384
+        },
+        {
+          "call_id": "3595e2bdae9cd092",
+          "from": 16385,
+          "join": "exact",
+          "to": 2
+        },
+        {
+          "call_id": "cd01b27407f95c4a",
+          "from": 16384,
+          "join": "exact",
+          "to": 1
+        }
+      ],
+      "one_run_id_across_capsules": true,
+      "proxy_vantage_recorded": true,
+      "repeated_call_ids": {},
+      "run_ids_seen": [
+        "r_75c3982789895807"
+      ],
+      "stderr_tail": [
+        "blackbox: python child gets a temporary sitecustomize (/tmp/blackbox-sdk-itf_euoh); removed when it exits",
+        "blackbox: run r_75c3982789895807 \u00b7 exit 0 \u00b7 proxy http://127.0.0.1:33721 (5 vars exported) \u00b7 sdk auto-import (sitecustomize) \u00b7 recovered r_75c3982789895807 \u2192 /tmp/bbx-accept-ho6photi/data-concurrent-nodes/capsules/c_af916c3e5ba73749.bbx (recovered, root 846273f7d8b5) and 1 more tape (sdk)"
+      ],
+      "stdout": [
+        "concurrent first ok",
+        "concurrent second ok"
+      ],
+      "total_nodes": 4
+    },
+    {
+      "capsule_count": 2,
+      "capsules": [
+        {
+          "call_ids": [
+            "586b42eb75124fc0"
+          ],
+          "capsule": "c_4f3c1a0c8aabae56.bbx",
+          "counts": {
+            "bytes": 20233,
+            "events": 13,
+            "nodes": 1,
+            "nodes_interrupted": 0,
+            "segments": 1
+          },
+          "frames": {
+            "CHAIN": 5,
+            "MODEL_CHUNK": 1,
+            "MODEL_REQUEST": 1,
+            "MODEL_RESPONSE": 1,
+            "NODE_CLOSE": 1,
+            "NODE_OPEN": 1,
+            "RUN_END": 1,
+            "RUN_START": 1,
+            "SEG_END": 1
+          },
+          "has_proxy_vantage": true,
+          "link_pairs": [
+            {
+              "class": "exact",
+              "left_run": "r_5b123dfeca846133",
+              "right_run": "r_5b123dfeca846133"
+            }
+          ],
+          "links": {
+            "declared": 0,
+            "exact": 1,
+            "inferred": 0
+          },
+          "nodes": 1,
+          "root_ok": true,
+          "run_id": "r_5b123dfeca846133",
+          "run_status": "recovered"
+        },
+        {
+          "call_ids": [
+            "586b42eb75124fc0"
+          ],
+          "capsule": "c_84fe53fdbb01d6d6.bbx",
+          "counts": {
+            "bytes": 21311,
+            "events": 15,
+            "nodes": 1,
+            "nodes_interrupted": 0,
+            "segments": 1
+          },
+          "frames": {
+            "CHAIN": 7,
+            "MODEL_CHUNK": 1,
+            "MODEL_REQUEST": 1,
+            "MODEL_RESPONSE": 1,
+            "NODE_CLOSE": 1,
+            "NODE_OPEN": 1,
+            "RUN_END": 1,
+            "RUN_START": 1,
+            "SEG_END": 1
+          },
+          "has_proxy_vantage": true,
+          "link_pairs": [
+            {
+              "class": "exact",
+              "left_run": "r_5b123dfeca846133",
+              "right_run": "r_5b123dfeca846133"
+            }
+          ],
+          "links": {
+            "declared": 0,
+            "exact": 1,
+            "inferred": 0
+          },
+          "nodes": 1,
+          "root_ok": true,
+          "run_id": "r_5b123dfeca846133",
+          "run_status": "recovered"
+        }
+      ],
+      "client": "anthropic-nodes",
+      "command": [
+        "/home/user/Blackbox/.venv/bin/python",
+        "anthropic_client.py"
+      ],
+      "duration_ms": 5173.3,
+      "every_root_ok": true,
+      "exact_pairs": [
+        {
+          "class": "exact",
+          "left_run": "r_5b123dfeca846133",
+          "right_run": "r_5b123dfeca846133"
+        },
+        {
+          "class": "exact",
+          "left_run": "r_5b123dfeca846133",
+          "right_run": "r_5b123dfeca846133"
+        }
+      ],
+      "exit_code": 0,
+      "graphs": [
+        {
+          "ambiguous_edges": 0,
+          "edge_levels": [
+            "node",
+            "run"
+          ],
+          "edge_nodes_named": 1,
+          "graph_edges": 2,
+          "graph_nodes": 1,
+          "node_join": "exact",
+          "node_join_reason": "both ends of the call are inside nodes their own writer opened: the app's node on one tape and the proxy's span on the other",
+          "node_kinds": [
+            "run"
+          ],
+          "node_level_edges": 1,
+          "node_level_pairs": [
+            {
+              "call_id": "586b42eb75124fc0",
+              "from": 1,
+              "join": "exact",
+              "to": 16384
+            }
+          ],
+          "node_owners": [
+            "None"
+          ],
+          "node_slots": [
+            1
+          ],
+          "node_statuses": [
+            "closed"
+          ],
+          "open_nodes": 0,
+          "run_dir": "r_35e4d712cb4c7231",
+          "run_id": "r_5b123dfeca846133",
+          "writer_uuid": "236bacaf926eca459e416c8af89fe34c"
+        },
+        {
+          "ambiguous_edges": 0,
+          "edge_levels": [
+            "node",
+            "run"
+          ],
+          "edge_nodes_named": 1,
+          "graph_edges": 2,
+          "graph_nodes": 1,
+          "node_join": "exact",
+          "node_join_reason": "both ends of the call are inside nodes their own writer opened: the app's node on one tape and the proxy's span on the other",
+          "node_kinds": [
+            "proxy_call"
+          ],
+          "node_level_edges": 1,
+          "node_level_pairs": [
+            {
+              "call_id": "586b42eb75124fc0",
+              "from": 16384,
+              "join": "exact",
+              "to": 1
+            }
+          ],
+          "node_owners": [
+            "proxy"
+          ],
+          "node_slots": [
+            16384
+          ],
+          "node_statuses": [
+            "closed"
+          ],
+          "open_nodes": 0,
+          "run_dir": "r_5b123dfeca846133",
+          "run_id": "r_5b123dfeca846133",
+          "writer_uuid": "a0f22e80313be1b892346a97a329f398"
+        }
+      ],
+      "links": [
+        {
+          "class": "exact",
+          "left_run": "r_5b123dfeca846133",
+          "right_run": "r_5b123dfeca846133"
+        },
+        {
+          "class": "exact",
+          "left_run": "r_5b123dfeca846133",
+          "right_run": "r_5b123dfeca846133"
+        }
+      ],
+      "node_level_pairs": [
+        {
+          "call_id": "586b42eb75124fc0",
+          "from": 1,
+          "join": "exact",
+          "to": 16384
+        },
+        {
+          "call_id": "586b42eb75124fc0",
+          "from": 16384,
+          "join": "exact",
+          "to": 1
+        }
+      ],
+      "one_run_id_across_capsules": true,
+      "proxy_vantage_recorded": true,
+      "repeated_call_ids": {},
+      "run_ids_seen": [
+        "r_5b123dfeca846133"
+      ],
+      "stderr_tail": [
+        "blackbox: python child gets a temporary sitecustomize (/tmp/blackbox-sdk-cwns97mt); removed when it exits",
+        "blackbox: run r_5b123dfeca846133 \u00b7 exit 0 \u00b7 proxy http://127.0.0.1:37755 (5 vars exported) \u00b7 sdk auto-import (sitecustomize) \u00b7 recovered r_5b123dfeca846133 \u2192 /tmp/bbx-accept-ho6photi/data-anthropic-nodes/capsules/c_4f3c1a0c8aabae56.bbx (recovered, root 640e743a7502) and 1 more tape (sdk)"
+      ],
+      "stdout": [
+        "anthropic-nodes ok"
+      ],
+      "total_nodes": 2
+    },
+    {
+      "capsule_count": 2,
+      "capsules": [
+        {
+          "call_ids": [],
+          "capsule": "c_8fa59c32c946d076.bbx",
+          "counts": {
+            "bytes": 9889,
+            "events": 5,
+            "nodes": 0,
+            "nodes_interrupted": 0,
+            "segments": 1
+          },
+          "frames": {
+            "CHAIN": 2,
+            "RUN_END": 1,
+            "RUN_START": 1,
+            "SEG_END": 1
+          },
+          "has_proxy_vantage": false,
+          "link_pairs": [
+            {
+              "class": "exact",
+              "left_run": "r_4b80d62dc21da967",
+              "right_run": "r_4b80d62dc21da967"
+            }
+          ],
+          "links": {
+            "declared": 0,
+            "exact": 1,
+            "inferred": 0
+          },
+          "nodes": 0,
+          "root_ok": true,
+          "run_id": "r_4b80d62dc21da967",
+          "run_status": "recovered"
+        },
+        {
+          "call_ids": [
+            "duplicate-id",
+            "duplicate-id"
+          ],
+          "capsule": "c_b8d4a277de5daa43.bbx",
+          "counts": {
+            "bytes": 27837,
+            "events": 19,
+            "nodes": 2,
+            "nodes_interrupted": 0,
+            "segments": 1
+          },
+          "frames": {
+            "CHAIN": 6,
+            "MODEL_CHUNK": 2,
+            "MODEL_REQUEST": 2,
+            "MODEL_RESPONSE": 2,
+            "NODE_CLOSE": 2,
+            "NODE_OPEN": 2,
+            "RUN_END": 1,
+            "RUN_START": 1,
+            "SEG_END": 1
+          },
+          "has_proxy_vantage": true,
+          "link_pairs": [
+            {
+              "class": "exact",
+              "left_run": "r_4b80d62dc21da967",
+              "right_run": "r_4b80d62dc21da967"
+            }
+          ],
+          "links": {
+            "declared": 0,
+            "exact": 1,
+            "inferred": 0
+          },
+          "nodes": 2,
+          "root_ok": true,
+          "run_id": "r_4b80d62dc21da967",
+          "run_status": "recovered"
+        }
+      ],
+      "client": "duplicate-id",
+      "command": [
+        "/home/user/Blackbox/.venv/bin/python",
+        "duplicate.py"
+      ],
+      "duration_ms": 3678.7,
+      "every_root_ok": true,
+      "exact_pairs": [
+        {
+          "class": "exact",
+          "left_run": "r_4b80d62dc21da967",
+          "right_run": "r_4b80d62dc21da967"
+        },
+        {
+          "class": "exact",
+          "left_run": "r_4b80d62dc21da967",
+          "right_run": "r_4b80d62dc21da967"
+        }
+      ],
+      "exit_code": 0,
+      "graphs": [
+        {
+          "ambiguous_edges": 0,
+          "edge_levels": [
+            "run"
+          ],
+          "edge_nodes_named": 0,
+          "graph_edges": 1,
+          "graph_nodes": 2,
+          "node_join": "unknown",
+          "node_join_reason": "no per-call identifier is recorded on both sides: `node_slot` numbers nodes inside one tape and the injected header carries only <run>/<node>, so two calls from one node are indistinguishable",
+          "node_kinds": [
+            "proxy_call"
+          ],
+          "node_level_edges": 0,
+          "node_level_pairs": [],
+          "node_owners": [
+            "proxy"
+          ],
+          "node_slots": [
+            16384,
+            16385
+          ],
+          "node_statuses": [
+            "closed"
+          ],
+          "open_nodes": 0,
+          "run_dir": "r_4b80d62dc21da967",
+          "run_id": "r_4b80d62dc21da967",
+          "writer_uuid": "b51c66de71bc616d8e57759beac47aa7"
+        },
+        {
+          "ambiguous_edges": 0,
+          "edge_levels": [
+            "run"
+          ],
+          "edge_nodes_named": 0,
+          "graph_edges": 1,
+          "graph_nodes": 0,
+          "node_join": "unknown",
+          "node_join_reason": "no per-call identifier is recorded on both sides: `node_slot` numbers nodes inside one tape and the injected header carries only <run>/<node>, so two calls from one node are indistinguishable",
+          "node_kinds": [],
+          "node_level_edges": 0,
+          "node_level_pairs": [],
+          "node_owners": [],
+          "node_slots": [],
+          "node_statuses": [],
+          "open_nodes": 0,
+          "run_dir": "r_b326bc43b0de852c",
+          "run_id": "r_4b80d62dc21da967",
+          "writer_uuid": "91df35499ed505438fc1fdfb60719753"
+        }
+      ],
+      "links": [
+        {
+          "class": "exact",
+          "left_run": "r_4b80d62dc21da967",
+          "right_run": "r_4b80d62dc21da967"
+        },
+        {
+          "class": "exact",
+          "left_run": "r_4b80d62dc21da967",
+          "right_run": "r_4b80d62dc21da967"
+        }
+      ],
+      "node_level_pairs": [],
+      "one_run_id_across_capsules": true,
+      "proxy_vantage_recorded": true,
+      "repeated_call_ids": {
+        "duplicate-id": 2
+      },
+      "run_ids_seen": [
+        "r_4b80d62dc21da967"
+      ],
+      "stderr_tail": [
+        "blackbox: python child gets a temporary sitecustomize (/tmp/blackbox-sdk-u0ylodl0); removed when it exits",
+        "blackbox: run r_4b80d62dc21da967 \u00b7 exit 0 \u00b7 proxy http://127.0.0.1:42759 (5 vars exported) \u00b7 sdk auto-import (sitecustomize) \u00b7 recovered r_4b80d62dc21da967 \u2192 /tmp/bbx-accept-ho6photi/data-duplicate-id/capsules/c_b8d4a277de5daa43.bbx (recovered, root 21230b67bbea) and 1 more tape (sdk)"
+      ],
+      "stdout": [
+        "duplicate 0 ok",
+        "duplicate 1 ok"
+      ],
+      "total_nodes": 2
+    }
+  ],
+  "ticket": "P3B-03",
+  "upstream": "http://127.0.0.1:42287",
+  "verdict": {
+    "a_repeated_call_id_produces_no_node_edge": true,
+    "anthropic_client_has_node_level_edges": true,
+    "app_nodes_are_in_the_graph": {
+      "anthropic-nodes": 2,
+      "concurrent-nodes": 4,
+      "duplicate-id": 2,
+      "node": 1,
+      "python": 1,
+      "sdk": 1,
+      "sdk-nodes": 2
+    },
+    "both_clients_exit_zero": true,
+    "clean_runs_are_not_reported_as_interrupted": true,
+    "concurrent_calls_join_two_distinct_spans": true,
+    "edges_naming_a_node": 10,
+    "edges_recorded": 22,
+    "every_capsule_root_ok": true,
+    "exact_links_join_every_run_with_two_capsules": true,
+    "node_available": true,
+    "node_join_per_client": {
+      "anthropic-nodes": [
+        "exact"
+      ],
+      "concurrent-nodes": [
+        "exact"
+      ],
+      "duplicate-id": [
+        "unknown"
+      ],
+      "node": [
+        "unknown"
+      ],
+      "python": [
+        "unknown"
+      ],
+      "sdk": [
+        "partial"
+      ],
+      "sdk-nodes": [
+        "exact"
+      ]
+    },
+    "node_level_edges_recorded": {
+      "anthropic-nodes": 2,
+      "concurrent-nodes": 4,
+      "duplicate-id": 0,
+      "node": 0,
+      "python": 0,
+      "sdk": 0,
+      "sdk-nodes": 2
+    },
+    "one_run_id_across_capsules": true,
+    "proxy_spans_on_tape": {
+      "anthropic-nodes": 1,
+      "concurrent-nodes": 1,
+      "duplicate-id": 1,
+      "node": 1,
+      "python": 1,
+      "sdk": 1,
+      "sdk-nodes": 1
+    },
+    "proxy_vantage_recorded": true,
+    "uninstrumented_clients_stay_below_node_level": true
+  },
+  "when": "2026-11-19T04:42:50Z"
+}

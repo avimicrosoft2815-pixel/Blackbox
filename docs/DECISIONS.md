@@ -1384,3 +1384,27 @@ framing must say what it saw: `partial` on a proxied call is now `False` when th
 or at a chunked terminator, and `True` with `ending: "unverified"` when it ended at the connection's close (defect 77).
 The seam got the same treatment from the other side: a body that was never a stream is not judged against a stream's
 terminator table (defect 78). Both were found by running the product, not by testing the mechanism.
+
+## D-065 — "no secret reaches a sink" is asserted on every artefact a reader can be given (2026-11-19, G-Capture row 4)
+
+**The question.** G-Capture's row says the 60-secret corpus is *"absent from every sink that exists"*. Only one sink was
+ever tested: the tape. But a tape is not what a user hands to support — a capsule is, and a capsule carries a segment
+stream, `events/events.jsonl`, `graph.json`, `manifest.json`, two OTLP exports and, once rendered, a viewer page, a
+diagnosis report and a repair brief. A secret that survives into any of those is the same disclosure as one left on the
+tape, and grepping only the tape would have made the row true of the file the redactor writes and silent about the eight
+files the product writes from it.
+
+**The decision.** The evidence for that row is a test that puts all sixty secrets through the **real** sink onto a
+**real** tape, recovers a **real** capsule, renders everything the product renders from it, and greps all nine artefacts:
+`tests/test_redaction_every_sink.py`. Two conditions are what make it evidence rather than decoration. First, the fixture
+asserts **60 redactions happened**, so a clean artefact cannot be an empty one. Second, a control test runs the same
+fixture with `BLACKBOX_REDACTION=off` and requires **all 60** to reach the capsule — without it, a green run would be
+consistent with a sink that quietly stopped recording. (That control also corrected a reading of the first test: the
+capsule's *whole-file* grep is the weakest of the nine, because entries are deflated; it stays as the check that no stream
+is ever stored uncompressed, and the entry-level greps carry the row.)
+
+**The consequence.** This is builder-side evidence for a gate the builder may not sign (`docs/gates/README.md` rules 1–2).
+`docs/gates/G-Capture.md` had drifted from the tree in the other direction — it still said P3-11 did not exist, that the
+anthropic zero-change child was missing and that all five §15.1 rows were unmeasured, while `tests/_day14_child_anthropic.py`
+and `bench/results/2026-11-15-capture-overhead.json` were in the same commit tree. Its **evidence** cells were refreshed
+with the file or JSON path for each row; its **verdicts** were left exactly as they were, and the file is still unsigned.

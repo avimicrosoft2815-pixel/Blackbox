@@ -8,11 +8,16 @@ would measure it.
 
 Order is by what a real user hits first, not by ticket number. **B1 was fixed on this branch** (defects 66 and 67) after
 the list was first written, then **B2 and B3** (defects 68 and 69); the ids are kept stable so a comment, a defect entry
-or `docs/STATE.json` that names "B4" still points at the same thing. What remains open is **B4, B5 and B6** — two of
-which only the release machine can settle (B6, and the macOS cells it cannot acquire) and one of which is the owner's call
-on graph edges (B4). B8 was closed after the first review round, when `verify` learned to take many capsules. **B4's fact
-changed on 2026-11-18**: node-level edges are recorded and measured on a real instrumented client, so what is left of B4 is
-the owner's tick and the parts that are honestly still unmeasured (see B4).
+or `docs/STATE.json` that names "B4" still points at the same thing. B8 was closed after the first review round, when
+`verify` learned to take many capsules. **B4's fact changed on 2026-11-18**: node-level edges are recorded and measured
+on real instrumented clients, so what is left of B4 is the owner's tick and the parts that are honestly still
+unmeasured (see B4).
+
+**This list is not the gate list.** `docs/gates/` holds one file per gate and a full gate review is the only authority
+on what can be ticked; B4, B5 and B6 are the entries *here* that are still open, and reading only this file would miss
+rows a release needs — `G-Capture` is still unsigned (its 60-secret row and its §15.1 table), and the release-machine
+rows need the host described in B6. So: "B4, B5 and B6" is a summary of this file, not a claim that nothing else is
+open.
 
 ---
 
@@ -289,11 +294,44 @@ What this does **not** settle, and why the blocker stays open as the owner's dec
 
 * **Node clients cannot produce a node-level edge** — `api.run` has no Node equivalent, so the Node row is `unknown` at
   node level. That is a missing feature, reported as such, not a passing row.
-* **Ambiguity is refused, but only in tests** — an id recorded twice on a side yields `level: "call"`, `ambiguous`,
-  `candidates: 2` and no node (`tests/test_proxy_spans.py`), and no live client produces a duplicate id without being
-  told to.
-* **macOS is unmeasured** for every row above.
+* **Two concurrent calls from one client are two spans, and that is now measured by a run** (below), not asserted by a
+  fixture.
+* **macOS is unmeasured for the acceptance run** — the harness ran on a Linux host. CI's macOS cells run the test suite
+  (green at `228097f`), which exercises the resolver but produces no acceptance artefact, so no macOS row exists here
+  yet.
 * Shape (b) of `docs/node-edges.md` (a hook-to-seam node join) and a launcher-owned process span are still proposals.
+
+### The same ticket, run again with seven clients, including the two cases the first table could not show
+
+`bench/accept_p3b03.py` now runs seven clients under `blackbox run` against one loopback origin and writes
+`bench/results/2026-11-18-p3b03-acceptance.json`. Same four rows as above, plus the three the first run left open:
+
+| client | capsule roots, one run id | `node_join` | node-level edges |
+|---|---|---|---|
+| `urllib` (no seam) | 2, all ok, one | `unknown` | 0 |
+| Node v22.22.3 (no seam) | 2, all ok, one | `unknown` | 0 |
+| `openai` 3.51.0 as shipped | 2, all ok, one | `partial` | 0 |
+| `openai` 3.51.0 inside `api.run` | 2, all ok, one | `exact` | 2 |
+| `anthropic` 2.8.0 inside `api.run` (**new**) | 2, all ok, one | `exact` | 2 |
+| two `openai.AsyncOpenAI` calls in flight at once, inside `api.run` (**new**) | 2, all ok, one | `exact` | 4 |
+| the same call id written twice by one client (**new**) | 2, all ok, one | `unknown` | 0 |
+
+Totals from the artefact: `edges_recorded 22`, `edges_naming_a_node 10`, every capsule's own root verifies, and every
+two-capsule run is joined by `exact` links. What the three new rows add:
+
+* **A refusal produced by a run, not a fixture.** The duplicate-id client reuses one `x-blackbox-call` id for two requests;
+  the resolver refuses to pick and records `level: "call"` with no node-level edge — the ambiguous path the earlier
+  section listed as test-only. `repeated_call_ids` proves the id really was repeated on one side before the refusal is
+  read as a pass.
+* **Two concurrent calls join to two distinct proxy spans**, not to one by accident: the verdict counts pairs, so a
+  resolver that collapsed both calls onto the first span would fail it.
+* **A second real SDK** (the official `anthropic` client, no adapter of ours) reaches node level with the same mechanism,
+  so the seam is not tuned to one vendor's call shape. Repeats are counted **per capsule**: the app's tape and the
+  proxy's tape each record a call id once, and counting it across both would invent a duplicate.
+
+What is still not measured: the Node client has no node API, so its row stays `unknown`; shape (b) of
+`docs/node-edges.md` and a launcher-owned process span are proposals; and **this table is one Linux host** — the CI matrix
+does not run `bench/accept_p3b03.py`, so a macOS row would have to be produced by running it there.
 
 `docs/node-edges.md` is now an implementation note with the measurement, not a proposal. The rebind half of the same
 ticket passes on a request-level measurement (worst 53.98 ms, 0 of 240 over the 100 ms budget —

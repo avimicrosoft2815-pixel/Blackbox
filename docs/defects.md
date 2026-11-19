@@ -1322,3 +1322,23 @@ capability probe it already used for `call_id` and `node_slot` on `open_call`.
 
 **Measured** by `tests/test_capture_failopen.py` (`test_a_receiver_written_before_d053_still_records_its_calls` and the
 hostile-receiver cases, which now report no failures for a receiver that raises somewhere else).
+
+## Defect 81 — a test slept instead of waiting, and CI found it on the one runner that was busy (2026-11-18, CI `228097f`)
+
+**Found by** run 44417127703, one red cell out of ten: `py3.13 / windows-latest` failed
+`tests/test_proxy_supervisor.py::test_stopping_while_a_handler_is_pending_does_not_abandon_it`. The product was not at
+fault and no bound in it changed: the test began with `time.sleep(0.05)` to "let the handler start", then asserted that a
+stop does not abandon a pending handler. On that runner 50 ms was not enough for the handler thread to be *in* the
+handler, so the assertion was reached with nothing pending — the failure was in the precondition, and a pass would have
+been equally meaningless (it would have proven nothing about abandonment).
+
+**Cause.** A sleep used as a synchronisation primitive: it races on a loaded machine and says nothing when it loses.
+
+**Fix.** The fixture sets `held` from inside the handler, and the test waits on that fact with a ceiling
+(`Event.wait(timeout)`) and an explicit `assert` if the wait times out, so a slow machine now fails with "the handler
+never started" instead of mis-reporting the product. `tests/test_proxy_supervisor.py` is 12 tests, 0 failures, on three
+consecutive local runs.
+
+**Not the fix.** Raising the sleep, or relaxing the abandonment assertion. The rule from `docs/STATUS.md` holds: a
+timing-shaped failure is re-run and diagnosed before it is called a flake, and an assertion is never weakened to make CI
+green.

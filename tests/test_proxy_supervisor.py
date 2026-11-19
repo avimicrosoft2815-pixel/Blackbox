@@ -300,7 +300,15 @@ def test_stopping_while_a_handler_is_pending_does_not_abandon_it(tmp_path: Path)
                     pass
 
             threading.Thread(target=client, daemon=True).start()
-            time.sleep(0.05)                       # the handler is now waiting on the upstream
+            # Wait for the *precondition*, not for a duration: the black-hole upstream accepting the proxy's connection
+            # is proof that a handler task exists and is parked on it. A 50 ms sleep was the old version, and on a
+            # loaded Windows runner the accept had not happened yet, so the assertion below failed for a reason that had
+            # nothing to do with the shutdown it is about (2026-11-18, py3.13 / windows-latest at 228097f).
+            deadline = time.monotonic() + 10.0
+            while time.monotonic() < deadline and not held:
+                time.sleep(0.01)
+            assert held, "the proxy never reached the black-hole upstream, so no handler was ever pending"
+            time.sleep(0.02)                       # and now let it park on the read
             # Hammer the port through a few closes as well. Cancelling the pending tasks *runs* the loop, which runs
             # the `connection made` callbacks that were already queued: one drain round left three handlers behind per
             # shutdown under a probing client, so the round count has to converge and the test has to exercise it.

@@ -79,16 +79,23 @@ zero-capture sentence now offers the base URL as **one possible cause** rather t
 call that never left the process). (4) `blackbox verify` takes **one capsule or many**: a quoted pattern is expanded by
 the command (so the same line works on POSIX, `cmd.exe` and PowerShell), every capsule is verified and printed, the exit
 code is the worst outcome of the batch, and a pattern matching nothing is named rather than silently shrinking the set —
-B8, `tests/test_verify_cli.py` (23, five new). What remains open is B4, B5 and B6.
+B8, `tests/test_verify_cli.py` (23, five new). What this file's blocker list still calls open is B4, B5 and B6 —
+which is a summary of `docs/RELEASE-BLOCKERS.md`, **not** the release gate list: `docs/gates/` is the authority,
+and B4's remaining part is an owner's tick while B6 and the macOS rows need a machine this sandbox is not.
 
-Suite: **Total: 1258 tests** — 1257 pass here and 1 is skipped on POSIX by name
+Suite: **Total: 1261 tests** — 1260 pass here and 1 is skipped on POSIX by name
 (`test_an_open_view_blocks_the_unlink_only_on_windows`: POSIX permits unlinking a file another fd still holds, so
-the open-view case exists only on Windows). The number is for the dependency set CI installs,
+the open-view case exists only on Windows). The three new ones are `tests/test_redaction_every_sink.py`, the corpus
+against every artefact the product renders (this section's evidence). Measured through `--junitxml` because `pytest -q`
+prints no summary here: **1261 tests, 0 failures, 0 errors, 1 skip, 289.7 s** — the first run of this increment failed this
+very line (it said 1258), and the pinned number is checked by collection, not by trusting the sentence.
+The number is for the dependency set CI installs,
 `.[dev,capture,capture-sdks]`: sixteen tests live behind `anthropic`, so a venv with only `httpx` and `openai`
 collects 1146 (D-062 — the 1146 in this sentence was measured in exactly that lighter venv, and CI said 1162).
 Measured in a depth-1 clone, 4 tests cannot run (`test_forbidden_words`'s `git log` scan, `test_state_consistency`'s
 ancestry check and two in `test_status_doc` call `tools/git_history.commit_count()`, which refuses rather than inspect
-one commit and call it a history; CI checks out with `fetch-depth: 0`). ruff 0.17.5 and mypy 2.4.1 (`strict = true`,
+one commit and call it a history; CI checks out with `fetch-depth: 0`, and this checkout was `--unshallow`ed before the
+run above so those four ran). ruff 0.17.5 and mypy 2.4.1 (`strict = true`,
 nothing disabled): 0 findings.
 
 **The demo path, run end to end on 2026-11-17 (D-060, D-061).** `pip install -e .` now produces a `blackbox` command
@@ -225,7 +232,9 @@ nothing from a proposal is ever executed.
 | `main` `f4a9abb` (run 44400312163) | green | 3/3 green | 3/3 green | **3/3 cancelled at 0 steps** — "not acquired by Runner of type hosted". Unmeasured, not passed |
 | branch `9e6a35a` (run 44405724450) | green | 3/3 green | 3/3 green | **3/3 cancelled at 0 steps** — unmeasured |
 | branch `c1c0ad8` (run 44412902847) | green | 3/3 green | 3/3 green | **3/3 green — 11 steps each** (this is the first fully measured matrix on this branch) |
+| branch `2d0f0db`, `ce61225`, `82c20d2` (runs 44413091184, 44413317497, 44415198012) | green | 3/3 green | 3/3 green | **3/3 green** each — three more fully measured matrices |
 | branch `feeb598` (run 44406070968) | green | 3/3 green | 3/3 green except **py3.11**, which failed `test_the_ingest_command_costs_the_agent_tens_of_milliseconds` (84 ms marginal over a bare interpreter, 115 vs 31, against an 80 ms bound) | **3/3 cancelled at 0 steps** — unmeasured |
+| branch `228097f` (run 44417127703) | green | 3/3 green | 3/3 green except **py3.13**, which failed `test_stopping_while_a_handler_is_pending_does_not_abandon_it` — a *precondition* sleep in the test, not the product: on a loaded runner the handler was not yet pending when the stop arrived, so the assertion about abandonment was never reached (`docs/defects.md` 81) | **3/3 green — 11 steps each** |
 
 The Windows py3.11 failure was re-run rather than declared a flake, and the second sample said something different: the
 failed step's annotation now reports `BaseProactorEventLoop._start_serving` raising in a callback and **"Task was destroyed
@@ -238,6 +247,43 @@ consecutive local runs of the file are silent. The timing bound was not weakened
 macos-latest: success** — a macOS sample for `feeb598` — while `py3.12` and `py3.13` macOS cells were still waiting when
 this was written. Job logs are not retrievable from this sandbox (`gh run view --log-failed` → `EOF`), so the numbers
 above come from the check-run annotations GitHub stores.
+
+**What `228097f` cost, and what was fixed instead of excused.** The one red cell was a test's own precondition
+(`test_proxy_supervisor.py`): eleven steps ran, the suite ran, and one assertion never got a chance to fail — the fixture
+sleeps 50 ms waiting for a handler thread to be *pending* on a server, and on that Windows runner 50 ms was not enough.
+The repair is the one the earlier row already taught (`docs/defects.md` 81): the test now waits on the fact it needs
+(`held` is set by the handler once it is in the handler), with a generous ceiling and an explicit failure if the wait
+times out — the product is untouched by the change and no bound in the product suite was weakened. Twelve of twelve in
+this file pass locally, three consecutive runs just now (12 tests, 0 failures, 0 errors, ~1.0 s each). The new CI attempt is the one recording this paragraph's commit.
+
+
+## B4's acceptance, run with seven clients (2026-11-18)
+
+`bench/accept_p3b03.py` → `bench/results/2026-11-18-p3b03-acceptance.json`. One loopback origin stands in for the
+provider (stated in the artefact), and seven clients run under `blackbox run` against it:
+
+| client | roots ok, one run id | `node_join` | node-level edges |
+|---|---|---|---|
+| `urllib` (no seam) | 2, yes | `unknown` | 0 |
+| Node v22.22.3 (no seam) | 2, yes | `unknown` | 0 |
+| `openai` 3.51.0 as shipped | 2, yes | `partial` | 0 |
+| `openai` 3.51.0 inside `api.run` | 2, yes | `exact` | 2 |
+| `anthropic` 2.8.0 inside `api.run` | 2, yes | `exact` | 2 |
+| two `openai.AsyncOpenAI` calls in flight at once | 2, yes | `exact` | 4 |
+| one call id written twice by one client | 2, yes | `unknown` | 0 |
+
+Totals the harness asserts: `edges_recorded 22`, `edges_naming_a_node 10`, every capsule's own root verifies, every run
+with two capsules is joined by `exact` links, and all seven clients exit 0. Three of the rows exist to keep the other
+four honest. The **second SDK** shows the seam is not tuned to one vendor's call shape. The **two concurrent calls**
+join to two *distinct* proxy spans, so a resolver that collapsed both onto the first span would fail the verdict. The
+**repeated call id** is a run-produced refusal rather than a fixture: the resolver returns `level: "call"` with no
+node-level edge, and `repeated_call_ids` proves the id really was repeated per capsule before the refusal is read as a
+pass — counting one call id across both tapes would always look like a duplicate, because the app's tape and the proxy's
+tape each record it once.
+
+What it does not show: a Node client still cannot produce a node-level edge (`api.run` has no Node equivalent); shape (b)
+of `docs/node-edges.md` and a launcher-owned process span are proposals; and this artefact is **one Linux host** — CI runs
+the tests, not this harness, so macOS has no acceptance row.
 
 ## The fresh-install journey, measured (2026-11-18)
 
@@ -291,7 +337,7 @@ One line per §15.1 row: fs · N · warm-up · p50 / p95 / p99 · raw JSON.
 
 ## Deviations applied (DEVIATIONS.md) and held findings (F#)
 
-The defect list (seed → invariant → cause → fix → test) lives in `docs/defects.md` — sixty-seven entries. Six are
+The defect list (seed → invariant → cause → fix → test) lives in `docs/defects.md` — eighty-one entries, numbered to 81. Six are
 from this stretch of work: defects 23 and 24 (a seam that installed, reported `installed`, and captured nothing because both real SDKs speak
 `httpx2`; and a request frame that could say `model: null`), defect 25 (the Windows teardown fixture that probed
 every object in the collector and turned `anthropic`'s `LazyProxy` into nine teardown errors), defect 26 (open: on
@@ -338,7 +384,11 @@ row in the same commit.
    rule for **both** SDKs (unmodified `openai` 3.51.0 and `anthropic` 2.8.0 scripts killed mid-stream, recovered with
    counts that never exceed the mock provider's own tally, taking the same seam); P3-14 (a 100-call agent identical
    with and without the recorder, under three real breakages); P3-11's redaction (60-shape corpus at every split
-   offset, three modes, default policy, fail-closed, keyed pseudonyms); and the five §15.1 capture rows, measured.
+   offset, three modes, default policy, fail-closed, keyed pseudonyms — and, since `tests/test_redaction_every_sink.py`,
+   the 60-secret corpus asserted absent from **every artefact the product renders from a capsule**, not only the tape);
+   and the five §15.1 capture rows, measured. Each of those rows is now also quoted in `docs/gates/G-Capture.md` beside
+   the file or JSON it comes from; that file's verdicts are all still pending, because a builder may add evidence and
+   never a tick.
    What is left of P3-11 is **mask offsets** (DV-014), which belong with the viewer that would use them, and the gate
    itself needs a reviewer's counter-signature on `docs/gates/G-Capture.md`.
 

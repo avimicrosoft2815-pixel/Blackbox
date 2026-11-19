@@ -30,6 +30,7 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
+from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
@@ -74,6 +75,60 @@ with api.run("answer"):
 print("sdk-nodes", reply.choices[0].message.content)
 '''
 
+ANTHROPIC_NODE_CLIENT = '''\
+import anthropic
+
+from blackbox import api
+
+client = anthropic.Anthropic()
+with api.run("answer-anthropic"):
+    reply = client.messages.create(model="claude-3-5-sonnet-latest", max_tokens=16,
+                                   messages=[{"role": "user", "content": "hi"}])
+print("anthropic-nodes", reply.content[0].text)
+'''
+
+CONCURRENT_NODE_CLIENT = '''\
+import asyncio
+
+import openai
+
+from blackbox import api
+
+
+async def one(name: str) -> None:
+    client = openai.AsyncOpenAI()
+    with api.run(name):
+        reply = await client.chat.completions.create(model="gpt-4o-mini",
+                                                     messages=[{"role": "user", "content": name}])
+        print("concurrent", name, reply.choices[0].message.content)
+
+
+async def main() -> None:
+    await asyncio.gather(one("first"), one("second"))
+
+
+asyncio.run(main())
+'''
+
+DUPLICATE_ID_CLIENT = '''\
+"""A client that reuses one call id twice: the refusal path, produced by a real client.
+
+The seam mints its own id per request, so this cannot happen through the SDK seam; it can happen when an app talks to the
+proxy itself, or wraps a client this build does not instrument. Both requests are recorded, the id appears twice on the
+proxy's tape, and the app side has no node at all, so the graph must stay below node level.
+"""
+import json, os, urllib.request
+
+base = os.environ["OPENAI_BASE_URL"].rstrip("/")
+payload = json.dumps({"model": "gpt-4o-mini", "messages": [{"role": "user", "content": "hi"}]}).encode()
+for index in range(2):
+    request = urllib.request.Request(base + "/chat/completions", method="POST", data=payload,
+                                     headers={"content-type": "application/json",
+                                              "x-blackbox-call": "duplicate-id", "x-blackbox-run": "r_dup"})
+    with urllib.request.urlopen(request) as response:
+        print("duplicate", index, json.loads(response.read())["choices"][0]["message"]["content"])
+'''
+
 NODE_CLIENT = '''\
 const http = require('http');
 const base = new URL(process.env.OPENAI_BASE_URL);
@@ -98,6 +153,19 @@ class Upstream(BaseHTTPRequestHandler):
     def do_POST(self):
         length = int(self.headers.get("content-length") or 0)
         self.rfile.read(length)
+        if self.path.rstrip("/").endswith("/v1/messages"):
+            # The anthropic client parses its own message shape, so an OpenAI-shaped body would fail in the *client*
+            # and tell us nothing about the recorder. The stand-in answers each SDK in the shape that SDK reads.
+            payload = json.dumps({"id": "msg_accept", "type": "message", "role": "assistant",
+                                  "model": "claude-3-5-sonnet-latest",
+                                  "content": [{"type": "text", "text": "ok"}], "stop_reason": "end_turn",
+                                  "usage": {"input_tokens": 3, "output_tokens": 1}}).encode()
+            self.send_response(200)
+            self.send_header("content-type", "application/json")
+            self.send_header("content-length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+            return
         body = json.dumps({
             "id": "chatcmpl-accept", "object": "chat.completion",
             "choices": [{"index": 0, "message": {"role": "assistant", "content": "ok"}, "finish_reason": "stop"}],
@@ -143,6 +211,23 @@ def _has_openai() -> bool:
     return True
 
 
+def _has_anthropic() -> bool:
+    try:
+        import anthropic  # noqa: F401
+    except Exception:
+        return False
+    return True
+
+
+def _anthropic_version() -> str | None:
+    try:
+        import anthropic
+
+        return getattr(anthropic, "__version__", None)
+    except Exception:
+        return None
+
+
 def _openai_version() -> str | None:
     try:
         import openai
@@ -150,6 +235,39 @@ def _openai_version() -> str | None:
         return getattr(openai, "__version__", None)
     except Exception:
         return None
+
+
+def _repeated_per_capsule(capsules: list[dict]) -> dict[str, int]:
+    """Each id one *writer* recorded more than once, with the largest count seen on a single capsule.
+
+    Counting across a run would be wrong: the app's tape and the proxy's tape each record the same call once, so every
+    call would look repeated. What the resolver refuses is an id repeated on **one side**.
+    """
+    worst: dict[str, int] = {}
+    for capsule in capsules:
+        counts: dict[str, int] = {}
+        for value in capsule["call_ids"]:
+            counts[value] = counts.get(value, 0) + 1
+        for value, count in counts.items():
+            if count > 1:
+                worst[value] = max(worst.get(value, 0), count)
+    return worst
+
+
+def _call_ids(capsule: Any) -> list[str]:
+    """Every `call_id` this capsule recorded on a `MODEL_REQUEST`, read from its own `events.jsonl`."""
+    try:
+        events = [json.loads(line) for line in capsule.entry("events/events.jsonl").splitlines() if line.strip()]
+    except Exception:
+        return []
+    ids = []
+    for event in events:
+        if event.get("kind") != "MODEL_REQUEST":
+            continue
+        value = (event.get("attributes") or {}).get("bbx.model.call_id")
+        if isinstance(value, str) and value:
+            ids.append(value)
+    return ids
 
 
 def inspect(data_dir: Path) -> list[dict]:
@@ -163,6 +281,7 @@ def inspect(data_dir: Path) -> list[dict]:
             links = json.loads(capsule.entry("links.json"))
         except Exception as exc:                             # a missing or broken links.json is a finding, not a crash
             links = {"error": f"{type(exc).__name__}: {exc}"}
+        call_ids = _call_ids(capsule)
         out.append({
             "capsule": path.name,
             "root_ok": capsule.root_ok,
@@ -174,6 +293,7 @@ def inspect(data_dir: Path) -> list[dict]:
                                                           KIND_NAMES[KIND_MODEL_CHUNK],
                                                           KIND_NAMES[KIND_MODEL_RESPONSE])),
             "nodes": (manifest.get("counts") or {}).get("nodes"),
+            "call_ids": call_ids,
             "links": links.get("summary") or links,
             "link_pairs": [{"class": link.get("class"), "left_run": link.get("left_run"),
                             "right_run": link.get("right_run")} for link in (links.get("links") or [])],
@@ -221,15 +341,24 @@ def graphs(data_dir: Path) -> list[dict]:
     return out
 
 
-CLIENTS = {"python": PY_CLIENT, "node": NODE_CLIENT, "sdk": SDK_CLIENT, "sdk-nodes": SDK_NODE_CLIENT}
+CLIENTS = {"python": PY_CLIENT, "node": NODE_CLIENT, "sdk": SDK_CLIENT, "sdk-nodes": SDK_NODE_CLIENT,
+           "anthropic-nodes": ANTHROPIC_NODE_CLIENT, "concurrent-nodes": CONCURRENT_NODE_CLIENT,
+           "duplicate-id": DUPLICATE_ID_CLIENT}
 
 
-def run_client(work: Path, data: Path, upstream: str, name: str, cmd: list[str], client: Path) -> dict:
+def run_client(work: Path, data: Path, upstream: str, name: str, cmd: list[str], client: Path,
+               upstreams: list[str] | None = None) -> dict:
     client.write_text(CLIENTS[name], encoding="utf-8")
-    argv = [sys.executable, "-m", "blackbox", "run", "--data-dir", str(data),
-            "--upstream", f"openai={upstream}@/openai", "--", *cmd]
+    routes = upstreams or [f"openai={upstream}@/openai"]
+    argv = [sys.executable, "-m", "blackbox", "run", "--data-dir", str(data)]
+    for route in routes:
+        argv += ["--upstream", route]
+    argv += ["--", *cmd]
     # The SDK needs *a* key to build a client at all; the origin never checks it, and this is a loopback run.
-    env = dict(os.environ, PYTHONPATH=str(ROOT / "src"), OPENAI_API_KEY=os.environ.get("OPENAI_API_KEY", "sk-accept-local"))
+    # Both SDKs need *a* key to build a client at all; the stand-in origin never checks one, and this is a loopback run.
+    env = dict(os.environ, PYTHONPATH=str(ROOT / "src"),
+               OPENAI_API_KEY=os.environ.get("OPENAI_API_KEY", "sk-accept-local"),
+               ANTHROPIC_API_KEY=os.environ.get("ANTHROPIC_API_KEY", "sk-accept-local"))
     started = time.monotonic()
     proc = subprocess.run(argv, cwd=str(work), env=env, capture_output=True, text=True, timeout=180)
     capsules = inspect(data)
@@ -252,6 +381,11 @@ def run_client(work: Path, data: Path, upstream: str, name: str, cmd: list[str],
         "graphs": graph,
         "total_nodes": sum(g["graph_nodes"] for g in graph if "graph_nodes" in g),
         "exact_pairs": [pair for c in capsules for pair in c["link_pairs"] if pair.get("class") == "exact"],
+        # Ids this client wrote more than once, with the count: the case the resolver must refuse rather than tie-break.
+        # Per capsule, not per run: one id appears once on each tape by design (the app's record and the proxy's), so
+        # counting across the run would call every call a repeat. A repeat is one id twice on one writer's own tape.
+        "repeated_call_ids": _repeated_per_capsule(capsules),
+        "node_level_pairs": [pair for g in graph for pair in g.get("node_level_pairs") or []],
     }
 
 
@@ -273,9 +407,23 @@ def main(argv: list[str] | None = None) -> int:
             # The ticket's sentence is about *nodes*: an app that labels its work with `api.run` is the only kind
             # that can produce one, so the harness has to run one or the report cannot answer the question.
             cases.append(("sdk-nodes", [sys.executable, "sdk_node_client.py"], work / "sdk_node_client.py"))
+            # Two calls in flight at once, each inside its own `api.run` node: the concurrency case on a real
+            # client rather than only in `tests/test_launcher_proxy.py`.
+            cases.append(("concurrent-nodes", [sys.executable, "two_in_flight.py"], work / "two_in_flight.py"))
+        if _has_anthropic():
+            cases.append(("anthropic-nodes", [sys.executable, "anthropic_client.py"],
+                          work / "anthropic_client.py"))
+        # A client with no instrumentation that reuses one id: the refusal path, produced by a run rather than by
+        # a fixture. It needs no SDK, so it always runs.
+        cases.append(("duplicate-id", [sys.executable, "duplicate.py"], work / "duplicate.py"))
         for name, cmd, client in cases:
             data = work / f"data-{name}"
-            results.append(run_client(work, data, upstream_url, name, cmd, client))
+            routes = None
+            if name == "anthropic-nodes":
+                # The anthropic client reads ANTHROPIC_BASE_URL, so the child needs that route exported as well as
+                # OpenAI's; both point at the same stand-in origin.
+                routes = [f"openai={upstream_url}@/openai", f"anthropic={upstream_url}@/anthropic"]
+            results.append(run_client(work, data, upstream_url, name, cmd, client, routes))
     finally:
         upstream.shutdown()
 
@@ -285,7 +433,7 @@ def main(argv: list[str] | None = None) -> int:
         "question": "does `blackbox run -- node app.js` / `-- python app.py` yield one run with linked nodes?",
         "when": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "host": {"platform": platform.platform(), "python": platform.python_version(), "node": node_version,
-                 "openai": _openai_version()},
+                 "openai": _openai_version(), "anthropic": _anthropic_version()},
         "upstream": upstream_url,
         "results": results,
         "verdict": {
@@ -322,6 +470,16 @@ def main(argv: list[str] | None = None) -> int:
             "uninstrumented_clients_stay_below_node_level": all(
                 g.get("node_level_edges", 0) == 0
                 for r in results if r["client"] in ("python", "node") for g in r["graphs"]),
+            # A second real SDK, and two calls in flight at once: each call must be joined to its own proxy span.
+            "anthropic_client_has_node_level_edges": bool(next(
+                (r["node_level_pairs"] for r in results if r["client"] == "anthropic-nodes"), [])),
+            "concurrent_calls_join_two_distinct_spans": (
+                lambda pairs: len(pairs) >= 2 and len({(pair.get("to")) for pair in pairs}) >= 2)(
+                    next((r["node_level_pairs"] for r in results if r["client"] == "concurrent-nodes"), [])),
+            # The refusal, from a run: one id written twice, no node edge, nothing named.
+            "a_repeated_call_id_produces_no_node_edge": all(
+                r["repeated_call_ids"] and not r["node_level_pairs"]
+                for r in results if r["client"] == "duplicate-id"),
             "node_available": node is not None,
         },
     }
