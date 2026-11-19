@@ -1364,5 +1364,12 @@ report now includes `clients`, `connect_failures`, `upstream_holds`, `probe` and
 relaxed: 40 held upstream, a probe served from the middle of the burst, and the soft limit above 64 are still required.
 
 **Measured.** `tests/test_proxy_limits.py` is 7 tests, 0 failures, on three consecutive local runs, with the burst row
-taking 0.17 s here. What the macOS stall *was* is still unknown: the platform is not available in this sandbox, so the
-next macOS run of this test is the evidence, and it will now arrive with numbers attached.
+taking 0.17 s here. What the macOS stall *was* is still unknown: the platform is not available in this sandbox.
+
+**What the CI runs then showed, and what they did not.** The same test hung at the same 120 s watchdog in `d842397`'s
+py3.11/macos cell, then in `fa5d616`'s **PR** run — while `fa5d616`'s **push** run was ten of ten with that cell green. One
+commit, two runs, two outcomes: that is the strongest available evidence that the defect is a test that can hang rather
+than a product that hangs. With the repair in, `af6023f`'s push and PR runs are both ten of ten, macOS included. That does
+**not** prove the stall is gone — it is intermittent, and two green samples cannot show a race is fixed. What it does prove
+is the property this defect was about: the child now bounds every wait with one deadline, prints what it saw, and its
+timeout sits below the watchdog, so the next stall arrives as a failing assertion with numbers instead of a kill.
