@@ -14,7 +14,9 @@ on real instrumented clients, so what is left of B4 is the owner's tick and the 
 unmeasured (see B4).
 
 **This list is not the gate list.** `docs/gates/` holds one file per gate and a full gate review is the only authority
-on what can be ticked; B4, B5 and B6 are the entries *here* that are still open, and reading only this file would miss
+on what can be ticked — and `docs/gates/READINESS.md` is the builder's row-by-row index of the release checklist in
+`docs/BLACKBOX_FINAL_ARCHITECTURE_v1.1.md` §24/§24a (14 evidenced, 12 partial, 5 missing, 3 needing people, 2 needing
+another OS, as of 2026-11-19); B4, B5 and B6 are the entries *here* that are still open, and reading only this file would miss
 rows a release needs — `G-Capture` is still unsigned (its 60-secret row and its §15.1 table), and the release-machine
 rows need the host described in B6. So: "B4, B5 and B6" is a summary of this file, not a claim that nothing else is
 open.

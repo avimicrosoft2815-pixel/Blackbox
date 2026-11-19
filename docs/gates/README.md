@@ -30,6 +30,13 @@ file here, and `docs/STATUS.md` names the gate in its §10 header line.
 **Signed:** <reviewer> — <commit>
 ```
 
+## `READINESS.md` is the builder's index, not a gate file
+
+`docs/gates/READINESS.md` walks `docs/BLACKBOX_FINAL_ARCHITECTURE_v1.1.md` §24 and §24a row by row and says where the
+evidence for each row sits in the tree, or that none was found. It is written **by the builder**, it carries no verdict,
+and it cannot tick anything: rules 1 and 2 below still decide what a gate file is. Its purpose is to keep anyone from
+reading a short blocker list as a long gate list.
+
 ## Rules
 
 1. The builder may not tick its own gate. A gate file signed by the builder is void.

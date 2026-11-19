@@ -82,6 +82,9 @@ code is the worst outcome of the batch, and a pattern matching nothing is named 
 B8, `tests/test_verify_cli.py` (23, five new). What this file's blocker list still calls open is B4, B5 and B6 —
 which is a summary of `docs/RELEASE-BLOCKERS.md`, **not** the release gate list: `docs/gates/` is the authority,
 and B4's remaining part is an owner's tick while B6 and the macOS rows need a machine this sandbox is not.
+`docs/gates/READINESS.md` is the builder's row-by-row index of that checklist — of §24/§24a's 36 rows it finds 14
+evidenced, 12 partial, 5 with no code in the tree at all (the I8 index rebuild, the capsule attack corpus, the Go reader,
+the trigger rules and the serverless wrapper), 3 needing people and 2 needing another OS.
 
 Suite: **Total: 1261 tests** — 1260 pass here and 1 is skipped on POSIX by name
 (`test_an_open_view_blocks_the_unlink_only_on_windows`: POSIX permits unlinking a file another fd still holds, so
