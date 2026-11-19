@@ -1373,3 +1373,82 @@ than a product that hangs. With the repair in, `af6023f`'s push and PR runs are 
 **not** prove the stall is gone — it is intermittent, and two green samples cannot show a race is fixed. What it does prove
 is the property this defect was about: the child now bounds every wait with one deadline, prints what it saw, and its
 timeout sits below the watchdog, so the next stall arrives as a failing assertion with numbers instead of a kill.
+
+## Defect 83 — a hostile manifest reached the reader as a Python exception, not as a code (2026-11-19, P4-04)
+
+**Found by** writing the attack corpus rather than reading the validator. Two capsules got past `read_capsule`'s
+promise that a hostile capsule is refused **with a code**:
+
+* `manifest.json` = `[]`, `"x"` or `null` — valid JSON, so `json.loads` returned a list, a string or `None`, and the
+  `.get("format")` on the next line raised **`AttributeError`**. `blackbox verify` printed
+  `cannot read …: AttributeError: 'list' object has no attribute 'get'` and exited 2: the right exit code with the wrong
+  reason, and nothing a user could look up.
+* `manifest.json` nested 20 000 deep — valid JSON, and `json.loads` raised **`RecursionError`** out of the reader. The
+  same shape of failure: a Python exception where the format's table says `BBX-E407`.
+
+**Cause.** The manifest path assumed its input had the shape the code needed. `cap/manifest.validate` already refuses a
+non-object (its `isinstance` guard was marked "unreachable, `read_capsule` parses JSON"); the caller had no such guard,
+so the check that exists was never reached.
+
+**Fix.** `read_capsule` catches `RecursionError` alongside the decode errors, and refuses a non-object manifest with
+`BBX-E407` **before** any `.get`. The validator's own guard is now reachable rather than ornamental.
+
+**Test.** `tests/test_capsule_attacks.py`, the param case `manifest that is not an object` (six bodies including the two
+above), plus a CLI-level case asserting that `blackbox verify` prints `BBX-E407` and never `AttributeError`.
+
+**Also added in the same corpus**, because writing the corpus is what a corpus is for: `BBX-E406` for an encrypted or
+bzip2 member (previously decodable), `BBX-E403` for a symlink/device/fifo/socket member (previously accepted, harmless
+because nothing is extracted, and still a capsule pretending to be a filesystem), `BBX-E408` for a manifest whose
+`derived_parts` names an entry the archive does not carry, and a bounded per-entry read (`_read_entry`) that is the
+§13.4 check-9 counter — a second net behind `zipfile`'s own declared-size bound, tested against a lying archive because a
+real one cannot reach the branch.
+
+## Defect 84 — a test asserted a machine-wide invariant inside a shared window (2026-11-19, P4-01)
+
+**Symptom.** `test_launcher_attach.py::test_the_temp_dir_is_removed_even_when_the_child_is_killed` failed in a full-suite
+run — and only there: it passed 3/3 on its own, 2/2 with the four other launcher files in one process, and again in the
+next full run. The assertion that failed was `_sdk_dirs() == before`, where `_sdk_dirs()` globs **the machine's** temp
+directory for `blackbox-sdk-*`.
+
+**What actually held.** Every claim about the thing under test was true in the failing run: `exit_code` was the kill
+code, `result.sdk["removed"] is True`, and the launcher's own `site_dir` did not exist. The directory the assertion
+tripped over (`/tmp/blackbox-sdk-or5c5xmy`) was gone by the time the run ended — it belonged to a launch that was still
+in flight in another process, which removed its own directory a moment later.
+
+**Measured.** Instrumenting `tempfile.mkdtemp`/`shutil.rmtree` for a whole suite run: 41 `blackbox-sdk-*` directories
+created in the pytest process, 41 removed, **0 orphans**. The litter the assertion feared is not what it found.
+
+**Fix.** The three tests that asserted `== before` now call `_no_new_sdk_dirs(before)`, which waits up to 3 s for the
+machine to settle and then asks whether anything *remained*. A real leak does not clean itself up: it still fails. What
+changed is that a concurrent process's short-lived directory is no longer this test's failure.
+
+**Not fixed, because it is not a defect:** the launcher's own cleanup path. `cleanup_sdk` keeps the path and reports
+`removed`, so "where it was, and whether it is gone" stays checkable afterwards.
+
+## Defect 85 — the format document was not enough to read the format (2026-11-19, P4-12)
+
+**Found by** writing `tools/readers/bbx-read.mjs` from `docs/format.md` alone. Three places cost real time, and each is a
+place where a second implementation would have gone wrong in the same way:
+
+1. **§4's table puts the trailer at the wrong offset.** The rows read `48+payload_len | 4 | BBXT` and
+   `52+payload_len | 4 | tail_len`, but the frame's payload is zero-padded to a multiple of 8 and the write order is
+   `payload+padding → trailer → header`, so the trailer is the frame's **last 8 bytes**. The first real frame a reader
+   sees is 80 B with a 21 B payload: `48 + 21 = 69`, where the table says the trailer starts, and `80 - 8 = 72`, where
+   it is. The document now says so, with the arithmetic.
+2. **§8.1 never names the manifest's identity values.** `format` is the string `bbx.capsule` and `format_version` is the
+   integer `0`; a reader that assumed `bbx` and `1` refused a capsule this build writes, and one that assumed nothing
+   could not tell a newer writer from a corrupt file. The values are now in §8.1, with the rule that a reader refuses a
+   different format or a higher version as `BBX-E407`.
+3. **§8.1 does not specify `INTEGRITY.sha256`.** The line format (64 lower-case hex, two spaces, the name as it appears
+   in the archive, `LF`, sorted, final newline) and the fact that `manifest.integrity.entries` counts **all** members —
+   not the lines — are both written down now. A reader that had assumed "entries = lines" was off by two.
+
+**Also amended:** §5's segment header checksum was described as "header checksum (profile)" without naming the
+function. It is CRC-32/ISO-HDLC over bytes `[0, 96)`, and the Node reader now verifies it on every segment.
+
+**What this defect says about the others.** Every one of these was invisible from inside the Python implementation,
+because the Python reader does not consult the document — it *is* the document. `tests/test_independent_reader.py`
+(16 tests) now holds them together: same entries, same root, same frames, same refusal codes on ten hostile inputs, and
+one disagreement about severity that turned out to be a disagreement about design — a bad root is exit 4 with a reason
+in the Node reader and `root_ok: false` on a capsule that still opens in the Python one, which is what a user with a
+drifted file actually needs.

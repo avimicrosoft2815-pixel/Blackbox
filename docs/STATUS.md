@@ -86,7 +86,7 @@ and B4's remaining part is an owner's tick while B6 and the macOS rows need a ma
 evidenced, 12 partial, 5 with no code in the tree at all (the I8 index rebuild, the capsule attack corpus, the Go reader,
 the trigger rules and the serverless wrapper), 3 needing people and 2 needing another OS.
 
-Suite: **Total: 1261 tests** — 1260 pass here and 1 is skipped on POSIX by name
+Suite: **Total: 1307 tests** — 1306 pass here and 1 is skipped on POSIX by name
 (`test_an_open_view_blocks_the_unlink_only_on_windows`: POSIX permits unlinking a file another fd still holds, so
 the open-view case exists only on Windows). The three new ones are `tests/test_redaction_every_sink.py`, the corpus
 against every artefact the product renders (this section's evidence). Measured through `--junitxml` because `pytest -q`

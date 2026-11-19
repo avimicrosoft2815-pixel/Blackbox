@@ -23,6 +23,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 import pytest
@@ -71,6 +72,24 @@ def _env(**extra: str) -> dict[str, str]:
 def _sdk_dirs() -> set[str]:
     root = tempfile.gettempdir()
     return {str(p) for p in Path(root).glob("blackbox-sdk-*")}
+
+
+def _no_new_sdk_dirs(before: set[str], *, timeout: float = 3.0) -> set[str]:
+    """Directories that appeared and did **not** go away.
+
+    The temp directory is the machine's, not this test's: a suite that also runs the CLI in a child process can have a
+    launch in flight in another process at the moment this one looks, and that launch will remove its own directory a
+    moment later. Asserting `== before` once, at one instant, made that a failure of *this* test — observed on
+    2026-11-19 under full-suite load (defect 84), where the directory the assertion tripped over was gone by the time
+    the run ended. What the test means is "nothing this launcher left is still there", so it waits for the machine to
+    settle and then asks: a real leak does not clean itself up, and still fails.
+    """
+    deadline = time.monotonic() + timeout
+    extra = _sdk_dirs() - before
+    while extra and time.monotonic() < deadline:
+        time.sleep(0.05)
+        extra = _sdk_dirs() - before
+    return extra
 
 
 # A child that dies as hard as the platform allows. Windows has no `SIGKILL` (accessing it is an `AttributeError`,
@@ -131,7 +150,7 @@ def test_sitecustomize_installs_the_capture_layer_without_the_application_import
     # ... and the child left a tape of its own, which is the observable consequence on disk
     entries = recovery.discover.discover(str(data_dir))
     assert len(entries) >= 2, "expected the launcher's tape and the child's, got " + repr([e.writer_uuid for e in entries])
-    assert _sdk_dirs() == before, "a temporary site directory was left behind"
+    assert _no_new_sdk_dirs(before) == set(), "a temporary site directory was left behind"
 
 
 def test_nothing_of_the_auto_import_survives_the_run(tmp_path):
@@ -143,7 +162,7 @@ def test_nothing_of_the_auto_import_survives_the_run(tmp_path):
     site_dir = result.sdk["site_dir"]
     assert site_dir is not None and not Path(site_dir).exists(), f"{site_dir} outlived the child"
     assert result.sdk.get("removed") is True
-    assert _sdk_dirs() == before
+    assert _no_new_sdk_dirs(before) == set()
     # Nothing was written into the interpreter that ran the child: the package root is untouched and read-only to us.
     package_root = Path(result.sdk["package_root"])
     assert not list(package_root.glob("*.pth")), "the launcher must never write a .pth beside the package"
@@ -165,7 +184,7 @@ def test_the_temp_dir_is_removed_even_when_the_child_is_killed(tmp_path):
     assert result.exit_code != 0, "a killed child must not report success"
     assert result.sdk["removed"] is True, result.sdk.get("cleanup_error")
     assert not Path(result.sdk["site_dir"]).exists()
-    assert _sdk_dirs() == before
+    assert _no_new_sdk_dirs(before) == set()
 
 
 def test_an_existing_sitecustomize_is_chained_not_replaced(tmp_path):
