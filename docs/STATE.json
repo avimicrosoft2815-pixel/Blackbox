@@ -387,7 +387,7 @@
   },
   "ci": {
     "last_green_commit": "af6023f",
-    "note": "`af6023f` is still the last **ten of ten** commit (both runs). `0427242` is Linux 3/3 and Windows 3/3 with every macOS cell cancelled at 0 steps for runner capacity — the Windows cells passing is the new fact, since `47ecb8c` was 2/3 there (defect 86). A cancelled cell is never counted as a pass."
+    "note": "`af6023f` remains the last **ten of ten** commit (both runs). `6674ab8`/`1ec8be9` are **Linux 3/3 and Windows 3/3**, with all three macOS cells cancelled for runner capacity — a cancelled cell is never a pass, and macOS stays unmeasured."
   },
   "desktop": {
     "command": "blackbox desktop [path]",

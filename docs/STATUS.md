@@ -249,6 +249,7 @@ tested, the pixels are not. `docs/desktop.md` carries the platform matrix and sa
 
 | ref | docs | Ubuntu | Windows | macOS |
 |---|---|---|---|---|
+| branch `6674ab8`, `1ec8be9` (desktop app + packaging) | green | **3/3 green** — including the job that builds the `.deb` and runs the installed launcher from an extracted tree | **3/3 green** — the suite runs on Windows, the desktop package test skips there by name (no `dpkg-deb`) | **queued, then not acquired**: the three macOS cells sat in the runner queue and were cancelled for capacity; unmeasured |
 | branch `0427242` (runs 44534156643 push, 44534172473 PR) | green | **3/3 green** | **3/3 green** — both Windows repairs held (defect 86) | **not measured**: all three cells cancelled / "not acquired by Runner of type hosted" (capacity). The push run's overall conclusion is `failure` for that reason alone |
 | branch `47ecb8c` (runs 44532577231 push, 44532588901 PR) | green | **3/3 green** | **2/3** — py3.11 failed on two test-shaped assumptions (defect 86, fixed in `0427242`) | 1/3 green, 2 cancelled at 0 steps — unmeasured |
 | `main` `f4a9abb` (run 44400312163) | green | 3/3 green | 3/3 green | **3/3 cancelled at 0 steps** — "not acquired by Runner of type hosted". Unmeasured, not passed |
