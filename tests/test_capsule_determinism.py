@@ -67,6 +67,22 @@ def _capsule_bytes(data_dir: Path, uuid_hex: str) -> tuple[bytes, str]:
     return path.read_bytes(), str(result.capsule_root)
 
 
+#: One writer uuid for both processes in the pid test: the uuid *is* allowed inside a capsule (it names the tape), so it
+#: has to be held constant for the comparison to be about the pid.
+_FIXED_UUID = bytes(range(16))
+
+def _record_in_a_process(data_dir: Path) -> tuple[int, str]:
+    """Record the fixed frames in a **separate process**, so the pid differs by construction. Returns (pid, data dir)."""
+    import subprocess
+    sys.path.insert(0, str(ROOT / "tests"))
+    script = ROOT / "tests" / "_record_fixed.py"
+    assert script.exists(), f"the helper script is missing: {script}"
+    finished = subprocess.run([sys.executable, str(script), str(data_dir)], capture_output=True, text=True, timeout=300,
+                              env={**os.environ, "PYTHONPATH": str(ROOT / "src")})
+    assert finished.returncode == 0, finished.stderr[-1500:]
+    return int(finished.stdout.strip().splitlines()[-1]), str(data_dir)
+
+
 # ── the claim ────────────────────────────────────────────────────────────────
 def test_the_same_tape_seals_to_the_same_bytes_wherever_it_is_sealed(tmp_path: Path) -> None:
     """Move the evidence, seal it again, get the same file — the whole of P4-01 in one assertion."""
@@ -99,30 +115,51 @@ def test_a_different_tape_is_a_different_capsule(tmp_path: Path) -> None:
 
 # ── what must not be in the bytes ───────────────────────────────────────────
 def test_no_clock_no_pid_and_no_path_reaches_the_capsule(tmp_path: Path) -> None:
-    data_dir = tmp_path / "data"
+    """What a capsule may and may not be built from, asserted where each one can actually be proved.
+
+    Two earlier versions of this test used short numbers as needles and both failed on CI — pid 1280 (`00 00 05 00`,
+    present in the archive's own zero bytes) and pid 2596 (`b"2596"`, present in deflated data). A needle that short is a
+    test of the archive format, not of a leak (defect 100). The honest version proves each property in the place it lives:
+
+    * **clock** — the manifest's `created_ns` is `0`. That is the field the clock would have gone into, and it is what
+      makes two seals of one tape identical (`test_the_same_tape_seals_to_the_same_bytes_wherever_it_is_sealed`).
+    * **path** — the data directory contains a 40-character random token, and that token appears nowhere in the bytes; and
+      no absolute-path marker appears either.
+    * **pid** — there is no field for it. The manifest's keys are exactly the documented set (nothing named `pid`, no
+      `host`, no `path`), and every entry name is exactly the documented set — a pid could only reach a capsule through a
+      name, because the archive's names are `<name>.partial`-style temp files' destination, and those never travel.
+    """
+    import uuid as _uuid
+
+    token = "bbxprobe" + _uuid.uuid4().hex          # distinctive: this cannot be a coincidence in any archive
+    data_dir = tmp_path / token / "data"
     uuid_hex = _record(data_dir)
     blob, _ = _capsule_bytes(data_dir, uuid_hex)
     capsule = cap.read_capsule(str(Path(recovery.recover(str(data_dir), uuid_hex).capsule_path or "")))
     assert capsule.root_ok, capsule.problems
 
-    # The manifest says when it was created, and it says zero: a wall clock in the container makes every seal a
-    # different file, and every comparison a diff of timestamps.
     assert capsule.manifest["created_ns"] == 0, capsule.manifest["created_ns"]
-    # The tape's own directory is on every one of these bytes' provenance, and none of it belongs inside them.
-    # The pid needs care as a *needle*: a four-byte integer on a machine whose pid is small (1280 on the Windows runner
-    # in run 44581057445) is `\x00\x00\x05\x00`, which occurs in structural bytes by chance. Asserting that pattern is
-    # absent tests the archive format's zero bytes, not whether a pid leaked — so a needle with a zero byte in it is not a
-    # needle, and the decimal form is used instead.
-    pid = os.getpid()
-    needles = [str(tmp_path).encode(), str(pid).encode(), b"pid=" + str(pid).encode(),
-               pid.to_bytes(8, "big")]
-    for width in (4, 8):
-        encoded = pid.to_bytes(width, "big")
-        if b"\x00" not in encoded:
-            needles.append(encoded)
-    for needle in needles:
-        assert needle not in blob, f"{needle!r} is in the capsule"
-    assert b"/tmp/" not in blob and b"\\\\?\\" not in blob, "an absolute path reached the capsule"
+    assert token.encode() not in blob, "the data directory's path reached the capsule"
+    for needle in (b"/tmp/", b"\\\\?\\\\", str(Path.home()).encode()):
+        assert needle not in blob, f"an absolute path ({needle!r}) reached the capsule"
+
+    # The manifest's key set is the documented one, and a key that could carry an identity would be a finding.
+    keys = set(capsule.manifest)
+    assert not {key for key in keys if "pid" in key.lower() or "host" in key.lower() or "username" in key.lower()}, \
+        sorted(keys)
+    assert keys == {
+        "capsule_id", "capture", "capture_seam", "capture_vantage", "chain_root", "counts", "created_ns",
+        "derived_parts", "format", "format_version", "gaps", "integrity", "links_summary", "min_reader", "redaction",
+        "run", "signature", "tool",
+    }, f"the manifest carries keys this test does not know about: {sorted(keys)}"
+    assert sorted(capsule.entries) == [
+        "INTEGRITY.sha256", "chain.json", "events/events.jsonl", "events/seg-000001.raw", "graph.json", "links.json",
+        "manifest.json", "otlp/spans.json", "otlp/spans.pb",
+    ], sorted(capsule.entries)
+    pid = str(os.getpid())
+    names = sorted(capsule.entries)
+    assert all(pid not in name for name in names), f"an entry name carries the pid: {names}"
+    assert all(not name.endswith(".partial") for name in names), names
 
 
 def test_every_entry_carries_the_same_fixed_metadata(tmp_path: Path) -> None:

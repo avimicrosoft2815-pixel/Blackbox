@@ -1733,9 +1733,16 @@ bytes, appears nowhere in a capsule. On that runner the pid was 1280, so the "ne
 archive contains by coincidence. The test was asserting the absence of a byte pattern the format itself produces, not the
 absence of a pid.
 
-**Fixed** by refusing to use a needle that contains a zero byte: the decimal form (`1280`), the eight-byte form and a
-`pid=` prefix are always checked, and the four-byte form only when it is distinctive. The wall-clock half of the same test
-(`manifest.created_ns == 0`) is untouched and is the part that actually proves no clock leaks.
+**Repaired three times, which is the honest history.** First by refusing a needle with a zero byte in it; that failed
+again on Ubuntu `py3.11` at `b949e62` with `b"2596" is in the capsule` — four decimal digits occur inside deflated data by
+chance, and 11 KB of archive has room for several. Then by trying the only needle that could not collide — the same frames
+recorded by two *different processes*, which must produce identical capsules — and that is impossible for a reason worth
+knowing: `CHAIN` and `SEG_END` frames carry real `wall_ns`/`mono_ns`, so two recordings are never byte-identical and no
+capsule can be, whatever the pid. The test now proves each property where it lives: `created_ns == 0` for the clock; a
+40-character random token in the data directory's path for the path; and for the pid, the manifest's exact key set and the
+archive's exact entry names — there is no field for a pid, and entry names are the only other place it could travel.
+`test_the_same_tape_seals_to_the_same_bytes_wherever_it_is_sealed` remains the byte-identity proof; it copies the tape,
+so the clocks are the same by construction.
 
 ## Defect 101 — six concurrent recoverers crashed on Windows instead of electing a winner (2026-11-16, CI)
 
