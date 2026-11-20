@@ -40,6 +40,12 @@ Four things landed after the packs were first written, and none of them changes 
   which half was slow.
 * Defect 116 stayed open on purpose: a Windows path reached the CLI as `D`, the cause is unsettled, and the workflow now
   avoids the shell boundary rather than asserting a diagnosis.
+* **The recovery claim is published whole** (defect 101, update 3): the lock was created empty and written afterwards, so a
+  peer could read nothing, judge it stale and take a live claim — which is how `44820329776` produced two recoverers for one
+  run. It is now written to a temporary file and published with `os.link`, and two tests fail against the old code.
+* **Defect 118 and defect 119 are diagnostics, not fixes**: on macOS a stall dump has twice held one thread, and one killed
+  `curl` run reported no node statuses. Neither could be reproduced here; both failure messages now carry the numbers that
+  would name the cause, and `docs/limitations.md` states the macOS stall-dump limitation where a user reads limitations.
 
 ## What none of these packs can contain
 
