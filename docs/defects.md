@@ -2212,3 +2212,26 @@ still fails on a slow refusal, and now it fails with something a reader can act 
 **What would settle it:** the next red cell on Windows, read against that second number; and, if the reader is implicated,
 a profile of `read_capsule` over a 5 001-entry archive on Windows (`cProfile`, cold and warm) which this environment cannot
 produce because it has no Windows and no 5 001-entry capsule large enough to be interesting on Linux.
+## Defect 118 — the stall dump showed one deadlocked thread on macOS, where the test needs two (2026-11-20, CI, open)
+
+**What happened.** `44818156775`'s `py3.12 / macos-latest` cell failed
+`tests/test_launcher.py::test_a_stalled_child_is_detected_and_dumps_its_stacks` with "both deadlocked threads must
+appear". The stall itself was detected, the `stall.json` fields were right, and the dump existed and named at least one
+thread — so the watchdog, the signal and `faulthandler.register(..., all_threads=True)` all did their part.
+
+**What is known.** The child starts two threads that deadlock on nested locks about 50 ms in; the dump is requested 600 ms
+after the last commit, i.e. long after both threads exist. The test read the dump as soon as the substring "Thread"
+appeared *and then read it once*, so a dump caught between the first and second heading would produce exactly this
+failure. On this machine (Linux) the test passes repeatedly, including under `--count`-style repetition.
+
+**What is not known.** Whether the macOS dump was truncated by the reader or whether the writer really emitted one
+thread: `faulthandler` writes the headings sequentially and a reader can observe the file in between, but nothing here can
+reproduce macOS timing, and the annotation keeps only the failure line, not the dump.
+
+**What changed.** The test now waits for a *settled* dump — two consecutive reads of the same size, with the deadline
+raised to 5 s — before asserting. The assertion itself is unchanged (`>= 2` thread headings, and the failure message now
+carries the dump it saw). If it recurs, the reader-side explanation is gone and the dump is the next thing to read; that is
+the point of keeping the text in the message.
+
+**What would settle it:** the next macOS occurrence's annotation, which now contains the beginning of the dump, and a
+macOS machine running the test in a loop.

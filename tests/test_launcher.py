@@ -98,12 +98,21 @@ def test_a_stalled_child_is_detected_and_dumps_its_stacks(tmp_path):
     assert stall["pid"] == result.pid and stall["stall_ms"] == 600
     assert stall["last_seq"] is not None
     dump = Path(data) / "stall_tb.txt"
-    deadline = time.time() + 3.0
-    while time.time() < deadline and (not dump.exists() or "Thread" not in dump.read_text()):
+    # Wait for a *settled* dump, not for the first substring that matches. The child writes the headings one after
+    # another, so a reader that stops at the first "Thread" can catch the file between two of them and count one thread —
+    # which is what `py3.12 / macos-latest` did at `100185d` (defect 118). Two consecutive reads of the same size is a
+    # cheap and honest definition of "the writer has stopped"; the deadline keeps a hung child from hanging the test.
+    deadline = time.time() + 5.0
+    text, previous = "", -1
+    while time.time() < deadline:
+        if dump.exists():
+            text = dump.read_text()
+            if "Thread 0x" in text and len(text) == previous:
+                break
+            previous = len(text)
         time.sleep(0.05)
-    text = dump.read_text() if dump.exists() else ""
     assert "Thread 0x" in text, f"no thread stacks in {dump}: {text[:400]!r}"
-    assert text.count("Thread 0x") >= 2, "both deadlocked threads must appear"
+    assert text.count("Thread 0x") >= 2, f"both deadlocked threads must appear: {text[:400]!r}"
     # the run is still recovered, and still on the launcher's exit path
     assert result.recovered or result.recovery_error is None
 
