@@ -132,8 +132,16 @@ jobs:
             Write-Host "::error::the run left no capsule in $env:BLACKBOX_HOME"
             exit 1
           }
-          $paths = $capsules | ForEach-Object { $_.FullName }
-          $verifyOut = & $py -c $boot verify @paths 2>&1 | Out-String
+
+          # The capsule paths are found *inside* Python rather than passed through PowerShell. The first attempt passed
+          # `D:\a\...\x.bbx` as an argument and the CLI received `D`: the drive letter was cut at the colon somewhere
+          # between this script and the child. Whether that is PowerShell's native-argument handling or something in the
+          # CLI could not be settled from this environment, so the workflow avoids the question instead of guessing —
+          # and the open question is recorded in docs/desktop.md rather than assumed away.
+          $verify = "import glob, sys; sys.path[:0] = [r'$site']; from blackbox.__main__ import main; " +
+                    "paths = sorted(glob.glob(r'$env:BLACKBOX_HOME\**\*.bbx', recursive=True)); " +
+                    "print('verifying:', *paths); raise SystemExit(main(['verify'] + paths))"
+          $verifyOut = & $py -c $verify 2>&1 | Out-String
           $verifyExit = $LASTEXITCODE
           Write-Host "verify exit: $verifyExit"
           Write-Host $verifyOut

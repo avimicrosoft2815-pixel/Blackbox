@@ -2132,3 +2132,27 @@ What that buys the next occurrence: 114's explanation is now arithmetic — 20 0
 `FlushFileBuffers` plus a Defender scan per close is where NTFS and a loaded runner differ from this host — and 113's is
 the opposite, a budget three orders of magnitude past the work, which points at a hung connect rather than a slow one.
 Neither is called resolved: both need a Windows runner, and the entries say exactly which command to run there.
+## Defect 116 — on a Windows runner the CLI received `D` where the script passed `D:\a\…\x.bbx` (2026-11-20, CI, open)
+
+**What happened.** The Windows packaging workflow's smoke step runs `blackbox verify <capsule>` against a capsule a real
+run had just sealed. It exited 2 with
+`blackbox verify: cannot read D: FileNotFoundError: [WinError 2] The system cannot find the file specified: 'D'` — the
+path had been cut at the drive letter's colon, so the CLI was handed the one-character string `D`.
+
+**What is known.** The staging and doctor steps passed on the same runner: the embedded interpreter runs, the package
+imports, the probes answer. So this is not "the CLI is broken on Windows". The path was produced by
+`(Get-ChildItem …).FullName` and passed as `& $py -c $boot verify @paths` from a PowerShell step.
+
+**What is not known.** Where the cut happened: PowerShell's native argument passing, the `-c` bootstrap string, or
+`blackbox verify`'s own argument handling. This environment has no Windows, no PowerShell and no wine, so any of the three
+would be a guess, and a guess dressed as a cause is worse than the open question.
+
+**Worked around, not fixed.** The workflow now finds the capsule paths *inside* Python (`glob` over the data directory) and
+calls `main(['verify'] + paths)` there, so no path crosses a shell boundary. That makes the row CI-measurable again while
+leaving the question open.
+
+**What would settle it:** on a Windows machine,
+`python -c "import sys; print(sys.argv[1:])" D:\tmp\x.bbx` from PowerShell 5.1 and from pwsh 7, and
+`blackbox verify D:\tmp\x.bbx` typed at a `cmd` prompt. If the CLI alone refuses an absolute Windows path, it is ours and
+this becomes a bug in `cmd_verify`; if only the PowerShell invocation mangles it, it is the harness and the docs should say
+so. Either way the answer is one command on a machine with Windows.
