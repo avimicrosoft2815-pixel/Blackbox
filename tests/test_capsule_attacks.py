@@ -131,7 +131,19 @@ def test_check_2_bytes_that_are_not_a_zip_are_a_capsule_that_cannot_be_read(tmp_
 def test_check_2_more_entries_than_the_format_allows(tmp_path: Path) -> None:
     entries = [(f"events/part-{index:04d}.txt", b"x") for index in range(cap.MAX_ENTRIES + 1)]
     path = _write(tmp_path, entries, manifest=_manifest())
-    assert _reject(path, "BBX-E402") < BUDGET_MS
+    elapsed = _reject(path, "BBX-E402")
+    if elapsed >= BUDGET_MS:
+        # Defect 117: this one went red once on `py3.12 / windows-latest` with 133.2 ms against the 50 ms budget, and
+        # green on the next commit with the same test and the same reader. One sample is not a diagnosis, so the failure
+        # now carries the second measurement that tells "the filesystem was cold" from "the validator did real work":
+        # a re-read of the same file that is also over the bound means the reader, and one far under means the machine.
+        again = _reject(path, "BBX-E402")
+        raise AssertionError(
+            f"refusing {len(entries)} entries took {elapsed:.1f} ms, over the {BUDGET_MS:.0f} ms budget; "
+            f"the same file refused again in {again:.1f} ms ({path.stat().st_size} bytes, {sys.platform}). "
+            "A second reading far under the bound points at the filesystem or a scanner rather than at the validator; "
+            "the budget itself is unchanged either way."
+        )
 
 
 # ── §13.4 check 3: paths and member types ───────────────────────────────────────────────────────────────────────────

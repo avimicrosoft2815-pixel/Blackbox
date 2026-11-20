@@ -2156,3 +2156,27 @@ leaving the question open.
 `blackbox verify D:\tmp\x.bbx` typed at a `cmd` prompt. If the CLI alone refuses an absolute Windows path, it is ours and
 this becomes a bug in `cmd_verify`; if only the PowerShell invocation mangles it, it is the harness and the docs should say
 so. Either way the answer is one command on a machine with Windows.
+## Defect 117 — the 5 001-entry refusal took 133 ms on one Windows cell and 15 ms on the next commit (2026-11-20, open)
+
+**What happened.** `tests/test_capsule_attacks.py::test_check_2_more_entries_than_the_format_allows` failed on
+`py3.12 / windows-latest` at `8d1c1b6`: `assert 133.2285 < 50.0`. Every other cell of that run, and all eleven cells plus
+`docs` and `go-reader` at the next commit `133b0c3`, are green with the same reader and the same test.
+
+**What is known.** The test writes a zip with 5 001 members and times `cap.read_capsule`, which reaches the entry-count
+check by reading the central directory and refusing. The same corpus's other fourteen cases passed on that cell, including
+the 1 000:1 ratio bomb and the 20 000-deep manifest, so the reader was not slow in general on that runner. The bound is
+§13.4's 50 ms and it has been untouched since the corpus was written.
+
+**What is not known.** Whether 133 ms was the reader (5 001 `ZipInfo` objects built twice on an interpreter whose
+`zipfile` path is slower on Windows) or the machine (a Defender scan on a file just written, a stalled runner). One red
+sample followed by one green commit is not a diagnosis, and this repository has an explicit rule against treating a
+passing rerun as one.
+
+**What changed.** Only the failure's *message*, which now takes a second timed refusal of the same file and reports both
+numbers with the file's size and the platform. If the second reading is far under 50 ms the next occurrence names the
+machine; if it is also over, it names the reader. The budget, the fixture and the entry count are unchanged — the test
+still fails on a slow refusal, and now it fails with something a reader can act on.
+
+**What would settle it:** the next red cell on Windows, read against that second number; and, if the reader is implicated,
+a profile of `read_capsule` over a 5 001-entry archive on Windows (`cProfile`, cold and warm) which this environment cannot
+produce because it has no Windows and no 5 001-entry capsule large enough to be interesting on Linux.
