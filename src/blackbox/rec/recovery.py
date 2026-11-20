@@ -698,24 +698,61 @@ class Recovery:
         """
         perms_mod.private_dir(os.path.dirname(self.run_dir))      # `<data>/runs`
         perms_mod.private_dir(self.run_dir)
+        if self._publish_lock(lock_path, content):
+            return True
+        held = _read_json(lock_path)
+        if held and self._lock_is_live(held):
+            return False
+        try:
+            os.unlink(lock_path)                      # stale: a dead recoverer left it behind
+        except OSError:
+            return False                              # a live one still has it open: that is the race, not an error
+        return self._publish_lock(lock_path, content)
+
+    def _publish_lock(self, lock_path: str, content: bytes) -> bool:
+        """Create `lock_path` with `content` already in it, or say somebody else has it.
+
+        The first version created the file with `O_EXCL` and *then* wrote the content, which left a window in which the
+        lock existed and was empty. A peer arriving inside that window read nothing, concluded "no live holder" (the
+        staleness check cannot judge a file with no pid in it), unlinked the lock and took it — so two recoverers could
+        both own one run. That is the shape of the `8ba986e`-era failure and of `44820329776`'s
+        "2 recoverers each claimed to have done the work" on `py3.13 / ubuntu-latest`.
+
+        The fix is to write the bytes into a private temporary file first and publish it with `os.link`, which fails with
+        `EEXIST` when the target exists: a lock file is therefore never observable without its content, and exactly one
+        process wins. Filesystems without hard links (some network mounts) fall back to the in-place create, and the
+        docstring says so rather than pretending the stronger property holds there.
+        """
+        tmp = f"{lock_path}.tmp-{os.getpid()}-{time.monotonic_ns()}"
+        fd = _plat.open_fd(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        try:
+            _plat.pwrite(fd, memoryview(content), 0)
+            _plat.fdatasync(fd)
+        finally:
+            os.close(fd)
+        try:
+            try:
+                os.link(tmp, lock_path)
+            except FileExistsError:
+                return False
+            except OSError as exc:
+                if _lock_conflict(exc):
+                    return False
+                return self._create_lock_in_place(lock_path, content)
+            return True
+        finally:
+            with contextlib.suppress(OSError):
+                os.unlink(tmp)
+
+    @staticmethod
+    def _create_lock_in_place(lock_path: str, content: bytes) -> bool:
+        """The fallback for filesystems with no hard links: create, then write. Its window is documented, not hidden."""
         try:
             fd = _plat.open_fd(lock_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         except OSError as exc:
-            if not _lock_conflict(exc):
-                raise
-            held = _read_json(lock_path)
-            if held and self._lock_is_live(held):
+            if _lock_conflict(exc):
                 return False
-            try:
-                os.unlink(lock_path)                  # stale: a dead recoverer left it behind
-            except OSError:
-                return False                          # a live one still has it open: that is the race, not an error
-            try:
-                fd = _plat.open_fd(lock_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-            except OSError as again:
-                if _lock_conflict(again):
-                    return False                      # lost the race to another recoverer, which is fine
-                raise
+            raise
         try:
             _plat.pwrite(fd, memoryview(content), 0)
             _plat.fdatasync(fd)

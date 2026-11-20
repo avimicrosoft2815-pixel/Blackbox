@@ -1798,6 +1798,38 @@ modules whole. **Verified on Windows** at `1d42e0c`: the `py3.11`/`py3.12`/`py3.
 cells are green on both workflow runs of that commit, and the test that failed with "2 recoverers each claimed to have
 done the work" is the test they ran. Confirmed, not inferred — the fix is what those cells measured.
 
+**Update 3 (2026-11-20): the same sentence came back, from a second window, and it was ours.** `44820329776` — the
+`pull_request` run at `9ddd5c4`, while the `push` run of the *same* sha was green — failed
+`py3.13 / ubuntu-latest` with "2 recoverers each claimed to have done the work". The post-claim fix above closed the
+window where a loser claims *after* the winner archived. It did not close this one:
+
+```
+open(O_CREAT|O_EXCL)  →  [ file exists, empty ]  →  pwrite(claim)  →  fdatasync
+```
+
+A peer that arrives between the create and the write reads a lock file with no pid in it. `_lock_is_live` cannot judge a
+document that is not there, answers "nobody live", and the peer *unlinks a live claim* and takes it. Both processes then
+run every step of one incident: one capsule (the path is derived from the run id, so the second seal lands on the same
+name), two recoverers each reporting work. Nothing about that is a flake or a slow runner; it is a protocol hole whose
+window is microseconds wide, which is exactly why it needed the fast cells and six processes to show itself once.
+
+**Fixed** by publishing the lock whole: the claim is written to a private temporary file, `fdatasync`'d, and published
+with `os.link`, which fails with `EEXIST` when the target exists. A lock file is therefore never observable without its
+content, and exactly one claimant's link can succeed. Filesystems without hard links fall back to the in-place create, and
+the docstring says which property that fallback does not have instead of pretending.
+
+**Two tests, both of which fail against the old code** (`git stash` the fix and they are red):
+
+* `test_a_lock_is_never_observable_without_its_content` watches `os.link` itself — what it was handed must already be the
+  full document — then asserts a second claimant with a live holder is refused rather than stealing, and that no temporary
+  file is left behind;
+* `test_a_filesystem_without_hard_links_still_claims` makes `os.link` refuse with `EPERM` and asserts the fallback still
+  elects one winner.
+
+**Measured here:** the whole `tests/test_recovery_identity.py` 60 consecutive times, no failure; the six-process test alone
+120 consecutive times, no failure. That is not proof the race is gone — nothing in-process can prove it — but the window
+the failure needs no longer exists in the code path, and the test above fails if anyone reintroduces it.
+
 ## Defect 104 — the hung-test watchdog bounded a test that was long by design (2026-11-16, CI)
 
 The `py3.12 / windows-latest` cell dumped `test_250_invocations_with_random_failures_leave_no_open_run` past 120 s inside
