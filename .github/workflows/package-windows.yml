@@ -194,11 +194,22 @@ jobs:
           # `Start-Process -Wait` waits for the whole process *tree*, and Inno's setup leaves a helper behind, so the
           # fifth run sat here for eighteen minutes and would have been killed by the job timeout. `-PassThru` plus
           # `WaitForExit(ms)` waits for the setup itself, which is what has a result.
-          $installer = Start-Process -FilePath $setup -PassThru -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/LOG=$env:RUNNER_TEMP\install.log"
-          if (-not $installer.WaitForExit(300000)) {
-            Write-Host "::error::the installer did not finish within five minutes"
+          # LZMA2/max over a whole interpreter plus pythonnet and cffi is real work on a Defender-scanned runner, and the
+          # sixth run's five-minute bound was too short to tell "slow" from "stuck". Fifteen minutes, with the install
+          # log's tail in the annotation if it does not make it, so the next run answers the question instead of repeating
+          # it.
+          $logPath = "$env:RUNNER_TEMP\install.log"
+          $installer = Start-Process -FilePath $setup -PassThru -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/LOG=$logPath"
+          $finished = $installer.WaitForExit(900000)
+          if (-not $finished) {
+            $tail = ""
+            if (Test-Path $logPath) {
+              $tail = ((Get-Content $logPath -Tail 8) -join " | ")
+            }
+            Write-Host "::error::the installer did not finish within fifteen minutes; install log tail: $tail"
             exit 1
           }
+          Write-Host "installer finished in $([int]((Get-Date) - $installer.StartTime).TotalSeconds) s"
           Write-Host "installer exit code: $($installer.ExitCode)"
           if ($installer.ExitCode -ne 0) {
             Write-Host "::error::the installer exited $($installer.ExitCode); see the install log in the artefact"
