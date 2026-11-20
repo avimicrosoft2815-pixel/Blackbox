@@ -5,19 +5,19 @@ same table, so a code in a log line always has a next step attached to it.
 
 | Code | Meaning | What to do |
 |---|---|---|
-| `BBX-E100` | capture hook install failed | run `blackbox doctor --capture`; recording continues in safe mode |
+| `BBX-E100` | capture hook install failed | run `blackbox doctor --capture` to see which seam failed; recording continues in safe mode |
 | `BBX-E120` | unsupported filesystem for mmap mode | move the data dir to a local disk or use layout=ring |
 | `BBX-E130` | segment too small for the configured frame | raise segment_bytes (minimum 65536) |
 | `BBX-E131` | refusing to write a sparse segment | check free space and filesystem; see docs/format.md §5 |
 | `BBX-E132` | segment preallocation failed (ENOSPC/EDQUOT) | recording degraded, app unaffected; free space or lower segment_bytes |
-| `BBX-E133` | interrupted roll left an orphan segment | recovery adopts it automatically; `blackbox doctor --tape` shows the queue |
+| `BBX-E133` | interrupted roll left an orphan segment | recovery adopts it automatically; `blackbox doctor --tape` counts what is left |
 | `BBX-E140` | proxy: upstream not in allowlist | add `--upstream name=url` or fix the base URL path prefix |
 | `BBX-E141` | proxy: port in use | `--port 0` or stop the other process |
 | `BBX-E142` | proxy: upstream TLS verification failed | fix the certificate; `--insecure-upstream name` only for local servers |
 | `BBX-E143` | proxy: refused non-loopback bind | use `--bind-unsafe` only if you understand the exposure |
 | `BBX-E150` | hook adapter: tool settings file not found | run the tool once, or pass `--settings <path>` |
 | `BBX-E151` | hook adapter: unknown settings schema | upgrade blackbox; the adapter never writes what it cannot parse |
-| `BBX-E152` | hook inbox: fold failed (corrupt entry) | entry quarantined under inbox/.bad/; `doctor --hooks` |
+| `BBX-E152` | hook inbox: fold failed (corrupt entry) | entry quarantined under inbox/.bad/; `blackbox doctor --hooks` |
 | `BBX-E153` | hook ingest: stdin was not JSON | the tool's hook payload changed; see the adapter notes |
 | `BBX-E154` | retention blocked by a pin | run `blackbox ls --pinned` or raise the budget |
 | `BBX-E155` | invalid CBOR payload | a producer wrote a non-canonical or malformed payload |
@@ -28,7 +28,7 @@ same table, so a code in a log line always has a next step attached to it.
 | `BBX-E170` | trigger rule refused; nothing was recorded for it | name a built-in metric (or custom:<name>), a numeric threshold, an op from >=,>,==,<=,< and an action from mark,freeze,snapshot; see docs/triggers.md |
 | `BBX-E210` | writer is alive; recovery refused | stop the process or pass --force-if-dead |
 | `BBX-E211` | lease held by a reused pid (start time mismatch) | run `blackbox doctor --locks` |
-| `BBX-E220` | both head slots invalid | run `blackbox recover --full-scan` |
+| `BBX-E220` | both head slots invalid | keep the directory: the next `blackbox run` scans it, and `blackbox doctor --tape` counts what it finds |
 | `BBX-E221` | tape format newer than this reader | upgrade blackbox |
 | `BBX-E222` | meta checksum mismatch | quarantine the tape directory; do not delete it |
 | `BBX-E223` | chain break | run `blackbox verify` for the first discontinuity |

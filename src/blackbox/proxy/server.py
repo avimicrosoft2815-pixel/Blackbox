@@ -624,6 +624,16 @@ class ProxyServer:
         upstream_keeps = ("close" not in connection_hdr and upstream_version != "HTTP/1.0") or \
                          (upstream_version == "HTTP/1.0" and "keep-alive" in connection_hdr)
         keep = request.keep_alive and upstream_keeps
+        # An upstream body with no `content-length` and no chunked framing ends when the **upstream** closes the
+        # connection. The proxy cannot promise the client anything after that point, so it must not keep the client
+        # connection open — and it must not claim a framing it is not writing. Defect 109: the head said
+        # `Transfer-Encoding: chunked` over raw bytes, and `curl` refused the stream with "Malformed encoding found in
+        # chunked-encoding" while the SDK clients happened not to look. Measured on the mock provider, which streams
+        # exactly this shape.
+        upstream_chunked = any(k.lower() == "transfer-encoding" and "chunked" in v.lower() for k, v in headers)
+        upstream_length = any(k.lower() == "content-length" for k, _ in headers)
+        if status not in (204, 304) and not upstream_chunked and not upstream_length:
+            keep = False
         tally = _Tally()
         try:
             # The head goes out now, and the first body bytes go out with the relay's first flush: waiting to *coalesce*
@@ -794,10 +804,18 @@ class ProxyServer:
                 continue
             lines.append(f"{name}: {value}")
         declared = next((v for k, v in headers if k.lower() == "content-length"), None)
-        if declared is not None:
+        chunked = any(k.lower() == "transfer-encoding" and "chunked" in v.lower() for k, v in headers)
+        if status in (204, 304):
+            pass                                   # no body, so no framing: a `204` with chunked is a client's parse error
+        elif declared is not None:
             lines.append(f"Content-Length: {declared}")
-        else:
+        elif chunked:
             lines.append("Transfer-Encoding: chunked")
+        else:
+            # The body ends when this connection does, so the head cannot promise the client anything after it. The rule
+            # lives here as well as in the caller so that a future caller cannot re-introduce defect 109 by passing
+            # `keep=True` for a body with no framing.
+            keep = False
         lines.append("Connection: keep-alive" if keep else "Connection: close")
         return ("\r\n".join(lines) + "\r\n\r\n").encode("latin-1")
 

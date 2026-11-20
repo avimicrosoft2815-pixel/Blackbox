@@ -67,6 +67,32 @@ Expected: 3 passed in `test_day14_kill.py` on a POSIX host (skipped on Windows �
    `bench/results/2026-11-15-capture-overhead.json`.
 5. A reviewer's signature below, from a different model family or a fresh context, with the commands they ran.
 
+## 2026-11-20 — builder-side refresh from a rebuilt environment
+
+The environment was rebuilt from `pyproject.toml` with the versions `docs/SUPPORTED.md` pins (`pytest` 8.3.4,
+`hypothesis` 6.122.3, `httpx` 0.28.1, `openai` 3.51.0, `anthropic` 2.8.0), and the rows this gate depends on were run
+again rather than cited from a previous build:
+
+| Command | Result on 2026-11-20 (Debian 12, x86_64, CPython 3.11.2) |
+|---|---|
+| `pytest tests/test_day14_kill.py -q` | passes (POSIX; skipped on Windows, where there is no `SIGKILL`) |
+| `pytest tests/test_preflight.py -q` | passes |
+| `pytest tests/test_failopen.py tests/test_capture_failopen.py -q` | passes |
+| `pytest tests/test_redaction.py tests/test_redaction_every_sink.py -q` | passes, including the eleven sinks and the redaction-off control |
+| `pytest tests -q` | **1 558 collected, 0 failed, 2 skipped** |
+| `python bench/journey.py` | the seven-step user journey from a wheel in a fresh venv, all steps passed (`bench/results/2026-11-20-journey.json`) |
+
+Two fixes landed on this branch that touch the rows above, and a reviewer should read them before signing:
+
+* the proxy's response framing (defect 109) — a body with no length and no chunking is no longer answered with a chunked
+  head; `tests/proxy/test_response_framing.py` (5) and `tests/test_attach_curl_kill.py` (2) hold it;
+* the capsule's derived graph no longer uses the process clock (defect 110), so `verify` passes on a capsule recovered
+  from a killed run — the case this gate's day-14 row produces.
+
+**Still unsigned.** A builder may add evidence and may not tick (`docs/gates/README.md` rules 1–2). What a reviewer needs
+is one fresh clone of the pushed branch and the six commands above, plus a read of the §15.1 table against
+`bench/results/2026-11-15-capture-overhead.json`.
+
 ## Signature
 
 _(none — unsigned candidate)_

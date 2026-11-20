@@ -1,0 +1,103 @@
+{
+  "schema": "blackbox.outage-split/1",
+  "budget_ms": 100.0,
+  "n": 8,
+  "samples": [
+    {
+      "outage_ms": 20.6,
+      "rebind_ms": 0.0,
+      "dispatch_ms": 0.0,
+      "wake_late_ms": 0.0,
+      "unexplained_ms": 20.6,
+      "over_budget": false,
+      "rebind_share_of_outage": 0.0,
+      "label": "inside-budget"
+    },
+    {
+      "outage_ms": 18.5,
+      "rebind_ms": 0.0,
+      "dispatch_ms": 0.0,
+      "wake_late_ms": 0.0,
+      "unexplained_ms": 18.5,
+      "over_budget": false,
+      "rebind_share_of_outage": 0.0,
+      "label": "inside-budget"
+    },
+    {
+      "outage_ms": 19.3,
+      "rebind_ms": 0.0,
+      "dispatch_ms": 0.0,
+      "wake_late_ms": 0.0,
+      "unexplained_ms": 19.3,
+      "over_budget": false,
+      "rebind_share_of_outage": 0.0,
+      "label": "inside-budget"
+    },
+    {
+      "outage_ms": 15.0,
+      "rebind_ms": 16.0,
+      "dispatch_ms": 0.0,
+      "wake_late_ms": 0.0,
+      "unexplained_ms": 0.0,
+      "over_budget": false,
+      "rebind_share_of_outage": 1.0667,
+      "label": "inside-budget"
+    },
+    {
+      "outage_ms": 12.3,
+      "rebind_ms": 0.0,
+      "dispatch_ms": 0.0,
+      "wake_late_ms": 0.0,
+      "unexplained_ms": 12.3,
+      "over_budget": false,
+      "rebind_share_of_outage": 0.0,
+      "label": "inside-budget"
+    },
+    {
+      "outage_ms": 9.1,
+      "rebind_ms": 0.0,
+      "dispatch_ms": 0.0,
+      "wake_late_ms": 0.0,
+      "unexplained_ms": 9.1,
+      "over_budget": false,
+      "rebind_share_of_outage": 0.0,
+      "label": "inside-budget"
+    },
+    {
+      "outage_ms": 686.2,
+      "rebind_ms": 0.0,
+      "dispatch_ms": 0.0,
+      "wake_late_ms": 0.0,
+      "unexplained_ms": 686.2,
+      "over_budget": true,
+      "rebind_share_of_outage": 0.0,
+      "label": "not-ours:tick-or-loop"
+    },
+    {
+      "outage_ms": 20.1,
+      "rebind_ms": 15.0,
+      "dispatch_ms": 0.0,
+      "wake_late_ms": 0.0,
+      "unexplained_ms": 5.1,
+      "over_budget": false,
+      "rebind_share_of_outage": 0.7463,
+      "label": "inside-budget"
+    }
+  ],
+  "worst": {
+    "outage_ms": 686.2,
+    "rebind_ms": 0.0,
+    "dispatch_ms": 0.0,
+    "wake_late_ms": 0.0,
+    "unexplained_ms": 686.2,
+    "over_budget": true,
+    "rebind_share_of_outage": 0.0,
+    "label": "not-ours:tick-or-loop"
+  },
+  "over_budget": 1,
+  "labels": [
+    "inside-budget",
+    "not-ours:tick-or-loop"
+  ],
+  "verdict": "1 of 8 sample(s) over 100 ms; the worst put 0.0 % of its outage in the rebind"
+}

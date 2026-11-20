@@ -1,0 +1,361 @@
+{
+  "date": "2026-11-20",
+  "host": {
+    "platform": "Linux-6.1.158+-x86_64-with-glibc2.36",
+    "python": "3.11.2"
+  },
+  "journey": "install \u2192 attach \u2192 capture \u2192 diagnose \u2192 view \u2192 approve a repair \u2192 verify",
+  "provider": "a loopback origin standing in for OpenAI; the child is handed OPENAI_BASE_URL by the launcher and never names a real provider",
+  "steps": {
+    "1_install": {
+      "fresh_venv": {
+        "install": {
+          "argv": [
+            "/tmp/bbx-journey-5xvmsx_j/venv/bin/python",
+            "-m",
+            "pip",
+            "install",
+            "-q",
+            "/tmp/bbx-journey-5xvmsx_j/wheel/blackbox_recorder-0.1.0.dev0-py3-none-any.whl[capture,capture-sdks]"
+          ],
+          "exit_code": 0,
+          "seconds": 8.32,
+          "stderr": [],
+          "stdout": []
+        },
+        "venv": {
+          "argv": [
+            "/home/user/Blackbox/.venv/bin/python",
+            "-m",
+            "venv",
+            "/tmp/bbx-journey-5xvmsx_j/venv"
+          ],
+          "exit_code": 0,
+          "seconds": 3.17,
+          "stderr": [],
+          "stdout": []
+        },
+        "versions": {
+          "anthropic": "2.8.0",
+          "blackbox-recorder": "0.1.0.dev0",
+          "httpx": "0.28.1",
+          "openai": "3.51.0"
+        }
+      },
+      "wheel": {
+        "argv": [
+          "/home/user/Blackbox/.venv/bin/python",
+          "-m",
+          "pip",
+          "wheel",
+          ".",
+          "--no-deps",
+          "-w",
+          "/tmp/bbx-journey-5xvmsx_j/wheel"
+        ],
+        "exit_code": 0,
+        "seconds": 2.19,
+        "stderr": [
+          "          By 2027-Feb-18, you need to update your project and remove deprecated calls",
+          "          or your builds will no longer be supported.",
+          "  ",
+          "          See https://packaging.python.org/en/latest/guides/writing-pyproject-toml/#license for details.",
+          "          ********************************************************************************",
+          "  ",
+          "  !!",
+          "    corresp(dist, value, root_dir)"
+        ],
+        "stdout": [
+          "  Preparing metadata (pyproject.toml): started",
+          "  Preparing metadata (pyproject.toml): finished with status 'done'",
+          "Building wheels for collected packages: blackbox-recorder",
+          "  Building wheel for blackbox-recorder (pyproject.toml): started",
+          "  Building wheel for blackbox-recorder (pyproject.toml): finished with status 'done'",
+          "  Created wheel for blackbox-recorder: filename=blackbox_recorder-0.1.0.dev0-py3-none-any.whl size=424984 sha256=aff98b14c62e6e98540dc49e43c3dc929a1fadac94963ed31f23d2860fb1e0f8",
+          "  Stored in directory: /tmp/pip-ephem-wheel-cache-yuh1wogh/wheels/b2/29/43/e55b7a86a7f10efaecd0d5cb2e05918e49818674a5dde1f0ca",
+          "Successfully built blackbox-recorder"
+        ],
+        "wheel": "blackbox_recorder-0.1.0.dev0-py3-none-any.whl"
+      }
+    },
+    "2_attach_and_capture": {
+      "run": {
+        "argv": [
+          "/tmp/bbx-journey-5xvmsx_j/venv/bin/blackbox",
+          "run",
+          "--data-dir",
+          "/tmp/bbx-journey-5xvmsx_j/data",
+          "--upstream",
+          "openai=http://127.0.0.1:45981@/openai",
+          "--",
+          "/tmp/bbx-journey-5xvmsx_j/venv/bin/python",
+          "app.py"
+        ],
+        "exit_code": 1,
+        "seconds": 4.17,
+        "stderr": [
+          "           ^^^^^^^^^^^",
+          "  File \"/tmp/bbx-journey-5xvmsx_j/venv/lib/python3.11/site-packages/openai/_base_client.py\", line 1474, in post",
+          "    return cast(ResponseT, self.request(cast_to, opts, stream=stream, stream_cls=stream_cls))",
+          "                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^",
+          "  File \"/tmp/bbx-journey-5xvmsx_j/venv/lib/python3.11/site-packages/openai/_base_client.py\", line 1248, in request",
+          "    raise self._make_status_error_from_response(err.response) from None",
+          "openai.NotFoundError: Error code: 404 - The model `gpt-4o-mni` does not exist",
+          "blackbox: run r_a6478dcde9ba8044 \u00b7 exit 1 \u00b7 proxy http://127.0.0.1:38249 (5 vars exported) \u00b7 sdk auto-import (sitecustomize) \u00b7 recovered r_a6478dcde9ba8044 \u2192 /tmp/bbx-journey-5xvmsx_j/data/capsules/c_e2365f7aa49c03b9.bbx (recovered, root 7498d7f76ed0) and 1 more tape (sdk)"
+        ],
+        "stdout": [
+          "first: hi"
+        ]
+      },
+      "summary_line": []
+    },
+    "3_capture": {
+      "capsules": [
+        "c_e2365f7aa49c03b9.bbx",
+        "c_ef30e5d2e62ef72b.bbx"
+      ],
+      "ls": {
+        "argv": [
+          "/tmp/bbx-journey-5xvmsx_j/venv/bin/blackbox",
+          "ls",
+          "--data",
+          "/tmp/bbx-journey-5xvmsx_j/data"
+        ],
+        "exit_code": 0,
+        "seconds": 0.07,
+        "stderr": [],
+        "stdout": [
+          "CAPSULE             RUN                 STATUS                   EVENTS  SIZE    ",
+          "c_ef30e5d2e62ef72b  r_a6478dcde9ba8044  recovered/PROCESS_DEATH  19      20.7 KiB",
+          "c_e2365f7aa49c03b9  r_a6478dcde9ba8044  recovered/PROCESS_DEATH  20      21.6 KiB"
+        ]
+      },
+      "verify": {
+        "argv": [
+          "/tmp/bbx-journey-5xvmsx_j/venv/bin/blackbox",
+          "verify",
+          "/tmp/bbx-journey-5xvmsx_j/data/capsules/c_e2365f7aa49c03b9.bbx",
+          "/tmp/bbx-journey-5xvmsx_j/data/capsules/c_ef30e5d2e62ef72b.bbx"
+        ],
+        "exit_code": 0,
+        "seconds": 0.07,
+        "stderr": [],
+        "stdout": [
+          "/tmp/bbx-journey-5xvmsx_j/data/capsules/c_ef30e5d2e62ef72b.bbx",
+          "  ok   integrity",
+          "  ok   chain_root",
+          "  ok   derived_parts",
+          "  ok   capture_seam",
+          "  ---- capture_vantage  a capsule carries no meta page: the vantage is declared and cannot be recomputed here, so it is printed as unverified rather than counted as a pass",
+          "  ok   links_summary",
+          "blackbox verify: 2 capsule(s) verified; 1 check(s) declared, not checkable from a capsule"
+        ]
+      }
+    },
+    "4_diagnose": {
+      "c_e2365f7aa49c03b9.bbx": {
+        "argv": [
+          "/tmp/bbx-journey-5xvmsx_j/venv/bin/blackbox",
+          "diagnose",
+          "/tmp/bbx-journey-5xvmsx_j/data/capsules/c_e2365f7aa49c03b9.bbx",
+          "--out",
+          "/tmp/bbx-journey-5xvmsx_j/incident-c_e2365f7aa49c03b9.md"
+        ],
+        "exit_code": 0,
+        "findings_head": [
+          "Findings by strength: 1 observed.",
+          "- 20 frame(s) decoded from capsule c_e2365f7aa49c03b9",
+          "- run id named by the tape: r_a6478dcde9ba8044",
+          "- the run reached its end boundary (seq 18 RUN_END, exit_code=1)",
+          "- manifest run.status is recovered (PROCESS_DEATH)",
+          "- the request named something the provider does not serve (a model, a path, a parameter)",
+          "- the credential was refused or the account is over its limit",
+          "- a proxy or gateway in front of the provider produced the status"
+        ],
+        "mentions_the_model": false,
+        "report_chars": 4144,
+        "report_exists": true,
+        "seconds": 0.08,
+        "stderr": [
+          "wrote the report to /tmp/bbx-journey-5xvmsx_j/incident-c_e2365f7aa49c03b9.md"
+        ],
+        "stdout": []
+      },
+      "c_ef30e5d2e62ef72b.bbx": {
+        "argv": [
+          "/tmp/bbx-journey-5xvmsx_j/venv/bin/blackbox",
+          "diagnose",
+          "/tmp/bbx-journey-5xvmsx_j/data/capsules/c_ef30e5d2e62ef72b.bbx",
+          "--out",
+          "/tmp/bbx-journey-5xvmsx_j/incident-c_ef30e5d2e62ef72b.md"
+        ],
+        "exit_code": 0,
+        "findings_head": [
+          "Findings by strength: 3 observed.",
+          "- 19 frame(s) decoded from capsule c_ef30e5d2e62ef72b",
+          "- run id named by the tape: r_a6478dcde9ba8044",
+          "- the run reached its end boundary (seq 17 RUN_END, exit_code=None)",
+          "- manifest run.status is recovered (PROCESS_DEATH)",
+          "- capture seam(s) that wrote these calls: httpx-hooks",
+          "- the application raised and the node's own close recorded it: the error text is the application's",
+          "- a recorder error closed the node early; the exception frame, when there is one, distinguishes them"
+        ],
+        "mentions_the_model": true,
+        "report_chars": 5969,
+        "report_exists": true,
+        "seconds": 0.08,
+        "stderr": [
+          "wrote the report to /tmp/bbx-journey-5xvmsx_j/incident-c_ef30e5d2e62ef72b.md"
+        ],
+        "stdout": []
+      }
+    },
+    "5_view": {
+      "argv": [
+        "/tmp/bbx-journey-5xvmsx_j/venv/bin/blackbox",
+        "view",
+        "/tmp/bbx-journey-5xvmsx_j/data/capsules/c_ef30e5d2e62ef72b.bbx",
+        "--out",
+        "/tmp/bbx-journey-5xvmsx_j/view.html"
+      ],
+      "exit_code": 0,
+      "offline": true,
+      "page_bytes": 58039,
+      "seconds": 0.08,
+      "stderr": [],
+      "stdout": [
+        "blackbox: wrote /tmp/bbx-journey-5xvmsx_j/view.html (58039 B) from 1 tape(s) of r_a6478dcde9ba8044 \u2014 19 events, 1 nodes; open it with file://"
+      ]
+    },
+    "6_approve_a_repair": {
+      "applied": {
+        "argv": [
+          "/tmp/bbx-journey-5xvmsx_j/venv/bin/blackbox",
+          "repair",
+          "apply",
+          "/tmp/bbx-journey-5xvmsx_j/proposal.json",
+          "--repo",
+          "/tmp/bbx-journey-5xvmsx_j/app",
+          "--approve",
+          "ebb9d650d4891975e1beb7dc83f9e612"
+        ],
+        "exit_code": 0,
+        "seconds": 0.05,
+        "stderr": [],
+        "stdout": [
+          "wrote   app.py",
+          "originals saved in /tmp/bbx-journey-5xvmsx_j/app/.blackbox-repair/backup-20261120T114337-ebb9d650",
+          "nothing was run: this change is unverified until you run `blackbox repair verify --test \u2026`"
+        ]
+      },
+      "file_changed": true,
+      "preview": {
+        "argv": [
+          "/tmp/bbx-journey-5xvmsx_j/venv/bin/blackbox",
+          "repair",
+          "preview",
+          "/tmp/bbx-journey-5xvmsx_j/proposal.json",
+          "--repo",
+          "/tmp/bbx-journey-5xvmsx_j/app"
+        ],
+        "exit_code": 0,
+        "seconds": 0.04,
+        "stderr": [],
+        "stdout": [
+          "",
+          "## Approval",
+          "Nothing has been written. To apply exactly this, run:",
+          "",
+          "    blackbox repair apply /tmp/bbx-journey-5xvmsx_j/proposal.json --repo /tmp/bbx-journey-5xvmsx_j/app --approve ebb9d650d4891975e1beb7dc83f9e612",
+          "",
+          "The token is bound to this proposal's bytes, this repository, and the hash of every file it touches. If any of",
+          "them change, the apply is refused and you have to look again."
+        ]
+      },
+      "proposal_written_by": "this script, as an agent would; nothing in it was executed by preview or apply",
+      "token_found": true,
+      "verify": {
+        "argv": [
+          "/tmp/bbx-journey-5xvmsx_j/venv/bin/blackbox",
+          "repair",
+          "verify",
+          "/tmp/bbx-journey-5xvmsx_j/proposal.json",
+          "--repo",
+          "/tmp/bbx-journey-5xvmsx_j/app",
+          "--test",
+          "/tmp/bbx-journey-5xvmsx_j/venv/bin/python app.py"
+        ],
+        "exit_code": 0,
+        "seconds": 0.68,
+        "stderr": [],
+        "stdout": [
+          "These run with your privileges: they can change anything you can. Nothing from the proposal is executed \u2014",
+          "only the commands above, which you supplied on this command line.",
+          "",
+          "PASS  exit   0    0.62s  /tmp/bbx-journey-5xvmsx_j/venv/bin/python app.py",
+          "      first: hi",
+          "      second: hi",
+          "",
+          "these commands ran in this process, just now, through the platform shell in the directory named above; the proposal's suggested tests were not executed"
+        ]
+      }
+    },
+    "7_verify": {
+      "capsules": [
+        "c_6c9381ef3c029c02.bbx",
+        "c_9e513a1d9e943f34.bbx"
+      ],
+      "diagnose": {
+        "argv": [
+          "/tmp/bbx-journey-5xvmsx_j/venv/bin/blackbox",
+          "diagnose",
+          "/tmp/bbx-journey-5xvmsx_j/data-after/capsules/c_6c9381ef3c029c02.bbx",
+          "--out",
+          "/tmp/bbx-journey-5xvmsx_j/incident-after.md"
+        ],
+        "exit_code": 0,
+        "report_mentions_the_model": false,
+        "seconds": 0.08,
+        "stderr": [
+          "wrote the report to /tmp/bbx-journey-5xvmsx_j/incident-after.md"
+        ],
+        "stdout": []
+      },
+      "run_after_the_fix": {
+        "argv": [
+          "/tmp/bbx-journey-5xvmsx_j/venv/bin/blackbox",
+          "run",
+          "--data-dir",
+          "/tmp/bbx-journey-5xvmsx_j/data-after",
+          "--upstream",
+          "openai=http://127.0.0.1:45981@/openai",
+          "--",
+          "/tmp/bbx-journey-5xvmsx_j/venv/bin/python",
+          "app.py"
+        ],
+        "exit_code": 0,
+        "seconds": 4.22,
+        "stderr": [
+          "blackbox: python child gets a temporary sitecustomize (/tmp/blackbox-sdk-3zjzjmu9); removed when it exits",
+          "blackbox: run r_1cbf907cfd47d75a \u00b7 exit 0 \u00b7 proxy http://127.0.0.1:45703 (5 vars exported) \u00b7 sdk auto-import (sitecustomize) \u00b7 recovered r_1cbf907cfd47d75a \u2192 /tmp/bbx-journey-5xvmsx_j/data-after/capsules/c_9e513a1d9e943f34.bbx (recovered, root 8b1cf7287b71) and 1 more tape (sdk)"
+        ],
+        "stdout": [
+          "first: hi",
+          "second: hi"
+        ]
+      }
+    }
+  },
+  "verdict": {
+    "capsules_were_written": true,
+    "diagnose_wrote_a_report": true,
+    "every_capsule_verified": true,
+    "installed_from_the_wheel_in_a_fresh_venv": true,
+    "repair_needed_an_approval_token_and_changed_the_file": true,
+    "the_child_reached_the_provider_through_the_launcher": true,
+    "the_run_after_the_fix_succeeded": true,
+    "verify_test_passed_after_the_repair": true,
+    "view_wrote_one_offline_page": true
+  },
+  "work_dir": "/tmp/bbx-journey-5xvmsx_j"
+}

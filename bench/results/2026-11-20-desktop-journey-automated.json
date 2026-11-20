@@ -1,0 +1,30 @@
+{
+  "schema": "blackbox.desktop-journey/1",
+  "when": "2026-11-20T11:45:25Z",
+  "machine": {
+    "system": "Linux",
+    "machine": "x86_64",
+    "distro": "Debian GNU/Linux 12 (bookworm)",
+    "python": "3.11.2"
+  },
+  "data_dir": "/tmp/bbx-dj",
+  "recorded_command": "python3 /tmp/tmp.TvyVYGIpiS/app.py",
+  "capsule": "/tmp/bbx-dj/capsules/c_6250ab6743789f3e.bbx",
+  "automated": {
+    "run_exit": 1,
+    "window_exit": "skipped",
+    "verify_exit": "0",
+    "diagnose_exit": "0"
+  },
+  "seen_by_a_person": {
+    "window_opened": "not-attempted",
+    "first_screen": "not-attempted",
+    "run_opened": "not-attempted",
+    "check_verified": "not-attempted",
+    "diagnose_shown": "not-attempted",
+    "closed_cleanly": "not-attempted",
+    "note": ""
+  },
+  "verdict": "automated-only",
+  "what_this_is": "One person's answers plus the machine's own exit codes, on one Linux desktop. It is evidence for the row in docs/desktop.md that names this distribution and architecture, and for nothing else."
+}

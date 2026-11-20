@@ -5,12 +5,12 @@ from typing import Any
 
 # code -> (short message, remediation shown to the user)
 REGISTRY: dict[str, tuple[str, str]] = {
-    "BBX-E100": ("capture hook install failed", "run `blackbox doctor --capture`; recording continues in safe mode"),
+    "BBX-E100": ("capture hook install failed", "run `blackbox doctor --capture` to see which seam failed; recording continues in safe mode"),
     "BBX-E120": ("unsupported filesystem for mmap mode", "move the data dir to a local disk or use layout=ring"),
     "BBX-E130": ("segment too small for the configured frame", "raise segment_bytes (minimum 65536)"),
     "BBX-E131": ("refusing to write a sparse segment", "check free space and filesystem; see docs/format.md §5"),
     "BBX-E132": ("segment preallocation failed (ENOSPC/EDQUOT)", "recording degraded, app unaffected; free space or lower segment_bytes"),
-    "BBX-E133": ("interrupted roll left an orphan segment", "recovery adopts it automatically; `blackbox doctor --tape` shows the queue"),
+    "BBX-E133": ("interrupted roll left an orphan segment", "recovery adopts it automatically; `blackbox doctor --tape` counts what is left"),
     "BBX-E140": ("proxy: upstream not in allowlist", "add `--upstream name=url` or fix the base URL path prefix"),
     "BBX-E141": ("proxy: port in use", "`--port 0` or stop the other process"),
     "BBX-E142": ("proxy: upstream TLS verification failed", "fix the certificate; `--insecure-upstream name` only for local servers"),
@@ -19,7 +19,7 @@ REGISTRY: dict[str, tuple[str, str]] = {
     "BBX-E153": ("hook ingest: stdin was not JSON", "the tool's hook payload changed; see the adapter notes"),
     "BBX-E154": ("retention blocked by a pin", "run `blackbox ls --pinned` or raise the budget"),
     "BBX-E151": ("hook adapter: unknown settings schema", "upgrade blackbox; the adapter never writes what it cannot parse"),
-    "BBX-E152": ("hook inbox: fold failed (corrupt entry)", "entry quarantined under inbox/.bad/; `doctor --hooks`"),
+    "BBX-E152": ("hook inbox: fold failed (corrupt entry)", "entry quarantined under inbox/.bad/; `blackbox doctor --hooks`"),
     "BBX-E155": ("invalid CBOR payload", "a producer wrote a non-canonical or malformed payload"),
     "BBX-E156": ("codec unavailable for a recorded body", "install the optional codec extra or re-record with content=hash"),
     "BBX-E170": ("trigger rule refused; nothing was recorded for it",
@@ -30,7 +30,7 @@ REGISTRY: dict[str, tuple[str, str]] = {
     "BBX-E162": ("blob body does not match its hash", "the blob was corrupted or modified; do not trust it, re-record"),
     "BBX-E210": ("writer is alive; recovery refused", "stop the process or pass --force-if-dead"),
     "BBX-E211": ("lease held by a reused pid (start time mismatch)", "run `blackbox doctor --locks`"),
-    "BBX-E220": ("both head slots invalid", "run `blackbox recover --full-scan`"),
+    "BBX-E220": ("both head slots invalid", "keep the directory: the next `blackbox run` scans it, and `blackbox doctor --tape` counts what it finds"),
     "BBX-E221": ("tape format newer than this reader", "upgrade blackbox"),
     "BBX-E222": ("meta checksum mismatch", "quarantine the tape directory; do not delete it"),
     "BBX-E223": ("chain break", "run `blackbox verify` for the first discontinuity"),

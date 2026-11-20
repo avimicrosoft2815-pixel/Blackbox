@@ -454,6 +454,27 @@ from *not run* to the observed result with the installer hash. Until then, "Wind
 nothing in this repository claims otherwise — the Linux `.deb` is verified by extraction and by a launcher run, and the
 window's code path is verified with a fake backend, which is a test and not a desktop.
 
+## 2026-11-20 — what changed on this list
+
+| Entry | State today | Evidence |
+|---|---|---|
+| B4 (node-level edges) | **unchanged** — measured, the tick is still the owner's | `bench/results/2026-11-18-p3b03-acceptance.json` |
+| B5 (OTLP importers) | **unchanged** — three products and one second transport still unmeasured, and their downloads are still blocked from this sandbox | this file, above |
+| B6 (release machine, rebind p95) | **unchanged**, and now with a tool for the rebind half: `tools/outage_split.py` reads a failing sample and says how much of the outage was the rebind | `bench/results/2026-11-20-defect-108-split.json` |
+| B9 (Windows desktop) | **unchanged in substance**: still not built, still not run, still unsigned. What moved is the Linux half — the `.deb` built and ran from the extracted tree on 2026-11-20, and the automated desktop journey ran headless | `bench/results/2026-11-20-desktop-journey-automated.json`, `tests/test_desktop_package.py` |
+
+Two new defects were found and fixed while closing the attach row, and they are the reason this list has a new shape
+rather than a shorter one:
+
+* **109** — the proxy wrote `Transfer-Encoding: chunked` over a body it relayed raw, so `curl` refused a stream the SDK
+  tests never looked at. Fixed and measured (`tests/proxy/test_response_framing.py`).
+* **110** — a capsule's `graph.json` carried a sentence built from the process clock, so `verify` failed a correctly
+  sealed capsule with `BBX-E412`. Fixed: the sentence is a function of the frames (`tests/test_attach_curl_kill.py`).
+
+And one defect class was closed rather than an instance: **111**, six error codes told the user to run `blackbox doctor …`
+for a command the binary did not have. `doctor` now exists with six probes, and `tests/test_error_advice.py` fails if a
+remediation — or a current user document — names a command this build does not dispatch.
+
 ## Fixed on this branch, with the numbers
 
 | what | before | after | test |
