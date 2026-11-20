@@ -1,0 +1,30 @@
+{
+  "schema": "blackbox.stream-identity/1",
+  "measured_at": "2026-11-20T11:46:03Z",
+  "what": "N streamed responses through ProxyThread, each compared byte for byte with what the origin generated",
+  "n": 10000,
+  "chunks_per_response": 4,
+  "corrupt_at": null,
+  "responses_matched": 10000,
+  "responses_mismatched": 0,
+  "first_mismatch": null,
+  "bytes_received": 2195560,
+  "per_response_ms": {
+    "n": 10000,
+    "min": 0.564,
+    "p50": 1.151,
+    "p95": 1.528,
+    "p99": 1.881,
+    "max": 22.988,
+    "mean": 1.171
+  },
+  "loop_errors": [],
+  "machine": {
+    "system": "Linux",
+    "machine": "x86_64",
+    "python": "3.11.2",
+    "cpus": 2
+  },
+  "verdict": "10000 of 10000 streamed responses arrived byte-identical",
+  "ok": true
+}

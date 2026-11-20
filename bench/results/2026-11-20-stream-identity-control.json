@@ -1,0 +1,33 @@
+{
+  "schema": "blackbox.stream-identity/1",
+  "measured_at": "2026-11-20T11:46:05Z",
+  "what": "N streamed responses through ProxyThread, each compared byte for byte with what the origin generated",
+  "n": 1000,
+  "chunks_per_response": 4,
+  "corrupt_at": 500,
+  "responses_matched": 999,
+  "responses_mismatched": 1,
+  "first_mismatch": {
+    "sequence": 500,
+    "bytes": 216
+  },
+  "bytes_received": 215560,
+  "per_response_ms": {
+    "n": 1000,
+    "min": 0.558,
+    "p50": 1.119,
+    "p95": 1.584,
+    "p99": 2.426,
+    "max": 3.54,
+    "mean": 1.13
+  },
+  "loop_errors": [],
+  "machine": {
+    "system": "Linux",
+    "machine": "x86_64",
+    "python": "3.11.2",
+    "cpus": 2
+  },
+  "verdict": "control behaved: exactly the corrupted response differed",
+  "ok": true
+}

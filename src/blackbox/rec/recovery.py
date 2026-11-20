@@ -149,7 +149,17 @@ def classify_nodes(frames: list[dict[str, Any]], *, now_wall_ns: int | None = No
     `TOOL_REQUEST` row is the one that matters most: it says *the side effect may have happened*, and this function
     never claims otherwise.
     """
-    now = time.time_ns() if now_wall_ns is None else now_wall_ns
+    # The clock the detail is written against is the tape's own, not this process's (defect 110). `graph.json` is a
+    # *derived* part: `verify` recomputes it from the frames and compares. A sentence built from `time.time_ns()` is a
+    # function of when the recomputation ran, so a capsule that was correct when it was sealed failed its own check with
+    # `BBX-E412` — "last chunk 1854 ms before death" against "49 ms before death", both true of different clocks. Taking
+    # the last frame's `wall_ns` makes the sentence a function of the frames, which is what a derived part has to be.
+    if now_wall_ns is not None:
+        now = int(now_wall_ns)
+    elif frames:
+        now = int(frames[-1].get("wall_ns") or 0) or time.time_ns()
+    else:
+        now = time.time_ns()
     nodes: dict[int, NodeRecord] = {}
     closed: set[int] = set()
 
@@ -747,7 +757,8 @@ class Recovery:
     def step_graphed(self) -> str:
         self._enter("GRAPHED")
         scan = self._scan or scanner.scan(self.data_dir, self.writer_uuid_hex)
-        nodes = classify_nodes(scan.frames, now_wall_ns=self.now_ns)
+        # No `now_wall_ns`: the same frames have to produce the same sentence at seal time and at verify time.
+        nodes = classify_nodes(scan.frames)
         status, cause = run_status(scan.frames, sealed=bool(scan.sealed_segments) and not scan.truncated_tail)
         graph: dict[str, object] = {"writer_uuid": self.writer_uuid_hex, "run_id": self.run_id,
                  "frames": scan.frame_count, "gaps": scan.gaps,
