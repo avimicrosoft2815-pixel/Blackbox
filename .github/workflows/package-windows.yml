@@ -1,0 +1,145 @@
+# Build the Windows installer on a Windows runner, then install it, run it and uninstall it.
+#
+# B9 says no Windows installer has been produced or run. This workflow is the smallest honest way to change that from this
+# repository: it runs on GitHub's Windows image, so the machine is real even though the build environment that wrote
+# `tools/package/windows/` had no Windows at all.
+#
+# What it proves, when it passes:
+#
+#   * `build_windows.ps1` stages an embeddable interpreter and the package from wheels, with no network at install time;
+#   * the staged tree answers `blackbox --version`, `blackbox doctor --json`, and records a real run to a capsule that
+#     `blackbox verify` accepts — on Windows, with the real launcher;
+#   * Inno Setup compiles `blackbox.iss` into `dist\BlackBox-Setup-<version>.exe`;
+#   * that installer installs silently into `%LOCALAPPDATA%\Programs\BlackBox`, the installed launcher answers, and the
+#     uninstaller removes the program while **keeping** the recordings.
+#
+# What it does not prove: that the window opens (no interactive session on a runner), that the app is signed, or that a
+# person can finish the install with a mouse. `docs/desktop.md` keeps those rows unverified, and this workflow's summary
+# says the same thing rather than implying otherwise.
+name: package-windows
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["**"]
+    paths:
+      - ".github/workflows/package-windows.yml"
+      - "tools/package/windows/**"
+
+jobs:
+  installer:
+    name: build and smoke-test the installer
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Inno Setup
+        run: choco install innosetup --yes --no-progress
+
+      - name: Stage the install tree (embeddable Python + wheels)
+        run: powershell -ExecutionPolicy Bypass -File tools\package\windows\build_windows.ps1
+
+      - name: Smoke the staged tree — version, doctor, a recorded run, verify
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $py = "tools\package\windows\win64\python\python.exe"
+          $site = (Resolve-Path "tools\package\windows\win64\python\Lib\site-packages").Path
+          if (-not (Test-Path $py)) { throw "the embeddable interpreter was not staged at $py" }
+          $env:BLACKBOX_HOME = Join-Path $env:RUNNER_TEMP "bbx-smoke"
+          New-Item -ItemType Directory -Force -Path $env:BLACKBOX_HOME | Out-Null
+          $boot = "import sys; sys.path[:0] = [r'$site']; from blackbox.__main__ import main; raise SystemExit(main(sys.argv[1:]))"
+
+          & $py -c $boot --version
+          if ($LASTEXITCODE -ne 0) { throw "the staged tree could not answer --version (exit $LASTEXITCODE)" }
+
+          & $py -c $boot doctor --json | Out-File -Encoding utf8 "$env:RUNNER_TEMP\doctor.json"
+          $doctor = Get-Content "$env:RUNNER_TEMP\doctor.json" -Raw | ConvertFrom-Json
+          $doctor.probes | ForEach-Object { Write-Host "$($_.status) $($_.probe) — $($_.summary)" }
+          if (-not ($doctor.probes | Where-Object { $_.probe -eq 'storage' -and $_.status -eq 'ok' })) {
+            throw "the storage probe did not report ok on this runner"
+          }
+
+          # A real recording, with the real launcher, on Windows: this is the row that has never been run.
+          & $py -c $boot run --data-dir $env:BLACKBOX_HOME -- python -c "print('hello from windows')"
+          $runExit = $LASTEXITCODE
+          Write-Host "run exit: $runExit"
+          if ($runExit -ne 0) { throw "a trivial run did not finish cleanly (exit $runExit)" }
+
+          $capsules = Get-ChildItem -Recurse -Path $env:BLACKBOX_HOME -Filter *.bbx -ErrorAction SilentlyContinue
+          if (-not $capsules) { throw "the run left no capsule behind" }
+          Write-Host "capsules: $($capsules.Count)"
+          & $py -c $boot verify @($capsules | ForEach-Object { $_.FullName })
+          if ($LASTEXITCODE -ne 0) { throw "the capsule from a Windows run did not verify (exit $LASTEXITCODE)" }
+
+      - name: Compile the installer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { throw "ISCC.exe was not installed where Inno Setup 6 puts it" }
+          & $iscc "tools\package\windows\blackbox.iss" "/DAppVersion=0.1.0.dev0"
+          if ($LASTEXITCODE -ne 0) { throw "ISCC failed with exit $LASTEXITCODE" }
+          $setup = Get-ChildItem -Path dist -Filter "BlackBox-Setup-*.exe" | Select-Object -First 1
+          if (-not $setup) { throw "ISCC reported success but no installer is in dist\" }
+          Write-Host "installer: $($setup.FullName) ($([math]::Round($setup.Length / 1MB, 1)) MiB)"
+          Get-FileHash $setup.FullName -Algorithm SHA256 | ForEach-Object { Write-Host "sha256: $($_.Hash)" }
+
+      - name: Install it, run the installed launcher, uninstall, and check the recordings survive
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $setup = (Get-ChildItem -Path dist -Filter "BlackBox-Setup-*.exe" | Select-Object -First 1).FullName
+          $recordedBefore = (Get-ChildItem -Recurse -Path $env:BLACKBOX_HOME -Filter *.bbx -ErrorAction SilentlyContinue).Count
+          Write-Host "recordings before the install: $recordedBefore"
+
+          Start-Process -FilePath $setup -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/LOG=$env:RUNNER_TEMP\install.log" -Wait
+          $installed = Join-Path $env:LOCALAPPDATA "Programs\BlackBox"
+          if (-not (Test-Path $installed)) { throw "the installer did not create $installed" }
+          Write-Host "installed: $(Get-ChildItem $installed -Recurse -File | Measure-Object | Select-Object -ExpandProperty Count) files"
+
+          $cli = Join-Path $installed "python\python.exe"
+          $site = Join-Path $installed "python\Lib\site-packages"
+          $boot = "import sys; sys.path[:0] = [r'$site']; from blackbox.__main__ import main; raise SystemExit(main(sys.argv[1:]))"
+          $env:BLACKBOX_HOME = Join-Path $env:LOCALAPPDATA "BlackBox"
+          & $cli -c $boot --version
+          if ($LASTEXITCODE -ne 0) { throw "the installed tree could not answer --version (exit $LASTEXITCODE)" }
+          & $cli -c $boot doctor --json | Out-File -Encoding utf8 "$env:RUNNER_TEMP\installed-doctor.json"
+          Write-Host "installed doctor written"
+
+          $uninstaller = Get-ChildItem $installed -Filter "unins*.exe" | Select-Object -First 1
+          if (-not $uninstaller) { throw "no uninstaller next to the installed program" }
+          Start-Process -FilePath $uninstaller.FullName -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART" -Wait
+          Start-Sleep -Seconds 3
+          if (Test-Path (Join-Path $installed "python")) { throw "the uninstaller left the program behind" }
+
+          $recordings = (Get-ChildItem -Recurse -Path $env:BLACKBOX_HOME -Filter *.bbx -ErrorAction SilentlyContinue).Count
+          if ($recordings -lt $recordedBefore) {
+            throw "the uninstaller removed recordings ($recordedBefore before, $recordings after): that is the one thing it must not do"
+          }
+          Write-Host "recordings kept: $recordings"
+
+      - name: Upload the installer and both reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: blackbox-windows-installer
+          path: |
+            dist/BlackBox-Setup-*.exe
+            ${{ runner.temp }}/doctor.json
+            ${{ runner.temp }}/installed-doctor.json
+            ${{ runner.temp }}/install.log
+          if-no-files-found: error
+
+      - name: Say what this run does and does not prove
+        if: always()
+        run: |
+          Write-Host "This job builds the Windows installer on a real Windows machine, installs it, runs the installed"
+          Write-Host "tree, uninstalls it and checks that the recordings survive. It does NOT open the window: a runner has"
+          Write-Host "no interactive desktop. docs/desktop.md keeps that row unverified until a person runs it."
