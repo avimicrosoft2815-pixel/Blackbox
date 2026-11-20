@@ -46,6 +46,22 @@ jobs:
       - name: Stage the install tree (embeddable Python + wheels)
         run: powershell -ExecutionPolicy Bypass -File tools\package\windows\build_windows.ps1
 
+      - name: Show what was staged (annotations, because the log is not always reachable)
+        if: always()
+        shell: pwsh
+        run: |
+          $stage = "tools\package\windows\win64\python"
+          if (-not (Test-Path $stage)) { Write-Host "::error::nothing was staged at $stage"; exit 0 }
+          $top = (Get-ChildItem $stage | Select-Object -First 15 | ForEach-Object { $_.Name }) -join ", "
+          Write-Host "::warning::staged tree top level: $top"
+          $site = Join-Path $stage "Lib\site-packages"
+          if (Test-Path $site) {
+            $names = (Get-ChildItem $site | Select-Object -First 20 | ForEach-Object { $_.Name }) -join ", "
+            Write-Host "::warning::site-packages: $names"
+          } else {
+            Write-Host "::error::there is no Lib\site-packages in the staged tree"
+          }
+
       # Every check below announces its own outcome through a workflow command (`::error::`), because job logs are
       # redirected to a host that some environments cannot reach: an annotation is readable through the API, a log is
       # not. The first attempt at this step failed with nothing but "Process completed with exit code 1", which is
