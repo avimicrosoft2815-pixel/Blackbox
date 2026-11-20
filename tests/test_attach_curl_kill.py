@@ -33,30 +33,50 @@ ROOT = Path(__file__).resolve().parents[1]
 
 # The child is a shell, because `curl` is not a Python program and the point of the row is that nothing is written into
 # the app: the launcher exports the base URL, curl reads it, and the shell kills its own process group mid-stream. The
-# `kill -9 -$$` reaches curl because the shell is the group leader the launcher started.
+# `kill -9 -$$` reaches curl because the shell is the group leader the launcher started, and it does not reach the
+# launcher, which is why the launcher can still print the recovery summary.
+#
+# When it fires is a *fact about the stream*, not about the clock: the watcher waits for a file the test touches once the
+# mock provider's own tally says chunks are moving. The first version slept a fixed 0.6 s, and on a loaded py3.12 Ubuntu
+# runner the kill landed before `curl` had sent anything, so the tape held no call at all and the test failed with
+# `no in-flight call survived: []` — a race in the test, not a hole in the product.
 CHILD = """\
 set -eu
-( sleep "${BBX_DIE_AFTER:-0.6}"; kill -9 -$$ 2>/dev/null || kill -9 $$ ) &
+( while [ ! -f "$BBX_KILL_WHEN" ]; do sleep 0.05; done; kill -9 -$$ 2>/dev/null || kill -9 $$ ) &
 curl -sS -N -H 'content-type: application/json' -d '{"model":"gpt-4","stream":true,"messages":[{"role":"user","content":"hi"}]}' \\
   "$OPENAI_BASE_URL/chat/completions" >/dev/null
 """
 
 
-def _run(data_dir: Path, provider: MockProvider, die_after: float = 0.6) -> subprocess.CompletedProcess:
-    env = {**os.environ, "PYTHONPATH": str(ROOT / "src"), "BLACKBOX_HOME": str(data_dir), "BBX_DIE_AFTER": str(die_after)}
+def _run_and_kill_mid_stream(data_dir: Path, provider: MockProvider, *, min_chunks: int = 3,
+                             deadline_s: float = 60.0) -> subprocess.CompletedProcess:
+    """Start the child, wait until the origin has pushed real chunks, then let the child SIGKILL its own group."""
+    flag = data_dir / "kill-mid-stream.flag"
+    flag.unlink(missing_ok=True)
+    env = {**os.environ, "PYTHONPATH": str(ROOT / "src"), "BLACKBOX_HOME": str(data_dir), "BBX_KILL_WHEN": str(flag)}
     env.pop("BLACKBOX_DISABLED", None)
     env["BLACKBOX_CONTENT"] = "full"
-    return subprocess.run(
+    proc = subprocess.Popen(
         [sys.executable, "-m", "blackbox", "run", "--data-dir", str(data_dir),
          "--upstream", f"openai={provider.openai_base_url()}@/openai", "--json", "--", "sh", "-c", CHILD],
-        capture_output=True, text=True, env=env, timeout=90,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env,
     )
+    give_up = time.monotonic() + deadline_s
+    try:
+        while provider.sent_chunks < min_chunks and time.monotonic() < give_up and proc.poll() is None:
+            time.sleep(0.01)
+    finally:
+        # Touched either way: if the stream never started the test has to fail with the launcher's own output rather than
+        # with a child that hangs for ninety seconds.
+        flag.write_text("go", encoding="utf-8")
+    out, err = proc.communicate(timeout=90)
+    return subprocess.CompletedProcess(proc.args, proc.returncode, out, err)
 
 
 def test_a_curl_stream_killed_mid_flight_keeps_what_the_proxy_forwarded(tmp_path):
     scenario = Scenario(chunks=40, delay_ms=60, chunk_text="token ")
     with MockProvider(scenario) as provider:
-        completed = _run(tmp_path, provider)
+        completed = _run_and_kill_mid_stream(tmp_path, provider)
         sent_chunks, sent_bytes = provider.sent_chunks, provider.sent_bytes
 
     assert sent_chunks >= 3 and sent_bytes > 0, f"the origin pushed nothing to forward: {sent_chunks} chunks"
@@ -84,7 +104,7 @@ def test_the_capsule_from_a_killed_curl_run_verifies(tmp_path):
     """A recovered capsule is only evidence if it passes its own integrity check — the reader's first question."""
     scenario = Scenario(chunks=40, delay_ms=60, chunk_text="token ")
     with MockProvider(scenario) as provider:
-        completed = _run(tmp_path, provider, die_after=0.5)
+        completed = _run_and_kill_mid_stream(tmp_path, provider, min_chunks=2)
         assert completed.returncode in (137, -signal.SIGKILL), completed.stderr[-1200:]
         capsules = sorted((tmp_path / "capsules").glob("*.bbx"))
         assert capsules, "no capsule after a killed curl run"

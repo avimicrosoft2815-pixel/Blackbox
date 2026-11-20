@@ -410,6 +410,11 @@ Because of that, the honest statement about CI tonight is: **the code is green o
 and 11 of 11 cells were green at `65c600e`; on `a259a70` one Windows cell at a time falls over on a slow-runner timeout.**
 The Windows cells are being re-run; the result is reported in the reply, not pre-judged here.
 
+`6bc057d` then found a defect in this branch's own new test: on `py3.12 / ubuntu-latest`, the `curl`+`kill -9` test killed
+the child after a fixed half-second and the child had not sent a request yet, so it failed with *no in-flight call
+survived*. That was the test's race, not the product's — the kill now fires when the origin's own chunk tally says the
+stream is moving (defect 115).
+
 **What did not change, and is still labelled below:** no gate is signed, the window has not been seen on a real desktop, no
 Windows installer exists, `run -- claude` with a kill is not run, and the bench-box rows still need a quiet host.
 

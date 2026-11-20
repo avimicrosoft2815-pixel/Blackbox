@@ -2081,3 +2081,24 @@ watchdog until Windows passes is a suite that has stopped measuring. What would 
 `--durations=0` on this file and Defender excluded, and the fixture's per-file cost recorded — if capsule creation alone
 is most of it, the honest fix is in the fixture's file count or in the way the capsule writer syncs, and either is a real
 change with its own evidence.
+## Defect 115 — the `curl`+`kill -9` test killed the child before `curl` had sent anything (2026-11-20, CI, fixed)
+
+**What happened.** `py3.12 / ubuntu-latest` failed on `6bc057d` with
+`tests/test_attach_curl_kill.py::test_a_curl_stream_killed_mid_flight_keeps_what_the_proxy_forwarded - AssertionError: no
+in-flight call survived: []`. An empty status list means the proxy recorded no call at all, so the capsule held nothing —
+and the test's own scenario had the origin push 40 chunks.
+
+**Cause, and it was in the test.** The child killed itself after a fixed `sleep 0.6`, measured from the shell's start. On a
+loaded runner the launcher's start-up plus `curl`'s exec plus the connect can take longer than that, so `SIGKILL` landed
+before `curl` had written a request: no call to preserve, through no fault of the proxy. The test had passed eleven cells
+and five local runs before this, which is exactly what a timing race looks like.
+
+**Fixed** by making the trigger a fact about the stream instead of about the clock. The child now waits for a file the
+test touches, and the test touches it when the *mock provider's own tally* says at least three chunks have been pushed.
+If the stream never starts, the flag is touched anyway and the failure carries the launcher's output, so the next
+occurrence says "the origin pushed nothing" instead of "no in-flight call survived". The assertions, the scenario (40
+chunks at 60 ms) and what the test claims are unchanged; five consecutive local runs pass.
+
+**This is the fourth timing assumption in a row to turn out to be the test's rather than the product's** — 108's outage,
+110's clock-derived sentence, 113's discarded stderr, and now a fixed sleep deciding when to kill. The pattern is worth
+naming: a kill test that does not wait for evidence that there was something to kill tests the scheduler.
