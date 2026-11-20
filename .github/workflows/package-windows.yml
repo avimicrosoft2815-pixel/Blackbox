@@ -191,7 +191,19 @@ jobs:
           $recordedBefore = (Get-ChildItem -Recurse -Path $env:BLACKBOX_HOME -Filter *.bbx -ErrorAction SilentlyContinue).Count
           Write-Host "recordings before the install: $recordedBefore"
 
-          Start-Process -FilePath $setup -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/LOG=$env:RUNNER_TEMP\install.log" -Wait
+          # `Start-Process -Wait` waits for the whole process *tree*, and Inno's setup leaves a helper behind, so the
+          # fifth run sat here for eighteen minutes and would have been killed by the job timeout. `-PassThru` plus
+          # `WaitForExit(ms)` waits for the setup itself, which is what has a result.
+          $installer = Start-Process -FilePath $setup -PassThru -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/LOG=$env:RUNNER_TEMP\install.log"
+          if (-not $installer.WaitForExit(300000)) {
+            Write-Host "::error::the installer did not finish within five minutes"
+            exit 1
+          }
+          Write-Host "installer exit code: $($installer.ExitCode)"
+          if ($installer.ExitCode -ne 0) {
+            Write-Host "::error::the installer exited $($installer.ExitCode); see the install log in the artefact"
+            exit 1
+          }
           $installed = Join-Path $env:LOCALAPPDATA "Programs\BlackBox"
           if (-not (Test-Path $installed)) { throw "the installer did not create $installed" }
           Write-Host "installed: $(Get-ChildItem $installed -Recurse -File | Measure-Object | Select-Object -ExpandProperty Count) files"
@@ -207,7 +219,11 @@ jobs:
 
           $uninstaller = Get-ChildItem $installed -Filter "unins*.exe" | Select-Object -First 1
           if (-not $uninstaller) { throw "no uninstaller next to the installed program" }
-          Start-Process -FilePath $uninstaller.FullName -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART" -Wait
+          $remover = Start-Process -FilePath $uninstaller.FullName -PassThru -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"
+          if (-not $remover.WaitForExit(300000)) {
+            Write-Host "::error::the uninstaller did not finish within five minutes"
+            exit 1
+          }
           Start-Sleep -Seconds 3
           if (Test-Path (Join-Path $installed "python")) { throw "the uninstaller left the program behind" }
 
