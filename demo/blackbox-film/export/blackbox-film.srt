@@ -1,0 +1,55 @@
+1
+00:00:00,500 --> 00:00:05,400
+An AI application can fail between a request, a response and the next action.
+
+2
+00:00:05,400 --> 00:00:08,980
+When the context is scattered, finding the cause takes time.
+
+3
+00:00:09,600 --> 00:00:13,300
+BlackBox records selected activity for supported integrations,
+
+4
+00:00:13,300 --> 00:00:16,080
+helping you inspect the evidence when something goes wrong.
+
+5
+00:00:16,700 --> 00:00:19,140
+Instead of starting with disconnected clues,
+
+6
+00:00:19,140 --> 00:00:22,880
+review what was recorded in one place, and see where the record ends.
+
+7
+00:00:23,500 --> 00:00:26,870
+Follow the sequence through a request, response and interruption.
+
+8
+00:00:26,870 --> 00:00:30,280
+BlackBox shows what it observed, and what it cannot establish.
+
+9
+00:00:30,900 --> 00:00:33,570
+The diagnosis connects findings to the evidence,
+
+10
+00:00:33,570 --> 00:00:38,380
+separating observed facts from possible explanations and unanswered questions.
+
+11
+00:00:39,000 --> 00:00:41,310
+Prepare a brief for your coding assistant.
+
+12
+00:00:41,310 --> 00:00:46,580
+Review a proposed change, approve it explicitly, and see the result of the checks you choose.
+
+13
+00:00:47,200 --> 00:00:50,020
+When the next incident happens, start with evidence.
+
+14
+00:00:50,020 --> 00:00:54,880
+BlackBox helps you see more clearly, and decide what comes next.

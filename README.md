@@ -137,6 +137,8 @@ Data lives where you ran the app (`./tape/`, `./capsules/`); `--data-dir` puts i
 - [`docs/format.md`](docs/format.md) — the tape and capsule formats, byte by byte.
 - [`docs/onboarding.md`](docs/onboarding.md) — three tasks for someone who has never seen this repository.
 - [`docs/progress.md`](docs/progress.md) — the ledger of record.
+- [`demo/blackbox-film/`](demo/blackbox-film/README.md) — the 55-second demo film, its Director Studio, and the synthetic
+  incident it shows. `npm run studio` in that directory serves both the studio and the film, locally.
 
 ## Licence
 

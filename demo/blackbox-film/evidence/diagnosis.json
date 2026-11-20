@@ -1,0 +1,183 @@
+{
+  "cannot_know": [
+    "content is stored as keyed or unkeyed hashes: prompt and response text cannot be recovered from this capsule, and no claim here is about their wording"
+  ],
+  "capsule": {
+    "bounded": false,
+    "capsule_id": "c_b3820c3ee321dd9d",
+    "events_seen": 17,
+    "path": "data/capsules/c_b3820c3ee321dd9d.bbx",
+    "problems": [],
+    "root_ok": true
+  },
+  "capture": {
+    "content_mode": "hash",
+    "coverage": "FULL",
+    "gaps": [],
+    "masks": 0,
+    "seams": []
+  },
+  "findings": [
+    {
+      "alternatives": [
+        "the application raised and the node's own close recorded it: the error text is the application's",
+        "a recorder error closed the node early; the exception frame, when there is one, distinguishes them"
+      ],
+      "basis": "seq 13 NODE_CLOSE (node 16384) closes node 16384 with `outcome: error` and records: INTERRUPTED_UPSTREAM: client received 776 B, proxy received 776 B from the upstream; the upstream closed before a terminal event while the client was still connected; the client received a truncated s",
+      "checks": [
+        "read the application's handler for this step: the tape says the step failed, not why the code chose to",
+        "if a model call inside this node failed first, that finding is the cause and this one is its shape"
+      ],
+      "confidence": "high",
+      "evidence": [
+        "seq 13 NODE_CLOSE (node 16384)",
+        "seq 3 NODE_OPEN (node 16384)"
+      ],
+      "id": "node-outcome-error-16384",
+      "title": "the step 'POST /v1/chat/completions' ended with an error",
+      "verdict": "observed"
+    },
+    {
+      "alternatives": [],
+      "basis": "seq 11 MODEL_ERROR (node 16384) is a MODEL_ERROR frame (INTERRUPTED_UPSTREAM: client received 776 B, proxy received 776 B from the upstream; the upstream closed before a terminal event while the client was still connected; the client received a truncated stream); it is the terminal frame for this node, so the tape is not missing an ending for it.",
+      "checks": [
+        "compare the error's timing with the retry policy: a retry that succeeded appears as a second MODEL_REQUEST under the same or a later node"
+      ],
+      "confidence": "high",
+      "evidence": [
+        "seq 11 MODEL_ERROR (node 16384)",
+        "seq 5 MODEL_REQUEST (node 16384)"
+      ],
+      "id": "provider-error-16384",
+      "title": "the provider returned an error at node 16384",
+      "verdict": "observed"
+    }
+  ],
+  "generated_at": "2026-11-20T02:45:48Z",
+  "generator": "blackbox-diagnose/0.1.0.dev0",
+  "missing": [],
+  "nodes": [],
+  "observed": [
+    "17 frame(s) decoded from capsule c_b3820c3ee321dd9d",
+    "run id named by the tape: r_83cb737e8089200e",
+    "the run reached its end boundary (seq 15 RUN_END, exit_code=3)",
+    "manifest run.status is recovered (PROCESS_DEATH)"
+  ],
+  "read_only": true,
+  "run": {
+    "capsule_run_id": "r_83cb737e8089200e",
+    "completeness": "full",
+    "durability_class": "F1",
+    "lost_from_seq": null,
+    "reached_run_end": true,
+    "run_id": "r_83cb737e8089200e",
+    "status": "recovered",
+    "status_cause": "PROCESS_DEATH",
+    "truncated_tail": false
+  },
+  "schema": "blackbox.diagnosis/1",
+  "timeline": [
+    {
+      "kind": "RUN_START",
+      "node": 0,
+      "note": "run_id=r_83cb737e8089200e",
+      "seq": 1
+    },
+    {
+      "kind": "CHAIN",
+      "node": 0,
+      "note": "",
+      "seq": 2
+    },
+    {
+      "kind": "NODE_OPEN",
+      "node": 16384,
+      "note": "name=POST /v1/chat/completions; kind=proxy_call",
+      "seq": 3
+    },
+    {
+      "kind": "CHAIN",
+      "node": 0,
+      "note": "",
+      "seq": 4
+    },
+    {
+      "kind": "MODEL_REQUEST",
+      "node": 16384,
+      "note": "provider=openai; model=None; path=/v1/chat/completions; stream=True; partial=False; capture_seam=None",
+      "seq": 5
+    },
+    {
+      "kind": "CHAIN",
+      "node": 0,
+      "note": "",
+      "seq": 6
+    },
+    {
+      "kind": "MODEL_CHUNK",
+      "node": 16384,
+      "note": "92 B",
+      "seq": 7
+    },
+    {
+      "kind": "CHAIN",
+      "node": 0,
+      "note": "",
+      "seq": 8
+    },
+    {
+      "kind": "MODEL_CHUNK",
+      "node": 16384,
+      "note": "92 B",
+      "seq": 9
+    },
+    {
+      "kind": "CHAIN",
+      "node": 0,
+      "note": "",
+      "seq": 10
+    },
+    {
+      "kind": "MODEL_ERROR",
+      "node": 16384,
+      "note": "provider=openai; model=None; path=/v1/chat/completions; partial=True; status=200; error=INTERRUPTED_UPSTREAM: client received 776 B, proxy received 776 B from the upstream; the upstream closed before a termin",
+      "seq": 11
+    },
+    {
+      "kind": "CHAIN",
+      "node": 0,
+      "note": "",
+      "seq": 12
+    },
+    {
+      "kind": "NODE_CLOSE",
+      "node": 16384,
+      "note": "name=POST /v1/chat/completions; kind=proxy_call; outcome=error; status=200; error=INTERRUPTED_UPSTREAM: client received 776 B, proxy received 776 B from the upstream; the upstream closed before a termin",
+      "seq": 13
+    },
+    {
+      "kind": "CHAIN",
+      "node": 0,
+      "note": "",
+      "seq": 14
+    },
+    {
+      "kind": "RUN_END",
+      "node": 0,
+      "note": "exit_code=3; signaled=None; run_id=r_83cb737e8089200e",
+      "seq": 15
+    },
+    {
+      "kind": "CHAIN",
+      "node": 0,
+      "note": "",
+      "seq": 16
+    },
+    {
+      "kind": "SEG_END",
+      "node": 0,
+      "note": "",
+      "seq": 17
+    }
+  ]
+}

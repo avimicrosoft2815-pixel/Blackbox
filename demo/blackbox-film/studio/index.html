@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>BLACKBOX — Director Studio</title>
+  <meta name="description" content="The Director Studio for the BlackBox demo film: one blueprint, seven scenes, a live stage, and the same renderer the film is exported with." />
+  <link rel="stylesheet" href="css/studio.css" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%2307070A'/%3E%3Ccircle cx='16' cy='16' r='5' fill='%23E3B341'/%3E%3C/svg%3E" />
+</head>
+<body>
+  <a class="skip" href="#stage">Skip to the stage</a>
+
+  <header class="topbar">
+    <div class="brand">
+      <span class="wordmark">BLACKBOX</span>
+      <span class="dot" aria-hidden="true"></span>
+      <span class="kicker">DIRECTOR STUDIO</span>
+    </div>
+    <div class="topbar-meta">
+      <span id="meta-filmlength" class="meta">—</span>
+      <span class="meta-sep" aria-hidden="true">·</span>
+      <span class="meta">1920 × 1080</span>
+      <span class="meta-sep" aria-hidden="true">·</span>
+      <span class="meta">30 fps</span>
+      <button id="btn-help" class="ghost" type="button" aria-expanded="false" aria-controls="help">Keys</button>
+    </div>
+  </header>
+
+  <div id="banner" class="banner" hidden role="status"></div>
+
+  <main class="layout">
+    <nav class="rail" aria-label="Scenes">
+      <p class="rail-title">SCENES</p>
+      <ol id="scene-tabs" class="scene-tabs"></ol>
+      <p class="rail-foot mono">one incident<br />seven readings</p>
+    </nav>
+
+    <section class="stage-wrap" id="stage">
+      <div class="stage-frame">
+        <canvas id="stage-canvas" width="1920" height="1080" aria-label="Film stage, rendered live from the blueprint"></canvas>
+        <div class="stage-badge mono" id="stage-badge">READY</div>
+      </div>
+
+      <p id="live-caption" class="live-caption" aria-live="polite"></p>
+
+      <div class="transport">
+        <button id="btn-play" class="primary" type="button" aria-label="Play (Space)">
+          <span id="play-glyph">▶</span><span id="play-label">Play</span>
+        </button>
+        <button id="btn-prev" class="ghost" type="button" aria-label="Previous scene (Left arrow)">◀ scene</button>
+        <button id="btn-next" class="ghost" type="button" aria-label="Next scene (Right arrow)">scene ▶</button>
+        <div class="time mono"><span id="tc-now">00:00.00</span> <span class="dim">/</span> <span id="tc-total">00:00.00</span></div>
+        <label class="speed">
+          <span class="mono dim">speed</span>
+          <select id="speed" aria-label="Playback speed">
+            <option value="0.5">0.5×</option>
+            <option value="1" selected>1×</option>
+            <option value="1.5">1.5×</option>
+            <option value="2">2×</option>
+          </select>
+        </label>
+        <button id="btn-mute" class="ghost" type="button" aria-pressed="false" aria-label="Mute narration (M)">sound on</button>
+        <button id="btn-captions" class="ghost" type="button" aria-pressed="true" aria-label="Toggle captions (C)">captions on</button>
+        <button id="btn-motion" class="ghost" type="button" aria-pressed="false" aria-label="Reduce motion">full motion</button>
+      </div>
+
+      <div class="scrub">
+        <div id="segments" class="segments" role="slider" tabindex="0" aria-label="Film position" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"></div>
+        <div class="scrub-labels mono">
+          <span id="scrub-scene">scene 01</span>
+          <span id="scrub-pct">0%</span>
+        </div>
+      </div>
+
+      <div id="help" class="help" hidden>
+        <dl class="mono">
+          <dt>Space</dt><dd>play / pause</dd>
+          <dt>← →</dt><dd>previous / next scene</dd>
+          <dt>Shift + ← →</dt><dd>nudge one percent</dd>
+          <dt>A D</dt><dd>move the before/after divider</dd>
+          <dt>C</dt><dd>captions</dd>
+          <dt>M</dt><dd>sound</dd>
+          <dt>E</dt><dd>blueprint editor</dd>
+          <dt>I</dt><dd>inspector</dd>
+          <dt>R</dt><dd>revert edits to the film</dd>
+        </dl>
+        <p class="mono dim">The stage renders with <code>studio/js/frame.js</code> — the same module the encoder uses.</p>
+      </div>
+    </section>
+
+    <aside class="panel" aria-label="Blueprint tools">
+      <div class="panel-tabs" role="tablist">
+        <button id="tab-editor" class="tab" role="tab" aria-selected="false" aria-controls="pane-editor" type="button">Editor <span class="mono dim">E</span></button>
+        <button id="tab-inspector" class="tab" role="tab" aria-selected="false" aria-controls="pane-inspector" type="button">Inspector <span class="mono dim">I</span></button>
+        <button id="tab-transcript" class="tab" role="tab" aria-selected="true" aria-controls="pane-transcript" type="button">Transcript</button>
+      </div>
+
+      <section id="pane-editor" class="pane" role="tabpanel" aria-labelledby="tab-editor" hidden>
+        <p class="pane-lede">Editing <strong id="editor-scene-label">scene 01</strong>. Changes are validated, kept in this browser only, and never touch the file on disk.</p>
+        <form id="editor-form" novalidate>
+          <label class="field">
+            <span class="mono dim">eyebrow</span>
+            <input id="f-eyebrow" type="text" maxlength="60" autocomplete="off" />
+          </label>
+          <label class="field">
+            <span class="mono dim">headline, line 1</span>
+            <input id="f-headline-1" type="text" maxlength="60" autocomplete="off" />
+          </label>
+          <label class="field">
+            <span class="mono dim">headline, line 2</span>
+            <input id="f-headline-2" type="text" maxlength="60" autocomplete="off" />
+          </label>
+          <label class="field">
+            <span class="mono dim">accent</span>
+            <select id="f-accent">
+              <option value="0">line 1 in gold</option>
+              <option value="1">line 2 in gold</option>
+              <option value="-1">no accent</option>
+            </select>
+          </label>
+          <label class="field">
+            <span class="mono dim">body</span>
+            <textarea id="f-body" rows="4" maxlength="320"></textarea>
+          </label>
+          <label class="field">
+            <span class="mono dim">duration (ms)</span>
+            <input id="f-duration" type="number" min="2000" max="30000" step="100" />
+          </label>
+          <p id="editor-hint" class="field-hint mono" role="status"></p>
+          <div class="row">
+            <button class="primary small" type="submit">Apply</button>
+            <button id="btn-revert" class="ghost small" type="button">Revert to film</button>
+          </div>
+        </form>
+      </section>
+
+      <section id="pane-inspector" class="pane" role="tabpanel" aria-labelledby="tab-inspector" hidden>
+        <p class="pane-lede">What this frame is made of. Every number is read from the blueprint, and every check is re-measured on the stage's own canvas.</p>
+        <dl id="inspector-list" class="inspect"></dl>
+        <h3 class="pane-sub mono">CHECKS</h3>
+        <ul id="inspector-checks" class="checks"></ul>
+      </section>
+
+      <section id="pane-transcript" class="pane" role="tabpanel" aria-labelledby="tab-transcript">
+        <p class="pane-lede">Narration, scene by scene. The audio is the timing source: each scene's duration is its clip plus a lead-in and a tail.</p>
+        <ol id="transcript" class="transcript"></ol>
+      </section>
+    </aside>
+  </main>
+
+  <footer class="bottombar">
+    <div class="export-note mono">
+      <span>EXPORT</span>
+      <code>node tools/render_frames.mjs --out frames/ &amp;&amp; node tools/mux_film.mjs</code>
+    </div>
+    <div class="export-links">
+      <a id="link-film" class="ghost" href="../export/blackbox-film.mp4" download>Download the film</a>
+      <a id="link-srt" class="ghost" href="../export/blackbox-film.srt" download>Subtitles (.srt)</a>
+      <a class="ghost" href="../docs/storyboard.md">Storyboard</a>
+    </div>
+    <p id="foot-note" class="mono dim">pre-alpha · synthetic incident · no network, no account</p>
+  </footer>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

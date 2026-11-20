@@ -1,0 +1,21 @@
+{
+  "schema": "blackbox.repair-proposal/1",
+  "title": "Refuse an assistant message the provider never finished",
+  "rationale": "The recorded incident (capsule c_85b98eccd858bec2) shows one MODEL_REQUEST at node 16384 and no terminal frame: the provider stopped mid-stream. The client folded the partial message and returned it as complete, so the tool call it had started was carried forward with no recorded result. The repair makes an unfinished message an error at the point it is read, which is the earliest place the evidence still says what happened.",
+  "risk": [
+    "A provider that legitimately ends a stream without [DONE] would now raise; the incident shows one that does, and the guard is the point, but a provider quirk would surface as an error rather than as silent partial data.",
+    "Callers that catch broad exceptions around read_stream() would see a different exception type.",
+    "The change does not add a retry: a refused message is still a failed call for the user."
+  ],
+  "changes": [
+    {
+      "path": "app.py",
+      "expected_sha256": "e428b4fe400946a3599b0f9676021d257df58bf573d73fb128a8f25bf74e09e4",
+      "content": "\"\"\"Synthetic order-desk client \u2014 after the approved repair.\n\nThis file is invented for the demo. The change is the one the repair proposal describes: a stream that ends without\n`[DONE]` raises `IncompleteMessage` instead of looking like a finished message, so nothing downstream acts on a tool call\nwhose result was never received.\n\"\"\"\nfrom __future__ import annotations\n\n\nclass IncompleteMessage(Exception):\n    \"\"\"The assistant message ended before the provider said it was finished.\"\"\"\n\n\ndef read_stream(lines: list[str]) -> tuple[str, dict]:\n    \"\"\"Fold SSE lines into (text, tool_call). A message without `[DONE]` is refused, not returned.\"\"\"\n    text = \"\"\n    tool_call: dict = {}\n    for line in lines:\n        if not line.startswith(\"data:\"):\n            continue\n        body = line[5:].strip()\n        if body == \"[DONE]\":\n            return text, tool_call\n        text += body\n    raise IncompleteMessage(\"the stream ended without [DONE]; the assistant message is incomplete\")\n\n\ndef next_action(tool_call: dict) -> str:\n    \"\"\"What the app does next. It is only reached for a message the provider actually finished.\"\"\"\n    if tool_call.get(\"name\") == \"lookup_order\":\n        return f\"order-lookup:{tool_call.get('arguments', '{}')}\"\n    return \"reply\"\n"
+    }
+  ],
+  "tests": [
+    "python3 -m pytest -q",
+    "python3 -m pytest tests/test_stream_guard.py -q"
+  ]
+}
