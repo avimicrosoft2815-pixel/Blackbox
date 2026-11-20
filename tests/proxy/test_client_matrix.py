@@ -30,6 +30,26 @@ SSE_LINE = b'data: {"id":"chatcmpl-m","choices":[{"delta":{"content":"tok"},"ind
 SSE_BODY = SSE_LINE * 24 + b"data: [DONE]\n\n"
 
 
+def _run_node(script: str, url: str) -> subprocess.CompletedProcess[bytes]:
+    """Run the client and, when it times out, fail with the child's own stderr rather than a bare `TimeoutExpired`.
+
+    Defect 113: two Windows cells timed out here and the message said only that a subprocess took 60 seconds. The child's
+    stderr is captured by the call and was then thrown away by the exception, which is the one thing that would have said
+    whether Node had connected at all.
+    """
+    with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False) as handle:
+        handle.write(script)
+        path = handle.name
+    try:
+        return subprocess.run([NODE, path, url], capture_output=True, check=True, timeout=60)
+    except subprocess.TimeoutExpired as timed_out:
+        stderr = timed_out.stderr or b""
+        pytest.fail(f"the Node client did not finish within 60 s against {url}; its stderr was:\n"
+                    f"{stderr.decode('utf-8', 'replace') or '<empty>'}", pytrace=False)
+    finally:
+        Path(path).unlink(missing_ok=True)
+
+
 class _SdkOrigin:
     """An origin that answers a chat completion the way a provider does — including `[DONE]`, which the SDK waits for."""
 
@@ -96,14 +116,7 @@ def test_node_gets_the_origins_bytes_through_the_proxy():
             "  res.on('end', () => { process.stdout.write(Buffer.concat(chunks).toString('base64')); });\n"
             "}).on('error', (e) => { process.stderr.write(String(e)); process.exit(1); });\n"
         )
-        with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False) as handle:
-            handle.write(script)
-            path = handle.name
-        try:
-            done = subprocess.run([NODE, path, f"http://127.0.0.1:{box.proxy.port}/p/stream"],
-                                  capture_output=True, check=True, timeout=60)
-        finally:
-            Path(path).unlink(missing_ok=True)
+        done = _run_node(script, f"http://127.0.0.1:{box.proxy.port}/p/stream")
         got = base64.b64decode(done.stdout)
         assert hashlib.sha256(got).hexdigest() == hashlib.sha256(box.origin.stream_body).hexdigest()
         assert box.proxy.stats.requests == 1
@@ -173,14 +186,7 @@ def test_the_two_process_clients_disagree_about_nothing():
         url = f"http://127.0.0.1:{box.proxy.port}/p/stream"
         got_curl = subprocess.run([CURL, "-sS", "--http1.1", "-N", "--max-time", "30", url],
                                   capture_output=True, check=True).stdout
-        with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False) as handle:
-            handle.write(node_script)
-            path = handle.name
-        try:
-            got_node = base64.b64decode(subprocess.run([NODE, path, url], capture_output=True, check=True,
-                                                       timeout=60).stdout)
-        finally:
-            Path(path).unlink(missing_ok=True)
+        got_node = base64.b64decode(_run_node(node_script, url).stdout)
         expected = hashlib.sha256(box.origin.stream_body).hexdigest()
         assert [hashlib.sha256(got_curl).hexdigest(), hashlib.sha256(got_node).hexdigest()] == [expected, expected]
         assert box.proxy.stats.requests == 2

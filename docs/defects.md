@@ -2031,3 +2031,26 @@ sentence — deleting them would make the page unable to record that it once had
 **Tests**: `tests/test_guarantees_links.py` (2) — every `|`-row in the table must name files and `file::name` nodes that
 are in the tree (read from each file's AST, so a rename fails it), and no row may say `planned`. The prose above the table
 is deliberately not scanned: it is the record of this defect.
+## Defect 113 — one Windows CI cell timed out twice on a Node subprocess, on a commit whose sibling cell passed (2026-11-20, CI, open)
+
+**What happened.** `py3.12 / windows-latest` failed on `45a5609` with two 60-second subprocess timeouts in
+`tests/proxy/test_client_matrix.py::test_node_gets_the_origins_bytes_through_the_proxy` and
+`::test_the_two_process_clients_disagree_about_nothing`. The annotations carry
+`subprocess.TimeoutExpired: Command '['C:\\Program Files\\nodejs\\node.EXE', …]' timed out after 60 seconds` for both. The
+same commit's `py3.11` and `py3.13` Windows cells passed, and the *same* `py3.12 / windows-latest` job passed on a second
+run of the same SHA (`44733709855`). The two runs were started 25 s apart, so the difference between them is the machine.
+
+**What is ruled out.** The framing change in `_client_head` (defect 109) cannot be the cause of these two tests: they
+`GET /p/stream`, and the mock provider's `do_GET` answers with `content-length` set, so the head the proxy writes for that
+route is the forwarded length — the unframed branch this branch changed is not reached. Reproduced three times locally,
+green each time (`tests/proxy/test_client_matrix.py`).
+
+**Not resolved, and not called a flake.** A 60-second timeout for a loopback GET against a local mock is two orders of
+magnitude past the work; either Windows runners under this six-cell matrix can starve a Node startup for a minute, or
+something in this test's teardown occasionally leaves a socket the child waits on. Recorded here so the next occurrence
+has a second data point, with the job URL above.
+
+**One thing was changed anyway, because it makes the next occurrence answerable:** both Node clients in that file now go
+through `_run_node()`, which keeps the child's `stderr` and prints it in the failure message instead of letting
+`TimeoutExpired` discard the only evidence the test had. That is a diagnostic, not a fix — the assertion is unchanged, the
+60-second budget is unchanged, and neither test is skipped.
