@@ -11,7 +11,8 @@
     "film:4k": "node tools/render_film.mjs --height 2160 --label 4k --crf 20",
     "still": "node tools/render_frames.mjs",
     "test": "node --test tools/test_film.mjs tools/test_studio.mjs",
-    "check": "node tools/render_frames.mjs --scene 1 --pct 40 --out /tmp/blackbox-check"
+    "check": "node tools/render_frames.mjs --scene 1 --pct 40 --out /tmp/blackbox-check",
+    "showcase": "node tools/showcase.mjs"
   },
   "devDependencies": {
     "@napi-rs/canvas": "^0.1.80",

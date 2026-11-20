@@ -9,6 +9,7 @@ generated clips, and the incident is a synthetic run you can reproduce with one 
 | **The film** | `export/blackbox-film-1080p.mp4` (1920×1080) and `export/blackbox-film-4k.mp4` (3840×2160) |
 | **Subtitles** | `export/blackbox-film.srt` — built from the same captions burned into the picture |
 | **The studio** | `npm run studio` → <http://localhost:8181/studio/> |
+| **Why this is different** | `docs/showcase.md` — ten things a demo usually does not show, each one re-measured by `npm run showcase` |
 | **Download link** | `/film.mp4` on the same server, sent as an attachment |
 | **The incident** | `incident/run_demo.sh` → writes `evidence/*` |
 | **Tests** | `npm test` (25 checks: blueprint, narration, renderer, studio behaviour) |
