@@ -1,0 +1,267 @@
+{
+  "schema": "blackbox.demo-stats/1",
+  "commit": "09c4ad5",
+  "measuredAt": "2026-11-20T05:48:46.171Z",
+  "machine": "linux/x64 · node v22.22.3",
+  "python": "3.11.2",
+  "sources": {
+    "note": "every number above is written by tools/stats.mjs from a command it ran, at the commit named here",
+    "stats": "tools/stats.mjs"
+  },
+  "facts": [
+    {
+      "id": "tests.python",
+      "label": "Python checks in the named suites",
+      "value": 153,
+      "unit": "checks",
+      "source": "start/stats.json · suites[]"
+    },
+    {
+      "id": "tests.film",
+      "label": "film and studio checks",
+      "value": 32,
+      "unit": "checks",
+      "source": "tools/test_film.mjs, tools/test_studio.mjs"
+    },
+    {
+      "id": "tests.suites",
+      "label": "suites summarised here",
+      "value": 10,
+      "unit": "suites",
+      "source": "start/stats.json · suites[]"
+    },
+    {
+      "id": "incident.capsules",
+      "label": "capsules written by one run",
+      "value": 2,
+      "unit": "capsules",
+      "source": "evidence/ls.txt"
+    },
+    {
+      "id": "incident.verifyOk",
+      "label": "verify checks that could be recomputed",
+      "value": 10,
+      "unit": "checks",
+      "source": "evidence/verify.txt"
+    },
+    {
+      "id": "incident.verifyDeclared",
+      "label": "checks printed as declared, not counted",
+      "value": 2,
+      "unit": "checks",
+      "source": "evidence/verify.txt"
+    },
+    {
+      "id": "incident.findings",
+      "label": "findings in the diagnosis",
+      "value": 2,
+      "unit": "findings",
+      "source": "evidence/diagnosis.json"
+    },
+    {
+      "id": "incident.cannotKnow",
+      "label": "limits the diagnosis states",
+      "value": 1,
+      "unit": "statements",
+      "source": "evidence/diagnosis.json"
+    },
+    {
+      "id": "incident.exitCode",
+      "label": "the app's own exit code, kept",
+      "value": 3,
+      "unit": "",
+      "source": "evidence/run.json"
+    },
+    {
+      "id": "film.scenes",
+      "label": "scenes",
+      "value": 7,
+      "unit": "scenes",
+      "source": "studio/spec.json"
+    },
+    {
+      "id": "film.seconds",
+      "label": "length",
+      "value": 55,
+      "unit": "seconds",
+      "source": "studio/spec.json"
+    },
+    {
+      "id": "film.cues",
+      "label": "sound cues mixed under the narration",
+      "value": 10,
+      "unit": "cues",
+      "source": "tools/sfx.mjs · studio/spec.json"
+    },
+    {
+      "id": "film.narration",
+      "label": "recorded narration clips",
+      "value": 7,
+      "unit": "clips",
+      "source": "studio/assets/narration/"
+    },
+    {
+      "id": "film.subtitles",
+      "label": "subtitle cues in the .srt",
+      "value": 14,
+      "unit": "cues",
+      "source": "export/blackbox-film.srt"
+    },
+    {
+      "id": "film.hd",
+      "label": "the 1080p master",
+      "value": 7.9,
+      "unit": "MB",
+      "source": "export/blackbox-film-1080p.mp4"
+    },
+    {
+      "id": "film.uhd",
+      "label": "the 4K master",
+      "value": 15.1,
+      "unit": "MB",
+      "source": "export/blackbox-film-4k.mp4"
+    }
+  ],
+  "suites": [
+    {
+      "name": "the film and the studio",
+      "command": "npm test",
+      "files": [
+        "tools/test_film.mjs",
+        "tools/test_studio.mjs",
+        "tools/test_start.mjs"
+      ],
+      "passed": 32,
+      "failed": 0,
+      "ok": true,
+      "what": "blueprint order, durations against the measured narration, caption bounds, on-frame labels, the banned-word rule, frame purity, clock mapping, and fourteen studio behaviour checks in jsdom"
+    },
+    {
+      "name": "test_forbidden_words.py",
+      "command": "pytest -q tests/test_forbidden_words.py",
+      "files": [
+        "tests/test_forbidden_words.py"
+      ],
+      "passed": 2,
+      "failed": 0,
+      "ok": true,
+      "what": "the words this repository refuses to use, in the tree and in commit messages"
+    },
+    {
+      "name": "test_redaction_every_sink.py",
+      "command": "pytest -q tests/test_redaction_every_sink.py",
+      "files": [
+        "tests/test_redaction_every_sink.py"
+      ],
+      "passed": 3,
+      "failed": 0,
+      "ok": true,
+      "what": "one corpus of secrets, every place a capsule can write, each asserted"
+    },
+    {
+      "name": "test_xss_corpus.py",
+      "command": "pytest -q tests/test_xss_corpus.py",
+      "files": [
+        "tests/test_xss_corpus.py"
+      ],
+      "passed": 5,
+      "failed": 0,
+      "ok": true,
+      "what": "twenty payloads, checked against the same sinks"
+    },
+    {
+      "name": "test_no_egress.py",
+      "command": "pytest -q tests/test_no_egress.py",
+      "files": [
+        "tests/test_no_egress.py"
+      ],
+      "passed": 5,
+      "failed": 0,
+      "ok": true,
+      "what": "nothing leaves the machine while a run is recorded"
+    },
+    {
+      "name": "test_capsule_attacks.py",
+      "command": "pytest -q tests/test_capsule_attacks.py",
+      "files": [
+        "tests/test_capsule_attacks.py"
+      ],
+      "passed": 25,
+      "failed": 0,
+      "ok": true,
+      "what": "capsules that were tampered with are refused, not rendered"
+    },
+    {
+      "name": "test_verify_cli.py",
+      "command": "pytest -q tests/test_verify_cli.py",
+      "files": [
+        "tests/test_verify_cli.py"
+      ],
+      "passed": 23,
+      "failed": 0,
+      "ok": true,
+      "what": "verify refuses what it cannot recompute"
+    },
+    {
+      "name": "test_diagnose.py",
+      "command": "pytest -q tests/test_diagnose.py",
+      "files": [
+        "tests/test_diagnose.py"
+      ],
+      "passed": 41,
+      "failed": 0,
+      "ok": true,
+      "what": "the diagnosis separates observed facts from possible explanations"
+    },
+    {
+      "name": "test_repair_workflow.py",
+      "command": "pytest -q tests/test_repair_workflow.py",
+      "files": [
+        "tests/test_repair_workflow.py"
+      ],
+      "passed": 46,
+      "failed": 0,
+      "ok": true,
+      "what": "a repair is previewed, approved by token, then checked"
+    },
+    {
+      "name": "test_docs_links.py",
+      "command": "pytest -q tests/test_docs_links.py",
+      "files": [
+        "tests/test_docs_links.py"
+      ],
+      "passed": 3,
+      "failed": 0,
+      "ok": true,
+      "what": "the documents' cross-references and tables"
+    }
+  ],
+  "incident": {
+    "runId": "r_116c150bbf23b03d",
+    "exitCode": 3,
+    "capsules": 2,
+    "verifyOk": 10,
+    "verifyDeclared": 2,
+    "findings": 2,
+    "cannotKnow": 1,
+    "observed": 4
+  },
+  "notRun": [
+    {
+      "what": "the rest of the Python suite",
+      "why": "this environment is missing pieces some suites need (an HTTP client, a browser, a Go toolchain); CI runs the whole thing"
+    },
+    {
+      "what": "the three operating systems",
+      "why": "CI runs ubuntu, macOS and Windows; this is one Linux machine"
+    },
+    {
+      "what": "the desktop viewer",
+      "why": "it needs a display, and this environment has none"
+    },
+    {
+      "what": "a real provider",
+      "why": "there is no outbound network here, so the incident uses a loopback OpenAI-compatible mock"
+    }
+  ]
+}

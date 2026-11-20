@@ -1,0 +1,3 @@
+CAPSULE             RUN                 STATUS                   EVENTS  SIZE    
+c_75c1d97257dac250  r_83cb737e8089200e  recovered/PROCESS_DEATH  5       9.8 KiB 
+c_b3820c3ee321dd9d  r_83cb737e8089200e  recovered/PROCESS_DEATH  17      18.9 KiB

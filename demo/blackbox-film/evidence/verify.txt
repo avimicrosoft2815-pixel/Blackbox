@@ -1,0 +1,15 @@
+data/capsules/c_75c1d97257dac250.bbx
+  ok   integrity
+  ok   chain_root
+  ok   derived_parts
+  ok   capture_seam
+  ---- capture_vantage  a capsule carries no meta page: the vantage is declared and cannot be recomputed here, so it is printed as unverified rather than counted as a pass
+  ok   links_summary
+data/capsules/c_b3820c3ee321dd9d.bbx
+  ok   integrity
+  ok   chain_root
+  ok   derived_parts
+  ok   capture_seam
+  ---- capture_vantage  a capsule carries no meta page: the vantage is declared and cannot be recomputed here, so it is printed as unverified rather than counted as a pass
+  ok   links_summary
+blackbox verify: 2 capsule(s) verified; 1 check(s) declared, not checkable from a capsule

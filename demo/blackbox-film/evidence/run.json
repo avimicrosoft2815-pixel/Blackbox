@@ -1,0 +1,40 @@
+{
+  "argv": [
+    "<python>",
+    "app.py"
+  ],
+  "duration_s": 0.497,
+  "exit_code": 3,
+  "hooks": {
+    "errors": [],
+    "events": 0,
+    "frames": 0,
+    "inbox": "<work-dir>/data/inbox",
+    "quarantined": [],
+    "tape": null
+  },
+  "recovered": {
+    "capsule_path": "<work-dir>/data/capsules/c_b3820c3ee321dd9d.bbx",
+    "capsule_root": "0f633e9730915145216ff62d5e2f9013593ce0b811f0f789c46f9ca0315ab672",
+    "capsules": 2,
+    "roles": [
+      "launcher",
+      "sdk"
+    ],
+    "run_id": "r_83cb737e8089200e",
+    "run_status": "recovered",
+    "state": "ARCHIVED"
+  },
+  "recovery_error": null,
+  "run_id": "r_83cb737e8089200e",
+  "signaled": null,
+  "stall": null,
+  "stall_last_seq": 5,
+  "stall_ms": 5000,
+  "stall_tb": null,
+  "stalled": false,
+  "triggers": {
+    "rules": []
+  },
+  "writer_uuid": "dcb629a3e062cbe556ea2c09ea5a0a07"
+}

@@ -1,0 +1,4 @@
+# Build outputs: frames are streams to ffmpeg, never kept. Both films are small enough to commit and are the deliverable;
+# re-rendering them is `npm run film` / `npm run film:4k`.
+frames/
+node_modules/

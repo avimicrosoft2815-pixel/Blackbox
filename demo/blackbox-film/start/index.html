@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>BLACKBOX — see the evidence, not the story</title>
+  <meta name="description" content="A recorder for AI applications, in development. One command puts it in front of any OpenAI-compatible call; when something goes wrong you get a capsule you can verify, a diagnosis that names its limits, and a repair a person approves." />
+  <link rel="stylesheet" href="start.css" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%2307070A'/%3E%3Ccircle cx='16' cy='16' r='5' fill='%23E3B341'/%3E%3C/svg%3E" />
+</head>
+<body>
+  <div class="progress" aria-hidden="true"><div class="progress-fill" id="progress"></div></div>
+  <a class="skip" href="#journey">Skip to the journey</a>
+
+  <header class="nav">
+    <div class="brand">
+      <span class="wordmark">BLACKBOX</span>
+      <span class="dot" aria-hidden="true"></span>
+      <span class="kicker mono">pre-alpha</span>
+    </div>
+    <nav class="links mono" aria-label="Sections">
+      <a href="#journey">the journey</a>
+      <a href="#why">why</a>
+      <a href="#proof">what is proven</a>
+      <a href="#numbers">numbers</a>
+      <a href="../studio/">studio</a>
+    </nav>
+    <button id="sound" class="pill" type="button" aria-pressed="false" title="This page has its own sound design. It is off until you ask for it.">sound off</button>
+  </header>
+
+  <main>
+    <!-- ── the claim, and the film that shows it ─────────────────────────────────────────────────────── -->
+    <section class="hero">
+      <div class="reveal">
+        <p class="eyebrow mono">A RECORDER FOR AI APPLICATIONS · IN DEVELOPMENT</p>
+        <h1>When the stream breaks, you get the <span class="gold">film of what happened</span> — not a story about it.</h1>
+        <p class="lede">
+          One command puts a recorder in front of any OpenAI-compatible call, without changing the application. When
+          something goes wrong you get three things you can check: a capsule you can verify, a diagnosis that names what
+          it cannot establish, and a repair that a person approves by token.
+        </p>
+        <div class="cta">
+          <a class="pill pill-solid" href="#film">watch the 55-second film</a>
+          <a class="pill" href="#journey">start in sixty seconds</a>
+          <a class="pill" href="#proof">what is proven, and what is not</a>
+        </div>
+        <p class="chips">
+          <span class="chip mono">synthetic incident</span>
+          <span class="chip mono">no network needed</span>
+          <span class="chip mono">every number measured</span>
+          <span class="chip warn mono">product in development</span>
+        </p>
+      </div>
+
+      <figure class="stage reveal" id="film">
+        <video id="player" controls preload="metadata" playsinline poster="../docs/poster.png"
+               src="../export/blackbox-film-1080p.mp4" width="1920" height="1080">
+          Your browser cannot play the film. <a href="../export/blackbox-film-1080p.mp4">Download it instead</a>.
+        </video>
+        <figcaption class="mono">
+          <span>55.00 s · 1920×1080 · h264 · recorded narration · eleven sound cues</span>
+          <span class="dim">every frame drawn by <code>studio/js/frame.js</code></span>
+        </figcaption>
+      </figure>
+    </section>
+
+    <!-- ── the journey ───────────────────────────────────────────────────────────────────────────────── -->
+    <section id="journey" class="block">
+      <div class="reveal">
+        <p class="eyebrow mono">01 · THE JOURNEY</p>
+        <h2>Sixty seconds, five commands</h2>
+        <p class="lede">
+          This is the whole of it: install, point it at a model, break something, read the evidence, approve a repair.
+          Every block below is the command that was typed on the machine that built this page — not a summary of it — and
+          the <span class="tag">ran here</span> marks the ones that were executed to write this page.
+        </p>
+      </div>
+
+      <ol class="steps">
+        <li class="step reveal">
+          <div class="step-head">
+            <span class="step-n mono">01</span>
+            <h3>Install it</h3>
+            <span class="tag">ran here</span>
+          </div>
+          <pre><code>git clone https://github.com/avimicrosoft2815-pixel/Blackbox
+cd Blackbox
+python -m venv .venv &amp;&amp; . .venv/bin/activate
+pip install -e .</code></pre>
+          <button class="pill copy" type="button" data-copy>copy</button>
+          <p class="note">Python 3.11 or newer, the standard library at run time, and nothing else. The recorder writes
+            capsules into a data directory you name; it installs no service and opens no port to the outside.</p>
+        </li>
+
+        <li class="step reveal">
+          <div class="step-head">
+            <span class="step-n mono">02</span>
+            <h3>Point it at any OpenAI-compatible model</h3>
+            <span class="tag">ran here, against a loopback provider</span>
+          </div>
+          <pre><code>blackbox run --upstream 'openai=https://api.openai.com/v1@/openai' -- python your_app.py
+
+# a local runtime — same command shape, different base URL
+blackbox run --upstream 'openai=http://127.0.0.1:11434/v1@/openai' -- python your_app.py
+
+# a gateway you answer on your own path
+blackbox run --upstream 'openai=https://gateway.example/v1@/gateway' -- python your_app.py</code></pre>
+          <button class="pill copy" type="button" data-copy>copy</button>
+          <p class="note">The <code>@/openai</code> suffix is the path the recorder answers on: it points the client's
+            base-URL variable at itself, so the application is unmodified and never learns it is being recorded. Any
+            OpenAI-compatible base URL works the same way — hosted, local or a gateway — because the recorder speaks the
+            client's protocol, not a vendor's. What ran here is the same flag against a loopback OpenAI-compatible mock
+            (the third line of <code>incident/run_demo.sh</code>): a hosted endpoint needs the network, which this
+            environment does not have, so that half of the sentence is a shape, not a measurement.</p>
+        </li>
+
+        <li class="step reveal">
+          <div class="step-head">
+            <span class="step-n mono">03</span>
+            <h3>Break something, then look</h3>
+            <span class="tag">ran here</span>
+          </div>
+          <pre><code>blackbox ls --data data
+blackbox verify data/capsules/*.bbx
+blackbox view data/capsules/&lt;id&gt;.bbx --out evidence.html</code></pre>
+          <button class="pill copy" type="button" data-copy>copy</button>
+          <p class="note"><code>ls</code> lists the capsules in a directory, <code>verify</code> re-derives every part
+            against the capsule's own frames and prints the checks it <em>cannot</em> recompute instead of counting them,
+            and <code>view</code> writes one offline HTML file you can hand to somebody who has nothing installed.</p>
+        </li>
+
+        <li class="step reveal">
+          <div class="step-head">
+            <span class="step-n mono">04</span>
+            <h3>Ask what it means</h3>
+            <span class="tag">ran here</span>
+          </div>
+          <pre><code>blackbox diagnose data --json
+blackbox diagnose data --out report.md --brief brief.md</code></pre>
+          <button class="pill copy" type="button" data-copy>copy</button>
+          <p class="note">Findings arrive with the evidence that supports them, the alternatives that are not ruled out,
+            and the check that would separate them — plus a list of what the capsule cannot answer at all.</p>
+        </li>
+
+        <li class="step reveal">
+          <div class="step-head">
+            <span class="step-n mono">05</span>
+            <h3>Approve a repair, then prove it</h3>
+            <span class="tag">the shape of the command, run in the repository's tests</span>
+          </div>
+          <pre><code>blackbox repair preview proposal.json          # prints a token
+blackbox repair apply proposal.json --approve &lt;token&gt;
+blackbox repair verify proposal.json --test "pytest -q"</code></pre>
+          <button class="pill copy" type="button" data-copy>copy</button>
+          <p class="note">A proposal is data; it is never executed. Applying it needs the token that <code>preview</code>
+            printed, and <code>verify</code> runs the check you named — the tool's own output stays on screen next to the
+            result, so a pass is not mistaken for a proof.</p>
+        </li>
+      </ol>
+
+      <p class="aside reveal">
+        The whole incident behind the film reproduces in about six seconds:
+        <code>BLACKBOX=../../.venv/bin/blackbox PYTHON=../../.venv/bin/python bash incident/run_demo.sh /tmp/bbdemo</code>.
+        It is a synthetic order desk and a loopback provider that cuts the stream; every id in it is invented.
+      </p>
+    </section>
+
+    <!-- ── the why ───────────────────────────────────────────────────────────────────────────────────── -->
+    <section id="why" class="block">
+      <div class="reveal">
+        <p class="eyebrow mono">02 · WHY THIS EXISTS</p>
+        <h2>What used to be expensive to build</h2>
+        <p class="lede">
+          None of this is a new idea about how to record software. What is expensive is the joining up: the proxy at the
+          seam, the ids that match across two processes, the artefact you can hand to someone else, the diagnosis that
+          does not overstate itself, and the repair a human actually approved. BlackBox is that, wired together, with the
+          limits printed on it.
+        </p>
+      </div>
+
+      <div class="table reveal">
+        <div class="row head mono">
+          <span>what you would build yourself</span><span>what it costs</span><span>what is here</span>
+        </div>
+        <div class="row">
+          <span>a proxy that sees both sides of the call</span>
+          <span>one per SDK, kept in step with each release</span>
+          <span><code>blackbox run</code> — the app is unmodified, the proxy is loopback only</span>
+        </div>
+        <div class="row">
+          <span>an id that joins the app, the client and the wire</span>
+          <span>thread it through every layer, and the day it breaks is the day you need it</span>
+          <span>one run id; the launcher and the SDK capsules are linked to it and to each other</span>
+        </div>
+        <div class="row">
+          <span>evidence somebody else can check</span>
+          <span>exports, log buckets, hope</span>
+          <span>a capsule plus <code>verify</code>, and one offline HTML page per capsule</span>
+        </div>
+        <div class="row">
+          <span>a diagnosis that admits its limits</span>
+          <span>usually nobody writes one, so a plausible sentence becomes a fact</span>
+          <span>findings with their alternatives and the next check; a <code>cannot_know</code> list</span>
+        </div>
+        <div class="row">
+          <span>a repair that a person approved</span>
+          <span>an agent with write access and no receipt</span>
+          <span>data-only proposals, a token from <code>preview</code>, and <code>verify</code> with the check you named</span>
+        </div>
+        <div class="row">
+          <span>the same thing on every vendor</span>
+          <span>a new integration per provider</span>
+          <span>any OpenAI-compatible base URL, by name or by path prefix</span>
+        </div>
+      </div>
+
+      <p class="aside reveal">
+        What it costs you: this is pre-alpha, there is no hosted service, there is no account, and the capsule stores
+        content as hashes in this demo — so the evidence answers <em>what happened and in what order</em>, not
+        <em>what the prompt said</em>.
+      </p>
+    </section>
+
+    <!-- ── the proof ─────────────────────────────────────────────────────────────────────────────────── -->
+    <section id="proof" class="block">
+      <div class="reveal">
+        <p class="eyebrow mono">03 · WHAT IS PROVEN, AND WHAT IS NOT CLAIMED</p>
+        <h2>Nothing here is “100% safe”. Here is what was tested instead.</h2>
+        <p class="lede">
+          A recorder sits next to your data, so vagueness is worse than a limit. The honest claim is a list: these checks
+          run, these ones do not cover everything, and here is how to re-run them yourself. Numbers on this page are
+          written by <code>tools/stats.mjs</code> from commands it ran at the commit named under them.
+        </p>
+      </div>
+
+      <div class="two">
+        <div class="card reveal">
+          <h3>Measured, in tests that run</h3>
+          <ul class="list" id="proof-list">
+            <li><strong>Secrets stay out of every sink.</strong> One corpus, every place a capsule can write, each asserted — <code>tests/test_redaction_every_sink.py</code>.</li>
+            <li><strong>A tampered capsule is refused, not rendered</strong> — <code>tests/test_capsule_attacks.py</code>.</li>
+            <li><strong>Nothing leaves the machine</strong>: the proxy can only reach the endpoints in its own table — <code>tests/test_no_egress.py</code>.</li>
+            <li><strong>Verify does not count what it cannot recompute</strong>: an uncheckable check is printed as declared — <code>tests/test_verify_cli.py</code>.</li>
+            <li><strong>Markup cannot execute in the pages the viewer writes</strong> — <code>tests/test_xss_corpus.py</code>.</li>
+            <li><strong>No marketing absolutes in code, docs or commit messages</strong> — <code>tests/test_forbidden_words.py</code>.</li>
+          </ul>
+        </div>
+        <div class="card reveal">
+          <h3>Not claimed</h3>
+          <ul class="list muted">
+            <li>That any of this makes a system safe. A recorder records; it does not sandbox the application it runs.</li>
+            <li>That the evidence is complete. Coverage depends on the integration and capture settings, and the film says so on the frame.</li>
+            <li>That a diagnosis is the cause. Each finding lists the alternatives it has not ruled out.</li>
+            <li>That a repair is correct. It is approved by a person and checked by the command that person named.</li>
+            <li>That any of it has been run on your provider, your OS or your model. The numbers below name the machine they came from.</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── the numbers ───────────────────────────────────────────────────────────────────────────────── -->
+    <section id="numbers" class="block">
+      <div class="reveal">
+        <p class="eyebrow mono">04 · THE NUMBERS</p>
+        <h2>Measured on one machine, at one commit</h2>
+        <p class="lede">
+          Written by <code>tools/stats.mjs</code>: it runs the suites, records an incident, and reads the two masters'
+          containers. Each card names where its number came from. If this page ever shows a number without a source, the
+          page is broken, not the claim.
+        </p>
+      </div>
+      <p class="stamp mono" id="stats-stamp">loading the measurement…</p>
+      <div class="grid" id="facts" aria-live="polite"></div>
+      <div class="two">
+        <div class="card">
+          <h3>Suites</h3>
+          <ul class="list tight" id="suites"></ul>
+        </div>
+        <div class="card">
+          <h3>Not measured here</h3>
+          <ul class="list tight muted" id="not-run"></ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── the film and the doors ────────────────────────────────────────────────────────────────────── -->
+    <section id="doors" class="block">
+      <div class="reveal">
+        <p class="eyebrow mono">05 · TAKE IT AWAY</p>
+        <h2>The film, the studio, and the documents with their limits in them</h2>
+      </div>
+      <div class="doors">
+        <a class="door reveal" href="../export/blackbox-film-1080p.mp4" download>
+          <span class="door-k mono">1080p</span><strong>The film</strong><span class="door-n">55.00 s · 8 MB</span>
+        </a>
+        <a class="door reveal" href="../export/blackbox-film-4k.mp4" download>
+          <span class="door-k mono">4K</span><strong>The 4K master</strong><span class="door-n">3840×2160</span>
+        </a>
+        <a class="door reveal" href="../export/blackbox-film.srt" download>
+          <span class="door-k mono">SRT</span><strong>Subtitles</strong><span class="door-n">from the same captions as the picture</span>
+        </a>
+        <a class="door reveal" href="../studio/">
+          <span class="door-k mono">STUDIO</span><strong>Director Studio</strong><span class="door-n">scrub the film, edit the copy, see the checks</span>
+        </a>
+        <a class="door reveal" href="../docs/showcase.md">
+          <span class="door-k mono">READ</span><strong>What is usually not there</strong><span class="door-n">ten properties, each one measured</span>
+        </a>
+        <a class="door reveal" href="../docs/README.md">
+          <span class="door-k mono">INDEX</span><strong>The documents</strong><span class="door-n">storyboard, script, claims, evidence</span>
+        </a>
+      </div>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <p class="mono">BLACKBOX · pre-alpha · the incident is synthetic, the measurement is not</p>
+    <p class="mono dim">
+      <a href="https://github.com/avimicrosoft2815-pixel/Blackbox">repository</a> ·
+      <a href="https://github.com/avimicrosoft2815-pixel/Blackbox/pull/20">the change under review</a> ·
+      <a href="../docs/claims-ledger.md">claims ledger</a>
+    </p>
+  </footer>
+
+  <script type="module" src="start.js"></script>
+</body>
+</html>

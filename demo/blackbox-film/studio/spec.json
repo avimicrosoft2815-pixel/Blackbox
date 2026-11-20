@@ -1,0 +1,883 @@
+{
+  "schema": "blackbox.demo-blueprint/1",
+  "product": {
+    "name": "BLACKBOX",
+    "version": "pre-alpha",
+    "tagline": "A local-first flight recorder for AI applications.",
+    "audience": "Developers running applications that call a model, and the people who have to explain what happened.",
+    "primaryCta": "Follow development",
+    "ctaTarget": "#follow",
+    "pillars": [
+      "Local-first, no account",
+      "Evidence with its limits shown",
+      "Approval-gated repair"
+    ]
+  },
+  "audio": {
+    "voiceStyle": "Warm, level, unhurried technical narrator; no hype, no upward inflection on claims.",
+    "wpm": 148,
+    "musicCue": "Low, slow sub pulse under a quiet pad; no melody competing with the voice.",
+    "narrationLeadMs": 500,
+    "narrationTailMs": 400,
+    "voiceAsset": "studio/assets/narration/scene-N.mp3 (generated narration, one clip per scene; see docs/narration-script.md)"
+  },
+  "film": {
+    "width": 1920,
+    "height": 1080,
+    "fps": 30,
+    "title": "BlackBox — see the evidence",
+    "closingNote": "Illustrative scenario. Coverage depends on the integration and capture settings. Product in development."
+  },
+  "evidence": {
+    "runId": "r_83cb737e8089200e",
+    "capsules": [
+      "c_75c1d97257dac250",
+      "c_b3820c3ee321dd9d"
+    ],
+    "frames": 17,
+    "node": 16384,
+    "exitCode": 3,
+    "verify": "2 capsule(s) verified; 1 check(s) declared, not checkable from a capsule",
+    "findings": 2,
+    "firstChunkBytes": 92,
+    "streamedBytes": 776,
+    "source": "demo/blackbox-film/evidence/ (captured by demo/blackbox-film/incident/run_demo.sh)"
+  },
+  "scenes": [
+    {
+      "id": "scene-1-the-problem",
+      "step": 1,
+      "shortTitle": "The problem",
+      "mode": "split-collage",
+      "splitLayout": true,
+      "durationMs": 9100,
+      "timeWindow": "00:00 – 00:09",
+      "label": "Illustrative scenario.",
+      "theme": {
+        "bg": "#07070A",
+        "surface": "#101014",
+        "surfaceElevated": "#16161C",
+        "border": "rgba(255,255,255,0.10)",
+        "fg": "#F4F1EA",
+        "muted": "#9A958C",
+        "primary": "#E3B341",
+        "secondary": "#F2CD73",
+        "deep": "#8A6A1E",
+        "unknown": "#7E786F"
+      },
+      "copy": {
+        "eyebrow": "01 / THE PROBLEM",
+        "headlines": [
+          "When an AI app fails,",
+          "what happened?"
+        ],
+        "accentLine": 1,
+        "body": "A request goes out. Part of an answer comes back. Then the next action never happens — and the context is spread across logs that do not share an id.",
+        "overlayBadge": "ONE INCIDENT · EVERY SCENE"
+      },
+      "collageProps": [
+        {
+          "id": "request",
+          "title": "POST /v1/chat/completions",
+          "badge": "REQUEST",
+          "detail": "stream: true · one call, one node",
+          "metricTag": "sent",
+          "xPct": 24,
+          "yPct": 15,
+          "rotateDeg": -3.5,
+          "scale": 1,
+          "enterPct": 4,
+          "accent": "#E3B341",
+          "pill": false
+        },
+        {
+          "id": "response",
+          "title": "first tokens",
+          "badge": "RESPONSE",
+          "detail": "92 B, then 92 B, then the socket closes",
+          "metricTag": "partial",
+          "xPct": 74,
+          "yPct": 15,
+          "rotateDeg": 2.5,
+          "scale": 0.98,
+          "enterPct": 14,
+          "accent": "#F2CD73",
+          "pill": false
+        },
+        {
+          "id": "next",
+          "title": "lookup_order",
+          "badge": "NEXT ACTION",
+          "detail": "the call the app was about to make",
+          "metricTag": "no result",
+          "xPct": 24,
+          "yPct": 85,
+          "rotateDeg": 2,
+          "scale": 0.98,
+          "enterPct": 38,
+          "accent": "#7E786F",
+          "pill": false
+        },
+        {
+          "id": "logs",
+          "title": "two separate logs",
+          "badge": "THE CONTEXT",
+          "detail": "app log, provider dashboard, one screenshot",
+          "metricTag": "scattered",
+          "xPct": 74,
+          "yPct": 85,
+          "rotateDeg": -2,
+          "scale": 0.96,
+          "enterPct": 50,
+          "accent": "#9A958C",
+          "pill": false
+        },
+        {
+          "id": "hero",
+          "title": "What did the app know when it stopped?",
+          "badge": "MISSING CONTEXT",
+          "detail": "The question this film answers — with evidence, and with its limits.",
+          "xPct": 50,
+          "yPct": 50,
+          "rotateDeg": -1.2,
+          "scale": 1.04,
+          "enterPct": 26,
+          "accent": "#E3B341",
+          "hero": true
+        }
+      ],
+      "narration": {
+        "script": "An AI application can fail between a request, a response and the next action. When the context is scattered, finding the cause takes time.",
+        "audio": "assets/narration/scene-1.mp3",
+        "audioMs": 7990,
+        "captions": [
+          {
+            "atPct": 0,
+            "atMs": 500,
+            "text": "An AI application can fail between a request, a response and the next action."
+          },
+          {
+            "atPct": 59,
+            "atMs": 5400,
+            "text": "When the context is scattered, finding the cause takes time."
+          }
+        ],
+        "pacing": "The hook lands inside the first five seconds: the request card, the partial response, the break.",
+        "entrySfx": "impact-low",
+        "sfxNotes": [
+          "a swell under the opening card"
+        ]
+      },
+      "sfx": [
+        {
+          "sound": "rise",
+          "atMs": 0,
+          "gain": 0.09
+        }
+      ]
+    },
+    {
+      "id": "scene-2-meet-blackbox",
+      "step": 2,
+      "shortTitle": "Meet BlackBox",
+      "mode": "arch-graph",
+      "splitLayout": true,
+      "durationMs": 7100,
+      "timeWindow": "00:09 – 00:16",
+      "theme": {
+        "bg": "#07070A",
+        "surface": "#101014",
+        "surfaceElevated": "#16161C",
+        "border": "rgba(255,255,255,0.10)",
+        "fg": "#F4F1EA",
+        "muted": "#9A958C",
+        "primary": "#E3B341",
+        "secondary": "#F2CD73",
+        "deep": "#8A6A1E",
+        "unknown": "#7E786F"
+      },
+      "copy": {
+        "eyebrow": "02 / MEET BLACKBOX",
+        "headlines": [
+          "A flight recorder",
+          "for AI applications."
+        ],
+        "accentLine": 1,
+        "body": "It runs alongside your app. The loopback proxy is the capture point; everything it records stays on this machine, in a tape you can recover and read without an account.",
+        "overlayBadge": "SYSTEM TOPOLOGY // SIGNAL FLOW"
+      },
+      "archGraph": {
+        "caption": "supported integrations only — a program with no instrumentation gets no node, and the capsule says so",
+        "nodes": [
+          {
+            "id": "app",
+            "label": "Your app",
+            "role": "APP",
+            "x": 8,
+            "y": 24,
+            "accent": "#F4F1EA",
+            "latencyLabel": "process"
+          },
+          {
+            "id": "proxy",
+            "label": "Loopback proxy",
+            "role": "CAPTURE",
+            "x": 42,
+            "y": 24,
+            "accent": "#E3B341",
+            "latencyLabel": "127.0.0.1"
+          },
+          {
+            "id": "tape",
+            "label": "Tape v2",
+            "role": "LOCAL",
+            "x": 8,
+            "y": 76,
+            "accent": "#F2CD73",
+            "latencyLabel": "on disk"
+          },
+          {
+            "id": "capsule",
+            "label": "Capsule .bbx",
+            "role": "RECOVERED",
+            "x": 42,
+            "y": 76,
+            "accent": "#E3B341",
+            "latencyLabel": "sealed"
+          },
+          {
+            "id": "viewer",
+            "label": "Viewer",
+            "role": "REVIEW",
+            "x": 78,
+            "y": 62,
+            "accent": "#F4F1EA",
+            "latencyLabel": "HTML file"
+          },
+          {
+            "id": "provider",
+            "label": "Model provider",
+            "role": "UPSTREAM",
+            "x": 88,
+            "y": 12,
+            "accent": "#7E786F",
+            "latencyLabel": "not recorded",
+            "dashed": true
+          }
+        ],
+        "edges": [
+          {
+            "from": "app",
+            "to": "proxy",
+            "label": "request",
+            "activeFromPct": 12
+          },
+          {
+            "from": "proxy",
+            "to": "tape",
+            "label": "frames",
+            "activeFromPct": 26
+          },
+          {
+            "from": "tape",
+            "to": "capsule",
+            "label": "recover · seal",
+            "activeFromPct": 42
+          },
+          {
+            "from": "capsule",
+            "to": "viewer",
+            "label": "read",
+            "activeFromPct": 58
+          },
+          {
+            "from": "proxy",
+            "to": "provider",
+            "label": "HTTP",
+            "activeFromPct": 34,
+            "dashed": true
+          }
+        ]
+      },
+      "narration": {
+        "script": "BlackBox records selected activity for supported integrations, helping you inspect the evidence when something goes wrong.",
+        "audio": "assets/narration/scene-2.mp3",
+        "audioMs": 6070,
+        "captions": [
+          {
+            "atPct": 0,
+            "atMs": 500,
+            "text": "BlackBox records selected activity for supported integrations,"
+          },
+          {
+            "atPct": 59,
+            "atMs": 4200,
+            "text": "helping you inspect the evidence when something goes wrong."
+          }
+        ],
+        "pacing": "Steady walkthrough: each node lights as its name is spoken.",
+        "entrySfx": "whoosh-ember",
+        "sfxNotes": [
+          "a cut as the scene arrives, then quiet"
+        ]
+      }
+    },
+    {
+      "id": "scene-3-scattered-to-incident",
+      "step": 3,
+      "shortTitle": "Scattered clues",
+      "mode": "before-after",
+      "splitLayout": true,
+      "durationMs": 6800,
+      "timeWindow": "00:16 – 00:23",
+      "label": "Illustrative scenario.",
+      "theme": {
+        "bg": "#07070A",
+        "surface": "#101014",
+        "surfaceElevated": "#16161C",
+        "border": "rgba(255,255,255,0.10)",
+        "fg": "#F4F1EA",
+        "muted": "#9A958C",
+        "primary": "#E3B341",
+        "secondary": "#F2CD73",
+        "deep": "#8A6A1E",
+        "unknown": "#7E786F"
+      },
+      "copy": {
+        "eyebrow": "03 / FROM SCATTERED CLUES TO AN INCIDENT",
+        "headlines": [
+          "Scattered clues,",
+          "one evidence-led view."
+        ],
+        "accentLine": 1,
+        "body": "Before, the question is answered by memory. After, it is answered by frames — and the view stops where the record stops.",
+        "overlayBadge": "DRAG OR SCRUB THE DIVIDER",
+        "interactionHint": "Drag the divider or use the arrow keys in the studio"
+      },
+      "beforeAfter": {
+        "beforeLabel": "BEFORE · SCATTERED",
+        "beforeMetric": "no shared id",
+        "beforeBullets": [
+          "app.log: \"failed while reading the response\"",
+          "provider dashboard: 200 OK, no body kept",
+          "a screenshot of the terminal in a thread",
+          "timestamps that almost line up"
+        ],
+        "afterLabel": "AFTER · ONE INCIDENT",
+        "afterMetric": "one capsule",
+        "afterBullets": [
+          "MODEL_REQUEST seq 5, then two MODEL_CHUNK frames",
+          "MODEL_ERROR seq 11: upstream closed mid-stream",
+          "node 16384 closed outcome=error, exit code 3",
+          "the tool result is unknown, not guessed"
+        ]
+      },
+      "narration": {
+        "script": "Instead of starting with disconnected clues, review what was recorded in one place, and see where the record ends.",
+        "audio": "assets/narration/scene-3.mp3",
+        "audioMs": 5750,
+        "captions": [
+          {
+            "atPct": 0,
+            "atMs": 500,
+            "text": "Instead of starting with disconnected clues,"
+          },
+          {
+            "atPct": 43,
+            "atMs": 2940,
+            "text": "review what was recorded in one place, and see where the record ends."
+          }
+        ],
+        "pacing": "The divider sweeps while the sentence turns from \"clues\" to \"one place\".",
+        "entrySfx": "whoosh-ember",
+        "sfxNotes": [
+          "a cut as the scene arrives, then quiet"
+        ]
+      }
+    },
+    {
+      "id": "scene-4-the-timeline",
+      "step": 4,
+      "shortTitle": "See it unfold",
+      "mode": "ember-timeline",
+      "splitLayout": true,
+      "durationMs": 7400,
+      "timeWindow": "00:23 – 00:30",
+      "theme": {
+        "bg": "#07070A",
+        "surface": "#101014",
+        "surfaceElevated": "#16161C",
+        "border": "rgba(255,255,255,0.10)",
+        "fg": "#F4F1EA",
+        "muted": "#9A958C",
+        "primary": "#E3B341",
+        "secondary": "#F2CD73",
+        "deep": "#8A6A1E",
+        "unknown": "#7E786F"
+      },
+      "copy": {
+        "eyebrow": "04 / SEE THE INCIDENT UNFOLD",
+        "headlines": [
+          "Follow the sequence.",
+          "Keep the gaps."
+        ],
+        "accentLine": 1,
+        "body": "Six tracks, one run. What was recorded is labelled; what was not is labelled too — an interrupted tool call has an unknown outcome, not a happy ending.",
+        "overlayBadge": "STREAM ACTIVE"
+      },
+      "timelineTracks": [
+        {
+          "id": "app",
+          "track": "APP",
+          "clip": "RUN_START",
+          "timecode": "seq 1",
+          "durationLabel": "process",
+          "color": "#F4F1EA",
+          "state": "OBSERVED",
+          "segments": [
+            {
+              "label": "app started",
+              "span": 1,
+              "status": "done"
+            },
+            {
+              "label": "exit code 3",
+              "span": 1,
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "request",
+          "track": "MODEL REQUEST",
+          "clip": "MODEL_REQUEST",
+          "timecode": "seq 5",
+          "durationLabel": "stream=true",
+          "color": "#E3B341",
+          "state": "OBSERVED",
+          "segments": [
+            {
+              "label": "POST /v1/chat/completions",
+              "span": 2,
+              "status": "done"
+            },
+            {
+              "label": "node 16384",
+              "span": 1,
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "response",
+          "track": "RESPONSE",
+          "clip": "MODEL_CHUNK",
+          "timecode": "seq 7 · 9",
+          "durationLabel": "2 x 92 B",
+          "color": "#F2CD73",
+          "state": "OBSERVED",
+          "segments": [
+            {
+              "label": "92 B",
+              "span": 1,
+              "status": "done"
+            },
+            {
+              "label": "92 B",
+              "span": 1,
+              "status": "done"
+            },
+            {
+              "label": "no terminal event",
+              "span": 1,
+              "status": "queued"
+            }
+          ]
+        },
+        {
+          "id": "interruption",
+          "track": "INTERRUPTION",
+          "clip": "MODEL_ERROR",
+          "timecode": "seq 11",
+          "durationLabel": "INTERRUPTED_UPSTREAM",
+          "color": "#E3B341",
+          "state": "OBSERVED",
+          "segments": [
+            {
+              "label": "upstream closed mid-stream",
+              "span": 2,
+              "status": "active"
+            },
+            {
+              "label": "client got 776 B",
+              "span": 1,
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "recovery",
+          "track": "RECOVERY",
+          "clip": "capsule sealed",
+          "timecode": "17 frames",
+          "durationLabel": "verify · 5 checks",
+          "color": "#F4F1EA",
+          "state": "RECOVERED",
+          "segments": [
+            {
+              "label": "recover",
+              "span": 1,
+              "status": "done"
+            },
+            {
+              "label": "seal",
+              "span": 1,
+              "status": "done"
+            },
+            {
+              "label": "verify",
+              "span": 1,
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "review",
+          "track": "REVIEW",
+          "clip": "diagnose",
+          "timecode": "2 findings",
+          "durationLabel": "read-only",
+          "color": "#9A958C",
+          "state": "UNKNOWN",
+          "segments": [
+            {
+              "label": "2 findings observed",
+              "span": 1,
+              "status": "done"
+            },
+            {
+              "label": "tool result · unknown",
+              "span": 2,
+              "status": "queued"
+            }
+          ]
+        }
+      ],
+      "narration": {
+        "script": "Follow the sequence through a request, response and interruption. BlackBox shows what it observed, and what it cannot establish.",
+        "audio": "assets/narration/scene-4.mp3",
+        "audioMs": 6390,
+        "captions": [
+          {
+            "atPct": 0,
+            "atMs": 500,
+            "text": "Follow the sequence through a request, response and interruption."
+          },
+          {
+            "atPct": 52,
+            "atMs": 3870,
+            "text": "BlackBox shows what it observed, and what it cannot establish."
+          }
+        ],
+        "pacing": "Playhead sweeps once; each track is spoken as the head passes it.",
+        "entrySfx": "whoosh-ember",
+        "sfxNotes": [
+          "a cut as the scene arrives, then quiet"
+        ]
+      }
+    },
+    {
+      "id": "scene-5-diagnosis",
+      "step": 5,
+      "shortTitle": "Diagnosis",
+      "mode": "hud-telemetry",
+      "splitLayout": false,
+      "durationMs": 8100,
+      "timeWindow": "00:30 – 00:38",
+      "theme": {
+        "bg": "#07070A",
+        "surface": "#101014",
+        "surfaceElevated": "#16161C",
+        "border": "rgba(255,255,255,0.10)",
+        "fg": "#F4F1EA",
+        "muted": "#9A958C",
+        "primary": "#E3B341",
+        "secondary": "#F2CD73",
+        "deep": "#8A6A1E",
+        "unknown": "#7E786F"
+      },
+      "copy": {
+        "eyebrow": "05 / DIAGNOSIS WITH HONESTY",
+        "headlines": [
+          "Evidence first.",
+          "Uncertainty visible."
+        ],
+        "accentLine": 1,
+        "body": "Every finding carries its verdict, its confidence and the frame numbers it rests on. The questions it cannot answer are named too, not left blank.",
+        "overlayBadge": "READ-ONLY"
+      },
+      "hudCounters": [
+        {
+          "id": "observed",
+          "code": "OBSERVED",
+          "label": "findings, both high confidence",
+          "sublabel": "seq 11 MODEL_ERROR · seq 13 NODE_CLOSE outcome=error",
+          "from": 0,
+          "to": 2,
+          "decimals": 0,
+          "unit": "",
+          "ticks": 12,
+          "deltaBadge": "HIGH"
+        },
+        {
+          "id": "explanation",
+          "code": "POSSIBLE EXPLANATION",
+          "label": "alternatives named, none promoted",
+          "sublabel": "\"the application raised\" · \"a recorder error closed the node early\"",
+          "from": 0,
+          "to": 3,
+          "decimals": 0,
+          "unit": "",
+          "ticks": 12,
+          "deltaBadge": "NAMED"
+        },
+        {
+          "id": "unknown",
+          "code": "CANNOT TELL",
+          "label": "the wording of prompt and response",
+          "sublabel": "content stored as hashes · whether the tool ran",
+          "from": 0,
+          "to": 2,
+          "decimals": 0,
+          "unit": "",
+          "ticks": 12,
+          "deltaBadge": "STATED",
+          "dashed": true
+        },
+        {
+          "id": "evidence",
+          "code": "EVIDENCE",
+          "label": "frames, all checkable parts agree",
+          "sublabel": "capsule c_b3820c3ee321dd9d · verify 5 ok · 1 declared, not checkable",
+          "from": 0,
+          "to": 17,
+          "decimals": 0,
+          "unit": "",
+          "ticks": 17,
+          "deltaBadge": "SEALED"
+        }
+      ],
+      "narration": {
+        "script": "The diagnosis connects findings to the evidence, separating observed facts from possible explanations and unanswered questions.",
+        "audio": "assets/narration/scene-5.mp3",
+        "audioMs": 7030,
+        "captions": [
+          {
+            "atPct": 0,
+            "atMs": 500,
+            "text": "The diagnosis connects findings to the evidence,"
+          },
+          {
+            "atPct": 39,
+            "atMs": 3170,
+            "text": "separating observed facts from possible explanations and unanswered questions."
+          }
+        ],
+        "pacing": "Counters climb once and lock; the CANNOT TELL card stays deliberately unfinished.",
+        "entrySfx": "hud-lock",
+        "sfxNotes": [
+          "a cut as the scene arrives",
+          "a low tick on each diagnosis beat"
+        ]
+      },
+      "sfx": [
+        {
+          "sound": "pulse",
+          "atMs": 500,
+          "gain": 0.11
+        },
+        {
+          "sound": "pulse",
+          "atMs": 3170,
+          "gain": 0.13
+        }
+      ]
+    },
+    {
+      "id": "scene-6-the-decision",
+      "step": 6,
+      "shortTitle": "You decide",
+      "mode": "code-diff",
+      "splitLayout": true,
+      "durationMs": 8200,
+      "timeWindow": "00:38 – 00:46",
+      "label": "Representative repair, run on the synthetic demo repo.",
+      "theme": {
+        "bg": "#07070A",
+        "surface": "#101014",
+        "surfaceElevated": "#16161C",
+        "border": "rgba(255,255,255,0.10)",
+        "fg": "#F4F1EA",
+        "muted": "#9A958C",
+        "primary": "#E3B341",
+        "secondary": "#F2CD73",
+        "deep": "#8A6A1E",
+        "unknown": "#7E786F"
+      },
+      "copy": {
+        "eyebrow": "06 / THE HUMAN DECIDES",
+        "headlines": [
+          "Review the proposal.",
+          "You decide."
+        ],
+        "accentLine": 1,
+        "body": "BlackBox does not write the fix. You or your assistant write it, and the tool gates it: a token bound to the exact bytes you reviewed, and only the checks you name.",
+        "overlayBadge": "NOTHING APPLIES WITHOUT THE TOKEN"
+      },
+      "codeLines": [
+        {
+          "lineNumber": 22,
+          "kind": "context",
+          "code": "    for line in lines:",
+          "highlightAtPct": 6,
+          "annotation": "the stream is folded here"
+        },
+        {
+          "lineNumber": 23,
+          "kind": "removed",
+          "code": "-   return text, tool_call   # no [DONE] seen",
+          "highlightAtPct": 20,
+          "annotation": "a partial message looked complete"
+        },
+        {
+          "lineNumber": 23,
+          "kind": "added",
+          "code": "+   raise IncompleteMessage(\"the stream ended without [DONE]\")",
+          "highlightAtPct": 34,
+          "annotation": "+7 / −6 lines · 1 file · risk notes attached"
+        },
+        {
+          "lineNumber": 24,
+          "kind": "context",
+          "code": "    return text, tool_call",
+          "highlightAtPct": 48,
+          "annotation": "only reached for a finished message"
+        }
+      ],
+      "approval": {
+        "token": "d025bd2d4aa2988902e72aa6e3732d7e",
+        "steps": [
+          "repair brief",
+          "proposed change",
+          "diff + risk",
+          "explicit approval",
+          "verification"
+        ],
+        "verify": {
+          "command": "python -m pytest -q",
+          "verdict": "PASS",
+          "exit": 0,
+          "seconds": 0.36,
+          "summary": "2 passed"
+        },
+        "caveat": "nothing was run: this change is unverified until you run blackbox repair verify with a test command"
+      },
+      "narration": {
+        "script": "Prepare a brief for your coding assistant. Review a proposed change, approve it explicitly, and see the result of the checks you choose.",
+        "audio": "assets/narration/scene-6.mp3",
+        "audioMs": 7030,
+        "captions": [
+          {
+            "atPct": 0,
+            "atMs": 500,
+            "text": "Prepare a brief for your coding assistant."
+          },
+          {
+            "atPct": 34,
+            "atMs": 2810,
+            "text": "Review a proposed change, approve it explicitly, and see the result of the checks you choose."
+          }
+        ],
+        "pacing": "The diff lines light in order; the token and the PASS land on \"approve\" and \"the checks you choose\".",
+        "entrySfx": "hud-lock",
+        "sfxNotes": [
+          "a cut as the scene arrives",
+          "a stamp as the approval lands"
+        ]
+      },
+      "sfx": [
+        {
+          "sound": "stamp",
+          "atMs": 2810,
+          "gain": 0.13
+        }
+      ]
+    },
+    {
+      "id": "scene-7-reveal",
+      "step": 7,
+      "shortTitle": "See the evidence",
+      "mode": "warp-reveal",
+      "splitLayout": false,
+      "durationMs": 8300,
+      "timeWindow": "00:46 – 00:55",
+      "theme": {
+        "bg": "#07070A",
+        "surface": "#101014",
+        "surfaceElevated": "#16161C",
+        "border": "rgba(255,255,255,0.10)",
+        "fg": "#F4F1EA",
+        "muted": "#9A958C",
+        "primary": "#E3B341",
+        "secondary": "#F2CD73",
+        "deep": "#8A6A1E",
+        "unknown": "#7E786F"
+      },
+      "copy": {
+        "eyebrow": "07 / BLACKBOX",
+        "headlines": [
+          "See the evidence.",
+          "Decide what comes next."
+        ],
+        "body": "",
+        "overlayBadge": "PRODUCT IN DEVELOPMENT"
+      },
+      "warpTitle": "BLACKBOX",
+      "warpSubtitle": "See the evidence. Decide what comes next.",
+      "warpPillars": [
+        "Local-first, no account",
+        "Evidence with its limits shown",
+        "Approval-gated repair"
+      ],
+      "narration": {
+        "script": "When the next incident happens, start with evidence. BlackBox helps you see more clearly, and decide what comes next.",
+        "audio": "assets/narration/scene-7.mp3",
+        "audioMs": 6390,
+        "captions": [
+          {
+            "atPct": 0,
+            "atMs": 500,
+            "text": "When the next incident happens, start with evidence."
+          },
+          {
+            "atPct": 40,
+            "atMs": 3320,
+            "text": "BlackBox helps you see more clearly, and decide what comes next."
+          }
+        ],
+        "pacing": "One slow surge, then stillness; the wordmark holds for the closing note.",
+        "entrySfx": "warp-surge",
+        "sfxNotes": [
+          "a swell under the end card"
+        ]
+      },
+      "sfx": [
+        {
+          "sound": "rise",
+          "atMs": 0,
+          "gain": 0.11
+        }
+      ]
+    }
+  ]
+}
