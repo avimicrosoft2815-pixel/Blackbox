@@ -393,10 +393,12 @@ existed (`tests/kill/test_kill_stages.py`, `tests/test_head.py`, `tests/test_pre
 `tests/test_recovery_idempotence.py`) and marked every row `planned`; it now names tests that are in the tree, and
 `tests/test_guarantees_links.py` fails when one is not (defect 112).
 
-**CI, as observed on this branch.** The pushed commit ran 11 cells: `docs`, `go-reader`, and `py3.11`/`py3.12`/`py3.13`
-on Ubuntu, macOS and Windows all succeeded except one `py3.12 / windows-latest`, which timed out twice on a Node
-subprocess in `tests/proxy/test_client_matrix.py` and passed on a second run of the same commit. Defect 113 records what is
-ruled out (the framing change is not on that route) and what would settle it.
+**CI, as observed on this branch.** Run `44737016133` on `65c600e`: **11 of 11 cells pass** — `docs` (18 s),
+`go-reader` (37 s), and `py3.11` / `py3.12` / `py3.13` on Ubuntu (5m50s, 7m28s, 9m6s), macOS (9m9s, 10m5s, 7m2s) and
+Windows (16m52s, 13m34s, 17m12s). An earlier run of `45a5609` had one failing cell, `py3.12 / windows-latest`, which timed
+out twice on a 60-second Node subprocess in `tests/proxy/test_client_matrix.py`; the same job passed on a second run of the
+same commit, and the change to that file since is a diagnostic only. Defect 113 records what is ruled out (the framing
+change is not on that route) and keeps it open.
 
 **What did not change, and is still labelled below:** no gate is signed, the window has not been seen on a real desktop, no
 Windows installer exists, `run -- claude` with a kill is not run, and the bench-box rows still need a quiet host.
