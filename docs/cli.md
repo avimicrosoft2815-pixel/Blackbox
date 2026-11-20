@@ -32,6 +32,7 @@ Two conventions run through all of it:
 | `ls` | `ls [--data DIR]` — lists the capsules in a data directory | `--json` | `0` listed (an empty directory is an answer, not an error), `2` the data directory is a file |
 | `index` | `index [--rebuild] [--dump]` — builds the data directory's index from its capsules | `--json` | `0` built (unreadable capsules are reported), `2` the data directory cannot be used |
 | `retention` | `retention [--max-bytes] [--keep-hours]` — explains what retention would delete, and why; **never deletes** | `--json` | `0` a plan was produced, `2` the data directory or tape cannot be read |
+| `doctor` | `doctor [--capture\|--tape\|--hooks\|--storage\|--locks]` — probes this machine and this data directory: permissions, the capture seam that would install, what the tapes lost, the hook adapters, free space and a write+fsync+rename probe, and the writer leases | `--json` | `0` nothing failed (a `warn` is not a failure), `8` at least one probe failed, `2` usage |
 
 ## Why `retention` cannot delete
 

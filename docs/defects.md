@@ -1917,3 +1917,117 @@ close-race repair — can be written on evidence rather than on this entry.
 which is what a stalled runner looks like and is still not proof of it — one green sample after one red one is a coin
 flip, not a diagnosis, and this entry stays open until either the test fails again with the new message and names a starved
 tick, or a month of green cells makes it moot.
+
+## Defect 108 (update, 2026-11-20) — the recorded sample says the rebind did none of it, and the tool that says so is now in the tree
+
+The sample was already in this entry; what was missing was the arithmetic. `tools/outage_split.py` reads it and splits
+each sample into the rebind, the harness's dispatch, the tick's lateness and the remainder, under a stated rule:
+
+```
+budget 100 ms · 8 sample(s)
+  6: outlier    686.200 · rebind   0.000 (  0.0 %) · unexplained  686.200 · not-ours:tick-or-loop
+  1 of 8 sample(s) over 100 ms; the worst put 0.0 % of its outage in the rebind
+```
+
+(`bench/results/2026-11-20-defect-108-split.json`, reproduced field by field by `tests/test_outage_split.py`.) The worst
+sample recorded **no rebind work at all**: the 686.2 ms was spent before the code that rebinds ran, which is consistent
+with both candidates this entry has always named — a starved runner thread, or the proactor loop parked mid-accept — and
+it rules out the third reading, "the rebind was slow", which is what the failure message invited.
+
+Two changes came from that reading, neither of them a weakening of the budget:
+
+* **`ProxyThread.loop_errors`**: the loop's exception handler now *records* what a callback raised (bounded, with the
+  handle's type and the message) before printing it as before. The Windows cell's evidence included a
+  `ProactorEventLoop._start_serving` callback exception that existed only in a job log this sandbox cannot fetch; the next
+  occurrence will be a field in the process's own record. `tests/test_proxy_supervisor.py` holds both halves: a callback
+  that raises is recorded, and a clean twelve-rebind storm records nothing.
+* **The test's failure message** already led with how late the tick woke (this entry's previous change); it now has a
+  number to put beside the budget in the tool's own vocabulary.
+
+**Not claimed**: the cause, and not fixed — a starved runner is not something the product can fix, and a proactor
+close-race has not been reproduced anywhere this build can run. The entry stays open until a Windows cell fails with the
+new record and names which half it was, or a month of green cells makes it moot.
+
+## Defect 109 — the proxy promised `chunked` over a body it was relaying raw, and `curl` refused the stream (2026-11-20, found while closing §24a's curl row)
+
+**What a user hits.** A provider that streams with neither `Content-Length` nor `Transfer-Encoding` — a body that ends
+when the connection closes, which is the shape of a plain SSE endpoint and of this repository's own mock provider —
+answers through the proxy with a head that says `Transfer-Encoding: chunked` while the proxy forwards the bytes
+untouched. `curl` stops with `(56) Malformed encoding found in chunked-encoding`. The SDK clients did not look, so the
+capture tests were green over a response that a plain HTTP client could not read.
+
+**Reproduced** by issuing the same request twice, once straight at the mock provider and once through `ProxyThread`:
+
+```
+DIRECT: b'HTTP/1.1 200 OK\r\n...\r\nconnection: close\r\n\r\ndata: {...}\n\ndata: {...}'
+PROXY : b'HTTP/1.1 200 OK\r\n...\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\ndata: {...}'
+```
+
+**Fixed** in `ProxyServer._client_head`, which now writes exactly one of three things and lets the third decide the
+connection: a forwarded `Content-Length`, `Transfer-Encoding: chunked` only when the upstream framed the body that way, or
+no framing at all *and* `Connection: close` — because a body whose end is the connection's end cannot be promised past it.
+The caller computes the same rule before it decides whether to keep the client connection, and `204`/`304` now carry no
+framing instead of a chunked head over nothing.
+
+**Tests**: `tests/proxy/test_response_framing.py` (5) holds the head to the body in both directions; `tests/test_attach_curl_kill.py`
+(2) is the client that found it — a real `curl`, a real `SIGKILL` mid-stream, and a recovered capsule whose verify now
+exits 0.
+
+## Defect 110 — a capsule failed its own derived-part check because a sentence used the wall clock (2026-11-20, found by defect 109's test)
+
+**What a user hits.** `blackbox verify` on a capsule from a killed run exits **9** with `BBX-E412 graph.json.nodes`, the
+declared node detail reading `last chunk 1854 ms before death` against a recomputation reading `last chunk 49 ms before
+death`. Both numbers were true of the clock that made them: `graph.json` is a *derived* part, `verify` recomputes it from
+the frames, and `classify_nodes()` measured "before death" against `time.time_ns()` at the moment it ran. A derived part
+that is a function of when it was derived cannot be recomputed, so a correctly sealed capsule failed its own integrity
+check.
+
+**Fixed** by taking the tape's own clock: `classify_nodes()` now uses the last frame's `wall_ns` when no clock is passed,
+and recovery no longer passes its detection time when it builds the graph. The sentence is now a function of the frames —
+the same number at seal time and at verify time — and the recovery *result* a user reads is computed the same way, so the
+two agree.
+
+**Tests**: `tests/test_attach_curl_kill.py::test_the_capsule_from_a_killed_curl_run_verifies` (the reproduction),
+`tests/test_recovery.py`, `tests/test_capsule.py`, `tests/test_verify_cli.py`, `tests/test_content_modes.py` (unchanged and
+still green, which is the point: the sentence keeps its meaning, it loses its dependence on a clock).
+
+## Defect 111 — six error messages told the user to run a command that this build did not have (2026-11-20, found while writing `docs/troubleshooting.md`)
+
+**What a user hits.** `docs/troubleshooting.md` is written as "if you see `BBX-E…`, run …". Four of its pages and two
+remediation strings in `src/blackbox/errors.py` said `blackbox doctor --capture` / `--hooks` / `--storage` / `--tape`, and
+`blackbox doctor` was not in `COMMANDS`. A user following the advice got the unknown-command text and nothing else — the
+worst shape of advice, because it reads as a fix.
+
+**Fixed** by writing the command: `src/blackbox/cli/cmd_doctor.py` runs six probes — `environment` (interpreter, the
+installed package, the platform), `capture` (whether the site hook would install a seam, and why not), `tape` (counts and
+the newest tape's seal state), `hooks` (which adapters are importable), `storage` (free space, plus a real write + `fsync`
++ rename timed) and `locks` (writer leases in this data directory). Exit 0 for ok/warn, 8 for any fail, 2 for a usage
+error; `--json` for a machine. Two flags that the prose had invented — `--assert-offline <url>` and `--secrets` — were
+**dropped rather than implemented**: egress refusal and redaction are proven by tests that run every sink, and a probe that
+merely re-asserts them would be a second, weaker copy. Their strings now point at those tests.
+
+`probe_locks` first walked the data directory with `rglob` and reported seven false leases — it was reading the *repo's*
+`package-lock.json` and `.gitignore`d build locks, because a data directory may be any directory, including a repository
+root. It now looks only for this layout: `*.lock` and `*lease*` at the top, plus the `locks/`, `tape/` and `runs/`
+subtrees.
+
+**Tests**: `tests/test_error_advice.py` (3) — every remediation in `src/blackbox/errors.py` must name a command the binary
+dispatches; every `doctor --x` in a remediation must be a probe that exists; and no current user document may name a
+command the build does not have (history files are excluded, because they are the record of commands that were removed).
+`tests/test_cli_contract.py` (22) and `docs/errors.md`, regenerated.
+
+## Defect 112 — `docs/guarantees.md` pointed at four test files that have never existed (2026-11-20, found while writing `docs/RELEASE-CANDIDATE.md`)
+
+**What a user hits.** The page a cautious user opens before trusting the tool — "here is what is promised and the test that
+holds it" — named `tests/kill/test_kill_stages.py`, `tests/test_head.py`, `tests/test_prealloc_sigbus.py` and
+`tests/test_recovery_idempotence.py`. None of the four paths is in the tree. Every row also carried the status word
+`planned`, under a paragraph that said the table was the current answer, so the page read as evidence while being a plan.
+
+**Fixed** by rewriting the page around tests that exist: 17 claim rows, each naming a file and the specific test inside it,
+with §2's durability modes described by the assertion that holds each one, and a "what this page cannot promise" paragraph
+that says which claims rest on the OS rather than on our code. The four phantom paths are kept in the page's own history
+sentence — deleting them would make the page unable to record that it once had them.
+
+**Tests**: `tests/test_guarantees_links.py` (2) — every `|`-row in the table must name files and `file::name` nodes that
+are in the tree (read from each file's AST, so a rename fails it), and no row may say `planned`. The prose above the table
+is deliberately not scanned: it is the record of this defect.

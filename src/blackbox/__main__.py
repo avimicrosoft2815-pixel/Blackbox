@@ -24,7 +24,8 @@ HELP = ("`status` prints the build line; `run -- cmd` runs a command under the r
         "parts against its own frames; "
         "`ingest` is the command a coding agent's hook runs; `hook install|remove|status` manages the hook adapters; "
         "`index [--rebuild]` builds the data directory's index from its capsules; `retention` explains what the "
-        "retention policy would delete from a tape, and never deletes")
+        "retention policy would delete from a tape, and never deletes; `doctor [--capture|--tape|--storage|--hooks|"
+        "--locks]` probes this machine and this data directory and says what is fine")
 
 
 # name -> (module, attribute). Nothing is imported until a command is actually chosen: the hook path (`ingest`) is on
@@ -46,6 +47,7 @@ COMMANDS: dict[str, tuple[str, str]] = {
     "desktop": ("blackbox.ui.desktop", "main"),
     "index": ("blackbox.cli.cmd_index", "main"),
     "retention": ("blackbox.cli.cmd_retention", "main"),
+    "doctor": ("blackbox.cli.cmd_doctor", "main"),
 }
 
 
@@ -57,7 +59,7 @@ def _load(name: str) -> Callable[[list[str]], int]:
 
 
 KNOWN = ("status", "run", "ingest", "hook", "view", "serve", "diagnose", "repair", "link", "capsule", "verify", "ls",
-         "desktop", "index", "retention")
+         "desktop", "index", "retention", "doctor")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -94,7 +96,7 @@ def main(argv: list[str] | None = None) -> int:
         print("See docs/STATUS.md for what is green, what is pending and what is not testable here.")
         return 0
     print(f"unknown command {args.command!r}; this build implements --version, status, run, desktop, view, serve, "
-          f"diagnose, repair, link, capsule, verify, ls, ingest, hook, index and retention", file=sys.stderr)
+          f"diagnose, repair, link, capsule, verify, ls, ingest, hook, index, retention and doctor", file=sys.stderr)
     return 2
 
 
