@@ -53,8 +53,11 @@ def test_it_runs_the_staged_tree_and_the_installed_one_on_windows() -> None:
     """The row B9 asks for is *on Windows*: a staged tree that records, and an installed tree that answers."""
     text = _text()
     assert "--version" in text and "doctor --json" in text, "the staged and the installed trees both have to answer"
-    assert " run --data-dir" in text and "verify" in text, (
+    assert "run --data-dir" in text and " verify " in text, (
         "a version string is not a recording: the job records a real run and verifies its capsule")
+    assert text.count("::error::") >= 3, (
+        "job logs are unreachable from the environment that wrote this, so every check has to announce its own failure "
+        "through a workflow command; the first attempt failed with only 'exit code 1'")
     assert "/VERYSILENT" in text, "the install has to be unattended on a runner"
     assert re.search(r"unins\*?\.exe", text), "the uninstaller has to be the installed one, not a guess"
     assert "recordings" in text.lower(), "the uninstaller's promise about recordings is the row worth checking"

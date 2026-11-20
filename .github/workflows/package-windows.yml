@@ -46,38 +46,79 @@ jobs:
       - name: Stage the install tree (embeddable Python + wheels)
         run: powershell -ExecutionPolicy Bypass -File tools\package\windows\build_windows.ps1
 
-      - name: Smoke the staged tree — version, doctor, a recorded run, verify
+      # Every check below announces its own outcome through a workflow command (`::error::`), because job logs are
+      # redirected to a host that some environments cannot reach: an annotation is readable through the API, a log is
+      # not. The first attempt at this step failed with nothing but "Process completed with exit code 1", which is
+      # exactly the kind of failure this project keeps having to re-learn how to read.
+      - name: Smoke the staged tree — version and doctor
         shell: pwsh
         run: |
-          $ErrorActionPreference = 'Stop'
+          $ErrorActionPreference = 'Continue'
           $py = "tools\package\windows\win64\python\python.exe"
           $site = (Resolve-Path "tools\package\windows\win64\python\Lib\site-packages").Path
-          if (-not (Test-Path $py)) { throw "the embeddable interpreter was not staged at $py" }
+          if (-not (Test-Path $py)) {
+            Write-Host "::error::the embeddable interpreter was not staged at $py"
+            exit 1
+          }
+          $boot = "import sys; sys.path[:0] = [r'$site']; from blackbox.__main__ import main; raise SystemExit(main(sys.argv[1:]))"
           $env:BLACKBOX_HOME = Join-Path $env:RUNNER_TEMP "bbx-smoke"
           New-Item -ItemType Directory -Force -Path $env:BLACKBOX_HOME | Out-Null
-          $boot = "import sys; sys.path[:0] = [r'$site']; from blackbox.__main__ import main; raise SystemExit(main(sys.argv[1:]))"
 
-          & $py -c $boot --version
-          if ($LASTEXITCODE -ne 0) { throw "the staged tree could not answer --version (exit $LASTEXITCODE)" }
+          $version = & $py -c $boot --version 2>&1 | Out-String
+          Write-Host "version output: $version"
+          if ($LASTEXITCODE -ne 0) { Write-Host "::error::staged tree --version exited $LASTEXITCODE; output: $version"; exit 1 }
 
-          & $py -c $boot doctor --json | Out-File -Encoding utf8 "$env:RUNNER_TEMP\doctor.json"
-          $doctor = Get-Content "$env:RUNNER_TEMP\doctor.json" -Raw | ConvertFrom-Json
-          $doctor.probes | ForEach-Object { Write-Host "$($_.status) $($_.probe) — $($_.summary)" }
-          if (-not ($doctor.probes | Where-Object { $_.probe -eq 'storage' -and $_.status -eq 'ok' })) {
-            throw "the storage probe did not report ok on this runner"
+          $doctorText = & $py -c $boot doctor --json 2>&1 | Out-String
+          $doctorExit = $LASTEXITCODE
+          $doctorText | Out-File -Encoding utf8 "$env:RUNNER_TEMP\doctor.json"
+          Write-Host $doctorText
+          if ($doctorExit -ne 0) {
+            Write-Host "::error::staged tree doctor --json exited $doctorExit; output: $doctorText"
+            exit 1
           }
+          $storage = ($doctorText | ConvertFrom-Json).probes | Where-Object { $_.probe -eq 'storage' }
+          if (-not $storage -or $storage.status -ne 'ok') {
+            Write-Host "::error::the storage probe did not report ok on this runner: $($storage | ConvertTo-Json -Compress)"
+            exit 1
+          }
+          Write-Host "staged tree: version ok, doctor ok ($($storage.summary))"
 
-          # A real recording, with the real launcher, on Windows: this is the row that has never been run.
-          & $py -c $boot run --data-dir $env:BLACKBOX_HOME -- python -c "print('hello from windows')"
+      - name: Smoke the staged tree — record a real run and verify it
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $py = "tools\package\windows\win64\python\python.exe"
+          $site = (Resolve-Path "tools\package\windows\win64\python\Lib\site-packages").Path
+          $boot = "import sys; sys.path[:0] = [r'$site']; from blackbox.__main__ import main; raise SystemExit(main(sys.argv[1:]))"
+          $env:BLACKBOX_HOME = Join-Path $env:RUNNER_TEMP "bbx-smoke"
+
+          # A real recording, with the real launcher, on Windows. The child is a one-line Python program quoted so the
+          # shell cannot eat it: single quotes keep PowerShell out of it, and Python sees `print("hello from windows")`.
+          $child = 'print("hello from windows")'
+          $runOut = & $py -c $boot run --data-dir $env:BLACKBOX_HOME -- python -c $child 2>&1 | Out-String
           $runExit = $LASTEXITCODE
           Write-Host "run exit: $runExit"
-          if ($runExit -ne 0) { throw "a trivial run did not finish cleanly (exit $runExit)" }
+          Write-Host $runOut
+          if ($runExit -ne 0) {
+            Write-Host "::error::a trivial run exited $runExit on Windows; output: $runOut"
+            exit 1
+          }
 
-          $capsules = Get-ChildItem -Recurse -Path $env:BLACKBOX_HOME -Filter *.bbx -ErrorAction SilentlyContinue
-          if (-not $capsules) { throw "the run left no capsule behind" }
+          $capsules = @(Get-ChildItem -Recurse -Path $env:BLACKBOX_HOME -Filter *.bbx -ErrorAction SilentlyContinue)
           Write-Host "capsules: $($capsules.Count)"
-          & $py -c $boot verify @($capsules | ForEach-Object { $_.FullName })
-          if ($LASTEXITCODE -ne 0) { throw "the capsule from a Windows run did not verify (exit $LASTEXITCODE)" }
+          if ($capsules.Count -lt 1) {
+            Write-Host "::error::the run left no capsule in $env:BLACKBOX_HOME"
+            exit 1
+          }
+          $paths = $capsules | ForEach-Object { $_.FullName }
+          $verifyOut = & $py -c $boot verify @paths 2>&1 | Out-String
+          $verifyExit = $LASTEXITCODE
+          Write-Host "verify exit: $verifyExit"
+          Write-Host $verifyOut
+          if ($verifyExit -ne 0) {
+            Write-Host "::error::a capsule from a Windows run did not verify (exit $verifyExit); output: $verifyOut"
+            exit 1
+          }
 
       - name: Compile the installer
         shell: pwsh
