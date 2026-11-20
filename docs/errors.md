@@ -25,6 +25,7 @@ same table, so a code in a log line always has a next step attached to it.
 | `BBX-E160` | blob not found in the store | the blob was collected or never committed; `blackbox verify` lists missing refs |
 | `BBX-E161` | blob header invalid | the file is not a readable BBXBLOB1 container; quarantine it |
 | `BBX-E162` | blob body does not match its hash | the blob was corrupted or modified; do not trust it, re-record |
+| `BBX-E170` | trigger rule refused; nothing was recorded for it | name a built-in metric (or custom:<name>), a numeric threshold, an op from >=,>,==,<=,< and an action from mark,freeze,snapshot; see docs/triggers.md |
 | `BBX-E210` | writer is alive; recovery refused | stop the process or pass --force-if-dead |
 | `BBX-E211` | lease held by a reused pid (start time mismatch) | run `blackbox doctor --locks` |
 | `BBX-E220` | both head slots invalid | run `blackbox recover --full-scan` |
@@ -56,4 +57,4 @@ same table, so a code in a log line always has a next step attached to it.
 | `BBX-E601` | serverless: /tmp not writable | set data_dir to a writable path |
 | `BBX-E602` | serverless: recovered a previous invocation's run | expected; the capsule path was handed to on_capsule |
 
-50 codes.
+51 codes.

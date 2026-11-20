@@ -1,0 +1,60 @@
+{
+  "bench": "i8-index-rebuild",
+  "corpus": {
+    "build_ms": 15232.7,
+    "capsule_bytes": 5767325,
+    "runs": 500,
+    "sealing": "recovery.recover, one tape per directory (see the module docstring)"
+  },
+  "date": "2026-11-16",
+  "dump": {
+    "equal": true,
+    "incremental_sha256": "8a65260426d6438b6272e6f7384e83b2994478bc64afcd6c1b3e3151a7359a02",
+    "rebuilt_sha256": "8a65260426d6438b6272e6f7384e83b2994478bc64afcd6c1b3e3151a7359a02",
+    "rows": {
+      "incremental": 6001,
+      "rebuilt": 6001
+    }
+  },
+  "hardware": {
+    "cpus": 2,
+    "machine": "x86_64",
+    "platform": "linux",
+    "python": "3.11.2",
+    "sqlite": "3.40.1"
+  },
+  "incremental": {
+    "capsules_seen": 500,
+    "counts": {
+      "artifact": 500,
+      "event": 4500,
+      "node": 500,
+      "run": 500
+    },
+    "elapsed_ms": 891.5,
+    "rows_added": 6000
+  },
+  "index": {
+    "bytes": 430080,
+    "bytes_per_capsule": 860.2,
+    "disagreements": [],
+    "path": "index/main.sqlite",
+    "unreadable": []
+  },
+  "rebuild": {
+    "capsules_seen": 500,
+    "counts": {
+      "artifact": 500,
+      "event": 4500,
+      "node": 500,
+      "run": 500
+    },
+    "elapsed_ms": 885.9,
+    "rows_added": 6000
+  },
+  "reindex": {
+    "rows_added": 0
+  },
+  "schema": "blackbox.bench/1",
+  "verdict": "i8 holds on this corpus"
+}

@@ -37,6 +37,7 @@ from typing import Any
 
 from blackbox.errors import bbx
 from blackbox.platform import current as _plat_current
+from blackbox.platform import replace as _replace
 
 _plat = _plat_current()
 
@@ -62,6 +63,20 @@ MAX_TOTAL_BYTES = 4 << 30
 MAX_RATIO = 100
 
 _UNSAFE_PARTS = ("..", ".", "")
+
+#: §13.4 check 6: the compression methods a capsule may use. `zipfile` will happily open bzip2 and lzma entries; a
+#: reader that accepts them accepts a decoder this format never promised, so both are refused with the same code.
+_METHODS_OK = (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED)
+
+#: §13.4 check 3: an archive member may carry a mode. Nothing in this format writes one, so a symlink, device, fifo or
+#: socket entry is a capsule trying to be a filesystem — refused before any byte is read.
+_UNIX_MODE_MASK = 0o170000
+_HOSTILE_MODES = {0o120000: "symlink", 0o020000: "character device", 0o060000: "block device",
+                  0o010000: "fifo", 0o140000: "socket"}
+
+#: The chunk size of the bounded extraction read (§13.4 check 9). One MiB: large enough that the loop is not the cost,
+#: small enough that a lying header cannot make the reader allocate the lie.
+_READ_CHUNK = 1 << 20
 
 
 def sha256(data: bytes) -> bytes:
@@ -156,6 +171,122 @@ def _check_name(name: str) -> None:
             raise bbx("BBX-E403", f"entry name {name!r} escapes its root")
 
 
+def _read_entry(zf: zipfile.ZipFile, info: zipfile.ZipInfo, *, remaining: int) -> bytes:
+    """Read one entry in bounded chunks and refuse a header that lied about its size (§13.4 check 9).
+
+    `zipfile` bounds its own reads by the declared `file_size`, so this counter is a second net rather than the first —
+    which is exactly why it is cheap: it costs one comparison per MiB and it is the only place a *future* reader that
+    does not trust `zipfile` can see the lie. `remaining` is what is left of the 4 GiB declared total, enforced on the
+    bytes that actually arrive rather than on the total the archive claims.
+    """
+    out = bytearray()
+    try:
+        with zf.open(info) as handle:
+            while True:
+                chunk = handle.read(_READ_CHUNK)
+                if not chunk:
+                    break
+                out += chunk
+                if len(out) > info.file_size:
+                    raise bbx("BBX-E409", f"{info.filename} produced more than its declared {info.file_size} B")
+                if len(out) > remaining:
+                    raise bbx("BBX-E405", f"{info.filename} pushes the capsule past {MAX_TOTAL_BYTES} B")
+    except zipfile.BadZipFile as exc:
+        raise bbx("BBX-E402", f"{info.filename}: {exc}") from None
+    return bytes(out)
+
+
+def _check_infos(path: str, infos: list[zipfile.ZipInfo]) -> None:
+    """The checks that need only the archive's own headers — §13.4 checks 2, 3, 4, 5 and 6, before any body is read.
+
+    Split out so `read_manifest` (the library's fast path) gets the same refusals as `read_capsule`: a directory listing
+    that skipped them would be a second, weaker reader of untrusted files.
+    """
+    if len(infos) > MAX_ENTRIES:
+        raise bbx("BBX-E402", f"{path}: {len(infos)} entries > {MAX_ENTRIES}")
+    seen: set[str] = set()
+    total = 0
+    for info in infos:
+        _check_name(info.filename)
+        mode = (info.external_attr >> 16) & _UNIX_MODE_MASK
+        if mode in _HOSTILE_MODES:
+            raise bbx("BBX-E403", f"{info.filename} is a {_HOSTILE_MODES[mode]} entry")
+        if info.flag_bits & 0x1:
+            raise bbx("BBX-E406", f"{info.filename} is encrypted; a capsule is not a vault")
+        if info.compress_type not in _METHODS_OK:
+            raise bbx("BBX-E406", f"{info.filename} uses compression method {info.compress_type}, "
+                                  f"which this format does not define")
+        key = info.filename.casefold()
+        if key in seen:
+            raise bbx("BBX-E404", f"duplicate entry {info.filename!r}")
+        seen.add(key)
+        total += info.file_size
+        if info.file_size and info.compress_size and info.file_size / max(info.compress_size, 1) > MAX_RATIO:
+            raise bbx("BBX-E405", f"{info.filename} expands {(info.file_size / info.compress_size):.0f}:1")
+    if total > MAX_TOTAL_BYTES:
+        raise bbx("BBX-E405", f"declared total {total} B over {MAX_TOTAL_BYTES} B")
+
+
+def read_manifest(path: str, *, max_bytes: int = 1 << 30) -> dict[str, Any]:
+    """Read **only** `manifest.json`, with every header check `read_capsule` makes and no entry bodies.
+
+    This is what a library view needs: a hundred capsules on a screen is a hundred manifest reads, not a hundred
+    capsules decompressed and hashed. What it does *not* do is verify the integrity index — that is `read_capsule`'s job,
+    and the reason a library row says `unverified` rather than `ok` until someone opens the run.
+    """
+    size = os.path.getsize(path)
+    if size > max_bytes:
+        raise bbx("BBX-E401", f"{path} is {size} B, over the {max_bytes} B limit")
+    try:
+        zf = zipfile.ZipFile(path)
+    except (zipfile.BadZipFile, OSError) as exc:
+        raise bbx("BBX-E402", f"{path}: {exc}") from None
+    with zf:
+        infos = zf.infolist()
+        _check_infos(path, infos)
+        wanted = [info for info in infos if info.filename == MANIFEST_NAME]
+        if not wanted:
+            raise bbx("BBX-E407", f"{path}: capsule has no manifest.json")
+        info = wanted[0]
+        if info.file_size > MAX_RATIO * 1024 * 1024:
+            raise bbx("BBX-E405", f"manifest.json declares {info.file_size} B")
+        raw = _read_entry(zf, info, remaining=MAX_TOTAL_BYTES)
+    manifest = _parse_manifest(raw, where=path)
+    from blackbox.cap import manifest as manifest_mod_read
+
+    manifest_mod_read.validate(manifest, where=path)
+    _check_declared_parts(path, manifest, {entry.filename for entry in infos})
+    return manifest
+
+
+def _parse_manifest(raw: bytes, *, where: str) -> dict[str, Any]:
+    """Decode and validate a manifest body. Shared by both readers so a capsule cannot be acceptable to one of them."""
+    try:
+        manifest = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError, RecursionError) as exc:
+        raise bbx("BBX-E407", f"manifest.json: {type(exc).__name__}: {exc}") from None
+    if not isinstance(manifest, dict):
+        raise bbx("BBX-E407", f"manifest.json is {type(manifest).__name__}, not an object")
+    if manifest.get("format") != CAPSULE_FORMAT:
+        raise bbx("BBX-E407", f"manifest format {manifest.get('format')!r} is not {CAPSULE_FORMAT}")
+    if int(manifest.get("format_version", -1)) > CAPSULE_FORMAT_VERSION:
+        raise bbx("BBX-E407", f"capsule format_version {manifest['format_version']} is newer than this reader")
+    return manifest
+
+
+def _check_declared_parts(path: str, manifest: dict[str, Any], names: set[str]) -> None:
+    """§13.4 check 8, the half the integrity file cannot do: a manifest that *lists* a part the archive does not carry
+    describes a capsule that is not this one.
+
+    The hashes would verify over the entries that exist; the claim about what exists is what is checked here. It costs a
+    set lookup, so the library's fast path makes it too — a capsule the library offers to open must be one that opens.
+    """
+    for part in manifest.get("derived_parts") or []:
+        name = part.get("name")
+        if isinstance(name, str) and name not in names:
+            raise bbx("BBX-E408", f"manifest lists {name!r}, which the archive does not contain")
+
+
 def read_capsule(path: str, *, max_bytes: int = 1 << 30) -> Capsule:
     """Read and verify a capsule. Never extracts; never trusts the archive's own claims."""
     size = os.path.getsize(path)
@@ -167,37 +298,17 @@ def read_capsule(path: str, *, max_bytes: int = 1 << 30) -> Capsule:
         raise bbx("BBX-E402", f"{path}: {exc}") from None
     with zf:
         infos = zf.infolist()
-        if len(infos) > MAX_ENTRIES:
-            raise bbx("BBX-E402", f"{path}: {len(infos)} entries > {MAX_ENTRIES}")
-        seen: set[str] = set()
-        total = 0
+        _check_infos(path, infos)
+        entries: dict[str, bytes] = {}
         for info in infos:
-            _check_name(info.filename)
-            key = info.filename.casefold()
-            if key in seen:
-                raise bbx("BBX-E404", f"duplicate entry {info.filename!r}")
-            seen.add(key)
-            total += info.file_size
-            if info.file_size and info.compress_size and info.file_size / max(info.compress_size, 1) > MAX_RATIO:
-                raise bbx("BBX-E405", f"{info.filename} expands {(info.file_size / info.compress_size):.0f}:1")
-        if total > MAX_TOTAL_BYTES:
-            raise bbx("BBX-E405", f"declared total {total} B over {MAX_TOTAL_BYTES} B")
-        entries = {info.filename: zf.read(info) for info in infos}
+            entries[info.filename] = _read_entry(zf, info, remaining=MAX_TOTAL_BYTES - sum(len(v) for v in entries.values()))
     if MANIFEST_NAME not in entries:
         raise bbx("BBX-E407", "capsule has no manifest.json")
-    try:
-        manifest = json.loads(entries[MANIFEST_NAME].decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise bbx("BBX-E407", f"manifest.json: {exc}") from None
-    if manifest.get("format") != CAPSULE_FORMAT:
-        raise bbx("BBX-E407", f"manifest format {manifest.get('format')!r} is not {CAPSULE_FORMAT}")
-    if int(manifest.get("format_version", -1)) > CAPSULE_FORMAT_VERSION:
-        raise bbx("BBX-E407", f"capsule format_version {manifest['format_version']} is newer than this reader")
-    # P4-02: required keys and their types, on the way in. Unknown keys are tolerated and remembered, not rejected —
-    # a capsule from a newer writer must open here (D-058).
+    # Shared with `read_manifest` (defect 83's guards: non-object, deep nesting, schema, version).
+    manifest = _parse_manifest(entries[MANIFEST_NAME], where=path)
     from blackbox.cap import manifest as manifest_mod_read
-
     unknown = manifest_mod_read.validate(manifest, where=path)
+    _check_declared_parts(path, manifest, set(entries))
     from blackbox.cap import integrity
 
     declared_lines = entries.get(INTEGRITY_NAME, b"")
@@ -240,7 +351,9 @@ def write_capsule(dest: str, entries: dict[str, bytes], manifest: dict[str, Any]
         _plat.fdatasync(fd)
     finally:
         os.close(fd)
-    os.replace(tmp, dest)
+    # A `verify`/`diagnose` that has the old capsule open stops the rename on Windows; the shim waits that out and
+    # refuses with a code if it never ends (defect 105).
+    _replace(tmp, dest)
     # The directory entry is what makes the capsule survive a power cut; a platform without directory fsync
     # (Windows) says so in its own docstring, and that is the one case where there is nothing to do.
     with contextlib.suppress(OSError):

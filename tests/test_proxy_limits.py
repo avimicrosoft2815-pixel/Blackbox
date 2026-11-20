@@ -66,6 +66,13 @@ def test_a_platform_without_the_limit_says_so_and_does_not_raise(monkeypatch: py
 def test_a_burst_larger_than_the_old_soft_limit_is_still_served() -> None:
     """The arithmetic of defect 62, as a test: 40 concurrent requests need ~80 descriptors, so a proxy whose soft limit
     is 64 cannot serve them unless it raises the limit first. The probe in the middle of the burst is the child's side.
+
+    Deadlines, because the first version could not fail: `py3.11 / macos-latest` in run 44461898689 hung here for longer
+    than the harness's 120 s watchdog and was killed with no numbers. The child's own `subprocess.run` timeout was 180 s,
+    so the one path that would have printed its stderr could never fire, and 40 sequential `create_connection(timeout=5)`
+    calls could take 200 s before that. Now one deadline bounds every wait in the child, the child always prints what it
+    saw, and the outer timeout is **below** the watchdog's so an overrun is reported by the assertion that knows what the
+    burst was doing. No assertion was relaxed: still 40 held upstream, still a probe served from the middle of the burst.
     """
     burst = textwrap.dedent("""
         import json, resource, socket, sys, threading, time
@@ -73,6 +80,11 @@ def test_a_burst_larger_than_the_old_soft_limit_is_still_served() -> None:
         from blackbox.proxy.limits import raise_fd_limit
         from blackbox.proxy.routes import Route, Routes
         from blackbox.proxy.supervisor import ProxyThread
+
+        DEADLINE_S = 25.0                       # every wait below is bounded by this, so the child cannot hang
+        started = time.monotonic()
+        def remaining():
+            return max(0.0, DEADLINE_S - (time.monotonic() - started))
 
         # A tiny budget first: this is the macOS-shell case (soft 256) taken to its extreme, not a hypothetical.
         soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
@@ -92,17 +104,34 @@ def test_a_burst_larger_than_the_old_soft_limit_is_still_served() -> None:
         proxy = ProxyThread(Routes([Route(name="openai", base=f"http://127.0.0.1:{sink.getsockname()[1]}")],
                                    default="openai"))
         proxy.start()
-        result = {"fd_limit": proxy.fd_limit, "soft_after": resource.getrlimit(resource.RLIMIT_NOFILE)[0]}
+        result = {"fd_limit": proxy.fd_limit, "soft_after": resource.getrlimit(resource.RLIMIT_NOFILE)[0],
+                  "port": proxy.port}
 
         clients = []
-        for _ in range(40):
-            s = socket.create_connection(("127.0.0.1", proxy.port), timeout=5)
-            s.sendall(b"POST /v1/chat HTTP/1.1\\r\\nHost: x\\r\\nContent-Length: 2\\r\\n\\r\\nhi")
-            clients.append(s)
-        time.sleep(0.5)
+        failures = []
+        for index in range(40):
+            budget = remaining()
+            if budget <= 0:
+                failures.append(f"deadline reached after {index} connections")
+                break
+            try:
+                s = socket.create_connection(("127.0.0.1", proxy.port), timeout=min(5.0, budget))
+                s.sendall(b"POST /v1/chat HTTP/1.1\\r\\nHost: x\\r\\nContent-Length: 2\\r\\n\\r\\nhi")
+                clients.append(s)
+            except OSError as exc:                       # recorded, not raised: the assertion needs the numbers
+                failures.append(f"{index}: {type(exc).__name__}: {exc}")
+                break
+        result["clients"] = len(clients)
+        result["connect_failures"] = failures[:3]
+
+        # Wait for the upstream to hold every request, on a deadline, rather than sleeping and hoping.
+        hold_until = time.monotonic() + min(5.0, remaining())
+        while len(held) < 40 and time.monotonic() < hold_until:
+            time.sleep(0.01)
         result["upstream_holds"] = len(held)
 
-        probe = socket.socket(); probe.settimeout(5)
+        probe_budget = remaining()
+        probe = socket.socket(); probe.settimeout(min(5.0, probe_budget) if probe_budget > 0 else 0.1)
         try:
             probe.connect(("127.0.0.1", proxy.port))
             probe.sendall(b"GET /v1/models HTTP/1.1\\r\\nHost: x\\r\\nConnection: close\\r\\n\\r\\n")
@@ -113,15 +142,19 @@ def test_a_burst_larger_than_the_old_soft_limit_is_still_served() -> None:
             probe.close()
         for s in clients:
             s.close()
+        result["elapsed_ms"] = round((time.monotonic() - started) * 1000.0, 1)
         proxy.stop()
         print(json.dumps(result))
     """)
-    finished = subprocess.run([sys.executable, "-c", burst], cwd=ROOT, capture_output=True, text=True, timeout=180,
+    # 60 s, below the 120 s watchdog in `tests/conftest.py`: when this overruns, the child's own stderr is the evidence
+    # and a watchdog kill is not.
+    finished = subprocess.run([sys.executable, "-c", burst], cwd=ROOT, capture_output=True, text=True, timeout=60,
                               env={"PYTHONPATH": "src", "PATH": "/usr/bin:/bin"})
     assert finished.returncode == 0, finished.stderr[-1500:]
     answer = json.loads(finished.stdout.strip().splitlines()[-1])
     assert answer["fd_limit"] is not None and answer["fd_limit"][0] == 64
     assert answer["soft_after"] > 64, answer
+    assert answer["clients"] == 40, answer
     assert answer["upstream_holds"] == 40, answer
     assert answer["probe"] == "served", answer
 

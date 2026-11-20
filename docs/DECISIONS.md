@@ -1353,3 +1353,58 @@ request-level bound, on every sample, in four columns. And **a probe may not sat
 (`bench/results/2026-11-18-rebind-instrumented.json`). The instrumented columns stay, because a future slow sample must
 say which of the five possible causes it was, and because the first honest instrumented run is what corrected a wrong
 diagnosis — defect 60 is closed by the loop-side repair *and* by the measurement no longer manufacturing its failure.
+
+## D-064 — a writer's span is its own, with its own band, and the join is still one call id (2026-11-18, B4)
+
+**The question.** `docs/node-edges.md` proposed two shapes for a node-to-node edge and this build implemented the first:
+the proxy opens a span per forwarded request. Implementing it raised three that the proposal could not answer, and the
+answers are what this entry records. The ticket's tick stays the owner's (D-052/D-053 stand); this is how the mechanism
+was built, not whether it should be.
+
+**1. Two writers on one tape need disjoint numbers.** A node slot was documented as "the tape's own numbering", and the
+hook folder numbers from 1 per session. A proxy that also numbered from 1 would make slot 3 mean two different spans in
+one `graph.json` — the ambiguity the whole design refuses. So the number space is split: hooks get 1–`NODE_SLOT_HOOK_MAX`
+(0x3FFF) and the proxy 0x4000–0x7FFF (`NODE_SLOT_PROXY_BASE`/`MAX`). A writer that exhausts its band **stops opening
+spans and counts them** (`ProxyStats.spans_capped`); the call is still recorded, without a span, and its edge falls back
+to `level: "call"`. A node with no frames is never an answer to a full band.
+
+**2. A span only exists if a frame carries it.** The proxy asks its receiver for the span before handing the slot to the
+call, and a receiver that will not record it says so (`SinkRecorder.span_open` returns `False` when there is no sink or
+the write raised). A slot the graph would believe in but no `NODE_OPEN` carries is exactly the invented node D-052 rule 2
+forbids, so the call gets no slot instead.
+
+**3. The proxy names its own span, never the app's.** The close frame carries the span's `name`, `kind` and `owner` that
+its own open wrote, and the graph lists it with `owner: "proxy"`. The app's node is named only by the app's tape. What
+joins them is still `x-blackbox-call` and nothing else: no `x-blackbox-node` header was added, so the proxy cannot claim
+to know which app node a request was inside — the resolver reads that from the app's own frames, and refuses when either
+side is missing or duplicated (`node_join: "partial"`/`"ambiguous"` with the candidate count).
+
+**A consequence worth writing down, because it was a bug in the other direction.** A writer that can see the body's own
+framing must say what it saw: `partial` on a proxied call is now `False` when the body ended inside its `content-length`
+or at a chunked terminator, and `True` with `ending: "unverified"` when it ended at the connection's close (defect 77).
+The seam got the same treatment from the other side: a body that was never a stream is not judged against a stream's
+terminator table (defect 78). Both were found by running the product, not by testing the mechanism.
+
+## D-065 — "no secret reaches a sink" is asserted on every artefact a reader can be given (2026-11-19, G-Capture row 4)
+
+**The question.** G-Capture's row says the 60-secret corpus is *"absent from every sink that exists"*. Only one sink was
+ever tested: the tape. But a tape is not what a user hands to support — a capsule is, and a capsule carries a segment
+stream, `events/events.jsonl`, `graph.json`, `manifest.json`, two OTLP exports and, once rendered, a viewer page, a
+diagnosis report and a repair brief. A secret that survives into any of those is the same disclosure as one left on the
+tape, and grepping only the tape would have made the row true of the file the redactor writes and silent about the eight
+files the product writes from it.
+
+**The decision.** The evidence for that row is a test that puts all sixty secrets through the **real** sink onto a
+**real** tape, recovers a **real** capsule, renders everything the product renders from it, and greps all nine artefacts:
+`tests/test_redaction_every_sink.py`. Two conditions are what make it evidence rather than decoration. First, the fixture
+asserts **60 redactions happened**, so a clean artefact cannot be an empty one. Second, a control test runs the same
+fixture with `BLACKBOX_REDACTION=off` and requires **all 60** to reach the capsule — without it, a green run would be
+consistent with a sink that quietly stopped recording. (That control also corrected a reading of the first test: the
+capsule's *whole-file* grep is the weakest of the nine, because entries are deflated; it stays as the check that no stream
+is ever stored uncompressed, and the entry-level greps carry the row.)
+
+**The consequence.** This is builder-side evidence for a gate the builder may not sign (`docs/gates/README.md` rules 1–2).
+`docs/gates/G-Capture.md` had drifted from the tree in the other direction — it still said P3-11 did not exist, that the
+anthropic zero-change child was missing and that all five §15.1 rows were unmeasured, while `tests/_day14_child_anthropic.py`
+and `bench/results/2026-11-15-capture-overhead.json` were in the same commit tree. Its **evidence** cells were refreshed
+with the file or JSON path for each row; its **verdicts** were left exactly as they were, and the file is still unsigned.

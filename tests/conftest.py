@@ -55,9 +55,17 @@ def _fail_a_test_that_overruns(request: pytest.FixtureRequest) -> object:
     import threading
 
     finished = threading.Event()
+    # A test that is *measuring* breadth is not a test that hangs, and the two must not share one number: the serverless
+    # breadth test runs 250 invocations and each one seals a capsule, which is 40 s here and over the 120 s bound on a
+    # Windows runner (its fsync is the slow part). `@pytest.mark.slow_budget(300)` says "I am long on purpose" in the
+    # test itself; the watchdog is there to name a hang, not to cap a measurement.
+    budget = TEST_TIMEOUT_S
+    marker = request.node.get_closest_marker("slow_budget")
+    if marker is not None and marker.args:
+        budget = max(budget, float(marker.args[0]))
 
     def watch() -> None:
-        if finished.wait(TEST_TIMEOUT_S):
+        if finished.wait(budget):
             return
         # The real file descriptors, not `sys.stdout`: pytest has replaced those with capture objects, and `os._exit`
         # does not let a capture buffer reach the log. This is the one place where the output *must* survive.
@@ -72,7 +80,7 @@ def _fail_a_test_that_overruns(request: pytest.FixtureRequest) -> object:
             if frames:
                 tail = frames[-1]
                 where = f" at {tail.filename}:{tail.lineno} in {tail.name}"
-        line = f"FAILED {request.node.nodeid} — ran longer than {TEST_TIMEOUT_S:.0f} s{where}\n"
+        line = f"FAILED {request.node.nodeid} — ran longer than {budget:.0f} s{where}\n"
         # The report `tools/ci_summary.py` annotates from: a file, because a descriptor can be captured, buffered or
         # closed on the way out and this line has to survive all three.
         with contextlib.suppress(OSError), open(HUNG_FILE, "a", encoding="utf-8") as handle:

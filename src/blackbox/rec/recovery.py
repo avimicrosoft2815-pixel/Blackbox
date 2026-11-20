@@ -37,6 +37,9 @@ from blackbox.codec import cbor
 from blackbox.codec.ids import blake2b
 from blackbox.errors import bbx
 from blackbox.platform import current as _plat_current
+from blackbox.platform import perms as perms_mod
+from blackbox.platform import read as _read
+from blackbox.platform import replace as _replace
 from blackbox.rec import correlate, discover
 from blackbox.tape import chain as chain_mod
 from blackbox.tape import frame as frame_mod
@@ -78,16 +81,20 @@ def _write_atomic(path: str, blob: bytes) -> None:
         _plat.fdatasync(fd)
     finally:
         os.close(fd)
-    os.replace(tmp, path)
+    # Not `os.replace`: a peer recoverer reading this state file stops the rename on Windows, and that is a race to wait
+    # out, not a failure (defect 105).
+    _replace(tmp, path)
     with contextlib.suppress(OSError):        # Windows has no directory fsync; its shim says so
         _plat.fsync_dir(directory)
 
 
 def _read_json(path: str) -> dict[str, Any] | None:
+    # `_read`, not `open`: a peer publishing the same marker is renaming onto this path, and on Windows a reader that
+    # arrives inside that window is refused for a few microseconds (defect 106). A state file that cannot be read after
+    # the budget is treated as absent — the conservative direction, because "absent" means the step runs again.
     try:
-        with open(path, "rb") as fh:
-            loaded = json.loads(fh.read().decode("utf-8"))
-    except (FileNotFoundError, UnicodeDecodeError, json.JSONDecodeError):
+        loaded = json.loads(_read(path).decode("utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
         return None
     return loaded if isinstance(loaded, dict) else None
 
@@ -289,6 +296,9 @@ def graph_nodes(frames: list[dict[str, Any]], *, interrupted: list[NodeRecord] |
             payload = _payload(f.get("payload") or b"")
             nodes[slot] = {"node_slot": slot, "name": payload.get("name"), "kind": payload.get("kind"),
                            "parent": payload.get("parent"), "opened_ns": payload.get("opened_ns"),
+                           # Who opened this node. A proxy's span is a real recorded node and a different writer's
+                           # observation from the app's, so a reader can tell them apart without reading an edge (B4).
+                           "owner": payload.get("owner"),
                            "status": "unclosed", "outcome": None, "detail": ""}
         elif kind == C.KIND_NODE_CLOSE:
             node = nodes.get(slot)
@@ -427,8 +437,14 @@ def graph_edges(links_document: bytes, writer_uuid: str) -> tuple[list[dict[str,
     named = [e for e in edges if (e["nodes"]["from"] or e["nodes"]["to"])]
     node_level = sum(1 for e in edges if e["level"] == "node")
     node_join = "exact" if node_level else ("partial" if named else "unknown")
-    reason = NODE_JOIN_REASON if not named else (
-        "the call is inside a node on one tape only: the proxy vantage records calls, not the app's nodes")
+    if node_level:
+        reason = ("both ends of the call are inside nodes their own writer opened: the app's node on one tape and the "
+                  "proxy's span on the other")
+    elif named:
+        reason = ("the call is inside a node on one tape only: the other writer recorded the call without a span "
+                  "around it, and a node is not invented for the end an edge is missing")
+    else:
+        reason = NODE_JOIN_REASON
     summary: dict[str, Any] = {
         "total": len(edges),
         "run_level": sum(1 for e in edges if e["level"] == "run"),
@@ -449,14 +465,26 @@ def empty_edge_summary() -> dict[str, Any]:
 
 
 def _payload(raw: bytes) -> dict[str, Any]:
-    """A frame payload as a dict, or an empty dict when it will not decode: a graph entry is not worth an exception."""
+    """A frame payload as a dict, or an empty dict when neither encoding reads it.
+
+    Two encodings land on one tape: frames written by the sink are JSON (`TapeSink._safe`), frames written straight
+    through `TapeWriter.emit` are CBOR. Reading only CBOR made every sink-written `NODE_OPEN` list as a node with no
+    name or kind — the proxy's span, measured 2026-11-18, arrived in `graph.json` as `{kind: None, owner: None}`
+    (defect 72).
+    """
     if not raw:
         return {}
     try:
         decoded = cbor.decode_exact(raw)
+        if isinstance(decoded, dict):
+            return decoded
+    except Exception:
+        pass
+    try:
+        decoded_json = json.loads(raw.decode("utf-8"))
     except Exception:
         return {}
-    return decoded if isinstance(decoded, dict) else {}
+    return decoded_json if isinstance(decoded_json, dict) else {}
 
 
 def run_status(frames: list[dict[str, Any]], *, sealed: bool) -> tuple[str, str | None]:
@@ -490,6 +518,10 @@ def _declared_run_id(tape_dir: str) -> str | None:
 
 
 # ── the state machine ───────────────────────────────────────────────────────
+class _ArchivedElsewhere(Exception):
+    """Raised inside a step when another recoverer finished the run while we were taking the claim."""
+
+
 @dataclass
 class RecoveryResult:
     run_id: str
@@ -567,9 +599,8 @@ class Recovery:
         if not path:
             return None
         try:
-            with open(path, "rb") as fh:
-                return blake2b(fh.read()).hex()
-        except FileNotFoundError:
+            return blake2b(_read(path)).hex()
+        except OSError:
             return None
 
     def _skip(self, step: str, input_hash: str) -> bool:
@@ -633,25 +664,48 @@ class Recovery:
         took = self._take_lock(lock_path, content)
         if not took:
             raise bbx("BBX-E210", f"{lock_path} is held by a live recoverer")
+        if self._already_archived():
+            # Another recoverer finished between our `run()` check and this claim: it checked the archive, was told "not
+            # yet", then waited on/raced the lock while the other process completed and *released* it. Redoing every step
+            # would produce a second claimant for one incident (defect 103), so adopt the archive that now exists.
+            self._die("CLAIMED.archived_elsewhere")
+            with contextlib.suppress(OSError):
+                os.unlink(lock_path)
+            raise _ArchivedElsewhere
         self._die("CLAIMED.mid")
         self._save_marker("CLAIMED", input_hash=input_hash, output_hash=blake2b(content).hex(), artifact=lock_path)
         self._die("CLAIMED.after")
         return blake2b(content).hex()
 
     def _take_lock(self, lock_path: str, content: bytes) -> bool:
-        """`O_EXCL`, with the same staleness rules as the writer lease: dead pid, other boot, or another start time."""
-        os.makedirs(self.run_dir, mode=0o700, exist_ok=True)
+        """`O_EXCL`, with the same staleness rules as the writer lease: dead pid, other boot, or another start time.
+
+        Two processes claiming one run is the case this is for, so every way the operating system can say "somebody else
+        has it" has to end in `False` (a coded `BBX-E210` from the caller) and not in a traceback. On Windows that is not
+        one errno: `O_EXCL` on a file another process holds raises a *sharing violation*, `PermissionError` with WinError
+        32, and unlinking the stale lock can raise the same. The first version only caught `FileExistsError`, which is why
+        six concurrent recoverers on Windows crashed in `test_recovery_identity.py` (defect 101).
+        """
+        perms_mod.private_dir(os.path.dirname(self.run_dir))      # `<data>/runs`
+        perms_mod.private_dir(self.run_dir)
         try:
             fd = _plat.open_fd(lock_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        except FileExistsError:
+        except OSError as exc:
+            if not _lock_conflict(exc):
+                raise
             held = _read_json(lock_path)
             if held and self._lock_is_live(held):
                 return False
-            os.unlink(lock_path)                      # stale: a dead recoverer left it behind
+            try:
+                os.unlink(lock_path)                  # stale: a dead recoverer left it behind
+            except OSError:
+                return False                          # a live one still has it open: that is the race, not an error
             try:
                 fd = _plat.open_fd(lock_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-            except FileExistsError:
-                return False                          # lost the race to another recoverer, which is fine
+            except OSError as again:
+                if _lock_conflict(again):
+                    return False                      # lost the race to another recoverer, which is fine
+                raise
         try:
             _plat.pwrite(fd, memoryview(content), 0)
             _plat.fdatasync(fd)
@@ -863,6 +917,7 @@ class Recovery:
         input_hash = _hash(self.writer_uuid_hex, self.capsule_id)
         if not self._skip("INDEXED", input_hash):
             con = sqlite3.connect(path)
+            perms_mod.private_file(path)                   # sqlite creates 0644 under the default umask
             try:
                 con.execute("CREATE TABLE IF NOT EXISTS event (seq INTEGER PRIMARY KEY, kind INTEGER NOT NULL, "
                             "wall_ns INTEGER NOT NULL, len INTEGER NOT NULL)")
@@ -901,33 +956,59 @@ class Recovery:
         self._save_marker("ARCHIVED", input_hash=input_hash, output_hash=blake2b(payload).hex(), artifact=out)
         self.result.state = "ARCHIVED"
         self._die("ARCHIVED.after")
-        with contextlib.suppress(FileNotFoundError):
+        # A Windows sharing violation (another reader has the file open) is the same fact as "it is gone": the lock is
+        # advisory state, and the ARCHIVED marker is the durable one.
+        with contextlib.suppress(OSError):
             os.unlink(os.path.join(self.run_dir, "recovery.lock"))
         return blake2b(payload).hex()
 
     # ── the machine ─────────────────────────────────────────────────────────
+    def _adopt_archive(self) -> RecoveryResult:
+        """Report the archive somebody else produced, without doing any of the work again.
+
+        `steps_run` is **emptied**, not left as it was. A recoverer that adopted after the claim had already run
+        `DISCOVERED` (it happens before the lock), and leaving that in the list made it a second process that "did the
+        work" — which is exactly the duplicate claim defect 103 was about, one layer up (defect 107).
+        """
+        self.result.state = "ARCHIVED"
+        self.result.steps_run = []
+        self.result.steps_skipped = list(STEPS)
+        archived = _read_json(os.path.join(self.run_dir, "recovery.json")) or {}
+        self.result.capsule_path = archived.get("capsule_path")
+        self.result.capsule_root = archived.get("capsule_root")
+        self.result.run_status = archived.get("run_status", "recovered")
+        self.result.node_statuses = archived.get("node_statuses") or []
+        return self.result
+
     def run(self) -> RecoveryResult:
         if self._already_archived():
             # An archived run has nothing left to do. Saying so is the difference between "idempotent" and
             # "re-runs everything and happens to agree".
-            self.result.state = "ARCHIVED"
-            self.result.steps_skipped = list(STEPS)
-            archived = _read_json(os.path.join(self.run_dir, "recovery.json")) or {}
-            self.result.capsule_path = archived.get("capsule_path")
-            self.result.capsule_root = archived.get("capsule_root")
-            self.result.run_status = archived.get("run_status", "recovered")
-            self.result.node_statuses = archived.get("node_statuses") or []
-            return self.result
-        for step, fn in (("DISCOVERED", self.step_discovered), ("CLAIMED", self.step_claimed),
-                         ("SCANNED", self.step_scanned), ("GRAPHED", self.step_graphed),
-                         ("COSTED", self.step_costed), ("SEALED", self.step_sealed),
-                         ("INDEXED", self.step_indexed), ("ARCHIVED", self.step_archived)):
-            before = len(self.result.steps_skipped)
-            self._die(f"{step}.guard")
-            fn()
-            if len(self.result.steps_skipped) == before:
-                self.result.steps_run.append(step)
+            return self._adopt_archive()
+        try:
+            for step, fn in (("DISCOVERED", self.step_discovered), ("CLAIMED", self.step_claimed),
+                             ("SCANNED", self.step_scanned), ("GRAPHED", self.step_graphed),
+                             ("COSTED", self.step_costed), ("SEALED", self.step_sealed),
+                             ("INDEXED", self.step_indexed), ("ARCHIVED", self.step_archived)):
+                before = len(self.result.steps_skipped)
+                self._die(f"{step}.guard")
+                fn()
+                if len(self.result.steps_skipped) == before:
+                    self.result.steps_run.append(step)
+        except _ArchivedElsewhere:
+            return self._adopt_archive()
         return self.result
+
+
+def _lock_conflict(exc: OSError) -> bool:
+    """`True` when the OS refused a claim because the lock is already there or held by another process.
+
+    `FileExistsError` is the POSIX answer; Windows adds `PermissionError` (WinError 5, 32 sharing violation, 33 lock
+    violation) for the same situation when the other process has the file open.
+    """
+    if isinstance(exc, FileExistsError):
+        return True
+    return getattr(exc, "winerror", None) in (5, 32, 33)
 
 
 def run_id_for(data_dir: str, writer_uuid_hex: str) -> str:

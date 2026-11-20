@@ -147,6 +147,13 @@ KIND_GAP = 4
 KIND_DEGRADED = 5
 KIND_HEARTBEAT = 6
 KIND_NODE_OPEN = 16
+# A tape can carry nodes from more than one writer: the hook folder numbers its nodes from 1, and the proxy now
+# opens a span of its own for every request it forwards (B4). Two writers sharing a numbering space is how two
+# unrelated spans become one graph node, so the space is split: hooks may use 1..0x3FFF, the proxy opens from
+# 0x4000. Neither side can reach the other's band, and each NODE_OPEN says who owns it.
+NODE_SLOT_HOOK_MAX = 0x3FFF
+NODE_SLOT_PROXY_BASE = 0x4000
+NODE_SLOT_PROXY_MAX = 0x7FFF
 KIND_NODE_CLOSE = 17
 KIND_EDGE = 18
 # 0x13 — the graph range's lowest free id at the time LINK was first written (append-only: MARK keeps the 0x70 it has
@@ -187,7 +194,14 @@ DEFAULT_BLOB_INLINE = 1024
 DEFAULT_BLOB_MAX = 32 << 20
 DEFAULT_QUEUE_MAX = 65536
 DEFAULT_SAMPLE = 1.0
-MODES = ("volatile", "process", "kernel", "paranoid")
+# `serverless` is a mode of its own (§11.11): one run per invocation, sealed at the boundary, 2 MiB segments under
+# /tmp and a sync at the end of each invocation. It is listed here so `blackbox run` and the wrapper accept it, and it
+# behaves like `kernel` for the two places the writer decides whether to sync.
+MODES = ("volatile", "process", "kernel", "paranoid", "serverless")
+
+#: §11.11: a serverless invocation's segment budget. Payloads bigger than one segment are refused, so the cap is a
+#: statement about what fits in an invocation rather than a tuning knob.
+SERVERLESS_SEGMENT_BYTES = 2 * 1024 * 1024
 CONTENTS = ("full", "hash", "off")
 DURABILITY_CLASS = {"volatile": "F1-weak", "process": "F1", "kernel": "F1+F2", "paranoid": "F1+F2"}
 LEASE_MAX_BYTES = 512

@@ -45,10 +45,12 @@ def test_src_has_files():
 @pytest.mark.parametrize("path", _python_files(), ids=lambda p: str(p.relative_to(ROOT)))
 def test_only_stdlib_imports(path: Path):
     scoped = _capture_policy.function_scoped_modules(path) if _capture_policy.is_exempt(path) else set()
+    # The desktop shell's window toolkit: declared in `_capture_policy.OPTIONAL_DESKTOP`, allowed only inside functions.
+    scoped |= _capture_policy.function_scoped_desktop_modules(path)
     offenders = []
     for lineno, module in _modules(path):
         root = module.split(".")[0]
-        if root and root not in ALLOWED and not (root == "httpx" and root in scoped):
+        if root and root not in ALLOWED and root not in scoped:
             offenders.append(f"{path.relative_to(ROOT)}:{lineno} imports {module!r}")
     assert not offenders, "non-stdlib import(s):\n" + "\n".join(offenders)
 
@@ -74,3 +76,26 @@ def test_dev_tools_never_imported_by_src():
         if m.split(".")[0] in banned
     ]
     assert not hits, "test tooling leaked into src/:\n" + "\n".join(hits)
+
+
+def test_the_desktop_shell_imports_the_window_only_inside_functions():
+    """The other half of the `OPTIONAL_DESKTOP` permission: a module-scope import of the toolkit is the bug."""
+    offenders = []
+    for rel in _capture_policy.OPTIONAL_DESKTOP:
+        path = SRC / rel
+        bad = _capture_policy.module_scoped_desktop_imports(path)
+        offenders.extend(f"{rel} imports {name!r} at module scope" for name in sorted(bad))
+    assert not offenders, "\n".join(offenders)
+
+
+def test_importing_the_package_needs_no_window_toolkit():
+    """`import blackbox` on a machine with no pywebview and no PyGObject — the desktop extra is genuinely optional."""
+    import subprocess
+
+    done = subprocess.run(
+        [sys.executable, "-c",
+         "import sys, blackbox, blackbox.__main__ as m; "
+         "print('webview' in sys.modules, 'gi' in sys.modules, 'desktop' in str(m.COMMANDS['desktop']))"],
+        capture_output=True, text=True, timeout=120, env={"PYTHONPATH": str(SRC), "PATH": "/usr/bin:/bin"})
+    assert done.returncode == 0, done.stderr
+    assert done.stdout.split() == ["False", "False", "True"], done.stdout

@@ -15,13 +15,16 @@ from blackbox import __version__
 from blackbox import constants as C
 
 HELP = ("`status` prints the build line; `run -- cmd` runs a command under the recorder; "
+        "`desktop [path]` opens the viewer in a window of its own; "
         "`view <capsule>` writes one offline HTML page; `serve <capsule>` serves it on loopback once; "
         "`diagnose <capsule>` reports what a capsule's evidence supports; "
         "`repair preview|apply|verify` reviews and applies a proposal under an approval token; "
         "`ls` lists the capsules in a data directory; "
         "`link <a> <b>` declares that two tapes describe one run; `verify <c>|--run|--writer` checks a capsule's "
         "parts against its own frames; "
-        "`ingest` is the command a coding agent's hook runs; `hook install|remove|status` manages the hook adapters")
+        "`ingest` is the command a coding agent's hook runs; `hook install|remove|status` manages the hook adapters; "
+        "`index [--rebuild]` builds the data directory's index from its capsules; `retention` explains what the "
+        "retention policy would delete from a tape, and never deletes")
 
 
 # name -> (module, attribute). Nothing is imported until a command is actually chosen: the hook path (`ingest`) is on
@@ -40,6 +43,9 @@ COMMANDS: dict[str, tuple[str, str]] = {
     "capsule": ("blackbox.cap.cli", "main"),
     "verify": ("blackbox.cli.cmd_verify", "main"),
     "ls": ("blackbox.cli.cmd_ls", "main"),
+    "desktop": ("blackbox.ui.desktop", "main"),
+    "index": ("blackbox.cli.cmd_index", "main"),
+    "retention": ("blackbox.cli.cmd_retention", "main"),
 }
 
 
@@ -50,7 +56,8 @@ def _load(name: str) -> Callable[[list[str]], int]:
     return entry
 
 
-KNOWN = ("run", "ingest", "hook", "view", "serve", "diagnose", "repair", "link", "capsule", "verify", "ls")
+KNOWN = ("status", "run", "ingest", "hook", "view", "serve", "diagnose", "repair", "link", "capsule", "verify", "ls",
+         "desktop", "index", "retention")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -60,7 +67,9 @@ def main(argv: list[str] | None = None) -> int:
     for index, token in enumerate(raw):
         if token in KNOWN:
             if any(flag in ("-h", "--help") for flag in raw[index + 1:]):
-                return _load(token)(raw[index + 1:])
+                if token in COMMANDS:                  # `status` has no parser; the front door's help answers for it
+                    return _load(token)(raw[index + 1:])
+                break
             break
     ap = argparse.ArgumentParser(prog="blackbox", description="BlackBox recorder (pre-alpha)")
     ap.add_argument("--version", action="version",
@@ -70,14 +79,22 @@ def main(argv: list[str] | None = None) -> int:
     if args.command in COMMANDS:
         return _load(args.command)(rest)
     if args.command == "status":
+        if "--json" in rest:
+            import json
+            import platform as _platform
+
+            print(json.dumps({"version": __version__, "format_version": C.FORMAT_VERSION, "stage": "pre-alpha",
+                              "python": _platform.python_version(), "platform": _platform.platform(),
+                              "commands": sorted(set(KNOWN) | {"status"})}, indent=2, sort_keys=True))
+            return 0
         print(f"blackbox {__version__}: pre-alpha. Storage, recovery, the capture seams, the loopback proxy, the "
               f"launcher's attach, the offline viewer, the read-only diagnosis, the interruption lab and the "
               f"approval-gated repair are built; nothing applies a fix without a token.  "
               f"Tape format v{C.FORMAT_VERSION}.")
         print("See docs/STATUS.md for what is green, what is pending and what is not testable here.")
         return 0
-    print(f"unknown command {args.command!r}; this build implements --version, status, run, view, serve, diagnose, "
-          f"repair, link, capsule, verify, ls, ingest and hook", file=sys.stderr)
+    print(f"unknown command {args.command!r}; this build implements --version, status, run, desktop, view, serve, "
+          f"diagnose, repair, link, capsule, verify, ls, ingest, hook, index and retention", file=sys.stderr)
     return 2
 
 

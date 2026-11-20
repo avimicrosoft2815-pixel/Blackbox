@@ -260,13 +260,20 @@ def test_the_ingest_command_costs_the_agent_tens_of_milliseconds(tmp_path: Path)
     payload = json.dumps({"session_id": "s1", "tool_name": "Bash", "tool_input": {"command": "ls"}}).encode()
     env = {**os.environ, "PYTHONPATH": str(ROOT / "src")}
     bare = _median_ms([sys.executable, "-c", "pass"], n=5)
+    # The floor to compare against is the product's *own* front door, not a bare interpreter. `blackbox --version` imports
+    # `__main__` and the constants and nothing else, so the difference between it and `ingest` is what `ingest` itself
+    # costs. Comparing against a bare interpreter measures the interpreter plus the package layout, which on a Windows
+    # runner is 160 ms before any of our imports run — run 44581057445 failed on 191 vs 31 ms with the product behaving
+    # exactly as designed (defect 99).
+    floor = _median_ms([sys.executable, "-m", "blackbox", "--version"], n=5, env=env)
     ingest = _median_ms([sys.executable, "-m", "blackbox", "ingest", "--tool", "claude-code",
                          "--event", "PreToolUse", "--inbox", str(tmp_path / "inbox")], n=5, stdin=payload, env=env)
     assert len(inbox.pending(str(tmp_path / "inbox"))) == 5
     assert ingest < 900, f"cold start took {ingest:.0f} ms"
-    assert ingest - bare <= 80.0, (
-        f"one hook event cost {ingest - bare:.0f} ms over a bare interpreter ({ingest:.0f} vs {bare:.0f} ms); "
-        f"before defect 64 the front door imported every command and this delta was ~90 ms")
+    assert ingest - floor <= 80.0, (
+        f"`ingest` cost {ingest - floor:.0f} ms more than the front door alone ({ingest:.0f} vs {floor:.0f} ms; "
+        f"bare interpreter {bare:.0f} ms). Before defect 64 the front door imported every command and this delta was "
+        f"~90 ms; the import-list test below is the machine-independent half of the same assertion.")
 
 
 def test_the_ingest_path_imports_only_what_it_uses(tmp_path: Path) -> None:

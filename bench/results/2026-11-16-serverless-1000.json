@@ -1,0 +1,27 @@
+{
+  "bench": "serverless-1000",
+  "capsules": 1000,
+  "capsules_verified": 1000,
+  "completeness": {
+    "sealed": 933,
+    "unknown_serverless": 67
+  },
+  "date": "2026-11-16",
+  "documents": 1000,
+  "elapsed_s": 205.7,
+  "failures": [],
+  "invocations": 1000,
+  "marker_left_behind": false,
+  "ms_per_invocation": 205.73,
+  "open_runs_after_the_run": 0,
+  "outcomes": {
+    "error": 81,
+    "killed": 67,
+    "ok": 751,
+    "timeout": 101
+  },
+  "recovered_invocations": 67,
+  "schema": "blackbox.bench/1",
+  "unrecorded_invocations": 67,
+  "verdict": "no open run"
+}

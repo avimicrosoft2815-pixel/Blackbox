@@ -29,6 +29,7 @@ class ScanResult:
     frames: list[dict[str, Any]] = field(default_factory=list)
     gaps: list[dict[str, Any]] = field(default_factory=list)
     truncated_tail: bool = False
+    truncated_bytes: int = 0          # bytes of a frame that were written but did not survive: never rounded up or down
     lost_from_seq: int | None = None
     gaps_declared: list[dict[str, Any]] = field(default_factory=list)   # committed `GAP` frames (declared holes)
     gaps_unreadable: list[dict[str, Any]] = field(default_factory=list)  # GAP frames we cannot decode: NOT declared
@@ -61,7 +62,8 @@ class ScanResult:
         return {
             "writer_uuid": self.writer_uuid, "frames": self.frame_count,
             "first_seq": self.first_seq, "last_seq": self.last_seq,
-            "truncated_tail": self.truncated_tail, "lost_from_seq": self.lost_from_seq,
+            "truncated_tail": self.truncated_tail, "truncated_bytes": self.truncated_bytes,
+            "lost_from_seq": self.lost_from_seq,
             "gaps": self.gaps, "declared_gaps": self.gaps_declared,
             "unreadable_gaps": self.gaps_unreadable,
             "segments": self.segments_seen,
@@ -124,6 +126,16 @@ def scan(data_dir: str, writer_uuid_hex: str, *, max_frames: int = 2_000_000) ->
         buf = _read_file(active_path)
         cursor = min(head.head_off, len(buf))
         tail = frame_mod.scan_backwards(buf, cursor)
+        if not tail and cursor > C.SEGMENT_HEADER_BYTES:
+            # The head points into a frame: the write that would have finished it did not reach the disk. Recover from
+            # the last frame that does verify rather than declaring the segment empty (`frame.last_valid_frame_end`).
+            resynced = frame_mod.last_valid_frame_end(buf, cursor)
+            if resynced is not None:
+                result.truncated_tail = True
+                result.truncated_bytes = cursor - resynced
+                result.lost_from_seq = head.head_seq
+                cursor = resynced
+                tail = frame_mod.scan_backwards(buf, cursor)
         for f in tail:
             if f["seq"] <= head.head_seq:
                 collected[f["seq"]] = {**f, "segment": n_active}

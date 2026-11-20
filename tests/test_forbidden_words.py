@@ -24,7 +24,9 @@ BANNED = (
     "zero loss", "zero-loss", "crash-safe", "crash safe", "power-loss safe", "secure", "forensic-grade",
     "forensic grade", "deterministic", "first ever", "never done before", "ai-powered", "unique",
 )
-ALLOWED_CONTEXTS = ("--insecure-upstream", "insecure_upstream")
+# `insecure_channel` / `add_insecure_port` are grpcio's own names for a plaintext loopback channel (the OTLP/gRPC
+# measurement in `bench/bench_otlp_importers.py`); they are identifiers, not claims about this product.
+ALLOWED_CONTEXTS = ("--insecure-upstream", "insecure_upstream", "insecure_channel", "add_insecure_port")
 SKIP_DIRS = {".git", ".venv", "__pycache__", ".bench", ".pytest_cache", "node_modules", "dist", "build"}
 SKIP_FILES = {
     "docs/BLACKBOX_FINAL_ARCHITECTURE_v1.1.md",

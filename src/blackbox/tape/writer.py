@@ -26,6 +26,7 @@ from blackbox.codec import cbor
 from blackbox.codec.ids import new_writer_uuid
 from blackbox.errors import bbx
 from blackbox.platform import current as _plat_current
+from blackbox.platform import perms as perms_mod
 from blackbox.tape import chain as chain_mod
 from blackbox.tape import frame as frame_mod
 from blackbox.tape import head as head_mod
@@ -130,11 +131,13 @@ class TapeWriter:
 
     def open(self) -> TapeWriter:
         arm_die()
-        os.makedirs(self.tape_dir, mode=0o700, exist_ok=True)
+        perms_mod.private_dir(os.path.dirname(self.tape_dir))     # `<data>/tape`, which `makedirs` would leave at 0755
+        perms_mod.private_dir(self.tape_dir)
         if not os.path.exists(self.meta_path):
             blob = meta_mod.encode(writer_uuid=self.writer_uuid, segment_bytes=self.segment_bytes,
                                    vantage=self.vantage)
-            with open(self.meta_path, "wb") as fh:
+            descriptor = _plat.open_fd(self.meta_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(descriptor, "wb") as fh:
                 fh.write(blob)
                 fh.flush()
                 _plat.fdatasync(fh.fileno())
@@ -316,7 +319,7 @@ class TapeWriter:
             self._flush_buf()                  # data first ...
             self._slot = self._publish()       # ... then the commit, which is the linearization point
 
-            if self.mode in ("kernel", "paranoid"):
+            if self.mode in ("kernel", "paranoid", "serverless"):
                 self._maybe_sync(force=(self.mode == "paranoid"))
             self.publishes += 1
             self._batch_spans = []
@@ -585,7 +588,7 @@ class TapeWriter:
             self._write_seal(n, body=body, start_seq=start_seq, end_seq=end_seq,
                              frame_count=frame_count, reason=reason)
             if self._head is not None:
-                if self.mode in ("kernel", "paranoid"):
+                if self.mode in ("kernel", "paranoid", "serverless"):
                     self._head.sync()
                 self._head.close()
                 self._head = None

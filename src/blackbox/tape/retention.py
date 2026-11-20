@@ -190,10 +190,61 @@ def select(tape_dir: str, *, active_segment: int, max_bytes: int | None = None,
             victims.append(c)
             seen.add(c["segment"])
     freed = sum(v["bytes"] for v in victims)
-    return {"victims": victims, "pinned": pinned, "tape_bytes": total, "sealed_bytes": sealed,
+    chosen = {v["segment"] for v in victims}
+    return {"victims": victims, "pinned": pinned, "candidates": cands, "active_segment": active_segment,
+            "kept": [c for c in deletable if c["segment"] not in chosen],
+            "tape_bytes": total, "sealed_bytes": sealed, "freed_bytes": freed,
             "active_bytes": active_bytes, "keep_bytes": total - freed,
             "under_budget": max_bytes is None or (total - freed) <= max_bytes,
-            "max_bytes": max_bytes, "keep_hours": keep_hours}
+            "max_bytes": max_bytes, "keep_hours": keep_hours, "now_ns": now}
+
+
+def explain(plan: dict[str, Any]) -> list[dict[str, Any]]:
+    """One row per segment the plan looked at, with the reason it is or is not a victim.
+
+    A dry run that prints only "would delete 3 segments" is not a dry run a person can check: the interesting question is
+    why the fourth one stays, and whether it stays because it is inside the keep window or because it holds the only
+    record of an older hole. Every verdict here names its reason and the numbers it was derived from.
+    """
+    victims = {v["segment"]: v for v in plan["victims"]}
+    pinned = {c["segment"]: c for c in plan["pinned"]}
+    max_bytes = plan.get("max_bytes")
+    keep_hours = plan.get("keep_hours")
+    rows: list[dict[str, Any]] = []
+    for cand in plan.get("candidates", []) + list(pinned.values()):
+        number = cand["segment"]
+        row = {"segment": number, "first_seq": cand["first_seq"], "last_seq": cand["last_seq"],
+               "bytes": cand["bytes"], "verdict": "keep", "reasons": []}
+        if number in pinned:
+            row["verdict"] = "pinned"
+            row["reasons"].append("holds a GAP tombstone: deleting it would delete the only record that this range is "
+                                  "a declared hole")
+        elif number in victims:
+            row["verdict"] = "delete"
+            if keep_hours is not None:
+                horizon = plan["now_ns"] - int(keep_hours * 3600 * 1e9)
+                if cand["mtime_ns"] < horizon:
+                    row["reasons"].append(f"older than the {keep_hours:g} h keep window")
+            if max_bytes is not None:
+                row["reasons"].append(f"deleted to bring the tape under its {max_bytes} B budget "
+                                      f"(tape held {plan['tape_bytes']} B in {len(plan['candidates'])} sealed segment(s))")
+            if not row["reasons"]:
+                row["reasons"].append("selected by the retention policy")
+        else:
+
+            if keep_hours is not None:
+                row["reasons"].append(f"inside the {keep_hours:g} h keep window")
+            if max_bytes is not None:
+                row["reasons"].append(f"not needed to reach the {max_bytes} B budget "
+                                      f"({plan['keep_bytes']} B would remain)")
+            if not row["reasons"]:
+                row["reasons"].append("no retention limit was given, so nothing is deleted")
+        rows.append(row)
+    active = plan.get("active_segment")
+    if active is not None:
+        rows.append({"segment": active, "first_seq": None, "last_seq": None, "bytes": plan.get("active_bytes", 0),
+                     "verdict": "active", "reasons": ["the segment being written: never a deletion candidate"]})
+    return sorted(rows, key=lambda row: row["segment"])
 
 
 def _unlink_segment(tape_dir: str, c: dict[str, Any]) -> tuple[list[dict[str, Any]], bool]:
@@ -249,6 +300,16 @@ def apply(writer: Any, *, max_bytes: int | None = None, keep_hours: float | None
     else:
         groups = [(victims, (0, 0))]
 
+    if dry_run:
+        # A dry run must not commit anything: a `GAP` written for data that is still there would declare a hole that is
+        # not one, and the next scan would report the segment as a retention hole while its frames sit on disk.
+        planned = []
+        for group, span in groups:
+            planned.append({"from": span[0], "to": span[1], "segments": sorted(c["segment"] for c in group)})
+        return {**plan, "deleted": [{**{k: c[k] for k in ("segment", "first_seq", "last_seq", "bytes")},
+                                     "dry_run": True} for c in victims],
+                "blocked": [], "would_declare": planned, "merged": merged, "dry_run": True}
+
     for group, span in groups:
         if span[0] and span[1]:
             gap = cbor.encode({"from": span[0], "to": span[1], "reason": "RETENTION",
@@ -260,10 +321,6 @@ def apply(writer: Any, *, max_bytes: int | None = None, keep_hours: float | None
                 return {**plan, "deleted": deleted, "blocked": blocked, "merged": merged, "dry_run": dry_run,
                         "aborted": "writer degraded: GAP not committed"}
         for c in group:
-            if dry_run:
-                deleted.append({**{k: c[k] for k in ("segment", "first_seq", "last_seq", "bytes")},
-                                "dry_run": True})
-                continue
             seg_blocked, gone = _unlink_segment(tape_dir, c)
             blocked += seg_blocked
             if gone:

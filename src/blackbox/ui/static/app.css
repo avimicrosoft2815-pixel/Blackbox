@@ -1,0 +1,275 @@
+/* The desktop app's own surfaces — library, onboarding — on top of viewer.css.
+ *
+ * viewer.css owns the palette, the glass panels and the focus ring; this file adds only what those two pages need, and
+ * uses the same custom properties so a change to the black-and-gold palette moves both. No @import, no font file, no
+ * URL: these pages are served by the app's own loopback process and must make no request beyond it.
+ */
+
+body { margin: 0; }
+
+.app {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 28px 22px 56px;
+}
+
+.masthead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 10px 18px;
+  margin-bottom: 22px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.wordmark {
+  font-size: 20px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--gold-bright);
+  margin: 0;
+  font-weight: 600;
+}
+
+.wordmark .dot { color: var(--gold); }
+
+.masthead p { margin: 0; color: var(--ink-dim); font-size: 13px; }
+
+.masthead nav { margin-left: auto; display: flex; gap: 8px; }
+
+.navlink {
+  color: var(--ink);
+  text-decoration: none;
+  font-size: 13px;
+  padding: 6px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel);
+}
+
+.navlink:hover, .navlink:focus-visible { border-color: var(--line-strong); color: var(--gold-bright); }
+
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(148px, 1fr)); gap: 12px; margin: 0 0 22px; }
+
+.tile {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  backdrop-filter: blur(6px);
+}
+
+.tile .n { font-size: 26px; color: var(--gold-bright); font-variant-numeric: tabular-nums; }
+.tile .k { font-size: 12px; color: var(--ink-faint); text-transform: uppercase; letter-spacing: 0.09em; margin-top: 4px; }
+.tile.attention .n { color: var(--warn); }
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 18px 20px;
+  margin-bottom: 20px;
+}
+
+.panel h2 { margin: 0 0 6px; font-size: 15px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--gold); }
+.panel .lede { color: var(--ink-dim); font-size: 13px; margin: 0 0 14px; max-width: 74ch; }
+
+form.search { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; margin: 0 0 6px; }
+form.search label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--ink-faint); }
+
+input[type="search"], select {
+  background: #0f0e0c;
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 14px;
+  min-width: 190px;
+}
+
+input[type="search"]:focus-visible, select:focus-visible, button:focus-visible, a:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+button {
+  background: linear-gradient(180deg, #2a2519, #171412);
+  color: var(--gold-bright);
+  border: 1px solid var(--line-strong);
+  border-radius: 9px;
+  padding: 9px 16px;
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+button:hover { border-color: var(--gold); }
+
+table.runs { width: 100%; border-collapse: collapse; font-size: 14px; }
+table.runs caption { text-align: left; color: var(--ink-faint); font-size: 12px; padding-bottom: 8px; }
+table.runs th {
+  text-align: left;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  font-weight: 600;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+table.runs td { padding: 10px; border-bottom: 1px solid rgba(216, 180, 90, 0.1); vertical-align: top; }
+table.runs tr:hover td { background: rgba(216, 180, 90, 0.05); }
+table.runs td.num { text-align: right; font-variant-numeric: tabular-nums; color: var(--ink-dim); }
+table.runs a.run { color: var(--gold-bright); text-decoration: none; border-bottom: 1px dotted var(--line-strong); }
+table.runs a.run:hover { border-bottom-style: solid; }
+table.runs .sub { display: block; color: var(--ink-faint); font-size: 12px; margin-top: 3px; }
+
+.badge {
+  display: inline-block;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  border: 1px solid var(--line);
+  color: var(--ink-dim);
+  white-space: nowrap;
+}
+.badge.ok { color: var(--ok); border-color: rgba(143, 214, 174, 0.4); }
+.badge.warn { color: var(--warn); border-color: rgba(232, 192, 122, 0.4); }
+.badge.bad { color: var(--bad); border-color: rgba(242, 144, 127, 0.4); }
+
+ul.reasons { margin: 6px 0 0; padding: 0 0 0 16px; color: var(--warn); font-size: 12px; }
+ul.reasons li { margin: 2px 0; }
+
+.pager { display: flex; gap: 10px; align-items: center; margin-top: 16px; color: var(--ink-faint); font-size: 13px; }
+.pager a { color: var(--gold); text-decoration: none; padding: 6px 12px; border: 1px solid var(--line); border-radius: 9px; }
+.pager a[aria-disabled="true"] { opacity: 0.4; pointer-events: none; }
+
+.empty { text-align: center; padding: 42px 20px; color: var(--ink-dim); }
+.empty h2 { color: var(--gold-bright); text-transform: none; letter-spacing: 0; font-size: 19px; }
+
+.checks { list-style: none; margin: 0; padding: 0; }
+.checks li {
+  display: grid;
+  grid-template-columns: 74px 1fr;
+  gap: 4px 14px;
+  padding: 12px 0;
+  border-bottom: 1px solid rgba(216, 180, 90, 0.1);
+}
+.checks li:last-child { border-bottom: none; }
+.checks .title { color: var(--ink); font-size: 14px; }
+.checks .detail { color: var(--ink-dim); font-size: 13px; grid-column: 2; }
+.checks code, .cmd {
+  display: inline-block;
+  margin-top: 6px;
+  padding: 6px 9px;
+  border-radius: 8px;
+  background: #100f0d;
+  border: 1px solid var(--line);
+  color: var(--gold-bright);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12.5px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.two-col { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 18px; }
+.two-col ul { margin: 0; padding-left: 18px; color: var(--ink-dim); font-size: 13.5px; }
+.two-col li { margin: 7px 0; }
+.two-col h3 { margin: 0 0 8px; font-size: 13px; letter-spacing: 0.06em; text-transform: uppercase; }
+.yes h3 { color: var(--ok); }
+.no h3 { color: var(--ink-faint); }
+
+.verdict { font-size: 15px; color: var(--ink); margin: 0 0 16px; }
+.verdict.blocked { color: var(--bad); }
+.verdict.ready { color: var(--gold-bright); }
+.verdict.complete { color: var(--ok); }
+
+footer.appfoot { margin-top: 34px; color: var(--ink-faint); font-size: 12px; line-height: 1.6; }
+footer.appfoot code { color: var(--ink-dim); }
+
+@media (max-width: 640px) {
+  .app { padding: 18px 14px 40px; }
+  table.runs { display: block; overflow-x: auto; }
+  .checks li { grid-template-columns: 1fr; }
+  .checks .detail { grid-column: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; animation: none !important; }
+}
+
+/* ── inspection pages: verify, diagnose, repair review ────────────────────────────────────────────────────────── */
+.verdict-line { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin: 0 0 10px; }
+.verdict-line .big { font-size: 22px; color: var(--gold-bright); }
+.verdict-line .big.ok { color: var(--ok); }
+.verdict-line .big.bad { color: var(--bad); }
+
+dl.facts { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 0; font-size: 13.5px; }
+dl.facts dt { color: var(--ink-faint); }
+dl.facts dd { margin: 0; color: var(--ink); font-variant-numeric: tabular-nums; word-break: break-all; }
+
+article.finding { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; margin: 0 0 12px; }
+article.finding h3 { margin: 0 0 6px; font-size: 15px; line-height: 1.35; color: var(--ink); }
+article.finding .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 6px; }
+article.finding p { margin: 6px 0; font-size: 13px; color: var(--ink-dim); }
+article.finding ul { margin: 4px 0 0 18px; padding: 0; font-size: 12.5px; color: var(--ink-dim); }
+article.finding .label { font-size: 11px; letter-spacing: 0.07em; text-transform: uppercase; color: var(--ink-faint); }
+
+pre.pane {
+  background: #0d0c0b;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 14px 16px;
+  overflow: auto;
+  max-height: 460px;
+  color: var(--ink-dim);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12.5px;
+  line-height: 1.5;
+  margin: 8px 0 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+pre.diff .add { color: #9fe0b0; }
+pre.diff .del { color: #f2a08f; }
+
+details.file { border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; margin: 0 0 10px; }
+details.file summary { cursor: pointer; color: var(--gold-bright); font-size: 13.5px; }
+details.file summary:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+label.check { display: flex; gap: 10px; align-items: flex-start; font-size: 14px; color: var(--ink); margin: 12px 0; }
+label.check input { margin-top: 3px; accent-color: var(--gold); width: 16px; height: 16px; }
+label.field { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--ink-faint); margin: 12px 0; }
+label.field input[type="text"] {
+  background: #0f0e0c; color: var(--gold-bright); border: 1px solid var(--line-strong); border-radius: 9px;
+  padding: 9px 11px; font: inherit; font-size: 15px; letter-spacing: 0.18em; max-width: 260px;
+}
+.danger { border-color: rgba(242, 144, 127, 0.45); }
+.danger h2 { color: var(--bad); }
+.gate { font-size: 13px; color: var(--ink-dim); max-width: 78ch; }
+.gate strong { color: var(--ink); }
+ul.plain { margin: 8px 0 0 18px; padding: 0; font-size: 13px; color: var(--ink-dim); }
+ul.plain li { margin: 5px 0; }
+
+/* The action bar on a run page. It sits at the foot of the window's document because the viewer owns the rest of the
+ * page; `position: sticky` keeps it reachable while the timeline scrolls, and it never overlaps the tree on narrow
+ * screens because it wraps. */
+.runbar {
+  position: fixed;
+  left: 12px; right: 12px; bottom: 12px;
+  z-index: 30;
+  display: flex; flex-wrap: wrap; gap: 8px;
+  padding: 10px 12px;
+  background: rgba(12, 11, 10, 0.92);
+  border: 1px solid var(--line-strong);
+  border-radius: 14px;
+  backdrop-filter: blur(8px);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.55);
+}
+.runbar .navlink { background: transparent; }

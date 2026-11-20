@@ -1,15 +1,25 @@
 # Release blockers, with the evidence that puts them here
 
-Written on branch `arena/4e84d6ee-blackbox` (from `06b32a5`, the merge of PR #17). Every entry below was **reproduced on
+Started on branch `arena/4e84d6ee-blackbox` (from `06b32a5`, the merge of PR #17) and carried into
+`arena/4572f080-blackbox` (from `f4a9abb`, the merge of PR #18). Every entry below was **reproduced on
 this branch**, and each carries the command or the artifact that shows it. Nothing here is a guess, an old note carried
 forward, or a claim about a machine that was not available: where a claim is unmeasured, the entry says so and says what
 would measure it.
 
 Order is by what a real user hits first, not by ticket number. **B1 was fixed on this branch** (defects 66 and 67) after
 the list was first written, then **B2 and B3** (defects 68 and 69); the ids are kept stable so a comment, a defect entry
-or `docs/STATE.json` that names "B4" still points at the same thing. What remains open is **B4, B5 and B6** — two of
-which only the release machine can settle (B6, and the macOS cells it cannot acquire) and one of which is the owner's call
-on graph edges (B4). B8 was closed after the first review round, when `verify` learned to take many capsules.
+or `docs/STATE.json` that names "B4" still points at the same thing. B8 was closed after the first review round, when
+`verify` learned to take many capsules. **B4's fact changed on 2026-11-18**: node-level edges are recorded and measured
+on real instrumented clients, so what is left of B4 is the owner's tick and the parts that are honestly still
+unmeasured (see B4).
+
+**This list is not the gate list.** `docs/gates/` holds one file per gate and a full gate review is the only authority
+on what can be ticked — and `docs/gates/READINESS.md` is the builder's row-by-row index of the release checklist in
+`docs/BLACKBOX_FINAL_ARCHITECTURE_v1.1.md` §24/§24a (16 evidenced, 14 partial, 4 with nothing in the tree, 2 needing people, as of
+2026-11-19); B4, B5 and B6 are the entries *here* that are still open, and reading only this file would miss
+rows a release needs — `G-Capture` is still unsigned (its 60-secret row and its §15.1 table), and the release-machine
+rows need the host described in B6. So: "B4, B5 and B6" is a summary of this file, not a claim that nothing else is
+open.
 
 ---
 
@@ -262,25 +272,113 @@ defaults are safe and both are said out loud.
 
 ---
 
-## B4 — P3B-03's acceptance: 0 node-level edges
+## B4 — P3B-03's acceptance: node-level edges are now **measured**, the tick is still the owner's call
 
-Unchanged and unsoftened. A shared trace id is not an edge; the capsule's `graph.json` records nodes and statuses but
-**no node-to-node edges**, so the "why did this step fail" question cannot be answered from the graph. Evidence:
-`bench/results/2026-11-16-p3b03-acceptance.json`. The rebind half of the same ticket now passes on a request-level
-measurement (worst 53.98 ms, 0 of 240 over the 100 ms budget — `bench/results/2026-11-18-rebind-instrumented.json`), and
-one half is not the ticket.
+**The blocker's stated fact was `node_level_edges_recorded: 0`, and that number is no longer zero.** The proxy now opens a
+span of its own for every request it forwards (`NODE_OPEN` … `NODE_CLOSE`, `kind: "proxy_call"`, `owner: "proxy"`, a slot
+from its own band) and tags that call's frames with the slot; the join stays the one both writers wrote, the
+`x-blackbox-call` id. Evidence, four real clients under `blackbox run` against a real loopback origin
+(`bench/results/2026-11-18-b4-node-edges.json`):
 
-## B5 — OTLP importers other than Phoenix are untested
+| client | capsules, roots, one run id | `node_join` | node-level edges |
+|---|---|---|---|
+| `urllib` (no seam) | 2, all ok, one | `unknown` | **0** |
+| Node v22.22.3 (no seam) | 1, ok, one | `unknown` | **0** |
+| `openai` 3.51.0 as shipped | 2, all ok, one | `partial` | **0** |
+| `openai` 3.51.0 inside `api.run` | 2, all ok, one | **`exact`** | **2** (each tape's graph lists the join from its side) |
+
+The instrumented case's pair is app node `1` ↔ proxy span `16384`, call id `5eb5b57ced07034f`, on both tapes' graphs, with
+both capsules passing their own integrity root and `graph.json` recomputed from raw frames by `capsule verify`. The
+uninstrumented rows are the **negative control**: their frames carry fingerprints and timestamps, they are recorded inside
+no app node, and they produce no node-level edge — nothing is joined by time or by fingerprint.
+
+What this does **not** settle, and why the blocker stays open as the owner's decision rather than mine:
+
+* **Node clients cannot produce a node-level edge** — `api.run` has no Node equivalent, so the Node row is `unknown` at
+  node level. That is a missing feature, reported as such, not a passing row.
+* **Two concurrent calls from one client are two spans, and that is now measured by a run** (below), not asserted by a
+  fixture.
+* **macOS is unmeasured for the acceptance run** — the harness ran on a Linux host. CI's macOS cells run the test suite
+  (green at `228097f`), which exercises the resolver but produces no acceptance artefact, so no macOS row exists here
+  yet.
+* Shape (b) of `docs/node-edges.md` (a hook-to-seam node join) and a launcher-owned process span are still proposals.
+
+### The same ticket, run again with seven clients, including the two cases the first table could not show
+
+`bench/accept_p3b03.py` now runs seven clients under `blackbox run` against one loopback origin and writes
+`bench/results/2026-11-18-p3b03-acceptance.json`. Same four rows as above, plus the three the first run left open:
+
+| client | capsule roots, one run id | `node_join` | node-level edges |
+|---|---|---|---|
+| `urllib` (no seam) | 2, all ok, one | `unknown` | 0 |
+| Node v22.22.3 (no seam) | 2, all ok, one | `unknown` | 0 |
+| `openai` 3.51.0 as shipped | 2, all ok, one | `partial` | 0 |
+| `openai` 3.51.0 inside `api.run` | 2, all ok, one | `exact` | 2 |
+| `anthropic` 2.8.0 inside `api.run` (**new**) | 2, all ok, one | `exact` | 2 |
+| two `openai.AsyncOpenAI` calls in flight at once, inside `api.run` (**new**) | 2, all ok, one | `exact` | 4 |
+| the same call id written twice by one client (**new**) | 2, all ok, one | `unknown` | 0 |
+
+Totals from the artefact: `edges_recorded 22`, `edges_naming_a_node 10`, every capsule's own root verifies, and every
+two-capsule run is joined by `exact` links. What the three new rows add:
+
+* **A refusal produced by a run, not a fixture.** The duplicate-id client reuses one `x-blackbox-call` id for two requests;
+  the resolver refuses to pick and records `level: "call"` with no node-level edge — the ambiguous path the earlier
+  section listed as test-only. `repeated_call_ids` proves the id really was repeated on one side before the refusal is
+  read as a pass.
+* **Two concurrent calls join to two distinct proxy spans**, not to one by accident: the verdict counts pairs, so a
+  resolver that collapsed both calls onto the first span would fail it.
+* **A second real SDK** (the official `anthropic` client, no adapter of ours) reaches node level with the same mechanism,
+  so the seam is not tuned to one vendor's call shape. Repeats are counted **per capsule**: the app's tape and the
+  proxy's tape each record a call id once, and counting it across both would invent a duplicate.
+
+What is still not measured: the Node client has no node API, so its row stays `unknown`; shape (b) of
+`docs/node-edges.md` and a launcher-owned process span are proposals; and **this table is one Linux host** — the CI matrix
+does not run `bench/accept_p3b03.py`, so a macOS row would have to be produced by running it there.
+
+`docs/node-edges.md` is now an implementation note with the measurement, not a proposal. The rebind half of the same
+ticket passes on a request-level measurement (worst 53.98 ms, 0 of 240 over the 100 ms budget —
+`bench/results/2026-11-18-rebind-instrumented.json`). Defects 75 and 76 are the two bugs measuring this uncovered.
+
+## B5 — OTLP importers other than Phoenix: **two more measured, five still unmeasured and named**
 
 Phoenix 21.0.0 accepts `otlp/spans.pb` (200, read back intact) and rejects `otlp/spans.json` (its receiver is
-protobuf-only). Langfuse, the OpenTelemetry Collector's OTLP/JSON receiver and Phoenix's gRPC port 4317 have never been
-exercised, and none of them can be installed offline here. Evidence: `bench/results/2026-11-16-otlp-pb-importer.json`.
+protobuf-only) — `bench/results/2026-11-16-otlp-pb-importer.json`. Measured on 2026-11-18
+(`bench/results/2026-11-18-otlp-importers.json`), with the capsule's own bytes and the versions that read them:
+
+| importer / consumer | version | setup | result |
+|---|---|---|---|
+| the official OTLP message definitions | `opentelemetry-proto` 1.45.2, `protobuf` 7.36.2 | `ParseFromString` on `otlp/spans.pb` | **accepted**: 3 spans, names `bbx.run` / `invoke_agent agent` / `chat gpt-4`, trace id `50444de0…`, every `parent_span_id` resolves to a span in the message |
+| the same definitions, proto3-JSON | `protobuf` 7.36.2 `json_format.Parse(..., ignore_unknown_fields=False)` | `otlp/spans.json` | **accepted**: no unknown fields, 3 spans, same names — so the JSON part is the message OTel defines, not merely JSON we invented |
+| an OTLP/**gRPC** `TraceService` (4317 semantics) | `grpcio` 1.85.3 + the official servicer | loopback gRPC server, capsule bytes sent through the stub | **accepted**: 3 spans, same names and trace id, `ExportTraceServiceResponse` returned |
+
+The gRPC row closes the transport half of B5's question — the capsule's bytes are not just "parseable", they survive the
+framing an exporter puts them in — but it is a receiver built from OTel's own generated code, **not** a product. Still
+unmeasured, with the reason recorded in the artefact rather than an adjective:
+
+* **OpenTelemetry Collector (otelcol)**, **Grafana Tempo**, **Jaeger** — all need a released Go binary; the download is a
+  302 to `objects.githubusercontent.com`, which this sandbox cannot reach (the fetch stops at 0 bytes).
+* **Langfuse** — a TypeScript server with Postgres behind it; no pip package, no image pull.
+* **Phoenix's own gRPC listener on 4317** — the 2026-11-16 measurement started `phoenix serve` and used its HTTP receiver;
+  the gRPC listener was not exercised.
+
+The capsule verifies itself (exit 0) in the same run, so the bytes handed to those readers are the bytes the capsule ships.
+B5 stays open: three real products and one product's second transport are still unmeasured.
 
 ## B6 — Two rows that only the release machine can settle
 
-* **P3B-07's bench-box cold start.** The gate is ≤ 40 ms p95 on the bench box. This branch measures **p50 30.3 / p95 38.3
-  ms** for `blackbox ingest` on a 2-vCPU Linux sandbox after defect 64, from a wheel install — inside the gate, on the
-  wrong machine. The row stays owed until it is run on the named box.
+* **P3B-07's bench-box cold start.** The gate is ≤ 40 ms p95 on the bench box, and there is now a **protocol** rather than
+  two prose numbers: `bench/bench_ingest_cold_start.py` spawns a real process per sample, randomises the column order per
+  trial, empties the inbox between samples and writes an artefact with `n`, MAD and the hardware. On this 2-vCPU sandbox
+  (n = 60 per column, `bench/results/2026-11-19-ingest-cold-start.json`) the command costs **p50 33.0 / p95 44.5 /
+  p99 53.9 ms**, of which the bare interpreter is p50 10.9 ms and the CLI's own imports take the floor to p50 32.2 ms —
+  `ingest` adds **0.85 ms** p50 on top of the CLI. So the p95 **misses 40 ms here**, and it misses it in the part that is
+  not ours; the artefact's verdict says `on_the_bench_box: false` and `row_satisfied_here: false` in those words. The
+  earlier prose figures (32.0 / 40.2 in STATUS and progress, 30.3 / 38.3 in this file) had no artefact behind them and
+  disagreed with each other; they are superseded by the JSON, which is why the protocol is committed.
+  **What the bench box must provide for this row**: a quiet, non-shared host (the row is a p95, and this sandbox's MAD is
+  1.7 ms with a 53.9 ms maximum — a shared container cannot answer it), the same command
+  `python bench/bench_ingest_cold_start.py --n 60 --where bench-box`, and nothing else: the row needs no fault injection
+  and no privileges.
 * **The rebind numbers are local.** No CI runner contributes a rebind sample, and none will: `bench/bench_rebind.py`
   needs one busy process per CPU and a quiet loop, which a shared runner cannot give. macOS is now measured *for the
   test suite* (ten of ten on `ad3a783`, `f46dac1`, `66fc174`), never *for the bench*.
@@ -329,6 +427,32 @@ batch making the exit code 9 and naming only that one, a pattern that matches no
 exit 2 alone), and an unreadable path in a batch exiting 2. Defect 74 in `docs/defects.md`.
 
 ---
+
+## B9 — The Windows desktop app: installer definition written, install journey **not run**
+
+**What exists.** `blackbox desktop` (a real window, not a tab) with its three pages — first-run setup, the incident
+library, and a run — on top of `ui/app.py`'s loopback routes; a `.deb` that installs it on Debian/Ubuntu; and
+`tools/package/windows/{blackbox.iss,build_windows.ps1}` — an Inno Setup definition and a staging script that downloads
+the Windows embeddable Python, the package wheel and `pywebview`/`pythonnet`, so the installer needs no Python on the
+user's machine. The Windows installer is **unsigned**: signing is the owner's separate task and no certificate exists in
+this environment.
+
+**What has not happened.** The installer has never been built and the journey has never been done: this build environment
+is Linux, with no Windows machine, no `wine`, no Inno Setup and no Authenticode certificate. So the Windows rows read:
+
+| Row | State |
+|---|---|
+| Build `BlackBox-Setup-<version>.exe` | **not built** |
+| Install on Windows 10/11, launch, record with a real SDK client, open the capsule, uninstall | **not run** |
+| Data kept on uninstall (the installer says where it is) | designed and stated; unverified on Windows |
+| Signature so SmartScreen does not warn | **no certificate** — the owner's |
+
+**What would close it**, exactly: on a Windows 10 and a Windows 11 machine (or two real Windows VMs), run
+`build_windows.ps1`, then `iscc …`, install, launch `blackbox desktop`, record `openai` with the user's own key, open the
+capsule in the window, uninstall, and check that the recordings are still there. Then move the row in `docs/desktop.md`
+from *not run* to the observed result with the installer hash. Until then, "Windows desktop" is **unverified**, and
+nothing in this repository claims otherwise — the Linux `.deb` is verified by extraction and by a launcher run, and the
+window's code path is verified with a fake backend, which is a test and not a desktop.
 
 ## Fixed on this branch, with the numbers
 

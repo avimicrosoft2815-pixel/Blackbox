@@ -104,6 +104,32 @@ def _model_calls(evidence: Evidence) -> list[Finding]:
                     evidence=[f"capture_seam={seam} on {frames[0].ref()}"],
                     alternatives=[],
                     checks=["re-run with the SDK seam (-m blackbox or the sitecustomize launcher) to get app-side counts"]))
+        refused = [f for f in terminal if f.kind == C.KIND_MODEL_RESPONSE
+                   and isinstance(f.data.get("status"), int) and int(f.data["status"]) >= 400]
+        if refused:
+            # The most common failure a user meets, and it used to appear only in the timeline: the provider answered an
+            # error status. Without this finding the report was silent about a 404 whose body the capsule held
+            # (defect 79, found by running the fresh-install journey rather than the unit tests).
+            first = refused[0]
+            model = first.data.get("model") or (requests[0].data.get("model") if requests else None)
+            out.append(Finding(
+                id=f"provider-status-{slot}", verdict=OBSERVED, confidence=HIGH,
+                title=f"the provider answered HTTP {int(first.data['status'])} for the call at node {slot}"
+                      + (f" (model {model})" if model else ""),
+                basis=(f"{first.ref()} is a MODEL_RESPONSE whose `status` is {int(first.data['status'])}, and it is the "
+                       "terminal frame for this call: the request reached a provider and was refused. What the refusal "
+                       "means is in the provider's body, which this capsule keeps only when the content mode does."),
+                evidence=[first.ref()] + [f.ref() for f in requests[:1]],
+                alternatives=[
+                    "the request named something the provider does not serve (a model, a path, a parameter)",
+                    "the credential was refused or the account is over its limit",
+                    "a proxy or gateway in front of the provider produced the status",
+                ],
+                checks=[
+                    "read the provider's error body if the content mode kept it; with `hash` the status is all the tape has",
+                    "check the model name, the path and the key against the provider's own documentation",
+                    "the same request repeated unchanged will be refused the same way: fix the argument, not the retry",
+                ]))
         partial_terminal = [f for f in terminal if f.kind == C.KIND_MODEL_RESPONSE
                             and bool(f.data.get("partial"))]
         unverified = [f for f in terminal if f.kind == C.KIND_MODEL_RESPONSE
@@ -171,6 +197,30 @@ def _model_calls(evidence: Evidence) -> list[Finding]:
                               "the response arrived but recording stopped first (torn tail or a killed writer)"],
                 checks=["check whether the capsule's truncated_tail / lost_from_seq lands in this window",
                         "check the provider's own status page for the same minute before blaming this code"]))
+    return out
+
+
+def _node_outcomes(evidence: Evidence) -> list[Finding]:
+    """A node whose own `NODE_CLOSE` says `error`: the step the user named ended badly, and the tape heard why."""
+    out: list[Finding] = []
+    for frame in (f for f in evidence.frames if f.kind == C.KIND_NODE_CLOSE):
+        if str(frame.data.get("outcome") or "").lower() != "error":
+            continue
+        opens = [f for f in evidence.frames if f.kind == C.KIND_NODE_OPEN and f.node_slot == frame.node_slot]
+        name = (opens[-1].data.get("name") if opens else None) or f"node {frame.node_slot}"
+        error = str(frame.data.get("error") or "").strip()
+        out.append(Finding(
+            id=f"node-outcome-error-{frame.node_slot}", verdict=OBSERVED, confidence=HIGH,
+            title=f"the step {name!r} ended with an error",
+            basis=(f"{frame.ref()} closes node {frame.node_slot} with `outcome: error`"
+                   + (f" and records: {error[:200]}" if error else " and records no message")),
+            evidence=[frame.ref()] + [f.ref() for f in opens[-1:]],
+            alternatives=[
+                "the application raised and the node's own close recorded it: the error text is the application's",
+                "a recorder error closed the node early; the exception frame, when there is one, distinguishes them",
+            ],
+            checks=["read the application's handler for this step: the tape says the step failed, not why the code chose to",
+                    "if a model call inside this node failed first, that finding is the cause and this one is its shape"]))
     return out
 
 
@@ -296,7 +346,7 @@ def _evidence_quality(evidence: Evidence) -> list[Finding]:
 def findings(evidence: Evidence) -> list[Finding]:
     """All findings, ordered the way a reader triages: certain facts, likely causes, then what stays unknown."""
     everything = (_evidence_quality(evidence) + _run_boundary(evidence) + _exceptions(evidence)
-                  + _identifiers(evidence) + _model_calls(evidence) + _tool_calls(evidence))
+                  + _node_outcomes(evidence) + _identifiers(evidence) + _model_calls(evidence) + _tool_calls(evidence))
     rank = {OBSERVED: 0, LIKELY: 1, POSSIBLE: 2, CANNOT_TELL: 3}
     everything.sort(key=lambda f: (rank.get(f.verdict, 9), f.id))
     return everything

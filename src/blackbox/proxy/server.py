@@ -35,6 +35,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+from blackbox import constants as C
 from blackbox.cap_sdk import headers as cap_headers
 from blackbox.errors import bbx
 from blackbox.proxy import disconnects
@@ -207,6 +208,8 @@ class ProxyStats:
     max_queue_wait_ms: float = 0.0
     refused_reasons: dict[str, int] = field(default_factory=dict)
     caps: dict[str, Any] = field(default_factory=dict)   # the ceilings in force, and where they came from
+    spans: int = 0                     # proxy-owned spans opened: one per forwarded request (B4)
+    spans_capped: int = 0              # requests the reserved slot band could not cover (never silently dropped)
     upstream_errors: int = 0
     uncertain: int = 0                 # a request that may have reached the upstream and got no response
     client_gone: int = 0               # the client hung up while the upstream was still sending (§14.4a)
@@ -225,7 +228,7 @@ class ProxyStats:
         return {"requests": self.requests, "streamed": self.streamed, "refused": self.refused,
                 "refused_reasons": dict(sorted(self.refused_reasons.items())),
                 "queued": self.queued, "max_queue_wait_ms": round(self.max_queue_wait_ms, 1),
-                "caps": dict(self.caps),
+                "caps": dict(self.caps), "spans": self.spans, "spans_capped": self.spans_capped,
                 "upstream_errors": self.upstream_errors, "uncertain": self.uncertain,
                 "client_gone": self.client_gone, "upstream_gone": self.upstream_gone,
                 "record_errors": self.record_errors,
@@ -335,6 +338,10 @@ class ProxyServer:
                            "fd_budget": self.caps.budget, "open_at_start": self.caps.in_use,
                            "why": self.caps.reason}
         self._inflight = asyncio.Semaphore(self.max_inflight)
+        # B4: the proxy opens a span of its own for every request it forwards, so a node-to-node edge has two *recorded*
+        # ends instead of one recorded end and one inferred one. Slots come from the band `constants` reserves for this
+        # writer, never from the hook folder's, so two writers on one tape cannot merge two spans into one node.
+        self._span_slot = int(C.NODE_SLOT_PROXY_BASE)
         self._tls: dict[bool, ssl.SSLContext] = {}
         self._writers: set[asyncio.StreamWriter] = set()
         self.pool = _UpstreamPool()
@@ -523,7 +530,11 @@ class ProxyServer:
             connecting.cancel()
             return False
 
-        call = self._open_call(route, request, target_path, query, body, stream=True)
+        call_id = cap_headers.parse_call(request.header(cap_headers.CALL_HEADER))
+        span = self._open_span(route, request, target_path, call_id=call_id)
+        call = self._open_call(route, request, target_path, query, body, stream=True, node_slot=span)
+        if call is None and span is not None:
+            self._close_span(span, outcome="not-recorded", status=0)
         try:
             upstream_reader, upstream_writer, reused = await _resolve_future(connecting)
         except RouteError as exc:
@@ -626,17 +637,29 @@ class ProxyServer:
             self.stats.client_gone += 1
             self._close_call(call, status=0, error=disconnects.classify(
                 closed_first="client", status=0, client_received_bytes=gone.tally.to_client,
-                proxy_received_bytes=gone.tally.from_upstream).as_error())
+                proxy_received_bytes=gone.tally.from_upstream).as_error(),
+                partial=True, ending="unverified",
+                end_reason="the client disconnected while the body was still arriving")
             return False, False
         except (ConnectionError, OSError, asyncio.IncompleteReadError):
             self.stats.upstream_errors += 1
             self.stats.upstream_gone += 1
             self._close_call(call, status=status, error=disconnects.classify(
                 closed_first="upstream", status=status, client_received_bytes=tally.to_client,
-                proxy_received_bytes=tally.from_upstream).as_error())
+                proxy_received_bytes=tally.from_upstream).as_error(),
+                partial=True, ending="unverified",
+                end_reason="the upstream connection ended before the body's own framing did")
             return False, False
         self.stats.streamed += 1 if streamed else 0
-        self._close_call(call, status=status)
+        if complete:
+            self._close_call(call, status=status, partial=False, ending="terminated")
+        else:
+            # A body with no `content-length` and no chunked framing ends when the connection does. That is a legitimate
+            # HTTP/1.0 shape, and it is also what a cut looks like: nothing in the bytes says which happened, so the
+            # frame says `unverified` and the reason names the ambiguity instead of resolving it.
+            self._close_call(call, status=status, partial=True, ending="unverified",
+                             end_reason="the body ended at the connection's close: no length, no chunked terminator, "
+                                        "so whether it was complete is not recorded")
         return keep, upstream_keeps and complete
 
     # -- plumbing ------------------------------------------------------------------------------------------------
@@ -891,8 +914,48 @@ class ProxyServer:
             await writer.drain()
 
     # -- recording (fail-open, always) ---------------------------------------------------------------------------
+    def _open_span(self, route: Route, request: _Request, target_path: str, *,
+                   call_id: str | None) -> int | None:
+        """Open this writer's own span for one forwarded request, and return its slot (or `None`).
+
+        This is the half of B4 that had to exist before any node-to-node edge could be honest: the app's tape records a
+        node because its own writer opened one, and the proxy's tape records a node because *it* opened one. The call id
+        both sides wrote is then the evidence joining two recorded spans rather than one span and a guess. Nothing here
+        describes the app's node: `owner: "proxy"` is on every span this opens.
+        """
+        receiver = self.receiver
+        if receiver is None or not hasattr(receiver, "span_open"):
+            return None
+        if self._span_slot > C.NODE_SLOT_PROXY_MAX:
+            self.stats.spans_capped += 1
+            return None
+        slot = self._span_slot
+        self._span_slot += 1
+        try:
+            recorded = receiver.span_open(slot, name=f"{request.method} {target_path}", kind="proxy_call",
+                                          owner="proxy", route=route.name, call_id=call_id,
+                                          linked_run=cap_headers.parse(request.header(cap_headers.HEADER))[0])
+        except Exception:
+            self.stats.record_errors += 1
+            return None
+        if recorded is False:
+            # A receiver with no sink behind it: nothing will be written, so the call must not be given a slot the
+            # graph would then treat as a recorded span.
+            return None
+        self.stats.spans += 1
+        return slot
+
+    def _close_span(self, slot: int, *, outcome: str, status: int, error: str | None = None) -> None:
+        receiver = self.receiver
+        if receiver is None or not hasattr(receiver, "span_close"):
+            return
+        try:
+            receiver.span_close(slot, outcome=outcome, status=status, error=error)
+        except Exception:
+            self.stats.record_errors += 1
+
     def _open_call(self, route: Route, request: _Request, target_path: str, query: str, body: bytes | None,
-                   *, stream: bool) -> Any:
+                   *, stream: bool, node_slot: int | None = None) -> Any:
         if self.receiver is None:
             return None
         # `x-blackbox-run` is the one header the proxy *reads*: it names the run this call belongs to, which is how an
@@ -907,7 +970,7 @@ class ProxyServer:
                 request={"method": request.method, "path": target_path,
                          "headers": {k.lower(): v for k, v in request.headers if not is_ours(k)},
                          "body_sha256": hashlib.sha256(body or b"").hexdigest()},
-                stream=stream, partial=True, linked_run=linked_run, call_id=call_id)
+                stream=stream, partial=False, linked_run=linked_run, call_id=call_id, node_slot=node_slot)
         except Exception:
             self.stats.record_errors += 1
             return None
@@ -920,13 +983,26 @@ class ProxyServer:
         except Exception:
             self.stats.record_errors += 1
 
-    def _close_call(self, call: Any, *, status: int, error: str | None = None) -> None:
+    def _close_call(self, call: Any, *, status: int, error: str | None = None, partial: bool = False,
+                    ending: str | None = None, end_reason: str | None = None) -> None:
+        """Close a proxied call, saying what this writer could see about the body's ending.
+
+        The proxy reads the response's framing itself, so it has an answer a seam cannot always give: a body that ended
+        inside its `content-length`, or at a chunked terminator, *finished where the provider said it would*
+        (`partial: False`, `ending: "terminated"`). Before this, every proxied call was recorded `partial: True`, and
+        `diagnose` reported "the response stream ended before the provider finished it" for a 404 that arrived complete
+        (defect 77).
+        """
         if call is None or self.receiver is None:
             return
         try:
-            self.receiver.close_call(call, status=status, error=error)
+            self.receiver.close_call(call, status=status, error=error, partial=partial, ending=ending,
+                                     end_reason=end_reason)
         except Exception:
             self.stats.record_errors += 1
+        slot = getattr(call, "node_slot", None)
+        if isinstance(slot, int) and slot:
+            self._close_span(slot, outcome="error" if error else "ok", status=status, error=error)
 
 
 async def _resolve_future(future: asyncio.Future[Any]) -> Any:

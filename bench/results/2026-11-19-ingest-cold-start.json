@@ -1,0 +1,81 @@
+{
+  "date": "2026-11-19",
+  "ticket": "P3B-07",
+  "probe": "`blackbox ingest` cold start: one hook event from stdin to the inbox, real process per sample",
+  "protocol": "each sample is a fresh `subprocess.run` timed with perf_counter_ns around the spawn; three columns (bare interpreter, `ingest --help` as the CLI floor, and the real ingest with a populated PostToolUse body on stdin); column order randomised per trial with a fixed seed; the inbox is removed before every sample so this is the first event and not the hundredth; warm-up samples discarded; nearest-rank percentiles from one sorted array with n and MAD beside them (P1-17); exit code checked and a non-zero exit aborts rather than being timed",
+  "budget": {
+    "p95_ms_max": 40.0,
+    "source": "docs/BLACKBOX_FINAL_ARCHITECTURE_v1.1.md P3B-07 (cold start <= 40 ms p95 on the bench box)"
+  },
+  "where": "sandbox",
+  "entry_point": "console-script",
+  "hardware": {
+    "cpu": "Intel(R) Xeon(R) Processor @ 2.60GHz",
+    "cpu_count": 2,
+    "python": "3.11.2",
+    "implementation": "CPython",
+    "os": "Linux-6.1.158+-x86_64-with-glibc2.36",
+    "machine": "x86_64",
+    "mem_total_kib": 4034452
+  },
+  "host": {
+    "python": "3.11.2",
+    "implementation": "CPython",
+    "os": "Linux-6.1.158+"
+  },
+  "n_per_column": 60,
+  "warmup_per_column": 5,
+  "command": "python bench/bench_ingest_cold_start.py --n 60 --where sandbox",
+  "results": {
+    "bare_python": {
+      "n": 60,
+      "min": 9.918,
+      "p50": 10.888,
+      "p95": 17.765,
+      "p99": 19.495,
+      "max": 19.495,
+      "mean": 11.897,
+      "mad": 0.552,
+      "unit": "ms"
+    },
+    "cli_floor": {
+      "n": 60,
+      "min": 29.795,
+      "p50": 32.166,
+      "p95": 48.448,
+      "p99": 54.405,
+      "max": 54.405,
+      "mean": 34.23,
+      "mad": 1.229,
+      "unit": "ms"
+    },
+    "ingest": {
+      "n": 60,
+      "min": 30.221,
+      "p50": 33.015,
+      "p95": 44.462,
+      "p99": 53.942,
+      "max": 53.942,
+      "mean": 35.093,
+      "mad": 1.685,
+      "unit": "ms",
+      "budget": {
+        "p95_ms_max": 40.0
+      },
+      "gate": false,
+      "marginal_over_cli_floor_p50_ms": 0.849,
+      "marginal_over_interpreter_p50_ms": 22.127
+    }
+  },
+  "proof": {
+    "final_ingest_ms": 30.557,
+    "inbox_files": 1,
+    "tmp_files_left": 0
+  },
+  "verdict": {
+    "on_the_bench_box": false,
+    "p95_within_40_ms": false,
+    "the_command_wrote_an_inbox_file": true,
+    "row_satisfied_here": false
+  }
+}

@@ -58,6 +58,9 @@ ENV_PROXY = cap_headers.ENV_PROXY
 REBIND_BUDGET_MS = 100.0
 SUPERVISE_MS = 20.0                    # the default tick; a caller may pass any value it can defend
 START_TIMEOUT = 10.0
+#: How long shutdown waits for one round of cancelled handler tasks. A task that ignores its cancellation is counted by
+#: `undrained_at_stop` rather than waited for: a recorder that will not exit is worse than one that exits with a note.
+DRAIN_S = 2.0
 
 
 @dataclass
@@ -255,6 +258,16 @@ class ProxyThread:
         """
         if loop is None or loop.is_closed():
             return
+        # One budget for the whole drain, not one per round: a task that ignores cancellation would otherwise cost
+        # DRAIN_S per round (measured at 22 s for eleven rounds before this was a deadline). Settling is a courtesy to
+        # the collector; exiting is the promise.
+        deadline = time.monotonic() + DRAIN_S
+
+        def settle(tasks: list[asyncio.Task[Any]]) -> None:
+            remaining = deadline - time.monotonic()
+            if tasks and remaining > 0:
+                loop.run_until_complete(asyncio.wait(tasks, timeout=remaining))
+
         # In rounds, because cancelling the pending tasks *runs the loop*, and running the loop runs the `connection
         # made` callbacks that were already queued — those create new handler tasks, which the first round cannot have
         # seen. Measured: one round left three handlers behind per shutdown under a probing client.
@@ -266,20 +279,28 @@ class ProxyThread:
                 self.pending_at_stop += len(pending)
                 for task in pending:
                     task.cancel()
-                loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+                # `asyncio.wait(..., timeout=)` returns when the deadline passes even if a task *ignores* its
+                # cancellation, which `gather` does not: a handler that caught `CancelledError` and awaited again would
+                # make this loop wait for it forever (defect 89 — a proxy shutdown hung here for over 20 s under a burst
+                # of 40 connections). A task that will not die is counted, not waited for.
+                settle(pending)
+                if time.monotonic() >= deadline:
+                    break
         with contextlib.suppress(Exception):
             # Settle: an accept that was already queued when the listener closed still runs its `connection made`
             # callback the next time the loop turns, and *that* creates a handler task the rounds above cannot have
             # seen. Three short turns catch them; measured on this repository, without them a probing client left one
             # handler per shutdown to be destroyed by the collector.
             for _ in range(3):
+                if time.monotonic() >= deadline:
+                    break
                 loop.run_until_complete(asyncio.sleep(0.002))
                 late = [task for task in asyncio.all_tasks(loop) if not task.done()]
                 for task in late:
                     task.cancel()
                 if late:
                     self.pending_at_stop += len(late)
-                    loop.run_until_complete(asyncio.gather(*late, return_exceptions=True))
+                    settle(late)
         with contextlib.suppress(Exception):
             # Last look: a task that is still pending here will be destroyed by the collector and announced. Recorded
             # rather than swallowed, so a test can assert the drain converged instead of trusting it.

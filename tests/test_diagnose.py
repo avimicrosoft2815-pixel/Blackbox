@@ -548,3 +548,55 @@ def test_an_unknown_stream_convention_is_a_cannot_tell_not_a_silence(tmp_path: P
     if text:
         assert "nothing in these frames indicates that anything was cut short" not in text, (
             "the report may not claim completeness about a stream whose ending it could not check")
+
+
+# ── defect 79: the failure a user actually had must be a finding, not a timeline row ──────────────────────────────
+def _refused(tmp_path: Path) -> str:
+    """A run whose model call was answered 404 and whose node closed with the exception: the journey's incident."""
+    return _capsule(tmp_path,
+                    (C.KIND_RUN_START, 0, {"run_id": "r_refused", "source": "sdk"}),
+                    (C.KIND_NODE_OPEN, 1, {"name": "support-agent", "kind": "run"}),
+                    (C.KIND_MODEL_REQUEST, 1, {"provider": "127.0.0.1", "path": "/v1/chat/completions",
+                                               "model": "gpt-4o-mni", "call_id": "c1"}),
+                    (C.KIND_MODEL_CHUNK, 1, {"bytes": 123}),
+                    (C.KIND_MODEL_RESPONSE, 1, {"provider": "127.0.0.1", "path": "/v1/chat/completions",
+                                                "model": "gpt-4o-mni", "call_id": "c1", "status": 404,
+                                                "partial": False, "error": None}),
+                    (C.KIND_NODE_CLOSE, 1, {"name": "support-agent", "kind": "run", "outcome": "error",
+                                            "error": "Error code: 404 - The model `gpt-4o-mni` does not exist"}),
+                    (C.KIND_RUN_END, 0, {"run_id": "r_refused", "exit_code": 1}))
+
+
+def test_a_provider_error_status_is_an_observed_finding(tmp_path: Path) -> None:
+    report = build(load(_refused(tmp_path)))
+    status = [f for f in report.findings if f.id.startswith("provider-status-")]
+    assert len(status) == 1, _ids(report)
+    assert status[0].verdict == OBSERVED and status[0].confidence == "high"
+    assert "404" in status[0].title and "gpt-4o-mni" in status[0].title, status[0].title
+    assert status[0].evidence and "MODEL_RESPONSE" in status[0].evidence[0]
+
+
+def test_a_node_that_closed_with_an_error_is_an_observed_finding(tmp_path: Path) -> None:
+    report = build(load(_refused(tmp_path)))
+    node = [f for f in report.findings if f.id.startswith("node-outcome-error-")]
+    assert len(node) == 1, _ids(report)
+    assert "support-agent" in node[0].title, node[0].title
+    assert "404" in node[0].basis, node[0].basis
+
+
+def test_a_complete_call_is_never_reported_as_cut_short(tmp_path: Path) -> None:
+    """Defects 77 and 78 guarded at the report level: a finished body produces no interruption finding at all."""
+    capsule = _capsule(tmp_path,
+                       (C.KIND_RUN_START, 0, {"run_id": "r_done", "source": "sdk"}),
+                       (C.KIND_NODE_OPEN, 1, {"name": "agent", "kind": "run"}),
+                       (C.KIND_MODEL_REQUEST, 1, {"provider": "127.0.0.1", "path": "/v1/chat/completions",
+                                                  "model": "gpt-4o-mini", "call_id": "c1"}),
+                       (C.KIND_MODEL_CHUNK, 1, {"bytes": 232}),
+                       (C.KIND_MODEL_RESPONSE, 1, {"provider": "127.0.0.1", "path": "/v1/chat/completions",
+                                                   "model": "gpt-4o-mini", "call_id": "c1", "status": 200,
+                                                   "partial": False, "ending": None, "error": None}),
+                       (C.KIND_NODE_CLOSE, 1, {"name": "agent", "kind": "run", "outcome": "ok"}),
+                       (C.KIND_RUN_END, 0, {"run_id": "r_done", "exit_code": 0}))
+    report = build(load(capsule))
+    cut = [f.id for f in report.findings if "stream" in f.id or "interrupted" in f.id or "status" in f.id]
+    assert cut == [], cut

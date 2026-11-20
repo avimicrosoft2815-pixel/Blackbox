@@ -118,6 +118,12 @@ Frame = 48 B header ‖ payload ‖ 8 B trailer. `frame_len = 48 + payload_len +
 header, and the backward scanner can never mistake a partial frame for committed data.
 **Trailer** makes the backward walk O(1): `prev_off = off - tail_len`.
 
+**Where the trailer actually starts.** The two rows above are payload-relative and read as though the padding came
+*after* the trailer. It does not: a payload of 21 B sits in an 80 B frame, and the trailer is the frame's last 8 bytes,
+so `trailer_off = frame_len - 8` and `padding = frame_len - 48 - payload_len - 8` is 0 to 7 bytes that travel with the
+payload. `crc32` covers `header[0,44) ‖ payload ‖ padding ‖ trailer` — every byte from the end of the header to the end
+of the frame. A reader written from this section alone got this wrong before the note was added (defect 85).
+
 Kind registry (append-only): `1 SEG_END`, `2 CHAIN`, `3 INTERN`, `4 GAP`, `5 DEGRADED`, `6 HEARTBEAT`,
 `16 NODE_OPEN`, `17 NODE_CLOSE`, `18 EDGE`, `19 LINK`, `32 MODEL_REQUEST`, `33 MODEL_RESPONSE`, `34 MODEL_CHUNK`,
 `35 MODEL_ERROR`, `48 TOOL_REQUEST`, `49 TOOL_RESULT`, `80 RUN_START`, `81 RUN_END`, `96 EXCEPTION`, `112 MARK`.
@@ -257,7 +263,7 @@ declaration is *not* a licence to call a hole declared.
 | 48 | 8 | created_wall_ns (i64) |
 | 56 | 8 | created_mono_ns (i64) |
 | 64 | 32 | prev_chain (chain value at the end of segment n−1; zeros for the first) |
-| 96 | 4 | header checksum (profile) over bytes [0, 96) |
+| 96 | 4 | header checksum: **CRC-32/ISO-HDLC over bytes [0, 96)** (§9's vectors) |
 | 100 | 3996 | reserved |
 | 4096 | body | frames, byte-identical to what the writer committed; unused tail is zero |
 
@@ -360,6 +366,17 @@ ZIP, STORED for raw segment bodies and DEFLATE for JSON, entries sorted with `ma
 | `otlp/spans.json` | the same frames as OTLP/JSON ResourceSpans: agent, inference and tool spans (P4-14, D-056) |
 | `otlp/spans.pb` | the same spans as OTLP protobuf — the encoding a Phoenix-class receiver takes (P4-20, D-059) |
 | `links.json` | the resolved `LINK` records and, since D-053, the `call_links` |
+
+**The two values that say what this is.** `manifest.format` is the string `bbx.capsule` and `manifest.format_version`
+is the integer `0`; `min_reader` is the oldest reader that may open it (`0.1` today). A reader refuses any other
+`format`, and a `format_version` greater than its own, with `BBX-E407` — the values are stated here rather than left to
+a reader to infer because a reader that guesses them cannot tell a newer writer from a corrupt file (defect 85).
+
+**`INTEGRITY.sha256`, exactly.** One line per entry, in the order a `sha256sum` reader expects: 64 lower-case hex
+digits, two spaces, the entry's name **as it appears in the archive**, then `LF` — including after the last line. The
+entries are every member except `manifest.json` and `INTEGRITY.sha256` itself, sorted by name. `manifest.integrity.entries`
+counts **all** archive members, itself and the manifest included, so it is one less than the entry count this file lists
+plus one, and a reader that forgets the distinction reports a number that does not match the archive.
 
 `integrity.root = sha256(INTEGRITY.sha256)` — the manifest can therefore carry the root without hashing itself,
 while every data byte is still covered. Every entry's timestamp is `1980-01-01 00:00:00`, every mode is `0o644`,
@@ -499,8 +516,16 @@ carries counters, fingerprints and names only: no prompt or completion text, no 
 back all three spans with the trace id `50444de0…` byte for byte, both children naming `bbx.run`'s span id as parent,
 `bbx.model.bytes_received` still an integer, and Phoenix's `llm.system`/`llm.model_name` derived from our `gen_ai.*`
 names. Its OTLP/HTTP receiver still answers **415** to `otlp/spans.json` — the JSON part stays for readers that want
-JSON, and the protobuf part is what a Phoenix-class receiver takes. Langfuse, the Collector's OTLP/JSON receiver and
-Phoenix's gRPC port remain **untested**; `bench/results/2026-11-16-otlp-pb-importer.json` lists them.
+JSON, and the protobuf part is what a Phoenix-class receiver takes.
+
+**Wider on 2026-11-18** (`bench/results/2026-11-18-otlp-importers.json`): the capsule's own bytes were handed to the
+official OTLP messages (`opentelemetry-proto` 1.45.2, `protobuf` 7.36.2) and to an OTLP/**gRPC** `TraceService` built from
+OTel's own servicer (`grpcio` 1.85.3) on a loopback port. All three readings agree: 3 spans, names `bbx.run` /
+`invoke_agent agent` / `chat gpt-4`, trace id `50444de0…`, every `parent_span_id` resolving inside the message, and the
+JSON part parsing as proto3 JSON with `ignore_unknown_fields=False` (no unknown field anywhere). So the bytes are the
+message OTel defines and survive gRPC framing, not merely an HTTP POST. Still **untested**, with the failing command
+recorded: the Collector, Tempo and Jaeger (Go release binaries behind `objects.githubusercontent.com`, unreachable here),
+Langfuse (TypeScript server plus Postgres) and Phoenix's own gRPC listener (that measurement used its HTTP receiver).
 
 ## 9. Conformance vectors
 

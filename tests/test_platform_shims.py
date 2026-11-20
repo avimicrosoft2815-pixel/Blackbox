@@ -217,3 +217,87 @@ def test_open_fd_sets_o_binary_where_it_exists():
     mod = current()
     assert hasattr(mod, "open_fd")
     assert getattr(os, "O_BINARY", 0) == mod.O_BINARY
+
+
+def test_replace_waits_out_a_windows_sharing_violation(monkeypatch, tmp_path):
+    """`os.replace` onto a file a peer has open is refused on Windows, for as long as that handle lives (defect 105).
+
+    Simulated here rather than on Windows: the shim's whole job is to retry the two Windows codes and then give up with
+    a code of its own, and neither branch needs a Windows kernel to check.
+    """
+    from blackbox.platform import replace
+
+    src, dst = tmp_path / "a.tmp", tmp_path / "a.json"
+    src.write_bytes(b"new")
+    dst.write_bytes(b"old")
+    real, refusals = os.replace, []
+
+    def sharing(src_path, dst_path):
+        if len(refusals) < 2:
+            refusals.append(1)
+            error = OSError(13, "Access is denied")
+            error.winerror = 32                     # type: ignore[attr-defined]
+            raise error
+        real(src_path, dst_path)
+
+    monkeypatch.setattr(os, "replace", sharing)
+    replace(str(src), str(dst))
+    assert dst.read_bytes() == b"new" and len(refusals) == 2
+
+
+def test_replace_refuses_with_a_code_when_the_peer_never_lets_go(monkeypatch, tmp_path):
+    from blackbox.errors import BlackBoxError
+    from blackbox.platform import replace
+
+    src, dst = tmp_path / "b.tmp", tmp_path / "b.json"
+    src.write_bytes(b"new")
+
+    def forever(src_path, dst_path):
+        error = OSError(13, "Access is denied")
+        error.winerror = 32                         # type: ignore[attr-defined]
+        raise error
+
+    monkeypatch.setattr(os, "replace", forever)
+    with pytest.raises(BlackBoxError) as caught:
+        replace(str(src), str(dst), budget_s=0.05)
+    assert "BBX-E210" in str(caught.value)
+
+
+def test_replace_lets_any_other_error_through_unchanged(monkeypatch, tmp_path):
+    from blackbox.platform import replace
+
+    def no_space(src_path, dst_path):
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(os, "replace", no_space)
+    with pytest.raises(OSError) as caught:
+        replace(str(tmp_path / "c.tmp"), str(tmp_path / "c.json"))
+    assert caught.value.errno == 28               # not retried, not relabelled: the caller has to see ENOSPC
+
+
+def test_read_waits_out_the_window_a_peer_is_renaming_into(monkeypatch, tmp_path):
+    """The other half of the race in defect 105: a reader arriving during a rename is refused on Windows (defect 106)."""
+    from blackbox.platform import read
+
+    target = tmp_path / "marker.json"
+    target.write_bytes(b'{"step": "CLAIMED"}')
+    real, refusals = open, []
+
+    def refused(path, mode="r", *args, **kwargs):
+        if path == str(target) and len(refusals) < 3:
+            refusals.append(1)
+            error = PermissionError(13, "Permission denied", str(target))
+            error.winerror = 5                      # type: ignore[attr-defined]
+            raise error
+        return real(path, mode, *args, **kwargs)
+
+    monkeypatch.setattr("builtins.open", refused)
+    assert read(str(target)) == b'{"step": "CLAIMED"}'
+    assert len(refusals) == 3
+
+
+def test_read_gives_up_on_a_refusal_that_is_not_about_renaming(tmp_path):
+    from blackbox.platform import read
+
+    with pytest.raises(FileNotFoundError):
+        read(str(tmp_path / "absent.json"))             # an ordinary refusal is not retried and not swallowed

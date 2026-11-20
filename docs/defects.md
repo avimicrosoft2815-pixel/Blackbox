@@ -1215,3 +1215,705 @@ same; one tampered capsule in the batch → exit 9 and only that capsule named; 
 `cannot read` and the path.
 
 **Tests.** `tests/test_verify_cli.py` (23, five new).
+
+## Defect 75 — every sink-written `NODE_OPEN` reached `graph.json` with no name, no kind and no owner (2026-11-18, B4)
+
+**Found by** reading the first B4 measurement back from the tape instead of from a counter: the proxy's spans were on the
+tape, `ProxyStats.spans` said `2`, and the graph listed two nodes as `{kind: None, owner: None, name: None}`.
+
+**Cause.** `TapeSink._safe` encodes payloads with `json.dumps`, while `TapeWriter.emit` — used directly by the interpreter
+writer and the hook folder — stores CBOR. `recovery._payload` decoded **CBOR only** and returned `{}` for everything the
+sink wrote, so a sink-written node lost its identity at read time. The frames were never wrong; the reader was.
+
+**Fix.** `_payload` tries CBOR, then JSON, and returns `{}` only when neither reads it. A payload that is neither is still
+an empty dict rather than an exception: a graph entry is not worth a crash, and an unreadable node is visible as a node
+with no name.
+
+**Why it mattered for B4 specifically.** A node-level edge whose ends have no name or kind is an edge naming two numbers
+— indistinguishable from an invented node to anyone reading `graph.json`. A proxy span that reads as `{kind: null}` would
+have been the blocker's own failure mode wearing a passing count.
+
+**Measured** by `tests/test_proxy_spans.py` (the tape is scanned and `recovery.graph_nodes` is asked for the span's name,
+kind, owner, outcome and duration) and by the launcher suites, which read `graph.json` from a real run.
+
+## Defect 76 — a span's own `name` field made `SinkRecorder` fail silently, and fail-open hid it (2026-11-18, B4)
+
+**Found by** the same measurement: the tape carried a `RUN_START` and no span, and the proxy's own stats said
+`spans: 0, record_errors: 1` while every request still answered `200`.
+
+**Cause.** `SinkRecorder._forward(self, name, *args, **kwargs)` — a span's payload has a field called `name`, so
+`_forward("span_open", slot, name="POST /v1/chat/completions", …)` raised `TypeError: got multiple values for argument
+'name'`. The sink counts every exception as a failed write and never re-raises (fail-open is the design), so the request
+succeeded, nothing was recorded, and no test failed: the only symptom was a number in a stats dict that nobody asserted
+on.
+
+**Fix.** The parameter is `attr`, and `_forward` now returns whether the frame reached a sink; the proxy treats `False` as
+"no span" instead of handing the call a slot no frame carries.
+
+**Measured** by `tests/test_proxy_spans.py::test_a_span_wraps_the_call_and_every_frame_carries_its_slot` (frame order and
+one slot per frame) and `::test_the_proxy_counts_the_spans_it_opened` (`spans: 1`, `spans_capped: 0`, no record errors),
+both read from a real tape written by a real proxy with a real upstream.
+
+## Defect 77 — every proxied call was recorded as a cut stream (2026-11-18, found by the fresh-install journey)
+
+**Found by** running the user journey: a proxied 404 arrived complete under its `content-length`, and `blackbox diagnose`
+reported — as `observed`, confidence high — *"the response stream at node N ended before the provider finished it"*.
+
+**Cause.** `ProxyServer._open_call` passed `partial=True` for every call it opened, unconditionally, and nothing ever
+cleared it. `partial` is the flag that says "the writer saw part of this call"; on a body read to its own framing it is
+false, and the proxy is one of the few writers that *can* know: `_relay_body` already returned whether the body ended
+inside its `content-length` or at a chunked terminator (it used the answer only to decide whether the upstream socket
+could be pooled).
+
+**Fix.** The proxy closes each call with what it observed: a body that ended inside its framing is
+`partial: False, ending: "terminated"`; a body that ended at the connection's close — no length, no chunked terminator —
+is `partial: True, ending: "unverified"` with a reason that says the question is unanswered rather than answered; a
+client disconnect and an upstream cut each carry their own reason. `Receiver.close_call` grew the three optional fields,
+and `FailOpenReceiver` probes the inner receiver's signature so a receiver written before them still works (defect 80).
+
+**Measured** by `tests/test_proxy_spans.py::test_a_body_that_ended_inside_its_content_length_is_not_a_partial_call` and
+`::test_a_body_that_stopped_before_its_content_length_is_partial_and_unverified` (a real proxy, a real upstream that
+promises 100 bytes and sends 10), and by the journey report, which lost the false finding.
+
+## Defect 78 — a plain JSON response was judged against the SSE terminator table (2026-11-18, found by the journey)
+
+**Found by** the same run, one layer down: the **app's** capsule, from the SDK seam, recorded `partial: true` and
+`end_reason: "the stream ended without the provider terminator ([DONE])"` for a `chat.completions.create(...)` that was
+not a stream at all — so the report said a stream had been cut that never existed.
+
+**Cause.** `TeeStream._finish` ran `TerminatorWatch` — the SSE table — over the body of *every* response, because the
+tee wraps `response.stream` whether or not the call asked for a stream. A JSON body has no `data: [DONE]`, so the watch
+concluded the terminator never came.
+
+**Fix.** The rule is about the call, not the bytes: `call.stream` (which the seam sets from the response's
+`content-type: text/event-stream`) decides. A non-streaming body that reached the end of its iteration ended inside its
+framing — httpx raises rather than returning a short read of one — so it is recorded `partial: False, ending: None`, which
+is what "this was not a stream" means in the format. A streaming call keeps the three-valued answer unchanged.
+
+**Measured** by `tests/test_stream_termination.py::test_a_non_streaming_json_body_is_not_a_stream_with_a_missing_terminator`
+and `::test_the_same_bytes_are_still_judged_as_a_stream_when_the_call_says_so`, and by a real `openai` 3.51.0 call in the
+journey.
+
+## Defect 79 — the report did not mention the failure the user had (2026-11-18, found by the journey)
+
+**Found by** reading the journey's incident report: the app had crashed on a 404 with the exception text on the tape, and
+the report's findings were about *identifiers* — nothing said the provider had answered 404, and nothing said the step
+had ended with an error. The evidence table showed `status=404` and `outcome=error`; no rule turned either into a finding.
+
+**Fix.** Two producers in `diagnose/findings.py`: `provider-status-N` (`observed`, high) when a terminal `MODEL_RESPONSE`
+carries a status ≥ 400 — with the model named, the provider's-body caveat, and three alternatives — and
+`node-outcome-error-N` (`observed`, high) when a node's own `NODE_CLOSE` says `outcome: error`, quoting the recorded
+error text. Their checks do not advise a blind retry: a 4xx repeated unchanged is refused unchanged, and a failed node's
+cause is the finding above it, not a second attempt.
+
+**Measured** by `tests/test_diagnose.py::test_a_provider_error_status_is_an_observed_finding`,
+`::test_a_node_that_closed_with_an_error_is_an_observed_finding`, and the journey, where the two reports now name the 404
+and the failed step — and where the *post-repair* run's report names neither.
+
+## Defect 80 — a receiver written before the ending fields failed open into a `TypeError` (2026-11-18, same increment)
+
+**Found by** the fail-open suite after defect 77's change: `FailOpenReceiver` passed `partial`/`ending`/`end_reason` to
+any inner receiver, so one with the older `close_call` signature raised `TypeError`, which the wrapper counted as a
+recorder failure while the application carried on — a call that closed with no ending recorded and a blame line pointing
+at the recorder.
+
+**Fix.** The wrapper asks the signature which of the three names the inner receiver takes and passes only those, the same
+capability probe it already used for `call_id` and `node_slot` on `open_call`.
+
+**Measured** by `tests/test_capture_failopen.py` (`test_a_receiver_written_before_d053_still_records_its_calls` and the
+hostile-receiver cases, which now report no failures for a receiver that raises somewhere else).
+
+## Defect 81 — a test slept instead of waiting, and CI found it on the one runner that was busy (2026-11-18, CI `228097f`)
+
+**Found by** run 44417127703, one red cell out of ten: `py3.13 / windows-latest` failed
+`tests/test_proxy_supervisor.py::test_stopping_while_a_handler_is_pending_does_not_abandon_it`. The product was not at
+fault and no bound in it changed: the test began with `time.sleep(0.05)` to "let the handler start", then asserted that a
+stop does not abandon a pending handler. On that runner 50 ms was not enough for the handler thread to be *in* the
+handler, so the assertion was reached with nothing pending — the failure was in the precondition, and a pass would have
+been equally meaningless (it would have proven nothing about abandonment).
+
+**Cause.** A sleep used as a synchronisation primitive: it races on a loaded machine and says nothing when it loses.
+
+**Fix.** The fixture sets `held` from inside the handler, and the test waits on that fact with a ceiling
+(`Event.wait(timeout)`) and an explicit `assert` if the wait times out, so a slow machine now fails with "the handler
+never started" instead of mis-reporting the product. `tests/test_proxy_supervisor.py` is 12 tests, 0 failures, on three
+consecutive local runs.
+
+**Not the fix.** Raising the sleep, or relaxing the abandonment assertion. The rule from `docs/STATUS.md` holds: a
+timing-shaped failure is re-run and diagnosed before it is called a flake, and an assertion is never weakened to make CI
+green.
+
+## Defect 82 — a test whose own timeout was longer than the harness's could only ever be killed, never report (2026-11-18, CI `d842397`)
+
+**Found by** run 44461898689: `py3.11 / macos-latest` failed after the 120 s watchdog killed the step inside
+`tests/test_proxy_limits.py::test_a_burst_larger_than_the_old_soft_limit_is_still_served`, at
+`selectors.py:415 in select`. The Windows py3.13 cell that reddened `228097f` passed in the same run, so the supervisor
+repair worked; this was the next thing underneath it.
+
+**Cause.** Two bounds in the wrong order. The test spawns a child that makes 40 sequential
+`socket.create_connection(..., timeout=5)` calls — 200 s worst case — and the test's own `subprocess.run(timeout=180)`
+sat *above* the 120 s per-test watchdog in `tests/conftest.py`. So when the burst stalled on that runner, the harness
+killed the process before the child's timeout could fire, which means the one thing that would have explained the stall —
+the child's stderr — was never collected. A bounded test that cannot say what it saw is a hang with extra steps.
+
+**Fix.** One deadline bounds every wait in the child (connections, the wait for the upstream to hold them, the probe), a
+failed connection is **recorded rather than raised** so the assertion carries the numbers, the `time.sleep(0.5)` before
+counting `upstream_holds` became a bounded poll on the fact it was waiting for (defect 81's lesson), and the child's
+report now includes `clients`, `connect_failures`, `upstream_holds`, `probe` and `elapsed_ms`. The outer timeout is 60 s —
+**below** the watchdog — so an overrun is reported by an assertion that knows what the burst was doing. No assertion was
+relaxed: 40 held upstream, a probe served from the middle of the burst, and the soft limit above 64 are still required.
+
+**Measured.** `tests/test_proxy_limits.py` is 7 tests, 0 failures, on three consecutive local runs, with the burst row
+taking 0.17 s here. What the macOS stall *was* is still unknown: the platform is not available in this sandbox.
+
+**What the CI runs then showed, and what they did not.** The same test hung at the same 120 s watchdog in `d842397`'s
+py3.11/macos cell, then in `fa5d616`'s **PR** run — while `fa5d616`'s **push** run was ten of ten with that cell green. One
+commit, two runs, two outcomes: that is the strongest available evidence that the defect is a test that can hang rather
+than a product that hangs. With the repair in, `af6023f`'s push and PR runs are both ten of ten, macOS included. That does
+**not** prove the stall is gone — it is intermittent, and two green samples cannot show a race is fixed. What it does prove
+is the property this defect was about: the child now bounds every wait with one deadline, prints what it saw, and its
+timeout sits below the watchdog, so the next stall arrives as a failing assertion with numbers instead of a kill.
+
+## Defect 83 — a hostile manifest reached the reader as a Python exception, not as a code (2026-11-19, P4-04)
+
+**Found by** writing the attack corpus rather than reading the validator. Two capsules got past `read_capsule`'s
+promise that a hostile capsule is refused **with a code**:
+
+* `manifest.json` = `[]`, `"x"` or `null` — valid JSON, so `json.loads` returned a list, a string or `None`, and the
+  `.get("format")` on the next line raised **`AttributeError`**. `blackbox verify` printed
+  `cannot read …: AttributeError: 'list' object has no attribute 'get'` and exited 2: the right exit code with the wrong
+  reason, and nothing a user could look up.
+* `manifest.json` nested 20 000 deep — valid JSON, and `json.loads` raised **`RecursionError`** out of the reader. The
+  same shape of failure: a Python exception where the format's table says `BBX-E407`.
+
+**Cause.** The manifest path assumed its input had the shape the code needed. `cap/manifest.validate` already refuses a
+non-object (its `isinstance` guard was marked "unreachable, `read_capsule` parses JSON"); the caller had no such guard,
+so the check that exists was never reached.
+
+**Fix.** `read_capsule` catches `RecursionError` alongside the decode errors, and refuses a non-object manifest with
+`BBX-E407` **before** any `.get`. The validator's own guard is now reachable rather than ornamental.
+
+**Test.** `tests/test_capsule_attacks.py`, the param case `manifest that is not an object` (six bodies including the two
+above), plus a CLI-level case asserting that `blackbox verify` prints `BBX-E407` and never `AttributeError`.
+
+**Also added in the same corpus**, because writing the corpus is what a corpus is for: `BBX-E406` for an encrypted or
+bzip2 member (previously decodable), `BBX-E403` for a symlink/device/fifo/socket member (previously accepted, harmless
+because nothing is extracted, and still a capsule pretending to be a filesystem), `BBX-E408` for a manifest whose
+`derived_parts` names an entry the archive does not carry, and a bounded per-entry read (`_read_entry`) that is the
+§13.4 check-9 counter — a second net behind `zipfile`'s own declared-size bound, tested against a lying archive because a
+real one cannot reach the branch.
+
+## Defect 84 — a test asserted a machine-wide invariant inside a shared window (2026-11-19, P4-01)
+
+**Symptom.** `test_launcher_attach.py::test_the_temp_dir_is_removed_even_when_the_child_is_killed` failed in a full-suite
+run — and only there: it passed 3/3 on its own, 2/2 with the four other launcher files in one process, and again in the
+next full run. The assertion that failed was `_sdk_dirs() == before`, where `_sdk_dirs()` globs **the machine's** temp
+directory for `blackbox-sdk-*`.
+
+**What actually held.** Every claim about the thing under test was true in the failing run: `exit_code` was the kill
+code, `result.sdk["removed"] is True`, and the launcher's own `site_dir` did not exist. The directory the assertion
+tripped over (`/tmp/blackbox-sdk-or5c5xmy`) was gone by the time the run ended — it belonged to a launch that was still
+in flight in another process, which removed its own directory a moment later.
+
+**Measured.** Instrumenting `tempfile.mkdtemp`/`shutil.rmtree` for a whole suite run: 41 `blackbox-sdk-*` directories
+created in the pytest process, 41 removed, **0 orphans**. The litter the assertion feared is not what it found.
+
+**Fix.** The three tests that asserted `== before` now call `_no_new_sdk_dirs(before)`, which waits up to 3 s for the
+machine to settle and then asks whether anything *remained*. A real leak does not clean itself up: it still fails. What
+changed is that a concurrent process's short-lived directory is no longer this test's failure.
+
+**Not fixed, because it is not a defect:** the launcher's own cleanup path. `cleanup_sdk` keeps the path and reports
+`removed`, so "where it was, and whether it is gone" stays checkable afterwards.
+
+## Defect 85 — the format document was not enough to read the format (2026-11-19, P4-12)
+
+**Found by** writing `tools/readers/bbx-read.mjs` from `docs/format.md` alone. Three places cost real time, and each is a
+place where a second implementation would have gone wrong in the same way:
+
+1. **§4's table puts the trailer at the wrong offset.** The rows read `48+payload_len | 4 | BBXT` and
+   `52+payload_len | 4 | tail_len`, but the frame's payload is zero-padded to a multiple of 8 and the write order is
+   `payload+padding → trailer → header`, so the trailer is the frame's **last 8 bytes**. The first real frame a reader
+   sees is 80 B with a 21 B payload: `48 + 21 = 69`, where the table says the trailer starts, and `80 - 8 = 72`, where
+   it is. The document now says so, with the arithmetic.
+2. **§8.1 never names the manifest's identity values.** `format` is the string `bbx.capsule` and `format_version` is the
+   integer `0`; a reader that assumed `bbx` and `1` refused a capsule this build writes, and one that assumed nothing
+   could not tell a newer writer from a corrupt file. The values are now in §8.1, with the rule that a reader refuses a
+   different format or a higher version as `BBX-E407`.
+3. **§8.1 does not specify `INTEGRITY.sha256`.** The line format (64 lower-case hex, two spaces, the name as it appears
+   in the archive, `LF`, sorted, final newline) and the fact that `manifest.integrity.entries` counts **all** members —
+   not the lines — are both written down now. A reader that had assumed "entries = lines" was off by two.
+
+**Also amended:** §5's segment header checksum was described as "header checksum (profile)" without naming the
+function. It is CRC-32/ISO-HDLC over bytes `[0, 96)`, and the Node reader now verifies it on every segment.
+
+**What this defect says about the others.** Every one of these was invisible from inside the Python implementation,
+because the Python reader does not consult the document — it *is* the document. `tests/test_independent_reader.py`
+(16 tests) now holds them together: same entries, same root, same frames, same refusal codes on ten hostile inputs, and
+one disagreement about severity that turned out to be a disagreement about design — a bad root is exit 4 with a reason
+in the Node reader and `root_ok: false` on a capsule that still opens in the Python one, which is what a user with a
+drifted file actually needs.
+
+## Defect 86 — two tests written on Linux broke the Windows cell (2026-11-19, `47ecb8c`)
+
+CI on `47ecb8c` was green on all three Ubuntu cells and green on `docs`, and **py3.11/windows-latest failed in the unit
+step** with two errors that neither the new reader nor the corpus has anything to do with on POSIX:
+
+* `test_the_reader_runs_on_a_machine_with_no_blackbox_installed` built its environment by hand
+  (`PATH=/usr/local/bin:/usr/bin:/bin`) to prove the Node reader leans on nothing of ours. On Windows `node` is in
+  `C:\Program Files\nodejs`, so the hand-built PATH found no interpreter and the test failed on process start. The
+  environment is now this host's minus every `PYTHONPATH`/`BLACKBOX*` entry: what the test is about is the absence of
+  *our* variables, not the absence of PATH.
+* `test_check_7_…[deeply nested-[[[[[…` — pytest derived the test id from the parameter **body**, and the 40 kB
+  bracket string became a test name long enough that collection errored on Windows. Every case in that table now carries
+  an explicit id.
+
+**What this says about the corpus and the reader:** their Ubuntu cells were green, and neither failure would have been
+visible from this machine. It is the third time a POSIX-shaped assumption in a *test* (not the product) cost a Windows
+cell — after defect 81's sleep and the `SIGKILL`-as-137 assertion — which is why the Windows cells are read as part of the
+signal rather than as a formality.
+
+## Defect 87 — the fallback announced its URL after the wait it was waiting for (2026-11-19, the desktop shell)
+
+Two bugs in the new `blackbox desktop`, both found by its own tests before either shipped:
+
+* **The browser fallback deadlocked.** `run(path, window=False)` served the page and then waited for a fetch, while the
+  URL — the only thing a user needs — was printed by the caller *after* `run()` returned. So the fallback could only be
+  used by someone who already knew the URL: it waited for a fetch nobody could make, for the full 900 s timeout. The
+  test that caught it hung, which is what a deadlock looks like from the outside. Fixed by passing an `announce(url)`
+  callback into `run()`, called before the wait, and by printing that line flushed — the same failure `blackbox serve`
+  had (defect 40) arriving again in a new caller.
+* **The byte count was a character count.** `report["bytes"]` was `len(page)`, and the page carries em dashes and
+  ellipses: 56 536 characters, 59 951 bytes on the wire. A test comparing the served body with the reported size is what
+  noticed; the number is now `len(page.encode("utf-8"))`, because a size a user reads should be the size of the file they
+  would save.
+
+Neither reached a release. Both are recorded because the pattern is the one worth remembering: a shell around an
+existing component reintroduces the bugs that component already paid for, unless it is tested the same way.
+
+## Defect 88 — the library's fast path was a second, weaker reader (2026-11-19, the desktop library)
+
+`read_manifest` exists so the library can list a hundred capsules without decompressing a hundred archives. Its first
+version made every **header** check `read_capsule` makes and then stopped, and `tests/test_cap_read_manifest.py` — which
+runs the whole hostile corpus through both readers and compares the refusal code — found the gap on its first run:
+
+* **A manifest that lists a part the archive does not carry was accepted by the library reader.** `read_capsule` refuses
+  it as `BBX-E408` (§13.4 check 8: the hashes verify over the entries that exist, so only a check of the *claim* about
+  what exists can catch it). The library would have drawn that capsule as a healthy row and the window would have failed
+  when it was opened. The check is a set lookup, so `read_manifest` now makes it too, through one shared function; the
+  test that caught it is `test_both_readers_refuse_with_the_same_code[manifest lists a part the archive lacks]`.
+
+Two more bugs the same tests found before the pages shipped:
+
+* **A readable row carried an "unreadable" reason.** `_row_from_manifest` computed the attention list while the row still
+  said `readable=False`, so every healthy capsule in the library was labelled `unreadable: no reason given`. The flag is
+  now set in the row's constructor and the reasons are computed once, after it.
+* **A capsule file opened a library of nothing.** `blackbox desktop path/to/capsules/x.bbx` took the capsule's own
+  directory as the data directory, so the app scanned `capsules/capsules/` and served 404 for the run it had just been
+  pointed at. `library.data_root()` now walks up from a file inside a `capsules/` directory, and a capsule outside any
+  data directory is served by path instead.
+
+**What this says.** The optimisation was correct about *which bytes it may skip* and wrong about *which checks are
+therefore skippable* — a distinction no amount of reading the diff would have settled. The corpus that proved it already
+existed for `read_capsule`; pointing both readers at it was the whole test.
+
+## Defect 89 — a proxy shutdown could wait forever for a task that refuses to be cancelled (2026-11-19)
+
+Found by the full suite, not by reading: `tests/test_proxy_limits.py::test_a_burst_larger_than_the_old_soft_limit_is_still_served`
+opens 40 connections at the proxy against a black-hole upstream and then stops it. It failed twice — once under load, once
+alone — with the *subprocess* timeout (60 s) as the only thing that ended it, and a hand-written reproduction showed where
+the time went:
+
+```
+Thread ... (most recent call first):
+  File "asyncio/base_events.py", line 1884 in _run_once
+  File "asyncio/base_events.py", line 640 in run_until_complete
+  File "supervisor.py", line 269 in _drain_and_close
+  File "supervisor.py", line 242 in stop
+```
+
+`_drain_and_close` cancelled the pending handler tasks and then `gather`ed them. `gather` waits for a task that catches
+`CancelledError` and awaits again — which a handler parked mid-request can do — so `stop()` had no bound at all. The drain
+now uses `asyncio.wait(tasks, timeout=…)` under **one** deadline for the whole drain (2 s, `DRAIN_S`), and counts what is
+still pending in `undrained_at_stop` instead of waiting for it.
+
+The second half of the same measurement matters: the first fix bounded each round at 2 s, and eleven rounds made 22 s. A
+per-round timeout is not a shutdown budget; the deadline is computed once. `test_shutdown_is_bounded_even_when_a_handler_
+ignores_its_cancellation` builds the worst case by hand (a task that swallows its cancellation and parks on an event that
+is never set) and asserts both halves: the drain returns in bounded time **and** the surviving task is counted.
+
+**Not fixed, and stated:** a task that ignores cancellation is left for the collector, which may print `Task was destroyed
+but it is pending!`. That is a message about a handler that was already broken; the alternative was a recorder that would
+not exit. The condition is counted, and `tests/test_proxy_supervisor.py` asserts `undrained_at_stop == 0` for the normal
+shutdown paths.
+
+## Defect 90 — the Windows installer named an icon that did not exist (2026-11-19, the Windows definition)
+
+`blackbox.iss` refers to `blackbox.ico` in four places — the `[Files]` entry, `UninstallDisplayIcon`, the Start Menu
+shortcut and the desktop shortcut — and the repository contained no such file. `iscc` fails on the first unresolvable
+`Source:`, so the Windows definition was broken before it could ever be compiled, and nothing on this machine would have
+noticed: there is no `iscc` here, so the failure would have cost a Windows machine round-trip to discover.
+
+`tests/test_windows_definition.py` (11 tests) now checks the definition the way a compiler would, as far as that can be
+done without Windows: every `Source:` exists or is produced by the staging script, the two halves agree on the launcher,
+`[Registry]` writes only under `HKCU`, the uninstaller deletes only its own directory, no `#define` is dead, and the icon
+is a real ICO. The icon is generated by `tools/package/windows/make_icon.py` from the same primitives as
+`debian/blackbox.svg` — a near-black rounded square, a gold ring, a gold waveform — with no image library and no network,
+at 16/32/48/64/128/256 pixels, and the test decodes the 32-pixel entry to check the field, the ring, the mark and the
+transparent corner.
+
+**Two smaller things the same review found, both fixed:**
+
+* `#define AppExe "win64\python\pythonw.exe"` was never used, so a reader would believe the install's entry point was
+  `pythonw.exe` directly. It is not: the entry point is `blackbox.cmd`, which sets `%LOCALAPPDATA%\BlackBox` and points the
+  interpreter's stderr at a log. The unused define is gone, and a test fails on the next one.
+* The staging script's launcher ran `python.exe`, which puts a console window beside a desktop app, and on a non-zero exit
+  the window closed with the error inside it. It now runs `pythonw.exe`, appends stderr to
+  `%LOCALAPPDATA%\BlackBox\launcher.log`, and on failure prints the log's tail and waits.
+
+## Defect 91 — a `GET` could render the apply route (2026-11-19, the repair page)
+
+The repair pages added two `POST` routes. `GET /<token>/repair` is the review sheet, so the router matched `repair` and
+passed the rest of the path to the same renderer — which meant `GET /<token>/repair/apply?proposal=…&confirm=yes`
+returned **200** and a review page. Nothing was written (the write only happens in `do_POST`), so this was not a
+vulnerability; it was worse than that in one narrow way: a link that *looks* like an approval and answers `200` teaches a
+reader that approval can be driven by a link. `tests/test_ui_safety.py::test_a_get_cannot_apply_a_proposal` failed on it,
+and the router now answers 404 for any `repair/<sub-path>` reached by `GET`.
+
+**What the safety file covers now**, because "the window is safe" is a claim that needs tests and not a tone of voice: no
+secret from the environment on any of seven pages; no page referencing anything outside the loopback server (script bodies
+scanned with comments stripped, since the viewer's own header *says* "no `fetch()`, no `XMLHttpRequest`"); a redacted value
+staying redacted through a real recorded run; four hostile capsules refused with `BBX-` codes and no traceback anywhere,
+including on the check page and the run page; a capsule *name* from the URL never reaching outside the data directory; the
+data directory byte-identical after loading every page twice; a non-form `POST` refused; and a run whose process was killed
+still listing, opening, verifying and diagnosing.
+
+## Defect 92 — a test of the journey script asserted a Windows-impossible file mode (2026-11-16, CI)
+
+`tests/test_desktop_journey.py::test_the_script_is_valid_posix_shell` asserted `SCRIPT.stat().st_mode & 0o111` — that
+`tools/desktop_journey.sh` is executable. On a POSIX filesystem with this checkout it is. On GitHub's Windows runners Git
+does not store or restore a POSIX permission bit, so the file arrives mode `0o666` and the assertion failed in **all three
+Windows cells** (`py3.11`, `py3.12`, `py3.13`; run 44570138085, and the PR run 44570119233) while Ubuntu was 3/3 green. The
+failure is real evidence and it is not a product defect: every invocation of the script here, in `docs/desktop.md` and in
+the test file itself is `sh tools/desktop_journey.sh`, which needs no bit at all.
+
+What was wrong is the shape of the check: it tested what the checkout preserved rather than what makes the script runnable.
+It now asserts the two things that are the script's own — that `sh -n` parses it, and that its first line is `#!/bin/sh` —
+and asserts the permission bit only when `os.name == "posix"`, with the reason in the docstring so the next person does
+not read the conditional as an attempt to go green. Nothing was weakened on Linux: the bit assertion still runs here and
+still fails if it is cleared (`chmod -x` was checked after the change).
+
+**Kept as a record of the cost:** the branch's previous two commits were green on Ubuntu and Windows and were read as
+"Windows 3/3" in this PR — that reading was right for those commits and wrong for this one, which is why each commit's row
+in the CI table below names the commit rather than the pull request.
+
+## Defect 93 — the Markdown report quoted recorded text without escaping it (2026-11-16, the 20-payload corpus)
+
+`tests/test_xss_corpus.py` puts twenty payloads through a **real capsule** — a tape whose node names, model text, marks
+and exception messages all contain them — and then reads what three renderers do with it: the offline viewer page, the
+desktop library and run pages, and `blackbox diagnose`'s Markdown report and repair brief.
+
+The viewer was already safe: the payloads arrive as characters in a JSON data block and `app.js` builds text nodes.
+The **report was not**. Its timeline table escaped only `|`, so a capsule containing `<script>alert('script')</script>`
+produced a line like
+
+```
+| 2 | `NODE_OPEN` | 1 | name=<script>alert('script')</script>; kind=step |
+```
+
+and the same raw text appeared in bullet lines ("what the evidence shows", alternatives, checks) and inside single
+backticks for the recorded `argv`. Markdown renderers differ on raw HTML — several pass it through, some sanitise —
+which is exactly the wrong thing to depend on for a document whose whole purpose is to be attached to a ticket and opened
+by someone else. The report is a rendering of untrusted text; it needed the same rule the viewer has.
+
+**Fixed** with one function, `inline()`, applied at every place recorded text sits outside a fence: it masks credentials
+(`scrub`) and then escapes `&`, `<`, `>`, backtick and `|`, flattening newlines. Fenced blocks keep `fence()`, which is
+the right shape for multi-line evidence. The test now fails if any unescaped `<` from a payload appears outside a fence,
+if the escaping is applied twice, or if a Markdown image or link target is built from recorded text.
+
+**What this defect was not:** it was not exploitable on the viewer page, in the library, on the run page, in the
+page's data block, or in the capsule itself — the corpus checks all five. It was a sink in the one output designed to
+leave the machine.
+
+## Defect 94 — a torn last frame hid the whole active segment (2026-11-16, the four-fault table)
+
+Building the fault table for `tests/test_fault_codes.py` turned up a recovery defect with a much worse shape than the
+row asked about. A tape whose last committed frame was partly lost — the ordinary result of a power cut during a write —
+scanned as **zero frames**. The scanner walks backwards from the offset the header commits; when that offset lands inside
+a frame, the trailer it looks for is not there, the walk stops at its first step, and everything earlier on the segment
+became invisible. One interrupted write in the last 88 bytes hid the entire run: a recorder failing precisely when the
+machine crashed.
+
+**Fixed** by `frame.last_valid_frame_end`: when the backward walk from the committed cursor yields nothing, find the last
+frame *before* it that decodes with a good CRC, walk backwards from there, and record what was lost —
+`truncated_tail`, `truncated_bytes` (a new field, so the size of the torn tail is a number rather than a word) and
+`lost_from_seq`. The resync only runs on that failure path; an intact tape still takes the single backward walk.
+
+`tests/test_fault_codes.py` now asserts the recovery: five of six frames kept, the last one reported lost, the capsule
+sealing with `root_ok`, `truncated_tail: true` and `lost_from_seq` naming the first missing sequence number.
+
+## Defect 95 — `retention.apply(dry_run=True)` committed the GAP it was only supposed to describe (2026-11-16)
+
+A dry run that mutates the tape is the one bug a dry run exists to prevent, and it was there: `apply` appended the `GAP`
+frame and published it *before* the `dry_run` branch inside the per-segment loop, so asking what retention would delete
+declared a retention hole over frames that were still on disk. Every later scan of that tape would have reported a hole
+in evidence that had never been deleted — a tape that lies about itself, written by the command whose job is looking
+without touching.
+
+**Fixed**: `dry_run` returns before any write, reporting the same plan plus `would_declare` — the span the real pass would
+commit. `tests/test_retention_dry_run.py` runs a dry run and then asserts the segment files, the frame count, the tail seq
+and the absence of a `GAP` are all unchanged, and separately that the real pass declares exactly the span the dry run
+named.
+
+The same file adds what the gate asked for in the first place: `retention.explain()` and the new `blackbox retention`
+command give one row per segment — `delete`, `keep`, `pinned` or `active` — with the reason and the numbers behind it
+(the keep window, the budget, the tape's own size). It cannot delete: deletion has to commit a `GAP`, and only the tape's
+writer can do that.
+
+## Defect 96 — five paths a recording writes were readable by every user on the machine (2026-11-16, the permissions row)
+
+Measured on a real run rather than reasoned from the code, and the code was the problem: `capsules/` and `tape/<uuid>/`
+were created `0700` and the capsule and segment files `0600`, but `meta`, `seal` and `runs/<id>/index.sqlite` were
+`0644`, and the two directories that hold everything — `tape/` and `runs/` — were `0755`. `os.makedirs(child, mode=0o700)`
+does not tighten an implicitly created parent, and a plain `open(path, "wb")` takes the umask. So the promise covered the
+tree's leaves and not its branches: another user on the same box could list the tape directory, read the metadata page,
+read every seal, and read the index — which carries run ids, node names and timings.
+
+**Fixed** with `platform/perms.private_dir` and `private_file`: create the parent explicitly at `0700` and `chmod` it
+(POSIX) rather than trusting the mode argument, and tighten the files SQLite and `open()` make. A second pass found one
+more, `<data>/index/` at `0755` the first time `blackbox index` ran; the test now runs `blackbox index` as part of its
+fixture, so the audit covers the index directory and not only the run that precedes it. **Verified** by
+`tests/test_permissions.py`, which walks **every** path a real run wrote and requires exactly `0600`/`0700` — not "at
+least as tight", which would accept `0640` and with it a second reader. The same measurement now runs inside the first-run
+doctor, so a data directory unpacked with the wrong modes warns its owner instead of failing silently.
+
+Windows is a different question and is not claimed here: mode bits there do not describe access, so the test reads the
+ACL with `icacls` and fails on `Everyone`/`BUILTIN\Users`/`Authenticated Users`/`INTERACTIVE`. **That arm has never run.**
+
+## Defect 97 — `install(content=…)` swallowed a capture policy the wrapper could not pass (2026-11-16, serverless)
+
+Building `serverless.wrap` exposed a fail-open trap in the API it wraps: `api.install()` accepts only writer keywords, so
+`install(content="full")` raised `TypeError`, and `install`'s own fail-open caught it and disabled the whole tape. The
+user asked for content capture, got no error, no warning and no content — a recorder that had stopped recording. **Fixed**
+in the wrapper, which does not pass capture policy through `install`; the policy reaches the sink instead. The lesson is
+kept in `docs/serverless.md`: a constructor argument that cannot exist is worse than one that is refused, because
+fail-open hides it.
+
+## Defect 98 — every cold start re-emitted the previous invocation's capsule, quadratically (2026-11-16, serverless)
+
+`recover_leftovers()` scanned the whole data directory and sealed every unsealed tape it found, including tapes it had
+already sealed on an earlier cold start: the number of callbacks grew with the square of the invocation count (100
+invocations produced 5 050 `on_capsule` calls in 28 s). Beyond the cost, the semantics were wrong — a sealed invocation
+was being handed to the user's durability callback again, as if it had just finished. **Fixed**: `recover_leftovers` prunes
+sealed tapes before it scans, and `tests/test_serverless.py` asserts one callback per invocation across the 250-invocation
+random-failure test; the 1 000-invocation bench (`bench/results/2026-11-16-serverless-1000.json`) reports exactly 1 000
+documents for 1 000 invocations.
+
+*(Numbers 91 and 92 were already used for two other findings; these two were reported in the session's notes under
+those numbers and are recorded here as 97 and 98 so the log has no duplicate. Both are also described in
+`docs/serverless.md`.)*
+
+## Defect 99 — a hook-latency test measured the runner, not the product (2026-11-16, CI on Windows)
+
+`44581057445`'s `py3.11 / windows-latest` cell failed at `1628d5a` with
+`one hook event cost 160 ms over a bare interpreter (191 vs 31 ms)`. The product was fine: `ingest` imports only what it
+uses — `test_the_ingest_path_imports_only_what_it_uses` asserts that from `sys.modules` and has never failed — and what
+the test actually compared was "a bare interpreter" against "an interpreter plus the whole package layout", which on that
+runner costs 160 ms before `ingest` runs at all. A threshold on that difference is a claim about the runner's disk.
+
+**Fixed** by measuring against the product's own floor: `blackbox --version` imports the front door and the constants and
+nothing else, so `ingest - --version` is the part `ingest` owns. The bound (80 ms) and the defect-64 rationale are
+unchanged, the number in the failure message now names all three measurements, and the machine-independent half of the
+same assertion (the import list) sits beside it.
+
+## Defect 100 — a determinism needle with a zero byte in it (2026-11-16, CI on Windows)
+
+In the same cell: `b'\x00\x00\x05\x00' is in the capsule`, from
+`test_no_clock_no_pid_and_no_path_reaches_the_capsule`, which asserted that the process's pid, in four and eight big-endian
+bytes, appears nowhere in a capsule. On that runner the pid was 1280, so the "needle" was `00 00 05 00` — a sequence any
+archive contains by coincidence. The test was asserting the absence of a byte pattern the format itself produces, not the
+absence of a pid.
+
+**Repaired three times, which is the honest history.** First by refusing a needle with a zero byte in it; that failed
+again on Ubuntu `py3.11` at `b949e62` with `b"2596" is in the capsule` — four decimal digits occur inside deflated data by
+chance, and 11 KB of archive has room for several. Then by trying the only needle that could not collide — the same frames
+recorded by two *different processes*, which must produce identical capsules — and that is impossible for a reason worth
+knowing: `CHAIN` and `SEG_END` frames carry real `wall_ns`/`mono_ns`, so two recordings are never byte-identical and no
+capsule can be, whatever the pid. The test now proves each property where it lives: `created_ns == 0` for the clock; a
+40-character random token in the data directory's path for the path; and for the pid, the manifest's exact key set and the
+archive's exact entry names — there is no field for a pid, and entry names are the only other place it could travel.
+`test_the_same_tape_seals_to_the_same_bytes_wherever_it_is_sealed` remains the byte-identity proof; it copies the tape,
+so the clocks are the same by construction.
+
+## Defect 101 — six concurrent recoverers crashed on Windows instead of electing a winner (2026-11-16, CI)
+
+`c0684a9`'s `py3.11 / windows-latest` cell failed the new `test_six_concurrent_recoverers_elect_one_winner` with "a
+concurrent recoverer failed without a code" and a traceback. The claim path caught only `FileExistsError`, which is the
+POSIX answer. On Windows a lock file another process has open fails differently: `O_EXCL` raises a sharing violation
+(`PermissionError`, WinError 32), and unlinking the stale lock while the owner still has it open raises the same. So the
+loser of the race — the ordinary outcome the test is *for* — escaped as an unhandled exception instead of `BBX-E210`.
+
+**Fixed** with one predicate, `_lock_conflict`: `FileExistsError`, or WinError 5/32/33. Every claim path that meets it now
+returns `False`, which `step_claimed` turns into the coded refusal — "the lock is held by a live recoverer" — and an
+unlink that fails because the owner still has the file is treated as the same race rather than as an error. Nothing is
+stolen, and nothing escapes uncoded.
+
+**Verified on Linux** (the test, three consecutive runs) and **not yet on Windows**: the fix is in this branch, and the
+cell that found the defect will be the cell that confirms it. Until it is green there, `docs/STATUS.md` says so.
+
+## Defect 102 — the suite outgrew the Windows harness budget, and the cells timed out instead of failing (2026-11-16, CI)
+
+At `940577a` both `py3.11` and `py3.12 / windows-latest` were killed with "The action 'Unit + property tests' has timed
+out after 15 minutes", while `py3.13` on the same runner fleet *passed* in 14.6 and 13.2 minutes. Nothing was wrong with
+the code: the suite had grown from 1 414 to 1 531 tests, and the 117 new ones are subprocess-heavy on purpose — a runtime
+netguard that runs eight CLI paths under a refusing `sitecustomize`, a concurrency test that starts six recoverers, a CLI
+contract that measures exit codes by invoking the binary, a permissions test that records a real run and indexes it. Linux
+runs the whole suite in 7.6 minutes here; a Windows runner is roughly twice as slow, which put every Windows cell within a
+minute of the old 15-minute bound and two of them over it.
+
+**A timeout is the worst failure mode available**: it names no test and looks like a hang. **Fixed** by raising the step
+budget to 30 minutes with the measurements in the comment, and by leaving `faulthandler_timeout` where it is, so a genuine
+hang still dumps its stacks long before the bound. This is headroom, not a licence: if the suite doubles again the answer
+is to shard the job, not to raise the number again.
+
+**Not claimed**: no Windows cell is green at this commit yet — the timeout fix is in the branch and the next run is what
+measures it.
+
+## Defect 103 — two concurrent recoverers both claimed to have finished the run (2026-11-16, CI)
+
+`8ba986e`'s `py3.12 / ubuntu-latest` cell failed `test_six_concurrent_recoverers_elect_one_winner` with "2 recoverers
+each claimed to have done the work"; Windows cells failed the same test. The lock made the *claim* exclusive, but the
+claim was checked before the lock in one place and after it in another: a recoverer that lost the race to a winner which
+had already run the tape would take the claim, re-check nothing, and finish the run itself — so two callers each came back
+with a succeeded step and a different capsule. On a runner with three times the cores the window is wide enough to hit
+reliably, which is why only the fast cells found it.
+
+**Fixed** by making the post-claim state the authority: after taking the lock, `step_claimed` asks whether the run is
+already archived and, if it is, raises `_ArchivedElsewhere`, which `run()` catches and turns into the adoption result —
+the winner's capsule, marked as somebody else's work. The unlink on release now also suppresses `OSError` rather than
+only `FileNotFoundError`: on Windows a releasing peer's handle is a sharing violation, and losing that race to *yourself*
+is not an error.
+
+**Verified here**: the concurrency test eight consecutive times without a failure, plus the recovery and determinism
+modules whole. **Verified on Windows** at `1d42e0c`: the `py3.11`/`py3.12`/`py3.13` Windows cells and all three Ubuntu
+cells are green on both workflow runs of that commit, and the test that failed with "2 recoverers each claimed to have
+done the work" is the test they ran. Confirmed, not inferred — the fix is what those cells measured.
+
+## Defect 104 — the hung-test watchdog bounded a test that was long by design (2026-11-16, CI)
+
+The `py3.12 / windows-latest` cell dumped `test_250_invocations_with_random_failures_leave_no_open_run` past 120 s inside
+`platform/windows.py:160 fdatasync`, with "hung yes". It was not hung: 250 invocations each seal a capsule, which is 40 s
+here and roughly three minutes on that runner, where every seal ends in an `fdatasync` that is the slow part. One flat
+number served two purposes — naming a hang, and capping a measurement — and the measurement lost.
+
+**Fixed** by letting a test declare its own budget: `@pytest.mark.slow_budget(300)` extends the watchdog for that node
+only, the marker is registered in `pyproject.toml`, and the watchdog's message prints the budget it actually used. The
+test stays at 250 invocations everywhere, so the breadth the row measures is unchanged; nothing else in the suite asks for
+more than 120 s. A marker is the narrow fix: if more than a handful of tests need one, the suite is too slow and that is
+the problem to fix.
+
+**Confirmed at `1d42e0c`**: the Windows cells ran the 250 invocations and finished, with no `hung yes` line and no
+`fdatasync` dump in the annotation. The bound was the defect; the seal time was not.
+
+## Defect 105 — a concurrent recoverer died with a traceback on Windows instead of a code (2026-11-16, CI, partly diagnosed)
+
+At `4afba25` the three Windows cells still failed `test_six_concurrent_recoverers_elect_one_winner`, but with a different
+assertion from defect 103's: "a concurrent recoverer failed without a code". One of six processes exited non-zero with no
+`BBX-E…` in its stderr — a traceback, and the annotation's 600 characters carried a `^^^` anchor line from it and nothing
+that named the exception, so the *cause* is not yet measured.
+
+**What is measured**: the Ubuntu cells were green at the same commit (defect 103's fix holds), and this is a
+Windows-only, concurrency-only, uncoded failure. The one construct on this path that behaves differently between the two
+systems is `os.replace` onto a file another process has open: CPython opens files without `FILE_SHARE_DELETE`, so on
+Windows the rename is refused (`WinError` 5/32) for as long as that handle lives, while on POSIX it is atomic and
+invisible. Recovery renames its own state files — markers, `recovery.json`, the capsule — and every other recoverer in the
+race is *reading* exactly those files. That is the likely mechanism, not a proven one, and this entry says so.
+
+**Fixed as far as it can be without a Windows machine**:
+
+* `blackbox.platform.replace` replaces the bare `os.replace` in the recovery state writer and the capsule writer: the two
+  Windows codes are retried with a doubling delay inside a 2 s budget, and if the peer never lets go the refusal is coded
+  `BBX-E210` ("writer is alive; recovery refused" — the plan's own meaning for "another process owns this run") instead of
+  escaping as a `PermissionError`. Any other error, `ENOSPC` included, is raised untouched and never retried.
+* Three tests measure that here by simulating a sharing violation: it is retried and then succeeds; a permanent one ends
+  in `BBX-E210`; `ENOSPC` is neither retried nor relabelled.
+* The concurrency test's own failure message now names the **exception line** rather than the last 1 200 characters of a
+  traceback — the third CI cycle spent on this defect was spent reading a caret.
+
+**Not claimed**: the mechanism is still an inference — no Windows machine here can prove that the rename was the
+`PermissionError` the cell saw, only that the one Windows-only construct on the path is now waited out and, failing that,
+refused with a code.
+
+**Outcome at `1d42e0c`**: all three Windows cells and all three macOS cells are green, so the failure did not recur with
+the retry in place. That is consistent with the inference and is not a proof of it: a race that does not happen leaves no
+evidence of which side fixed it. The `replace` shim and its three tests stay regardless — the Windows rename behaviour it
+handles is real whether or not it was this failure.
+
+## Defect 106 — the retry was on the wrong side of the rename: recovery markers failed to *read* (2026-11-16, CI)
+
+`e86e14a` says exactly what `1d42e0c` could not, because the concurrency test now prints the exception line: two Windows
+cells failed with `PermissionError: [Errno 13] Permission denied: …\runs\r_…\recovery.done.DISCOVERED` and
+`…\recovery.done.CLAIMED`. So defect 105's inference was half right and half wrong. The gate really is a Windows sharing
+refusal on recovery state — but it is the **read** that is refused, not the rename. `DISCOVERED` runs *before* the claim,
+so all six processes publish that marker and read it at the same time; a reader that arrives inside a peer's
+`MoveFileEx` window is refused with `ERROR_ACCESS_DENIED` (`errno` 13, naming the path rather than a source/destination
+pair, which is why 105's guess pointed at `os.replace` and this one is not a guess). Nothing retried it, so it escaped as a
+traceback — exactly what the test forbids.
+
+**Fixed** with `blackbox.platform.read`: the same predicate and the same 2 s budget as `replace`, applied to the open.
+`recovery._read_json` and `_artifact_hash` use it, so every marker, the lock file and every artifact hash is read through
+the retry. A file that is still refused after the budget reads as **absent**, which is the conservative direction — absent
+means the step runs again — and `_artifact_hash` returns `None` for the same reason. Anything that is not a sharing
+refusal (`FileNotFoundError`, `ENOSPC`) is raised or swallowed exactly as before, untouched.
+
+**Measured here**: two tests simulate the refusal — one that clears after three attempts and one that is an ordinary
+`FileNotFoundError` and is neither retried nor swallowed. **Not yet measured on Windows**: the cells that produced this
+traceback are the cells that will confirm it, and until they are green this entry stays open.
+
+## Defect 107 — the adopting recoverer still said it had done the work (2026-11-16, CI)
+
+`bc26dce`'s `py3.11 / ubuntu-latest` cell failed the concurrency test with "2 recoverers each claimed to have done the
+work" — defect 103's symptom, back at a commit whose Windows and macOS cells were green. The cause is in defect 103's own
+fix: `_adopt_archive` reported the winner's capsule and filled `steps_skipped` with every step, but it did not touch
+`steps_run`, which the adopting process had already appended to. `DISCOVERED` runs **before** the lock, so a process that
+loses the race legitimately has `["DISCOVERED"]` in `steps_run` by the time it adopts. Two processes then each returned a
+capsule *and* a non-empty `steps_run`: the duplicate claim the whole test exists to forbid, moved one layer up from "two
+capsules" to "two workers".
+
+**Fixed** by emptying `steps_run` in `_adopt_archive`: adopting somebody else's archive means this process did none of the
+work, and saying otherwise is a lie the caller cannot check. The `state`, `steps_skipped`, capsule path and root are
+unchanged.
+
+**Measured here**: a new single-process test forces the first `_already_archived()` to answer "not yet", so the machine runs
+exactly the loser's sequence — `DISCOVERED`, then the claim, then adoption — and asserts `steps_run == []`, every step in
+`steps_skipped`, the winner's capsule, and still one capsule on disk. Six consecutive runs of the whole file are green, and
+this is the kind of defect that only a single-process test can hold down: the concurrency test found it twice in eleven
+cells and missed it in the rest.
+
+**Confirmed at `ce32b86`**: all twenty-two check runs are green on both workflow runs of that commit — the read retry is in
+it, and the Windows cells that produced this traceback are the cells that ran it. This one is a measurement rather than an
+inference, because the annotation named the call site before the fix was written.
+
+## Defect 108 — one Windows cell failed the rebind budget with a 686 ms outlier, and the message hid which half was ours (2026-11-16, CI)
+
+`daa7471` (docs only, on top of `ce32b86`) had twenty-one of twenty-two cells green; the one red cell was
+`py3.11 / windows-latest` failing `test_every_watchdog_rebind_lands_inside_the_budget_not_the_median_of_them` with a worst
+request-level outage of **690.5 ms** against a 100 ms budget. The sample is informative in a way the failure is not: eight
+outages `[20.6, 18.5, 19.3, 15.0, 12.3, 9.1, 686.2, 20.1]` ms with rebinds `[0, 0, 0, 16, 0, 0, 0, 15]` ms — so of the
+686 ms, at most 15 was a rebind, and the same cell logged an asyncio `ProactorEventLoop._start_serving` callback exception
+(`<_OverlappedF…>`, a socket the loop was still serving). The test has been green on every other Windows cell at this
+commit and at the four before it; this is the first time in eight Windows cells.
+
+**Two honest candidates, and the annotation could not tell them apart**: a shared runner that stalled the watchdog thread
+for the length of the sample (a runner, not a proxy — the way defect 99 failed), or a Windows-specific stall in the
+proactor loop when a listener it is closing is mid-accept (ours, rare, and the logged callback exception points this way).
+
+**Changed**: the failure message now puts the split first — worst outage, **how late the watchdog tick woke**, that
+sample's rebind, dispatch and probe cycle — inside the characters an annotation keeps, before the full lists. Nothing about
+the budget moved: the budget is the requirement, and a red cell stays red. **Not claimed**: the cause. The next Windows
+cell that fails this test will say which half it was, and that is when a fix — a starved-runner guard, or a proactor
+close-race repair — can be written on evidence rather than on this entry.
+
+`docs/STATUS.md` carries the same paragraph. **Did not recur at `382c80f`**: the same cell ran the same test and passed,
+which is what a stalled runner looks like and is still not proof of it — one green sample after one red one is a coin
+flip, not a diagnosis, and this entry stays open until either the test fails again with the new message and names a starved
+tick, or a month of green cells makes it moot.

@@ -60,6 +60,21 @@ def fence(text: str, *, label: str = "recorded text") -> str:
             f"{body}\n{FENCE}")
 
 
+def inline(text: str) -> str:
+    """Recorded text for a one-line Markdown context — escaped so it cannot become HTML or break its line.
+
+    The report is a document people attach to tickets and open in a renderer that may pass raw HTML through. A timeline
+    cell that carries `<script>` unescaped is therefore not a cosmetic issue: it is the same sink the viewer refuses.
+    This escapes the five characters that change meaning in Markdown/HTML (`&`, `<`, `>`, backtick, `|`) and flattens a
+    newline, after `scrub` has masked credentials. Fenced blocks use `fence()` instead — this is for the text that has to
+    sit beside prose.
+    """
+    body = scrub(text)
+    body = body.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    body = body.replace("`", "&#96;").replace("|", "\\|")
+    return body.replace("\r", " ").replace("\n", " ")
+
+
 def _when() -> str:
     return datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -138,13 +153,13 @@ class Report:
         out.append("## What the evidence shows")
         out.append("")
         for line in e.observed:
-            out.append(f"- {scrub(line)}")
+            out.append(f"- {inline(line)}")
         if e.missing:
             out.append("")
             out.append("**Expected and absent** — absences, which are not negative facts:")
             out.append("")
             for line in e.missing:
-                out.append(f"- {scrub(line)}")
+                out.append(f"- {inline(line)}")
         out.append("")
 
         out.append("## Findings")
@@ -155,31 +170,31 @@ class Report:
                        "below still apply.")
             out.append("")
         for index, finding in enumerate(self.findings, 1):
-            out.append(f"### {index}. {scrub(finding.title)}")
+            out.append(f"### {index}. {inline(finding.title)}")
             out.append("")
             out.append(f"`{finding.verdict}` · confidence **{finding.confidence}** · id `{finding.id}`")
             out.append("")
-            out.append(scrub(finding.basis))
+            out.append(inline(finding.basis))
             if finding.evidence:
                 out.append("")
-                out.append("Evidence: " + "; ".join(f"`{scrub(ref)}`" for ref in finding.evidence))
+                out.append("Evidence: " + "; ".join(f"`{inline(ref)}`" for ref in finding.evidence))
             if finding.alternatives:
                 out.append("")
                 out.append("Other explanations that fit the same frames:")
                 for alternative in finding.alternatives:
-                    out.append(f"- {scrub(alternative)}")
+                    out.append(f"- {inline(alternative)}")
             if finding.checks:
                 out.append("")
                 out.append("What would settle it:")
                 for check in finding.checks:
-                    out.append(f"- {scrub(check)}")
+                    out.append(f"- {inline(check)}")
             out.append("")
 
         out.append("## What this cannot tell you")
         out.append("")
         if e.cannot_know:
             for line in e.cannot_know:
-                out.append(f"- {scrub(line)}")
+                out.append(f"- {inline(line)}")
         else:
             out.append("- Nothing was ruled out at load time, which is not the same as everything being known: see "
                        "each finding's alternatives.")
@@ -198,7 +213,7 @@ class Report:
             if frame.kind == C.KIND_CHAIN:                 # one per batch of frames: integrity, not narrative
                 chained += 1
                 continue
-            note = scrub(frame.summary).replace("|", "\\|")[:160]
+            note = inline(frame.summary)[:160]
             out.append(f"| {frame.seq} | `{frame.kind_name}` | {frame.node_slot or '—'} | {note} |")
         if chained:
             out.append("")
@@ -235,7 +250,7 @@ class Report:
                 lines.append("")
                 lines.append(FENCE + "sh\n" + scrub(" ".join(str(a) for a in argv)) + "\n" + FENCE)
             else:
-                lines.append(f"The run recorded this command: `{scrub(str(argv))}`")
+                lines.append(f"The run recorded this command: `{inline(str(argv))}`")
         else:
             lines.append("The command line was **not recorded** for this run (`RUN_START.argv` is null), so this brief "
                          "cannot name the exact invocation. Do not reconstruct one and call it the reproduction.")
@@ -289,10 +304,10 @@ class Report:
         out.append("## Evidence (only what the capsule supports)")
         out.append("")
         for finding in observed:
-            out.append(f"- **{scrub(finding.title)}** — `{finding.verdict}`, confidence {finding.confidence}. "
-                       f"{scrub(finding.basis)}")
+            out.append(f"- **{inline(finding.title)}** — `{finding.verdict}`, confidence {finding.confidence}. "
+                       f"{inline(finding.basis)}")
             if finding.evidence:
-                out.append("  - frames: " + "; ".join(f"`{scrub(ref)}`" for ref in finding.evidence))
+                out.append("  - frames: " + "; ".join(f"`{inline(ref)}`" for ref in finding.evidence))
         if not observed:
             out.append("- No finding reached `observed` or `likely`: the evidence is too sparse to name a cause. That is "
                        "the finding.")
@@ -306,9 +321,9 @@ class Report:
         causes = [f for f in observed if self._is_cause(f)]
         if causes:
             for finding in causes:
-                out.append(f"- `{finding.id}`: {scrub(finding.title)}")
+                out.append(f"- `{finding.id}`: {inline(finding.title)}")
                 for alternative in finding.alternatives:
-                    out.append(f"  - alternative: {scrub(alternative)}")
+                    out.append(f"  - alternative: {inline(alternative)}")
         else:
             out.append("- None established. Do not patch against a guess; gather the evidence named under *Success "
                        "criteria* first.")
@@ -318,7 +333,7 @@ class Report:
             out.append("## Observed, but not a cause of an interruption")
             out.append("")
             for finding in other:
-                out.append(f"- `{finding.id}`: {scrub(finding.title)}")
+                out.append(f"- `{finding.id}`: {inline(finding.title)}")
         out.append("")
         out.append("## Where to look in the code")
         out.append("")
@@ -336,7 +351,7 @@ class Report:
         out.append("")
         lines = list(e.cannot_know) + [f"{f.title} ({f.id})" for f in unknown]
         for line in lines or ["None declared at load time; that is not the same as none existing."]:
-            out.append(f"- {scrub(line)}")
+            out.append(f"- {inline(line)}")
         out.append("")
         out.append("## Untrusted input")
         out.append("")

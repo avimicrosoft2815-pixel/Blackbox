@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Application
+Name=BlackBox
+GenericName=Flight recorder for AI-calling apps
+Comment=Open recorded runs, incidents and their evidence, offline
+Exec=blackbox desktop %f
+TryExec=blackbox
+Icon=blackbox
+Terminal=false
+Categories=Development;Debugger;Utility;
+Keywords=recorder;tracing;llm;observability;offline;
+MimeType=application/x-blackbox-capsule;
+StartupNotify=true
+StartupWMClass=BlackBox

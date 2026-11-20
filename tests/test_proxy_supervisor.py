@@ -207,15 +207,22 @@ def test_every_watchdog_rebind_lands_inside_the_budget_not_the_median_of_them(up
     # schedule. `wake_late_ms` is the supervisor's own record of how late its ticks woke (defect 58), so a starved
     # runner is named as such in the failure message instead of being argued about afterwards.
     lateness = getattr(proxy, "wake_late_ms", [])
-    assert worst <= REBIND_BUDGET_MS, (
-        f"worst request-level outage {worst:.1f} ms (upper bound) over the {REBIND_BUDGET_MS} ms budget; "
-        f"outages {[round(o, 1) for o in outages]} ms, "
-        f"rebinds {[round(s['rebind_ms'], 2) for s in samples]} ms, "
-        f"dispatch {[round(s['dispatch_ms'], 2) for s in samples]} ms, "
-        f"refused {[s['refused_requests'] for s in samples]}, "
-        f"probe cycle {sorted({s['probe_cycle_ms'] for s in samples})} ms, "
-        f"restores from the loop {proxy.restores_from_loop}, "
-        f"worst watchdog tick lateness {max(lateness, default=0.0):.1f} ms over {len(lateness)} ticks")
+    if worst > REBIND_BUDGET_MS:
+        # The split comes FIRST, inside the first 200 characters, because a CI annotation is cut at 600 and this message
+        # used to end with the one number that decides whether the outage was ours (defect 108). Three facts and the
+        # outlier they came from: how late the watchdog tick woke (a starved runner), how long the rebind itself took
+        # (our code), and how long the request spent dispatching (the harness).
+        index = max(range(len(samples)), key=lambda i: samples[i]["outage_upper_ms"])
+        slowest = samples[index]
+        raise AssertionError(
+            f"outage {worst:.1f} ms vs {REBIND_BUDGET_MS} ms: tick woke {max(lateness, default=0.0):.1f} ms late "
+            f"over {len(lateness)} ticks; that sample's rebind {slowest['rebind_ms']} ms, dispatch "
+            f"{slowest['dispatch_ms']} ms, probe cycle {slowest['probe_cycle_ms']} ms. "
+            f"outages {[round(o, 1) for o in outages]} ms, "
+            f"rebinds {[round(s['rebind_ms'], 2) for s in samples]} ms, "
+            f"dispatch {[round(s['dispatch_ms'], 2) for s in samples]} ms, "
+            f"refused {[s['refused_requests'] for s in samples]}, "
+            f"restores from the loop {proxy.restores_from_loop}")
 
 
 def test_a_listener_that_dies_without_saying_so_is_still_restored_on_the_tick(upstream: LocalUpstream) -> None:
@@ -300,7 +307,15 @@ def test_stopping_while_a_handler_is_pending_does_not_abandon_it(tmp_path: Path)
                     pass
 
             threading.Thread(target=client, daemon=True).start()
-            time.sleep(0.05)                       # the handler is now waiting on the upstream
+            # Wait for the *precondition*, not for a duration: the black-hole upstream accepting the proxy's connection
+            # is proof that a handler task exists and is parked on it. A 50 ms sleep was the old version, and on a
+            # loaded Windows runner the accept had not happened yet, so the assertion below failed for a reason that had
+            # nothing to do with the shutdown it is about (2026-11-18, py3.13 / windows-latest at 228097f).
+            deadline = time.monotonic() + 10.0
+            while time.monotonic() < deadline and not held:
+                time.sleep(0.01)
+            assert held, "the proxy never reached the black-hole upstream, so no handler was ever pending"
+            time.sleep(0.02)                       # and now let it park on the read
             # Hammer the port through a few closes as well. Cancelling the pending tasks *runs* the loop, which runs
             # the `connection made` callbacks that were already queued: one drain round left three handlers behind per
             # shutdown under a probing client, so the round count has to converge and the test has to exercise it.
@@ -325,3 +340,43 @@ def test_stopping_while_a_handler_is_pending_does_not_abandon_it(tmp_path: Path)
     finally:
         asyncio_log.removeHandler(handler)
         hole.close()
+
+
+def test_shutdown_is_bounded_even_when_a_handler_ignores_its_cancellation() -> None:
+    """Defect 89: `stop()` must not wait forever for a task that refuses to die.
+
+    `_drain_and_close` used to `gather` its cancelled tasks, and `gather` waits for a task that caught `CancelledError`
+    and awaited again. A burst of 40 connections left a handler parked on a black-hole upstream, and the proxy then hung
+    in `run_until_complete` for over 20 s — the suite's 60 s subprocess timeout was the only thing that ended it. The
+    drain now uses `asyncio.wait(..., timeout=DRAIN_S)`: a stubborn task is counted in `undrained_at_stop`, not awaited.
+
+    The task here is the worst case, built by hand so it cannot be excused as a flaky network: it swallows its first
+    cancellation and parks on an event that is never set.
+    """
+    from blackbox.proxy.supervisor import DRAIN_S, ProxyThread
+
+    proxy = ProxyThread(Routes([Route(name="openai", base="http://127.0.0.1:9")], default="openai"))
+    loop = asyncio.new_event_loop()
+    never = asyncio.Event()
+
+    async def stubborn() -> None:
+        while True:
+            try:
+                await never.wait()
+            except asyncio.CancelledError:
+                continue                # the shape that made `gather` wait forever
+
+    task = loop.create_task(stubborn())
+    loop.run_until_complete(asyncio.sleep(0.01))
+    assert not task.done()
+
+    started = time.monotonic()
+    proxy._drain_and_close(loop)         # the method under test, on a loop that is not running
+    elapsed = time.monotonic() - started
+    assert elapsed < DRAIN_S * 4 + 5.0, f"shutdown waited {elapsed:.1f} s for a task that ignores cancellation"
+    assert proxy.undrained_at_stop >= 1, "the stubborn task must be counted, not silently forgotten"
+
+    # The drain closed the loop with this task still pending, which is the documented outcome and is why the count is
+    # asserted above. Nothing to unwind; `proxy.stop()` is idempotent and releases the thread objects.
+    assert loop.is_closed()
+    proxy.stop()

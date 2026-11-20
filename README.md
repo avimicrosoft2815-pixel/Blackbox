@@ -11,7 +11,17 @@ macOS is *unmeasured* here, not passing.
 
 ## Install
 
-Python 3.11+ and nothing else at runtime. From a checkout:
+**The desktop app** (Debian/Ubuntu, and the `.deb` is built and tested by `tests/test_desktop_package.py`):
+
+```console
+$ sudo apt install ./blackbox_0.1.0.dev0_amd64.deb     # builds with: tools/package/linux/build_deb.sh
+$ blackbox desktop                                     # the viewer, in a window of its own
+```
+
+Windows has an installer definition and no built installer yet; macOS is experimental. `docs/desktop.md` is the platform
+matrix — which rows have actually been run, and which are honest blanks.
+
+**The library / CLI**, Python 3.11+ and nothing else at runtime. From a checkout:
 
 ```console
 $ python3 -m venv .venv
@@ -121,6 +131,7 @@ Data lives where you ran the app (`./tape/`, `./capsules/`); `--data-dir` puts i
 
 ## Where to read next
 
+- [`docs/desktop.md`](docs/desktop.md) — install, the window, the platform matrix, uninstall and what it keeps.
 - [`docs/STATUS.md`](docs/STATUS.md) — every ticket, its test path, and its result.
 - [`docs/guarantees.md`](docs/guarantees.md) — what survives which failure, and what is not claimed.
 - [`docs/format.md`](docs/format.md) — the tape and capsule formats, byte by byte.

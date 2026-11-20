@@ -72,7 +72,8 @@ def write(path: str, *, segment_no: int, reason: int, start_seq: int, end_seq: i
                      body_hash=body_hash, chain=chain,
                      sealer=sealer, closed_wall_ns=closed_wall_ns or time.time_ns())
     tmp = path + ".tmp"
-    with open(tmp, "wb") as fh:
+    descriptor = _plat.open_fd(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(descriptor, "wb") as fh:
         fh.write(payload)
         fh.flush()
         _plat.fdatasync(fh.fileno())
