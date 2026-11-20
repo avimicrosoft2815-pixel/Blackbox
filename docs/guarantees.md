@@ -16,12 +16,16 @@ deterministic, first ever, unique, never done before.
 
 ## 2. Durability modes
 
-| Mode | Sync policy | Claim | Status |
+The four modes are in the code (`constants.MODES`, `constants.DURABILITY_CLASS`) and each one's sync policy is asserted
+where it lives: the writer's roll and seal syncs (`tests/test_blob_durability.py`), the head store's sync choice
+(`src/blackbox/tape/head.py`), and the serverless wrapper's per-invocation close.
+
+| Mode | Sync policy | Claim it may make | Where it is asserted |
 |---|---|---|---|
-| `volatile` | none | not recommended; F1 only if the OS keeps the mapping | planned (P1-08) |
-| **`process` (default)** | fsync only at roll / seal / journal | **F1** | in progress (P1-08) |
-| `kernel` | group commit every 250 ms or 1 MiB | F1 + F2 | planned (P1-08, P2-06) |
-| `paranoid` | `fdatasync` after every P0 event | F1 + F2 per event | planned (P1-08) |
+| `volatile` | none | **F1-weak** — named that way in `DURABILITY_CLASS`, because the OS may not keep the mapping | `constants.DURABILITY_CLASS`; no test claims more |
+| **`process` (default)** | fsync at roll, seal and journal | **F1** | `tests/test_crash_points.py` (8), `tests/test_adoption.py`, `tests/test_recovery_identity.py` (3) |
+| `kernel` | group commit every 250 ms or 1 MiB | **F1 + F2** | `tests/test_blob_durability.py`, `tests/test_recovery_identity.py` |
+| `paranoid` | `fdatasync` after every P0 event | **F1 + F2** per event, at the cost measured below | `tests/test_blob_durability.py::test_paranoid_mode_syncs_before_the_frame_is_appended` |
 
 Measured here: `fdatasync` on a 1 MiB file, 4 KiB write, n=200 → p50 **175 µs**, p99 **421 µs**
 (`bench/results/2026-11-14-env-probe.json`). That is why `paranoid` is documented as a low-QPS mode.
@@ -35,17 +39,30 @@ Measured here: `fdatasync` on a 1 MiB file, 4 KiB write, n=200 → p50 **175 µs
 
 ## 4. Claims → tests
 
-| Claim | Test ID | Status |
+Every row names a test that exists in this tree. `tests/test_guarantees_links.py` fails if a row here names a file or a
+node that cannot be collected, which is what this table needed: until 2026-11-20 it pointed at
+`tests/kill/test_kill_stages.py::test_s1`, `tests/test_head.py`, `tests/test_prealloc_sigbus.py` and
+`tests/test_recovery_idempotence.py` — four paths that have never existed in this repository (defect 112).
+
+| Claim | Test that holds it | Result here |
 |---|---|---|
-| kill after payload copy, before trailer ⇒ frame invisible, head unchanged | S1 · `tests/kill/test_kill_stages.py::test_s1` | planned |
-| kill after trailer, before header ⇒ same as S1 | S2 · `…::test_s2` | planned |
-| kill after header, before head publish ⇒ frame not visible, prefix intact | S3 · `…::test_s3` | planned |
-| torn head slot ⇒ older slot wins, nothing lost | S4 · `tests/test_head.py::test_torn_slot_uses_previous` | planned |
-| kill after head publish ⇒ frame is recovered exactly | S5 · `…::test_s5` | planned |
-| 2 000 randomized kills recover exactly the committed prefix | G3 · `tests/kill/randomized_kills.py` | planned (200 in-tree, 2 000 nightly) |
-| `ENOSPC` at preallocation never delivers `SIGBUS` to the app; sparse control case does | S17 · `tests/test_prealloc_sigbus.py` | planned |
-| `.seal` is written once; compaction never rewrites it | A6 · `tests/test_seal_footer.py` | planned |
-| recovery is idempotent (10× ⇒ identical capsule) | G4 · `tests/test_recovery_idempotence.py` | planned (P2-12) |
+| a kill between payload copy and trailer leaves the frame invisible and the head unchanged | `tests/test_crash_points.py::test_torn_frame_is_never_committed` | pass |
+| a torn head slot falls back to the previous commit, losing nothing | `tests/test_crash_points.py::test_s4_torn_head_slot_falls_back_to_previous_commit` | pass |
+| after the head publish the commit survives | `tests/test_crash_points.py::test_s5_after_head_publish_the_commit_survives` | pass |
+| a segment end before the next segment starts is recoverable | `tests/test_crash_points.py::test_s14_after_seg_end_before_next_segment` | pass |
+| a durable next segment whose head still names the old one is recovered | `tests/test_crash_points.py::test_s15_next_segment_durable_but_head_still_names_the_old_one` | pass |
+| randomized parent-`SIGKILL` trials recover exactly the committed prefix | `tests/kill/kill_matrix.py` (500 trials in-tree; 2 000 on the nightly) | 500/500, 0 violations (recorded in `docs/STATUS.md`); the 2 000-trial run was a `workflow_dispatch`, not a schedule |
+| recovery is idempotent: ten recoveries of one tape ⇒ one capsule, one sha256 | `tests/test_recovery_identity.py` | pass (3 tests) |
+| a second recoverer loses with a code rather than a traceback | `tests/test_recovery_identity.py` | pass |
+| `.seal` is written once and compaction never rewrites it | `tests/test_capsule.py` | pass |
+| a body the provider cut short is recorded as cut short, with byte counts no larger than the provider pushed | `tests/test_stream_termination.py`, `tests/test_day14_kill.py` | pass (POSIX) |
+| the recorder deliberately broken leaves the app's output and exceptions identical | `tests/test_failopen.py` (8) | pass |
+| a torn frame, a bad CRC, a zeroed head and corrupt meta produce the documented codes | `tests/test_fault_codes.py` (7) | pass |
+| a capsule's derived parts recompute to the same bytes | `tests/test_capsule.py`, `blackbox verify`'s `derived_parts` check | pass |
+| a hostile capsule is refused with its own code in under 50 ms | `tests/test_capsule_attacks.py` (25) | pass; worst rejection 15.7 ms |
+| recorded text cannot become markup in any sink | `tests/test_xss_corpus.py` (5) | pass |
+| the sixty-secret corpus is absent from all eleven sinks | `tests/test_redaction_every_sink.py` | pass, with a redaction-off control |
+| replay and every read path make no outbound connection | `tests/test_no_egress.py` (5), `tests/test_netguard_reads.py` (9) | pass |
 
 ## 5. What is never claimed
 

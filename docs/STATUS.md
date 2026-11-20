@@ -290,10 +290,10 @@ correctness. `tests/test_index_rebuild.py` (9 tests) asserts the same equality i
 could have been false: an unchanged corpus rebuilt twice, a new capsule changing only its own rows, and two tapes of one
 run producing one run row and two artifacts.
 
-Suite: **Total: 1537 tests** — 1535 pass here and 2 are skipped on POSIX by name
+Suite: **Total: 1558 tests** — 1556 pass here and 2 are skipped on POSIX by name
 (`test_an_open_view_blocks_the_unlink_only_on_windows`: POSIX permits unlinking a file another fd still holds, so the
 open-view case exists only on Windows; and `test_on_windows_no_broad_principal_has_access`: mode bits are not access on
-Windows and `icacls` does not exist here). Measured on this machine: **1 537 collected, 0 failed,
+Windows and `icacls` does not exist here). Measured on this machine on 2026-11-20: **1 558 collected, 0 failed,
 0 errors, 2 skipped, 431.3 s** (`/tmp/full22.xml`) — the six added this round are the Windows rename- and read-retry
 tests (defects 105–106) and the adoption test that holds defect 107 down. The 117 added since the 1414-line are the desktop flows and the two things that
 could previously only be checked by a person with a screen or a Windows machine:
@@ -350,10 +350,63 @@ left in state `planned`, so the tree is auditable rather than silently unknown. 
 executes CMD** through the platform shell, in `--repo`, with your privileges; it is announced before it runs and
 nothing from a proposal is ever executed.
 
+## The journey from a wheel, two framing defects, and the command the errors named (2026-11-20)
+
+This branch was cut from `4ed431f` (the merge of PR #20) after rebuilding the environment from `pyproject.toml` with the
+versions `SUPPORTED.md` names: `pytest` 8.3.4, `hypothesis` 6.122.3, `httpx` 0.28.1, `openai` 3.51.0,
+`anthropic` 2.8.0. Debian 12 x86_64, 2 vCPU, no display, no Windows host, no root.
+
+**The real-user journey was re-measured from a wheel in a fresh virtual environment** — install, attach an unmodified
+`openai` app through the launcher, capture, list, verify, diagnose, view, the repair preview with its approval token, the
+apply, and the authorised verification. All seven steps passed; the artefact is
+`bench/results/2026-11-20-journey.json`. The Linux package was built here as well (`dist/blackbox_0.1.0.dev0_amd64.deb`,
+373 entries) and run from its extracted tree, and the desktop journey's automated half — record, list, verify, diagnose —
+is `bench/results/2026-11-20-desktop-journey-automated.json`, with the window steps recorded as *not attempted*.
+
+**Two defects came out of closing §24a's `curl` row, and both are fixed:**
+
+* **109** — a body with neither `Content-Length` nor `Transfer-Encoding` was answered with `Transfer-Encoding: chunked`
+  over bytes the proxy relayed raw, so `curl` refused the stream (`(56) Malformed encoding`). The head now writes a
+  forwarded length, real chunking, or no framing plus `Connection: close`; `tests/proxy/test_response_framing.py` (5)
+  holds it to the body in both directions.
+* **110** — a capsule's `graph.json` carried "last chunk N ms before death" computed from the process clock, so `verify`
+  failed a correctly sealed capsule with `BBX-E412` (1854 ms declared against 49 ms recomputed). The sentence is now a
+  function of the frames.
+
+**`blackbox doctor` exists.** Six error codes told the user to run it and the binary did not have it (defect 111). It now
+probes environment, capture seam, tapes, hook adapters, storage (a real write + `fsync` + rename) and writer leases, with
+`--json` and exit 0/8, and `tests/test_error_advice.py` fails if a remediation — or a current user document — names a
+command this build does not dispatch.
+
+**Defect 108 was read from its own recording.** `tools/outage_split.py` splits a sample into rebind, dispatch, tick and
+unexplained time; the 686.2 ms Windows outlier contains **0 ms** of rebind work
+(`bench/results/2026-11-20-defect-108-split.json`). The budget did not move and the defect stays open: a starved runner and
+a parked proactor loop are still the two candidates, and this machine can produce neither.
+
+**§24a's byte-identity row was measured rather than cited.** 10 000 streamed responses through the supervisor, each
+compared with what the origin generated: 10 000 identical, 2 195 560 bytes, p50 1.15 ms
+(`bench/results/2026-11-20-stream-identity.json`), with a control that corrupts one byte in flight and reports exactly that
+one (`…-control.json`).
+
+**§24's guarantees row was repaired at the reference end.** `docs/guarantees.md` pointed at four test paths that have never
+existed (`tests/kill/test_kill_stages.py`, `tests/test_head.py`, `tests/test_prealloc_sigbus.py`,
+`tests/test_recovery_idempotence.py`) and marked every row `planned`; it now names tests that are in the tree, and
+`tests/test_guarantees_links.py` fails when one is not (defect 112).
+
+**What did not change, and is still labelled below:** no gate is signed, the window has not been seen on a real desktop, no
+Windows installer exists, `run -- claude` with a kill is not run, and the bench-box rows still need a quiet host.
+
 ## Fulfilled (test exists, ran, passed / number measured)
 
 | Gate or budget row | Plan ref | Evidence (test path, results JSON, or CI run URL) |
 |---|---|---|
+| **The user journey from a wheel, and the Linux package** | §24 usability, B9 | `bench/results/2026-11-20-journey.json` (seven steps, fresh venv, no fixtures), `tests/test_desktop_package.py` (9), `dist/blackbox_0.1.0.dev0_amd64.deb` built and run from the extracted tree, `bench/results/2026-11-20-desktop-journey-automated.json` |
+| **Proxy response framing (defects 109, 110)** | §24a attach, §24 data | `tests/proxy/test_response_framing.py` (5), `tests/test_attach_curl_kill.py` (2), `tests/test_recovery.py`, `tests/test_capsule.py`, `docs/defects.md` 109 and 110 |
+| **`blackbox doctor` and error advice that resolves** | §24 usability | `src/blackbox/cli/cmd_doctor.py`, `tests/test_error_advice.py` (3), `tests/test_cli_contract.py` (22), `docs/cli.md`, `docs/errors.md` (regenerated) |
+| **10 000 streamed responses byte-identical** | §24a attach | `bench/bench_stream_identity.py`, `bench/results/2026-11-20-stream-identity.json` (10 000 of 10 000, p50 1.15 ms) and its control |
+| **`run -- curl …` with `kill -9`** | §24a attach | `tests/test_attach_curl_kill.py::test_a_curl_stream_killed_mid_flight_keeps_what_the_proxy_forwarded` |
+| **Defect 108's sample, split** | P3B-03 / §11.8 | `tools/outage_split.py`, `bench/results/2026-11-20-defect-108-split.json`, `tests/test_outage_split.py` (7) |
+| **`docs/guarantees.md`'s links resolve** | §24 guarantees | `docs/guarantees.md`, `tests/test_guarantees_links.py` (2) |
 | **P3B-04, the header path and the link resolver (the first half)** | P3B-04, §11.10, D-036 | `src/blackbox/cap_sdk/headers.py`, `src/blackbox/rec/links.py`, `tests/test_headers.py` (7), `tests/test_links.py` (10): `x-blackbox-run` is injected by seam A's request hook **only** when `BLACKBOX_PROXY=1` — end-to-end through a mock provider that pretends to be the real one, the same SDK call carries nothing of ours unproxied and `run-seam` when proxied — the proxy reads the value, records it as `linked_run` on the `MODEL_REQUEST` frame, and strips every `x-blackbox-*` header before the upstream; the resolver emits `exact` (same run id, evidence names the header), `declared` (the user said so, `asserted_by: user`) and `inferred` (±2 s **and** fingerprint, confidence capped below 1.0, both numbers in the evidence), never downgrades a pair it has already resolved, never links a writer to itself, and **never merges runs** — asserted, not just documented. The second half is in (D-038): `KIND_LINK` is `19` in the plan's graph range, appended without moving a published id; the resolver runs at seal time and the capsule carries `links.json` (with an empty file when nothing linked, because "looked and found none" is not "never looked") while the tape's segment bytes are byte-identical afterwards and hold no `LINK` frame; a `LINK` payload read back off a tape is checked — unknown class, missing field, self-link, confidence outside `[0, 1]` and an `inferred` link claiming `1.0` are each refused as `BBX-E155`; a tape carrying two runs' traffic names neither, so it can only be linked by inference (with `why_not_exact` in the evidence) or by declaration; and `blackbox link <a> <b>` records one `declared` pair in **both** data directories, idempotently and order-free, refusing a directory whose tape names no run. `tests/test_link_records.py` (16) |
 | **The three §14.4a disconnect classes, and the client matrix** | P3B-08, §14.4a, D-035, defect 34 | `src/blackbox/proxy/disconnects.py`, `tests/proxy/` (15): `INTERRUPTED_CLIENT` and `INTERRUPTED_UPSTREAM` are decided by the side that closed first and written on a real tape with both byte counts, read back by `disconnects.error_of` the way a report will read them; `INTERRUPTED_PROXY` is derived from an open call plus a dead writer lease, because nothing can write it. Tested from outside: a client closes its socket mid-stream (`client_gone` 1, `upstream_gone` 0, class on the tape, listener still serving), an origin dies mid-body (the client's `IncompleteRead`, both counts equal at 512 — the client was not the one that left), and S16 (`SIGKILL` a real proxy mid-stream: the lease says `pid gone`, recovery says `INTERRUPTED_MID_STREAM`, and the tape has a request, chunks, and **no terminal frame**). The client matrix runs **curl** (libcurl, a separate process), **Node 22** (`http.get`) and the real **`openai` SDK** (streaming, `[DONE]`-terminated) through the same listener: all three receive bytes sha256-identical to the origin's, the prefix is stripped and the path kept, and the proxy's own counter says one request. Clients missing from a runner are skipped by name |
 | **The P0 that a reviewer found in D-032a: a retried POST is a duplicated effect** | P3B-08, D-032b, D-032c, defect 33 | `src/blackbox/proxy/server.py`, `tests/test_proxy_server.py` (18): a pooled connection that dies **after** the request was written is a different thing from one that is found dead **before**, and the pool now treats them differently. Before writing, `_connect` probes the connection (`at_eof`, `is_closing`, `exception`) and discards a dead one — that costs nothing and means no request was ever sent. After writing, the outcome is uncertain by construction, so **the proxy does not retry at all by default**: the client gets `502` with `x-blackbox-error: upstream-closed-uncertain`, a body saying the request may have been applied, and `stats.uncertain` counts it. `--proxy-retry-transmitted` (or `retry_transmitted=True`) opts into exactly one retry, and only for `GET`/`HEAD`/`OPTIONS` — an assertion the caller makes about *their* upstreams, because HTTP only *intends* those methods to be safe and a GET with a side effect is a real thing. The regression tests: the upstream records a POST and closes without answering, and **exactly one** POST arrived (`test_a_post_that_may_have_been_transmitted_is_never_sent_twice`); with the flag **off**, a GET in the same position comes back `502`; with it **on**, the GET arrives twice and a POST in the same position still arrives once; a mutation check (POST made retryable) shows the upstream receiving two. A dead pooled connection discarded *before* the write needs no flag and is covered separately
@@ -441,6 +494,13 @@ nothing from a proposal is ever executed.
 
 | Item | Label (requires humans / requires time / not testable here / blocked) | Reason / fix attempts |
 |---|---|---|
+| The desktop window on a real desktop | not testable here | the build machine has no display, no `python3-gi` and no `gir1.2-webkit2-4.1`; the code path runs against a fake webview. `sh tools/desktop_journey.sh` on a Debian/Ubuntu desktop closes it, and `bench/results/2026-11-20-desktop-journey-automated.json` records what the machine could decide for itself |
+| The Windows installer and its install journey | not testable here | no Windows host, no `iscc`, no `wine`, no PowerShell and no certificate. `tools/package/windows/README.md` is the hand-off; `tests/test_windows_definition.py` (11) checks the definition that would compile |
+| `run -- claude` with `kill -9` | not testable here | the CLI is not installed here and its install needs an account. `tests/test_attach_curl_kill.py` closes the `curl` half of the same row; the `claude` half stays named |
+| The bench-box rows (cold start, rebind p95) | requires time | this 2-vCPU sandbox reads p95 44.5 ms against a 40 ms gate with 32 ms of it in the interpreter and the CLI's imports (`bench/results/2026-11-19-ingest-cold-start.json`, `row_satisfied_here: false`); the quiet host is B6 |
+| Three OTLP products and Phoenix's gRPC listener | blocked | their Go binaries come from `objects.githubusercontent.com`, which this sandbox cannot reach; the three measured importers are in `bench/results/2026-11-18-otlp-importers.json` |
+| An independent reviewer for G-Capture | requires humans | `docs/gates/G-Capture.md` is a candidate with every row's evidence named and **no signature**; `docs/gates/README.md` forbids the builder from ticking |
+| The five-minute install on three strangers | requires humans | nothing here can be a stranger; `docs/RELEASE-CANDIDATE.md` §4 says so |
 | P4-14's importer acceptance | requires humans | **Met at P4-20 for Phoenix**: `arize-phoenix` 21.0.0 answered 200 to the capsule's own `otlp/spans.pb` and read back 3 spans with the trace id `50444de0…` byte for byte, the parent chain, integer types and every `bbx.*` attribute intact (read with `arize-phoenix-client` 3.7.0). The same receiver answers **415** to `otlp/spans.json` — protobuf-only — which is why the capsule ships both encodings. **Widened on 2026-11-18** (`bench/results/2026-11-18-otlp-importers.json`): the capsule's own `otlp/spans.pb` parses as the official OTLP messages (`opentelemetry-proto` 1.45.2 / `protobuf` 7.36.2 — 3 spans, names `bbx.run` / `invoke_agent agent` / `chat gpt-4`, trace id `50444de0…`, every `parent_span_id` resolving inside the message), `otlp/spans.json` parses as proto3 JSON with `ignore_unknown_fields=False`, and an OTLP/**gRPC** `TraceService` built from OTel's own servicer (`grpcio` 1.85.3) accepts the same bytes and returns `ExportTraceServiceResponse`. That closes the transport half of the question without pretending it is a product. **Untested and named as such**: Langfuse (its SDK is an exporter, not a receiver, and the server needs TypeScript plus Postgres), the OpenTelemetry Collector, Grafana Tempo and Jaeger (Go release binaries behind `objects.githubusercontent.com`, which this sandbox cannot reach — the fetch stops at 0 bytes), Phoenix's gRPC port 4317 (the 2026-11-16 run used its HTTP receiver). Three artifacts hold the raw results (`bench/results/2026-11-16-otlp-pb-importer.json`, `…-otlp-importer.json`, `2026-11-18-otlp-importers.json`) |
 | **Independent gate review** | G-Promise: **independent review pass (owner-relayed)**; every other ticket row: requires humans | G-Promise was counter-signed by a different model family on a different machine (fresh clone of `fdb3875`, CPython 3.13.18, ext4): 337 passed / 1 skipped, 100/100 kill trials with 0 violations, smoke 9 keys, launcher recovery, and it was that reviewer who found C40. The signature and a copy-paste reproduce block are in `docs/gates/G-Promise.md`. **Ticket rows in `docs/reviews.md` stay `self`** until a second model is wired into the loop; none of them counts as independent. |
 | P2-09 week of nightlies | requires time | **The nightly has now passed once, and not yet on the event that counts.** `43748375862` on `main` `1390c9b` (a **`workflow_dispatch`**) is the first green nightly in this repository's history: `kill-matrix` ran 2000 randomized `kill -9` trials and `cbor-fuzz` 100 000 buffers, both `success`. The only `schedule` run that has ever fired is `43675454143` at `31241d6` (2026-11-15 04:08Z), and both of its jobs failed on defect 28 — the steps named `tests/kill/randomized_kills.py` and `tests/test_cbor_fuzz.py`, which do not exist (exit 2 and exit 4); both now call the real drivers, which is what the dispatch proves. The clock the plan asks for is seven consecutive `schedule` runs, so it still has not started: **one green dispatch is evidence that the jobs work, not evidence of a week** |
@@ -567,6 +627,10 @@ that step and says so); the repair is a human-written proposal, not a model's; a
 Hardware for every ext4 row: Intel Xeon @ 2.60 GHz, 2 cores, 4 034 452 KiB RAM · Linux 6.1.158+ x86_64 (glibc
 2.36) · CPython 3.11.2 · ext4 (tmpfs is a labelled second column and is never gate evidence, D-010).
 One line per §15.1 row: fs · N · warm-up · p50 / p95 / p99 · raw JSON.
+- the user journey, fresh venv from a wheel: **7 of 7 steps**, install 8.3 s, in `bench/results/2026-11-20-journey.json`
+- 10 000 streamed responses through the proxy: **10 000 identical**, 2 195 560 B, p50 1.15 ms p95 1.53 ms p99 1.88 ms, in `bench/results/2026-11-20-stream-identity.json`
+- desktop journey, automated half: run exit 1 (the sample raises on purpose), verify 0, diagnose 0, window *not attempted*, in `bench/results/2026-11-20-desktop-journey-automated.json`
+- defect 108's recorded sample: worst outage 686.2 ms, rebind 0.0 ms, **0.0 % of the outage in the rebind**, in `bench/results/2026-11-20-defect-108-split.json`
 
 - 1 KiB `content=hash`, group commit 16 KiB, CHAIN on · ext4 · N 200 000 · warm-up 20 000 · p50 11.057 · p95 20.53 · p99 51.662 µs · 73 338 ev/s · `bench/results/2026-11-14-writer-throughput.json` (`results.ext4.rows[gate=true]`)
 - same row, keeper thread publishing · ext4 · N 200 000 · warm-up 20 000 · p50 11.044 · p95 20.6 · p99 54.527 µs · 73 471 ev/s · `bench/results/2026-11-14-writer-throughput.json`
