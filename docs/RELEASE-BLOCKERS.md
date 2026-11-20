@@ -472,7 +472,7 @@ a fake backend, which is a test and not a desktop.
 | B4 (node-level edges) | **unchanged** — measured, the tick is still the owner's | `bench/results/2026-11-18-p3b03-acceptance.json` |
 | B5 (OTLP importers) | **unchanged** — three products and one second transport still unmeasured, and their downloads are still blocked from this sandbox | this file, above |
 | B6 (release machine, rebind p95) | **unchanged**, and now with a tool for the rebind half: `tools/outage_split.py` reads a failing sample and says how much of the outage was the rebind | `bench/results/2026-11-20-defect-108-split.json` |
-| B9 (Windows desktop) | **unchanged in substance**: still not built, still not run, still unsigned. What moved is the Linux half — the `.deb` built and ran from the extracted tree on 2026-11-20, and the automated desktop journey ran headless | `bench/results/2026-11-20-desktop-journey-automated.json`, `tests/test_desktop_package.py` |
+| B9 (Windows desktop) | **moved on 2026-11-20**: the installer is now built by CI, installed silently on a real Windows runner, the installed tree answers `--version` and `doctor --json`, the uninstaller removes it and the recordings survive. Still **unsigned**, and the wizard, the Start-menu entry and the window still have no human behind them. The Linux half moved the same day — the `.deb` built and ran from the extracted tree, and the automated desktop journey ran headless | `.github/workflows/package-windows.yml` run `44807593306`; `bench/results/2026-11-20-desktop-journey-automated.json`; `tests/test_desktop_package.py` |
 
 Two new defects were found and fixed while closing the attach row, and they are the reason this list has a new shape
 rather than a shorter one:

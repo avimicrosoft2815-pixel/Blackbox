@@ -216,6 +216,21 @@ a macOS *installer*.
 `docs/gates/READINESS.md` now reads 36 rows → **27 evidenced / 7 partial / 0 with nothing behind them / 2 needing
 people**, and the two rows that moved are the Go reader (its cell is green) and permissions (its other two OSes are).
 
+**2026-11-20, the Windows packaging path, measured on a runner rather than argued on Linux.** `.github/workflows/package-windows.yml`
+puts the staging script and the Inno Setup definition in front of a real `windows-latest` machine. Eight runs each found
+exactly one real defect in the path — a pip failure hidden by PowerShell 5.1's silence on native exit codes, the embeddable
+Python having no `pip` and no `ensurepip` at all, a wheel directory the host interpreter never wrote, a drive letter the CLI
+received as `D` (defect 116, **cause unsettled and recorded as unsettled**), `OutputDir` resolved against the `.iss`,
+`Start-Process -Wait` waiting for Inno's whole process tree, and a privacy `MsgBox` that ignores `/SUPPRESSMSGBOXES` and
+blocked the silent install for fifteen minutes. Run **`44807593306` is green end to end**: staging, `--version`, `doctor`,
+a real recording run, compile, silent install, the *installed* interpreter's `--version` and `doctor --json`, uninstall,
+recordings kept — artefact `BlackBox-Setup-0.1.0.dev0.exe`, 12.3 MiB, sha256 `358c8125…`. What a runner cannot do is click:
+the wizard, the Start-menu entry and the window are still unrun by a person, and the installer is still unsigned.
+
+**And the suite cells at that commit:** CI run `44809947917` (`133b0c3`) is green on **all eleven suite cells** — 3 OSes ×
+3 Pythons, macOS included — plus `docs` and `go-reader`, which is also the run that carries the new
+`tests/test_getting_started.py` and the defect-117 failure message onto Windows and macOS.
+
 **The CLI contract** (`docs/cli.md`, `tests/test_cli_contract.py`, 21). Every command, its machine-readable form and its
 exit codes in one table, checked against the binary: the table's set equals the front door's, every `--json` row is
 accepted, and the documented code is measured on a failing invocation (`diagnose`'s `1` for "nothing readable" against
@@ -295,8 +310,8 @@ run producing one run row and two artifacts.
 Suite: **Total: 1586 tests** — 1584 pass here and 2 are skipped on POSIX by name
 (`test_an_open_view_blocks_the_unlink_only_on_windows`: POSIX permits unlinking a file another fd still holds, so the
 open-view case exists only on Windows; and `test_on_windows_no_broad_principal_has_access`: mode bits are not access on
-Windows and `icacls` does not exist here). Measured on this machine on 2026-11-20: **1 575 collected, 0 failed,
-0 errors, 2 skipped, 396.3 s** (`/tmp/full23.xml`) — the six added this round are the Windows rename- and read-retry
+Windows and `icacls` does not exist here). Measured on this machine on 2026-11-20: **1 586 collected, 0 failed,
+0 errors, 2 skipped, 424.6 s** (`/tmp/full25.xml`) — the six added this round are the Windows rename- and read-retry
 tests (defects 105–106) and the adoption test that holds defect 107 down. The 117 added since the 1414-line are the desktop flows and the two things that
 could previously only be checked by a person with a screen or a Windows machine:
 
