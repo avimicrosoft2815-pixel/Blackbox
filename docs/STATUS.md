@@ -194,6 +194,14 @@ violation here). Two things that were open are now closed by measurement rather 
   are not skipped (the `icacls` arm skips only if `icacls` cannot be run, and it can), so the green cells are those two
   tests passing. That is what moves the permissions row's Windows half out of "never run".
 
+Then the same test found two more defects *in the fixes*, in the two directions a race can fail: the retry was on the
+rename when the refusal was on the **read** (105 → 106, and it took the new failure message to see the path in the
+traceback), and the adopting recoverer reported its own `DISCOVERED` as work done (107). `ce32b86` is the commit that
+measures both: twenty-two of twenty-two green again, and unlike `1d42e0c` it is a **code** commit rather than a docs one, so
+the cells that were red are the cells that ran the repair. The lesson recorded in `docs/defects.md` is not "the race is
+gone" — it is that a race which fails differently on every cell needs the *message* fixed first, and that a loser's own
+bookkeeping is part of what a test can check without racing at all.
+
 What this does **not** measure, and still does not: a Windows **installer** — nothing here compiled or ran one — the
 desktop journey on either non-Linux OS (`desktop --selftest` needs a display and CI has none), or a macOS *installer*.
 `docs/gates/READINESS.md` now reads 36 rows → **27 evidenced / 7 partial / 0 with nothing behind them / 2 needing

@@ -1888,3 +1888,7 @@ exactly the loser's sequence — `DISCOVERED`, then the claim, then adoption —
 `steps_skipped`, the winner's capsule, and still one capsule on disk. Six consecutive runs of the whole file are green, and
 this is the kind of defect that only a single-process test can hold down: the concurrency test found it twice in eleven
 cells and missed it in the rest.
+
+**Confirmed at `ce32b86`**: all twenty-two check runs are green on both workflow runs of that commit — the read retry is in
+it, and the Windows cells that produced this traceback are the cells that ran it. This one is a measurement rather than an
+inference, because the annotation named the call site before the fix was written.
