@@ -202,6 +202,13 @@ the cells that were red are the cells that ran the repair. The lesson recorded i
 gone" — it is that a race which fails differently on every cell needs the *message* fixed first, and that a loser's own
 bookkeeping is part of what a test can check without racing at all.
 
+Then `daa7471` (docs only) came back twenty-one of twenty-two: one Windows `py3.11` cell failed the rebind-budget test
+with a 686 ms outlier among eight samples whose rebinds were 0–16 ms, and logged a proactor `_start_serving` callback
+exception at the same moment (defect 108). Two candidates fit — a stalled runner, or a rare Windows proactor close race —
+and the annotation could not say which, so the budget did not move and the failure message now carries the split (tick
+lateness, rebind, dispatch, probe cycle) in the characters an annotation keeps. `ce32b86` is still fully green and remains
+the pinned commit; this is a known intermittent red on a test that has otherwise been green on every Windows cell since.
+
 What this does **not** measure, and still does not: a Windows **installer** — nothing here compiled or ran one — the
 desktop journey on either non-Linux OS (`desktop --selftest` needs a display and CI has none), or a macOS *installer*.
 `docs/gates/READINESS.md` now reads 36 rows → **27 evidenced / 7 partial / 0 with nothing behind them / 2 needing

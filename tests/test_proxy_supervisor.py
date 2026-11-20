@@ -207,15 +207,22 @@ def test_every_watchdog_rebind_lands_inside_the_budget_not_the_median_of_them(up
     # schedule. `wake_late_ms` is the supervisor's own record of how late its ticks woke (defect 58), so a starved
     # runner is named as such in the failure message instead of being argued about afterwards.
     lateness = getattr(proxy, "wake_late_ms", [])
-    assert worst <= REBIND_BUDGET_MS, (
-        f"worst request-level outage {worst:.1f} ms (upper bound) over the {REBIND_BUDGET_MS} ms budget; "
-        f"outages {[round(o, 1) for o in outages]} ms, "
-        f"rebinds {[round(s['rebind_ms'], 2) for s in samples]} ms, "
-        f"dispatch {[round(s['dispatch_ms'], 2) for s in samples]} ms, "
-        f"refused {[s['refused_requests'] for s in samples]}, "
-        f"probe cycle {sorted({s['probe_cycle_ms'] for s in samples})} ms, "
-        f"restores from the loop {proxy.restores_from_loop}, "
-        f"worst watchdog tick lateness {max(lateness, default=0.0):.1f} ms over {len(lateness)} ticks")
+    if worst > REBIND_BUDGET_MS:
+        # The split comes FIRST, inside the first 200 characters, because a CI annotation is cut at 600 and this message
+        # used to end with the one number that decides whether the outage was ours (defect 108). Three facts and the
+        # outlier they came from: how late the watchdog tick woke (a starved runner), how long the rebind itself took
+        # (our code), and how long the request spent dispatching (the harness).
+        index = max(range(len(samples)), key=lambda i: samples[i]["outage_upper_ms"])
+        slowest = samples[index]
+        raise AssertionError(
+            f"outage {worst:.1f} ms vs {REBIND_BUDGET_MS} ms: tick woke {max(lateness, default=0.0):.1f} ms late "
+            f"over {len(lateness)} ticks; that sample's rebind {slowest['rebind_ms']} ms, dispatch "
+            f"{slowest['dispatch_ms']} ms, probe cycle {slowest['probe_cycle_ms']} ms. "
+            f"outages {[round(o, 1) for o in outages]} ms, "
+            f"rebinds {[round(s['rebind_ms'], 2) for s in samples]} ms, "
+            f"dispatch {[round(s['dispatch_ms'], 2) for s in samples]} ms, "
+            f"refused {[s['refused_requests'] for s in samples]}, "
+            f"restores from the loop {proxy.restores_from_loop}")
 
 
 def test_a_listener_that_dies_without_saying_so_is_still_restored_on_the_tick(upstream: LocalUpstream) -> None:

@@ -1892,3 +1892,26 @@ cells and missed it in the rest.
 **Confirmed at `ce32b86`**: all twenty-two check runs are green on both workflow runs of that commit — the read retry is in
 it, and the Windows cells that produced this traceback are the cells that ran it. This one is a measurement rather than an
 inference, because the annotation named the call site before the fix was written.
+
+## Defect 108 — one Windows cell failed the rebind budget with a 686 ms outlier, and the message hid which half was ours (2026-11-16, CI)
+
+`daa7471` (docs only, on top of `ce32b86`) had twenty-one of twenty-two cells green; the one red cell was
+`py3.11 / windows-latest` failing `test_every_watchdog_rebind_lands_inside_the_budget_not_the_median_of_them` with a worst
+request-level outage of **690.5 ms** against a 100 ms budget. The sample is informative in a way the failure is not: eight
+outages `[20.6, 18.5, 19.3, 15.0, 12.3, 9.1, 686.2, 20.1]` ms with rebinds `[0, 0, 0, 16, 0, 0, 0, 15]` ms — so of the
+686 ms, at most 15 was a rebind, and the same cell logged an asyncio `ProactorEventLoop._start_serving` callback exception
+(`<_OverlappedF…>`, a socket the loop was still serving). The test has been green on every other Windows cell at this
+commit and at the four before it; this is the first time in eight Windows cells.
+
+**Two honest candidates, and the annotation could not tell them apart**: a shared runner that stalled the watchdog thread
+for the length of the sample (a runner, not a proxy — the way defect 99 failed), or a Windows-specific stall in the
+proactor loop when a listener it is closing is mid-accept (ours, rare, and the logged callback exception points this way).
+
+**Changed**: the failure message now puts the split first — worst outage, **how late the watchdog tick woke**, that
+sample's rebind, dispatch and probe cycle — inside the characters an annotation keeps, before the full lists. Nothing about
+the budget moved: the budget is the requirement, and a red cell stays red. **Not claimed**: the cause. The next Windows
+cell that fails this test will say which half it was, and that is when a fix — a starved-runner guard, or a proactor
+close-race repair — can be written on evidence rather than on this entry.
+
+`docs/STATUS.md` carries the same paragraph, and `docs/STATE.json` still pins `ce32b86`, which is fully green: this defect
+is a known intermittent red on a cell that has otherwise been green since.
