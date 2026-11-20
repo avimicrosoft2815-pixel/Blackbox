@@ -156,7 +156,10 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
           if (-not (Test-Path $iscc)) { Write-Host "::error::ISCC.exe was not installed where Inno Setup 6 puts it"; exit 1 }
-          $compileOut = & $iscc "tools\package\windows\blackbox.iss" "/DAppVersion=0.1.0.dev0" 2>&1 | Out-String
+          # `/Odist` puts the artefact in the repository's `dist\`: the definition's `OutputDir=dist` is relative to the
+          # script's own directory, so without it the installer landed beside the .iss and the next step looked in the
+          # wrong place and reported only "exit code 1" (found on the fourth Windows run).
+          $compileOut = & $iscc "tools\package\windows\blackbox.iss" "/DAppVersion=0.1.0.dev0" "/Odist" 2>&1 | Out-String
           $compileExit = $LASTEXITCODE
           Write-Host $compileOut
           if ($compileExit -ne 0) {
@@ -167,8 +170,16 @@ jobs:
             Write-Host "::error::ISCC failed with exit $compileExit; errors: $errors; tail: $tail"
             exit 1
           }
-          $setup = Get-ChildItem -Path dist -Filter "BlackBox-Setup-*.exe" | Select-Object -First 1
-          if (-not $setup) { throw "ISCC reported success but no installer is in dist\" }
+          $setup = @(
+              Get-ChildItem -Path dist -Filter "BlackBox-Setup-*.exe" -ErrorAction SilentlyContinue
+              Get-ChildItem -Path "tools\package\windows\dist" -Filter "BlackBox-Setup-*.exe" -ErrorAction SilentlyContinue
+          ) | Select-Object -First 1
+          if (-not $setup) {
+            $where = (Get-ChildItem -Recurse -Filter "BlackBox-Setup-*.exe" -ErrorAction SilentlyContinue |
+                      ForEach-Object { $_.FullName }) -join ", "
+            Write-Host "::error::ISCC reported success but no installer was found; searched dist, tools\package\windows\dist and the tree: $where"
+            exit 1
+          }
           Write-Host "installer: $($setup.FullName) ($([math]::Round($setup.Length / 1MB, 1)) MiB)"
           Get-FileHash $setup.FullName -Algorithm SHA256 | ForEach-Object { Write-Host "sha256: $($_.Hash)" }
 

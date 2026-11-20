@@ -16,11 +16,13 @@ file is the difference.
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tools\package\windows\build_windows.ps1
-iscc tools\package\windows\blackbox.iss /DAppVersion=0.1.0.dev0
+iscc tools\package\windows\blackbox.iss /DAppVersion=0.1.0.dev0 /Odist
 ```
 
 `build_windows.ps1` downloads the Windows embeddable Python 3.11, the package wheel and `pywebview`/`pythonnet`, installs
-them into `win64\python\`, and writes the launcher. `blackbox.iss` then produces `dist\BlackBox-Setup-<version>.exe`.
+them into `win64\python\`, and writes the launcher. `blackbox.iss` then produces `dist\BlackBox-Setup-<version>.exe` — `/Odist` is not decoration: the definition's
+`OutputDir=dist` is relative to the script's own directory, so without it the installer lands in
+`tools\package\windows\dist\` and the next step looks in the wrong place.
 
 Requirements on the build machine: Windows 10/11 x64, PowerShell 5+, [Inno Setup 6](https://jrsoftware.org/isdl.php)
 (`iscc` on `PATH`), and network access for the downloads. The icon is committed: `blackbox.ico` is generated from the same
