@@ -23,6 +23,7 @@ from pathlib import Path
 
 import pytest
 
+from blackbox.cap import format as cap
 from blackbox.cap_sdk.mock_provider import MockProvider, Scenario
 from blackbox.rec import recovery
 
@@ -73,6 +74,21 @@ def _run_and_kill_mid_stream(data_dir: Path, provider: MockProvider, *, min_chun
     return subprocess.CompletedProcess(proc.args, proc.returncode, out, err)
 
 
+def _frame_kinds(data_dir: Path) -> dict[str, int]:
+    """What the capsules in `data_dir` actually contain, for a failure message that has to be self-explanatory.
+
+    A capsule's entries are named `<vantage>/<kind>/…`; counting the kinds is enough to tell "the proxy wrote a request and
+    three chunks" from "the tape is empty", which is the difference the assertion above cannot show on its own.
+    """
+    counts: dict[str, int] = {}
+    for capsule in sorted((Path(data_dir) / "capsules").glob("*.bbx")):
+        parsed = cap.read_capsule(str(capsule))
+        for name in parsed.entries:
+            kind = name.rsplit("/", 1)[-1]
+            counts[kind] = counts.get(kind, 0) + 1
+    return counts
+
+
 def test_a_curl_stream_killed_mid_flight_keeps_what_the_proxy_forwarded(tmp_path):
     scenario = Scenario(chunks=40, delay_ms=60, chunk_text="token ")
     with MockProvider(scenario) as provider:
@@ -91,7 +107,16 @@ def test_a_curl_stream_killed_mid_flight_keeps_what_the_proxy_forwarded(tmp_path
 
     result = recovery.recover(str(tmp_path))
     interrupted = [n for n in result.node_statuses if n["status"] == recovery.INTERRUPTED_MID_STREAM]
-    assert interrupted, f"no in-flight call survived: {[n['status'] for n in result.node_statuses]}"
+    if not interrupted:
+        # Defect 119: `py3.11 / macos-latest` failed here with an *empty* list, on a run whose origin had pushed chunks and
+        # whose launcher reported a capsule. An empty list cannot tell "the tape held no model frames" from "the archive
+        # reported none", so the message below carries both, plus how much the proxy actually forwarded.
+        raise AssertionError(
+            f"no in-flight call survived: statuses={[n['status'] for n in result.node_statuses]}, "
+            f"origin pushed {sent_chunks} chunks / {sent_bytes} bytes, "
+            f"launcher summary={completed.stdout.strip().splitlines()[-1] if completed.stdout.strip() else '<none>'}, "
+            f"capsules={_frame_kinds(tmp_path)}, launcher stderr tail={completed.stderr[-400:]!r}"
+        )
     node = interrupted[0]
     assert node["model_requests"] == 1, node
     assert node["chunks"] >= 1, "the proxy forwarded chunks and the tape recorded none of them"

@@ -2245,3 +2245,27 @@ the limitation is in the product documentation rather than only in a test's cond
 
 **What would settle it:** the next macOS occurrence's annotation, which now contains the beginning of the dump, and a
 macOS machine running the test in a loop.
+## Defect 119 — a killed `curl` run recovered with no node statuses at all on macOS (2026-11-20, CI, open)
+
+**What happened.** `44823859540`'s `py3.11 / macos-latest` cell failed
+`tests/test_attach_curl_kill.py::test_a_curl_stream_killed_mid_flight_keeps_what_the_proxy_forwarded` with
+`no in-flight call survived: []` — an **empty** status list, not a different status. The assertions before it had already
+passed: the mock origin had pushed at least three chunks and the launcher reported a capsule and a `137` exit, so curl
+really was killed mid-stream and a capsule really was sealed.
+
+**What is known.** The test's final list comes from `recovery.recover(...)` on a run the launcher had already archived, so
+it is the *reported* node statuses (`_adopt_archive` reads `node_statuses` out of `recovery.json`), not a second scan of
+the tape. Empty therefore means one of two things and the annotation could not say which: the proxy wrote no `MODEL_*`
+frames before the child died, or the archive recorded none even though the capsule holds them.
+
+**What is not known.** Which of the two it was. The same file passes 25 consecutive times here, and the four other cells of
+that workflow run were green.
+
+**What changed.** Only the failure message. It now prints the origin's own tally, the launcher's JSON summary, the launcher's
+stderr tail, and `_frame_kinds()` — a count of the entry kinds *inside* every capsule in the data directory. The next
+occurrence therefore separates "empty tape" (the proxy forwarded and recorded nothing) from "empty report" (the frames are
+in the capsule and the archive lost them), which are different bugs in different places.
+
+**What would settle it:** the next macOS or Ubuntu occurrence read against those four numbers; if the frames are present,
+the archive's `node_statuses` is the suspect and the fix is on the reporting side, and if they are absent the proxy's write
+ordering under a killed client is.
