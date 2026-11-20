@@ -206,8 +206,8 @@ Then `daa7471` (docs only) came back twenty-one of twenty-two: one Windows `py3.
 with a 686 ms outlier among eight samples whose rebinds were 0–16 ms, and logged a proactor `_start_serving` callback
 exception at the same moment (defect 108). Two candidates fit — a stalled runner, or a rare Windows proactor close race —
 and the annotation could not say which, so the budget did not move and the failure message now carries the split (tick
-lateness, rebind, dispatch, probe cycle) in the characters an annotation keeps. `ce32b86` is still fully green and remains
-the pinned commit; this is a known intermittent red on a test that has otherwise been green on every Windows cell since.
+lateness, rebind, dispatch, probe cycle) in the characters an annotation keeps. It did not recur at `382c80f`, which is twenty-two of twenty-two green and is now the pinned commit — one green sample
+after one red one is not a diagnosis, and defect 108 stays open saying so.
 
 What this does **not** measure, and still does not: a Windows **installer** — nothing here compiled or ran one — the
 desktop journey on either non-Linux OS (`desktop --selftest` needs a display and CI has none), or a macOS *installer*.

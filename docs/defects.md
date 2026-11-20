@@ -1913,5 +1913,7 @@ the budget moved: the budget is the requirement, and a red cell stays red. **Not
 cell that fails this test will say which half it was, and that is when a fix — a starved-runner guard, or a proactor
 close-race repair — can be written on evidence rather than on this entry.
 
-`docs/STATUS.md` carries the same paragraph, and `docs/STATE.json` still pins `ce32b86`, which is fully green: this defect
-is a known intermittent red on a cell that has otherwise been green since.
+`docs/STATUS.md` carries the same paragraph. **Did not recur at `382c80f`**: the same cell ran the same test and passed,
+which is what a stalled runner looks like and is still not proof of it — one green sample after one red one is a coin
+flip, not a diagnosis, and this entry stays open until either the test fails again with the new message and names a starved
+tick, or a month of green cells makes it moot.
