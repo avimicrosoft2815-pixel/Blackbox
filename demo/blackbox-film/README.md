@@ -11,7 +11,7 @@ generated clips, and the incident is a synthetic run you can reproduce with one 
 | **The studio** | `npm run studio` → <http://localhost:8181/studio/> |
 | **Download link** | `/film.mp4` on the same server, sent as an attachment |
 | **The incident** | `incident/run_demo.sh` → writes `evidence/*` |
-| **Tests** | `npm test` (22 checks: blueprint, narration, renderer, studio behaviour) |
+| **Tests** | `npm test` (25 checks: blueprint, narration, renderer, studio behaviour) |
 
 ## Watch it
 
@@ -21,10 +21,13 @@ npm install          # @napi-rs/canvas for the renderer, jsdom for the studio te
 npm run studio       # http://localhost:8181/studio/  →  the Director Studio
 ```
 
-The **Director Studio** is the review surface: seven scene tabs, a segmented timeline you can scrub, play/pause/speed, a
-live stage rendered by the same module that makes the export, a blueprint editor with validation, an inspector that
-re-measures the frame, the full transcript, captions, a reduced-motion mode, and keys (`Space`, `←`/`→`, `Shift`+arrows,
-`A`/`D`, `C`, `M`, `E`, `I`, `R`). A deep link opens on a frame: `/studio/#scene=4&pct=62`.
+The **Director Studio** is the review surface: one centred column, a header of transport pills and scene tabs, and a
+footer of seven scrub bars under a live caption and the words being spoken. It plays at 0.5–2×, shows a live stage
+rendered by the same module that makes the export, and opens one drawer at a time — **Edit** (copy, validated against
+the frame's own measurements), **Blueprint** (facts, re-measured checks, and the scene's JSON), **Script** (the full
+transcript). `frame PNG` saves the frame you are looking at at 1920 × 1080; the keys drawer lists every shortcut
+(`Space`, `←`/`→`, `Shift`+arrows, `A`/`D`, `C`, `M`, `E`, `I`, `T`, `R`, `Esc`). A deep link opens on a frame:
+`/studio/#scene=4&pct=62`.
 
 To download the rendered film without the studio, open `/film.mp4` on that server — the response is
 `Blackbox-film-1080p.mp4` as an attachment. `/film-4k.mp4` is the same for the 4K file.
@@ -114,8 +117,9 @@ demo/blackbox-film/
 
 ## Honest status
 
-- The film, the subtitles, the studio and the 22 tests exist and run in this checkout.
-- The studio is tested in jsdom (boot, navigation, validation, storage, keys, deep links), **not** in a real browser:
+- The film, the subtitles, the studio and the 25 tests exist and run in this checkout.
+- The studio is tested in jsdom (boot, navigation, validation, storage, keys, deep links, drawer exclusivity,
+  the scrub bars, the speed select, the export-size PNG), **not** in a real browser:
   no browser automation is available in this environment. The canvas itself is tested by rendering frames in Node and
   asserting they are non-blank, identical across two runs, and different across two percents.
 - The narration is generated speech, one clip per scene; it is in the export, mixed at each scene's offset and

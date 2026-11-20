@@ -160,12 +160,13 @@ function fitHeadlineSize(ctx, lines, maxWidth, maxSize, minSize) {
 
 /* ── the frame's furniture ──────────────────────────────────────────────────────────────────────────────────────── */
 
-function drawBackground(ctx, scene, W, H, pct) {
+function drawBackground(ctx, scene, W, H, pct, motionReduced = false) {
   ctx.fillStyle = scene.theme?.bg ?? BG;
   ctx.fillRect(0, 0, W, H);
 
-  // One warm glow, drifting very slowly: the only ambient motion in the film.
-  const drift = Math.sin((pct / 100) * Math.PI) * 40;
+  // One warm glow, drifting very slowly: the only ambient motion in the film. A viewer who asks for reduced motion gets
+  // the same frame with the glow parked, and the studio says so rather than implying the export changed.
+  const drift = motionReduced ? 0 : Math.sin((pct / 100) * Math.PI) * 40;
   const cx = W * 0.66 + drift;
   const cy = H * 0.42 - drift * 0.4;
   const glow = ctx.createRadialGradient(cx, cy, 40, cx, cy, W * 0.62);
@@ -1059,7 +1060,7 @@ export function renderFrame(ctx, spec, sceneIndex, pct, options = {}) {
   ctx.textAlign = "left";
   ctx.textBaseline = "alphabetic";
 
-  drawBackground(ctx, scene, FRAME_WIDTH, FRAME_HEIGHT, clamped);
+  drawBackground(ctx, scene, FRAME_WIDTH, FRAME_HEIGHT, clamped, options.motionReduced === true);
 
   // Content fades in over the first few percent and out over the last few, so cuts read as dissolves. The final scene
   // holds instead of fading: it is the end card, and a fade there would look like a dropout.

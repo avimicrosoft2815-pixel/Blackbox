@@ -1,27 +1,30 @@
 /**
  * Director Studio — the runtime.
  *
- * The stage is one canvas, painted by the same `renderFrame()` the encoder calls, so the preview cannot drift from the
- * export. This file is only the director around it: the clock, the audio, the scrub, the keyboard, the panels.
+ * The page is built on the reference integration's shell (one centred column, a row of pills in the header, drawers
+ * under it, seven scrub bars in the footer) and re-dressed for BlackBox. The stage itself is not DOM: it is the film's
+ * own canvas, painted by `renderFrame()` from `studio/js/frame.js` — the module the encoder imports — so the preview
+ * cannot drift from the export.
  *
- * Design notes worth keeping:
- *  - the clock is `performance.now()`-based and *the audio is not the clock*. Narration is nudged into sync when a scene
- *    starts; if a browser refuses to play audio, the film still runs and the captions still land on time.
+ * This file is only the director around that canvas:
+ *  - the clock is `performance.now()`-based, and the audio is *not* the clock. Narration is nudged into sync when a
+ *    scene starts; if a browser refuses to play audio, the film still runs and the captions still land on time.
  *  - every scene's length comes from the blueprint, which got it from the measured MP3s. Nothing here invents timing.
- *  - the deep link `#scene=3&pct=42` is read once on load and written as the film plays, so a frame can be shared.
- *  - keyboard shortcuts are declared in one table, not scattered through handlers.
+ *  - drawers (Edit / Blueprint / Script) hold the copy, the measurements and the raw scene JSON; one is open at a time.
+ *  - keyboard shortcuts live in one table, so the list in the keys drawer cannot rot.
  */
 
 import { captionAt, locate, sceneStartMs, timecode, totalDurationMs } from "./motionMath.js";
 import { renderFrame } from "./frame.js";
 import {
+  applyDraft,
   cloneSpec,
   inspectScene,
   loadSpec,
   readStoredSpec,
   validateDraft,
+  validateSpec,
   writeStoredSpec,
-  applyDraft,
 } from "./blueprint.js";
 
 const canvas = document.getElementById("stage-canvas");
@@ -38,18 +41,18 @@ const state = {
   muted: false,
   captions: true,
   reducedMotion: false,
-  showEditor: false,
-  showInspector: false,
+  drawer: "none",
   manualSplit: null,
   lastFrameAt: 0,
   storage: null,
-  playingVideo: false,
+  lastJsonAt: -1,
+  lastSfxScene: -1,
 };
 
 let audio = null;
 
 // Built once, then reused: the chrome updates on every animation frame, and querying the document 60 times a second to
-// find the same seven nodes is work the browser does not need to repeat.
+// find the same seven pills and seven bars is work the browser does not need to repeat.
 const dom = { segments: [], transcript: [], tabs: [] };
 
 /* ── boot ───────────────────────────────────────────────────────────────────────────────────────────────────────── */
@@ -61,7 +64,7 @@ async function boot() {
     state.filmSpec = cloneSpec(filmSpec);
     const restored = readStoredSpec(state.storage, cloneSpec(filmSpec));
     state.spec = restored.spec;
-    if (restored.outcome === "corrupt" || restored.outcome === "applied" || restored.outcome === "unavailable") {
+    if (["corrupt", "applied", "unavailable"].includes(restored.outcome)) {
       showBanner(restored.outcome, restored.detail);
     }
     await ensureFonts();
@@ -75,6 +78,8 @@ async function boot() {
     resizeCanvas();
     paint();
     tick();
+    showSpecNotices();
+    el("meta-version").textContent = state.spec.product?.version ?? "pre-alpha";
     el("meta-filmlength").textContent = `${(totalDurationMs(state.spec) / 1000).toFixed(1)} s`;
     el("tc-total").textContent = timecode(totalDurationMs(state.spec));
     el("foot-note").textContent = `${state.spec.product?.version ?? "pre-alpha"} · synthetic incident · no network, no account`;
@@ -115,6 +120,32 @@ function showBanner(outcome, detail) {
   banner.hidden = false;
 }
 
+/**
+ * The reference puts a spec-notice chip in the header when the blueprint has problems. Ours counts real ones: structural
+ * faults from `validateSpec`, plus any scene whose own checks fail.
+ */
+function showSpecNotices() {
+  const structural = validateSpec(state.spec);
+  const failures = [];
+  state.spec.scenes.forEach((scene, index) => {
+    const { checks } = inspectScene(state.spec, index, { measureHeadline });
+    checks.filter((check) => !check.ok).forEach((check) => {
+      failures.push(`scene ${index + 1} (${scene.shortTitle}): ${check.text}`);
+    });
+  });
+  const all = [...structural, ...failures];
+  const chip = el("spec-notice");
+  if (all.length === 0) {
+    chip.hidden = true;
+    chip.textContent = "";
+    chip.removeAttribute("title");
+    return;
+  }
+  chip.hidden = false;
+  chip.textContent = `${all.length} SPEC NOTICE${all.length === 1 ? "" : "S"}`;
+  chip.title = all.join("\n");
+}
+
 /* ── the stage ─────────────────────────────────────────────────────────────────────────────────────────────────── */
 
 function resizeCanvas() {
@@ -134,7 +165,7 @@ function paint() {
     width: canvas.width,
     height: canvas.height,
     showCaptions: state.captions,
-    reducedMotion: state.reducedMotion,
+    motionReduced: state.reducedMotion,
     manualSplit: state.manualSplit,
     timecode: `${timecode(state.elapsedMs)} · ${scene.shortTitle}`,
   });
@@ -150,14 +181,13 @@ function scenePct() {
 
 function tick(now) {
   requestAnimationFrame(tick);
+  // One clock, one domain. The animation frame's timestamp is the only time source the film reads; mixing it with
+  // `performance.now()` elsewhere would make the delta between two frames meaningless — the two can count from different
+  // origins — and a clock that silently froze was the first thing this rewrite's tests found.
   const stamp = now ?? performance.now();
-  if (state.playing) {
-    const delta = state.lastFrameAt ? (stamp - state.lastFrameAt) * state.speed : 0;
-    state.lastFrameAt = stamp;
-    setElapsed(state.elapsedMs + delta, { fromClock: true });
-  } else {
-    state.lastFrameAt = stamp;
-  }
+  const delta = state.lastFrameAt ? Math.max(0, stamp - state.lastFrameAt) : 0;
+  state.lastFrameAt = stamp;
+  if (state.playing) setElapsed(state.elapsedMs + delta * state.speed, { fromClock: true });
   paint();
   syncChrome();
 }
@@ -169,27 +199,24 @@ function setElapsed(ms, { fromClock = false } = {}) {
   if (index !== state.index) {
     state.index = index;
     state.manualSplit = null;
+    state.lastJsonAt = -1;
     loadSceneAudio();
     syncTabs();
   }
   if (!fromClock) {
     syncAudioToClock();
     paint();
-  } else {
-    if (audio && !audio.paused) {
-      const drift = Math.abs(audio.currentTime * 1000 - audioTargetMs());
-      if (drift > 260) syncAudioToClock();
-    }
+  } else if (audio && !audio.paused) {
+    const drift = Math.abs(audio.currentTime * 1000 - audioTargetMs());
+    if (drift > 260) syncAudioToClock();
   }
   if (!state.playing) paint();
-  state.lastFrameAt = performance.now();
 }
 
 function play() {
   if (state.playing) return;
   if (state.elapsedMs >= totalDurationMs(state.spec) - 1) state.elapsedMs = 0;
   state.playing = true;
-  state.lastFrameAt = performance.now();
   loadSceneAudio();
   startAudio();
   syncPlayButton();
@@ -249,7 +276,7 @@ function startAudio() {
   const started = audio.play();
   if (started && typeof started.catch === "function") {
     started.catch(() => {
-      // Autoplay policy: the film keeps running, and the transporte says so rather than pretending.
+      // Autoplay policy: the film keeps running, and the transport says so rather than pretending.
       el("btn-mute").textContent = "sound blocked";
     });
   }
@@ -272,21 +299,33 @@ function syncAudioToClock() {
 /* ── chrome ───────────────────────────────────────────────────────────────────────────────────────────────────── */
 
 function syncPlayButton() {
-  el("play-glyph").textContent = state.playing ? "❚❚" : "▶";
+  // The glyph is two inline SVGs toggled by a data attribute: the bundled faces are subsets, and a triangle typed into
+  // the mono font is a box in some builds. The label carries the meaning either way.
+  el("btn-play").dataset.state = state.playing ? "playing" : "paused";
   el("play-label").textContent = state.playing ? "Pause" : "Play";
 }
 
 function syncChrome() {
   const scene = state.spec.scenes[state.index];
   const pct = scenePct();
+
   el("tc-now").textContent = timecode(state.elapsedMs);
   el("scrub-pct").textContent = `${pct.toFixed(0)}%`;
   el("scrub-scene").textContent = `scene ${String(scene.step).padStart(2, "0")} · ${scene.shortTitle}`;
-  el("segments").setAttribute("aria-valuenow", String(Math.round(pct)));
+  el("scene-window").textContent = scene.timeWindow ?? "";
   el("stage-badge").textContent = state.playing ? "PLAYING" : "PAUSED";
 
   const caption = captionAt(scene.narration?.captions, pct);
   if (el("live-caption").textContent !== caption) el("live-caption").textContent = caption;
+
+  // The words being spoken, and the cues the scene was built around: the reference shows both under the bars.
+  if (el("scene-script").textContent !== (scene.narration?.script ?? "")) {
+    el("scene-script").textContent = scene.narration?.script ?? "";
+  }
+  if (state.lastSfxScene !== state.index) {
+    state.lastSfxScene = state.index;
+    el("scene-sfx").textContent = (scene.narration?.sfxNotes ?? []).join(" · ") || "—";
+  }
 
   dom.segments.forEach(({ node, fill }, i) => {
     if (node.dataset.active !== String(i === state.index)) node.dataset.active = String(i === state.index);
@@ -301,7 +340,18 @@ function syncChrome() {
     });
   }
 
-  if (state.showEditor) refreshEditorNumbers();
+  // The JSON drawer re-serialises at most twice a second, and only at a new percent: a live feed of the scene's own
+  // blueprint is useful, a 60 Hz one is a space heater.
+  if (state.drawer === "inspector") {
+    const whole = Math.round(pct);
+    if (whole !== state.lastJsonAt) {
+      state.lastJsonAt = whole;
+      el("json-view").textContent = JSON.stringify(scene, null, 2);
+      el("json-scene-label").textContent = `scene ${String(scene.step).padStart(2, "0")} · ${Math.round(pct)}%`;
+    }
+  }
+
+  if (state.drawer === "editor") refreshEditorNumbers();
 }
 
 function buildSceneTabs() {
@@ -313,13 +363,14 @@ function buildSceneTabs() {
     button.type = "button";
     button.className = "scene-tab";
     button.dataset.index = String(index);
+    button.setAttribute("role", "tab");
     const n = document.createElement("span");
     n.className = "n";
-    n.textContent = `${String(scene.step).padStart(2, "0")} · ${scene.mode}`;
+    n.textContent = String(scene.step).padStart(2, "0");
     const t = document.createElement("span");
     t.className = "t";
     t.textContent = scene.shortTitle;
-    button.append(n, t);
+    button.append(n, document.createTextNode(" · "), t);
     button.addEventListener("click", () => jumpToScene(index));
     item.append(button);
     list.append(item);
@@ -332,10 +383,15 @@ function syncTabs() {
   dom.tabs.forEach((node) => {
     node.setAttribute("aria-current", String(Number(node.dataset.index) === state.index));
   });
-  if (state.showEditor) fillEditor();
-  if (state.showInspector) fillInspector();
+  if (state.drawer === "editor") fillEditor();
+  if (state.drawer === "inspector") fillInspector();
 }
 
+/**
+ * Seven bars, one per scene, in the footer. Clicking a bar jumps to that point in that scene; dragging one scrubs inside
+ * it. The reference's `onPointerDown/Move/Up` trio, with the pointer capture made optional because not every host
+ * implements it.
+ */
 function buildSegments() {
   const segments = el("segments");
   segments.innerHTML = "";
@@ -343,39 +399,43 @@ function buildSegments() {
     const node = document.createElement("button");
     node.type = "button";
     node.className = "segment";
-    node.style.flexGrow = String(scene.durationMs);
     node.dataset.index = String(index);
-    node.title = `${scene.shortTitle} — ${(scene.durationMs / 1000).toFixed(2)} s`;
+    node.title = `Drag or click to scrub ${scene.shortTitle} · ${(scene.durationMs / 1000).toFixed(2)} s`;
     node.setAttribute("aria-label", `Scene ${scene.step}: ${scene.shortTitle}`);
+
     const fill = document.createElement("span");
     fill.className = "fill";
     const cap = document.createElement("span");
     cap.className = "cap";
     cap.textContent = String(scene.step).padStart(2, "0");
     node.append(fill, cap);
-    node.addEventListener("click", (event) => {
+
+    const scrubTo = (clientX) => {
       const rect = node.getBoundingClientRect();
-      const within = (event.clientX - rect.left) / rect.width;
+      if (!rect.width) return;
+      const within = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
       jumpToMs(sceneStartMs(state.spec, index) + scene.durationMs * within);
+    };
+
+    node.addEventListener("pointerdown", (event) => {
+      node.setPointerCapture?.(event.pointerId);
+      node.dataset.scrubbing = "true";
+      scrubTo(event.clientX);
     });
+    node.addEventListener("pointermove", (event) => {
+      if (node.dataset.scrubbing === "true") scrubTo(event.clientX);
+    });
+    const stop = (event) => {
+      node.dataset.scrubbing = "false";
+      if (node.hasPointerCapture?.(event.pointerId)) node.releasePointerCapture(event.pointerId);
+    };
+    node.addEventListener("pointerup", stop);
+    node.addEventListener("pointercancel", stop);
+    node.addEventListener("click", (event) => scrubTo(event.clientX));
+
     segments.append(node);
   });
   dom.segments = [...segments.querySelectorAll(".segment")].map((node) => ({ node, fill: node.querySelector(".fill") }));
-
-  let dragging = false;
-  const scrubFrom = (event) => {
-    const rect = segments.getBoundingClientRect();
-    const ratio = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
-    jumpToMs(totalDurationMs(state.spec) * ratio);
-  };
-  segments.addEventListener("pointerdown", (event) => {
-    dragging = true;
-    segments.setPointerCapture?.(event.pointerId);
-    scrubFrom(event);
-  });
-  segments.addEventListener("pointermove", (event) => { if (dragging) scrubFrom(event); });
-  segments.addEventListener("pointerup", () => { dragging = false; });
-  segments.addEventListener("pointercancel", () => { dragging = false; });
 }
 
 function buildTranscript() {
@@ -500,10 +560,15 @@ function setReducedMotion(value) {
   state.reducedMotion = value;
   el("btn-motion").setAttribute("aria-pressed", String(value));
   el("btn-motion").textContent = value ? "reduced motion" : "full motion";
+  // Only the ambient glow moves in the film; reduced motion parks it in the preview. The export is unaffected, and the
+  // keys drawer says so — a toggle that silently did nothing would be the same lie in a quieter voice.
+  el("btn-motion").title = value
+    ? "the preview parks the ambient glow; the exported film always renders full motion"
+    : "the film's own frames, ambient glow included";
   paint();
 }
 
-/* ── keyboard: one table, so the list in the help panel cannot rot ─────────────────────────────────────────────── */
+/* ── keyboard: one table, so the drawer's list cannot rot ──────────────────────────────────────────────────────── */
 
 function wireKeyboard() {
   window.addEventListener("keydown", (event) => {
@@ -519,14 +584,17 @@ function wireKeyboard() {
     if (typing) return;
 
     switch (event.key) {
+      case "Escape":
+        showPane("none");
+        break;
       case "ArrowLeft":
         event.preventDefault();
-        if (event.shiftKey) jumpToMs(state.elapsedMs - 1 * (state.spec.scenes[state.index].durationMs / 100));
+        if (event.shiftKey) jumpToMs(state.elapsedMs - state.spec.scenes[state.index].durationMs / 100);
         else jumpToScene(state.index - 1);
         break;
       case "ArrowRight":
         event.preventDefault();
-        if (event.shiftKey) jumpToMs(state.elapsedMs + 1 * (state.spec.scenes[state.index].durationMs / 100));
+        if (event.shiftKey) jumpToMs(state.elapsedMs + state.spec.scenes[state.index].durationMs / 100);
         else jumpToScene(state.index + 1);
         break;
       case "a":
@@ -553,6 +621,10 @@ function wireKeyboard() {
       case "I":
         showPane("inspector");
         break;
+      case "t":
+      case "T":
+        showPane("transcript");
+        break;
       case "r":
       case "R":
         revertDraft();
@@ -570,18 +642,26 @@ function nudgeDivider(delta) {
   paint();
 }
 
-/* ── panels ───────────────────────────────────────────────────────────────────────────────────────────────────── */
+/* ── drawers ──────────────────────────────────────────────────────────────────────────────────────────────────── */
+
+const PANES = {
+  editor: { tab: "tab-editor", pane: "pane-editor" },
+  inspector: { tab: "tab-inspector", pane: "pane-inspector" },
+  transcript: { tab: "tab-transcript", pane: "pane-transcript" },
+};
 
 function wirePanels() {
-  el("tab-editor").addEventListener("click", () => showPane("editor"));
-  el("tab-inspector").addEventListener("click", () => showPane("inspector"));
-  el("tab-transcript").addEventListener("click", () => showPane("transcript"));
+  Object.entries(PANES).forEach(([name, ids]) => {
+    el(ids.tab).addEventListener("click", () => showPane(state.drawer === name ? "none" : name));
+  });
 
   el("editor-form").addEventListener("submit", (event) => {
     event.preventDefault();
     commitEditor();
   });
   el("btn-revert").addEventListener("click", revertDraft);
+  el("btn-copy-json").addEventListener("click", copyBlueprintJson);
+  el("btn-png").addEventListener("click", downloadFramePng);
 
   ["f-eyebrow", "f-headline-1", "f-headline-2", "f-accent", "f-body", "f-duration"].forEach((id) => {
     el(id).addEventListener("input", () => {
@@ -593,17 +673,17 @@ function wirePanels() {
 }
 
 function showPane(name) {
-  state.showEditor = name === "editor";
-  state.showInspector = name === "inspector";
-  el("pane-editor").hidden = !state.showEditor;
-  el("pane-inspector").hidden = !state.showInspector;
-  el("pane-transcript").hidden = name !== "transcript";
-  el("tab-editor").setAttribute("aria-selected", String(state.showEditor));
-  el("tab-inspector").setAttribute("aria-selected", String(state.showInspector));
-  el("tab-transcript").setAttribute("aria-selected", String(name === "transcript"));
-  if (state.showEditor) fillEditor();
-  if (state.showInspector) fillInspector();
+  state.drawer = name === state.drawer ? "none" : name;
+  Object.entries(PANES).forEach(([pane, ids]) => {
+    const open = pane === state.drawer;
+    el(ids.pane).hidden = !open;
+    el(ids.tab).setAttribute("aria-selected", String(open));
+  });
+  if (state.drawer === "editor") fillEditor();
+  if (state.drawer === "inspector") fillInspector();
 }
+
+/* ── editor ───────────────────────────────────────────────────────────────────────────────────────────────────── */
 
 function fillEditor() {
   const scene = state.spec.scenes[state.index];
@@ -621,42 +701,42 @@ function fillEditor() {
 }
 
 function refreshEditorNumbers() {
-  // Kept cheap: the duration field shows the headroom this scene has for its clip without re-reading the DOM.
-  const scene = stdScene();
+  const scene = state.spec.scenes[state.index];
+  if (!scene || !document.activeElement || document.activeElement.id !== "f-duration") return;
   const durationMs = Number(el("f-duration").value);
-  if (!Number.isFinite(durationMs) || !scene) return;
-  const audioEnd = (scene.narration?.audioMs ?? 0) + LEAD_MS;
   const hint = el("editor-hint");
-  if (document.activeElement && document.activeElement.id === "f-duration" && durationMs < audioEnd) {
+  const audioEnd = (scene.narration?.audioMs ?? 0) + LEAD_MS;
+  if (!Number.isFinite(durationMs)) return;
+  if (durationMs < audioEnd) {
     hint.textContent = `narration ends at ${(audioEnd / 1000).toFixed(2)} s`;
     hint.dataset.tone = "error";
+  } else if (hint.dataset.tone === "error") {
+    // The number is being retyped and now fits: take the warning away instead of leaving a stale one under a valid field.
+    hint.textContent = "unsaved — press Apply";
+    hint.removeAttribute("data-tone");
   }
 }
 
-function stdScene() {
-  return state.spec.scenes[state.index];
-}
-
+/** Measure on the stage's own context, so validation and painting agree about how wide a line is. */
 function measureHeadline(line, size) {
   ctx.save();
   ctx.setTransform(1, 0, 0, 1, 0, 0);
-  ctx.font = `900 ${size * (canvas.width / 1920)}px InterBlack`;
-  const width = ctx.measureText(line).width / (canvas.width / 1920);
+  const scale = canvas.width / 1920 || 1;
+  ctx.font = `900 ${size * scale}px InterBlack`;
+  const width = ctx.measureText(line).width / scale;
   ctx.restore();
   return width;
 }
 
 function commitEditor() {
   const scene = state.spec.scenes[state.index];
-  const headlines = [el("f-headline-1").value, el("f-headline-2").value];
-  const durationMs = Number(el("f-duration").value);
   const result = validateDraft({
     scene,
     eyebrow: el("f-eyebrow").value,
-    headlines,
+    headlines: [el("f-headline-1").value, el("f-headline-2").value],
     accentLine: Number(el("f-accent").value),
     body: el("f-body").value,
-    durationMs,
+    durationMs: Number(el("f-duration").value),
     measure: measureHeadline,
   });
 
@@ -667,7 +747,9 @@ function commitEditor() {
     const first = result.errors[0];
     hint.textContent = first.message;
     hint.dataset.tone = "error";
-    const fieldId = { eyebrow: "f-eyebrow", "headline-1": "f-headline-1", "headline-2": "f-headline-2", body: "f-body", duration: "f-duration" }[first.field];
+    const fieldId = {
+      eyebrow: "f-eyebrow", "headline-1": "f-headline-1", "headline-2": "f-headline-2", body: "f-body", duration: "f-duration",
+    }[first.field];
     if (fieldId) {
       el(fieldId).closest(".field")?.setAttribute("data-invalid", "true");
       el(fieldId).focus();
@@ -681,7 +763,7 @@ function commitEditor() {
     headlines: result.headlines,
     accentLine: Number(el("f-accent").value),
     body: el("f-body").value,
-    durationMs,
+    durationMs: Number(el("f-duration").value),
   });
 
   const saved = writeStoredSpec(state.storage, state.spec, state.filmSpec);
@@ -692,11 +774,11 @@ function commitEditor() {
   buildSegments();
   buildTranscript();
   syncTabs();
-  el("editor-scene-label").textContent = `scene ${String(stdScene().step).padStart(2, "0")} · ${stdScene().shortTitle}`;
+  showSpecNotices();
   paint();
 
-  // Set last: rebuilding the tabs re-fills the editor, which resets this line. A confirmation that the next render
-  // erases is worse than no confirmation.
+  // Set last: rebuilding the tabs re-fills the editor, which resets this line. A confirmation the next render erases is
+  // worse than no confirmation.
   hint.textContent = `${saved.detail} · re-render the film to export it`;
   hint.dataset.tone = saved.ok ? "ok" : "error";
 }
@@ -708,15 +790,19 @@ function revertDraft() {
   }
   state.index = Math.min(state.index, state.spec.scenes.length - 1);
   state.elapsedMs = Math.min(state.elapsedMs, totalDurationMs(state.spec));
+  state.lastJsonAt = -1;
   buildSceneTabs();
   buildSegments();
   buildTranscript();
   syncTabs();
-  if (state.showEditor) fillEditor();
+  if (state.drawer === "editor") fillEditor();
+  showSpecNotices();
   el("meta-filmlength").textContent = `${(totalDurationMs(state.spec) / 1000).toFixed(1)} s`;
   el("tc-total").textContent = timecode(totalDurationMs(state.spec));
   paint();
 }
+
+/* ── blueprint drawer ──────────────────────────────────────────────────────────────────────────────────────────── */
 
 function fillInspector() {
   const { facts, checks } = inspectScene(state.spec, state.index, { measureHeadline });
@@ -737,6 +823,83 @@ function fillInspector() {
     li.textContent = check.text;
     checkList.append(li);
   });
+
+  const scene = state.spec.scenes[state.index];
+  el("json-view").textContent = JSON.stringify(scene, null, 2);
+  el("json-scene-label").textContent = `scene ${String(scene.step).padStart(2, "0")} · ${Math.round(scenePct())}%`;
+  state.lastJsonAt = Math.round(scenePct());
+}
+
+async function copyBlueprintJson() {
+  const text = JSON.stringify(state.spec, null, 2);
+  const button = el("btn-copy-json");
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(text);
+    } else if (typeof document.execCommand === "function") {
+      // The fallback the clipboard API replaced: a transient textarea and a range selection. `execCommand` reports
+      // failure by returning false, so its return value is read rather than assumed.
+      const area = document.createElement("textarea");
+      area.value = text;
+      area.setAttribute("readonly", "true");
+      area.style.position = "fixed";
+      area.style.opacity = "0";
+      document.body.append(area);
+      area.select();
+      const copied = document.execCommand("copy");
+      area.remove();
+      if (!copied) throw new Error("execCommand refused the copy");
+    } else {
+      throw new Error("this browser offers no clipboard path");
+    }
+    button.textContent = "Copied full blueprint JSON";
+  } catch {
+    button.textContent = "Copy blocked — select the JSON instead";
+  }
+  window.setTimeout(() => { button.textContent = "Copy full blueprint JSON"; }, 2200);
+}
+
+/** The reference's "1080p PNG" pill: render the current frame at export size and hand it to the browser as a file. */
+function downloadFramePng() {
+  const width = 1920;
+  const height = 1080;
+  const offscreen = document.createElement("canvas");
+  offscreen.width = width;
+  offscreen.height = height;
+  const offCtx = offscreen.getContext("2d");
+  const scene = state.spec.scenes[state.index];
+  renderFrame(offCtx, state.spec, state.index, scenePct(), {
+    width,
+    height,
+    showCaptions: state.captions,
+    motionReduced: state.reducedMotion,
+    manualSplit: state.manualSplit,
+    timecode: `${timecode(state.elapsedMs)} · ${scene.shortTitle}`,
+  });
+
+  const name = `blackbox-scene-${String(scene.step).padStart(2, "0")}-${String(Math.round(scenePct())).padStart(3, "0")}.png`;
+  const save = (href, revoke) => {
+    const link = document.createElement("a");
+    link.href = href;
+    link.download = name;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    if (revoke) window.setTimeout(() => URL.revokeObjectURL(href), 4000);
+  };
+
+  if (typeof offscreen.toBlob === "function") {
+    offscreen.toBlob((blob) => {
+      if (!blob) return;
+      save(URL.createObjectURL(blob), true);
+    }, "image/png");
+    return;
+  }
+  try {
+    save(offscreen.toDataURL("image/png"), false);
+  } catch {
+    el("btn-png").textContent = "PNG unavailable";
+  }
 }
 
 boot();

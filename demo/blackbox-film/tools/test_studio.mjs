@@ -120,6 +120,14 @@ test("the studio boots and paints seven scenes", async () => {
     assert.match(app.document.getElementById("meta-filmlength").textContent, /55\.0 s/);
     assert.equal(app.document.getElementById("stage-badge").textContent, "PAUSED");
     assert.ok(app.calls.some((url) => url.includes("spec.json")), "the blueprint is fetched, not hardcoded");
+
+    // The page and the runtime are two hand-written files; every id the runtime reaches for has to be in the page. This
+    // is the check that catches a rename on one side of the rewrite while the other side still looks finished.
+    const source = await readFile(new URL("studio/js/app.js", root), "utf8");
+    const ids = [...new Set([...source.matchAll(/\bel\("([a-z0-9-]+)"\)/g)].map((match) => match[1]))];
+    assert.ok(ids.length > 25, `the runtime names its controls, found ${ids.length}`);
+    const missing = ids.filter((id) => !app.document.getElementById(id));
+    assert.deepEqual(missing, [], `ids the runtime reaches for that the page does not have: ${missing.join(", ")}`);
   } finally {
     app.restore();
   }
@@ -288,6 +296,111 @@ test("reduced motion is honoured when the system asks for it", async () => {
     button.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
     assert.equal(button.getAttribute("aria-pressed"), "true");
     assert.equal(button.textContent, "reduced motion");
+  } finally {
+    app.restore();
+  }
+});
+
+test("one drawer opens at a time, and Escape closes it", async () => {
+  const app = await boot();
+  try {
+    const { document, window } = app;
+    const click = (id) => document.getElementById(id).dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    const pane = (id) => document.getElementById(id).hidden;
+
+    click("tab-editor");
+    assert.equal(pane("pane-editor"), false, "Edit opens");
+    assert.equal(document.getElementById("tab-editor").getAttribute("aria-selected"), "true");
+
+    click("tab-inspector");
+    assert.equal(pane("pane-inspector"), false, "Blueprint opens");
+    assert.equal(pane("pane-editor"), true, "and Edit closes: the shell shows one drawer at a time");
+
+    click("tab-inspector");
+    assert.equal(pane("pane-inspector"), true, "clicking the open tab closes it");
+
+    click("tab-transcript");
+    assert.equal(pane("pane-transcript"), false);
+    window.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+    assert.equal(pane("pane-transcript"), true, "Escape leaves no drawer open");
+    assert.ok(document.querySelectorAll(".drawer:not([hidden])").length <= 1, "never two drawers at once");
+  } finally {
+    app.restore();
+  }
+});
+
+test("a footer bar scrubs inside its own scene, and the speed select sets the rate", async () => {
+  const app = await boot();
+  try {
+    const { document, window } = app;
+    const clock = () => {
+      const [, mm, ss, cc] = /(\d\d):(\d\d)\.(\d\d)/.exec(document.getElementById("tc-now").textContent);
+      return Number(mm) * 60000 + Number(ss) * 1000 + Number(cc) * 10;
+    };
+    const press = (key, extra = {}) => document.dispatchEvent(new window.KeyboardEvent("keydown", { key, bubbles: true, cancelable: true, ...extra }));
+
+    // Scene 3 is ~13.1 s in; a click at the half of the third bar must land on the third scene and read about 50 %.
+    const bar = document.querySelectorAll(".segment")[2];
+    bar.getBoundingClientRect = () => ({ left: 0, width: 200, top: 0, height: 8, right: 200, bottom: 8, x: 0, y: 0 });
+    bar.dispatchEvent(new window.MouseEvent("click", { bubbles: true, clientX: 100 }));
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    assert.match(document.getElementById("scrub-scene").textContent, /scene 03/);
+    const pct = Number(document.getElementById("scrub-pct").textContent.replace("%", ""));
+    assert.ok(pct > 48 && pct < 52, `half of the bar is half the scene, got ${pct}%`);
+
+    // 2x is twice the clock, measured the same way at both rates so the comparison does not lean on absolute timings.
+    const measure = async () => {
+      document.getElementById("btn-next").dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+      document.getElementById("btn-prev").dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      press(" ", { code: "Space" });
+      const before = clock();
+      await new Promise((resolve) => setTimeout(resolve, 260));
+      const after = clock();
+      press(" ", { code: "Space" });
+      return after - before;
+    };
+
+    const single = await measure();
+    const select = document.getElementById("speed");
+    select.value = "2";
+    select.dispatchEvent(new window.Event("change", { bubbles: true }));
+    const doubled = await measure();
+
+    assert.ok(single > 60, `the clock runs at all, got ${single} ms in 260 ms`);
+    assert.ok(doubled > single * 1.5, `2x should outrun 1x, got ${doubled} ms against ${single} ms`);
+  } finally {
+    app.restore();
+  }
+});
+
+test("the frame PNG renders at export size, and the copy pill admits when it cannot copy", async () => {
+  const app = await boot();
+  try {
+    const { document, window } = app;
+    const seen = [];
+    const original = window.HTMLCanvasElement.prototype.getContext;
+    window.HTMLCanvasElement.prototype.getContext = function patched(...args) {
+      seen.push(`${this.width}x${this.height}`);
+      return original.apply(this, args);
+    };
+    let asked = "";
+    window.HTMLCanvasElement.prototype.toBlob = function toBlob(callback, type) {
+      asked = type;
+      this.__blobbed = true;
+      callback(null);
+    };
+    window.URL.createObjectURL = () => "blob:stub";
+
+    document.getElementById("btn-png").dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    assert.equal(asked, "image/png", "the pill asks for a PNG");
+    assert.ok(seen.includes("1920x1080"), `the frame is rendered at export size, saw ${seen.join(", ")}`);
+
+    // jsdom has no clipboard and no execCommand: the pill must say so rather than claim a copy that never happened.
+    const copy = document.getElementById("btn-copy-json");
+    copy.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    assert.match(copy.textContent, /Copy blocked/);
   } finally {
     app.restore();
   }
