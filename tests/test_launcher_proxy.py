@@ -279,6 +279,20 @@ def _run_starts(data_dir: Path) -> list[dict]:
     return out
 
 
+def _marks(data_dir: Path) -> list[dict]:
+    """Every `MARK` payload in the data directory. Marks are the tape's own annotations — facts a reader must be able to
+    find without a decoder of its own."""
+    from blackbox.codec import cbor
+
+    out: list[dict] = []
+    for tape in sorted((data_dir / "tape").iterdir()):
+        scan = scanner.scan(str(data_dir), tape.name)
+        for frame in scan.frames:
+            if frame["kind"] == C.KIND_MARK:
+                out.append(cbor.decode_exact(frame["payload"]))
+    return out
+
+
 def _graphs(data_dir: Path) -> list[dict]:
     """Every `graph.json` the run left, one per tape that recorded frames."""
     return [json.loads(path.read_text(encoding="utf-8"))
@@ -395,3 +409,28 @@ def test_an_uninstrumented_child_leaves_no_node_and_no_call_edge(tmp_path, origi
         assert graph["edge_summary"]["call_level"] == 0
         assert graph["edge_summary"]["node_level"] == 0
         assert graph["edge_summary"]["node_join"] == "unknown", graph["edge_summary"]
+
+def test_the_proxy_keeps_its_own_record_in_the_tape_not_only_in_memory(tmp_path, origin, capfd):
+    """Defect 108: the loop's exceptions, the rebinds and the port history used to die with this process.
+
+    A user who hits a slow run had nothing to send: `rebinds` and `loop_errors` lived on an object that the launcher
+    threw away when it exited. The `proxy_loop` mark is that record, on the tape, where a capsule carries it and any
+    reader can find it without a decoder of its own.
+    """
+    argv, _script = _child(tmp_path)
+    data_dir = tmp_path / "data"
+    log = tmp_path / "log.txt"
+    env = {"PATH": os.environ.get("PATH", ""), "PYTHONPATH": str(ROOT / "src")}
+    with open(log, "w") as handle:
+        result = launcher.launch(argv, data_dir=str(data_dir), out=handle, proxy=True,
+                                 proxy_routes=_routes(origin), env=env)
+    _printed(capfd)
+
+    marks = [mark for mark in _marks(data_dir) if mark.get("name") == "proxy_loop"]
+    assert len(marks) == 1, f"the proxy's record is not on the tape: {marks!r}"
+    mark = marks[0]
+    assert mark["loop_error_count"] == 0, mark
+    assert mark["loop_errors"] == [], mark
+    assert mark["rebinds_ms"] == [], mark
+    assert mark["port_changed"] is False, mark
+    assert mark["requests"] == result.proxy["stats"]["requests"] >= 1, mark

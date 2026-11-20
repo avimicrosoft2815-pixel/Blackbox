@@ -2102,3 +2102,33 @@ chunks at 60 ms) and what the test claims are unchanged; five consecutive local 
 **This is the fourth timing assumption in a row to turn out to be the test's rather than the product's** — 108's outage,
 110's clock-derived sentence, 113's discarded stderr, and now a fixed sleep deciding when to kill. The pattern is worth
 naming: a kill test that does not wait for evidence that there was something to kill tests the scheduler.
+## Defect 108 (update 2, 2026-11-20) — the record now survives the process, and the two newer Windows failures got numbers
+
+The first fix on this defect added `ProxyThread.loop_errors` and then never used it: the list lived on an object the
+launcher threw away when it exited, and the only consumer was a bench script. So a user who hit a slow run still had
+nothing to send, which was the whole point.
+
+**Three things changed, none of them a claim about the cause.**
+
+1. **The record goes into the tape.** The launcher writes one `MARK` before `RUN_END` — `{"name": "proxy_loop",
+   "rebinds_ms": [...], "port_changed": …, "loop_error_count": n, "loop_errors": [...], "requests": n}`. A `MARK` is a
+   frame every reader already understands, it changes no derived part, and it means the capsule from a bad run carries the
+   proxy's own account of that run. `tests/test_launcher_proxy.py::test_the_proxy_keeps_its_own_record_in_the_tape_not_only_in_memory`.
+2. **The counter has the test it was missing.**
+   `tests/test_supervisor_loop_errors.py` (3): a callback the loop cannot attribute to a request is recorded with its
+   message, exception type, handle type and time; the record stops at 256 entries, so a loop failing every tick cannot
+   turn its own log into the outage; the proxy keeps answering while it logs; and an idle proxy records nothing, which is
+   the control that makes the other two mean something.
+3. **The summary says it in one sentence** when the count is non-zero, and names where the record is — not what caused it.
+
+**The two newer Windows failures are now measured rather than guessed**, each with its own tool and artefact:
+
+| Question | Measurement here | Artefact |
+|---|---|---|
+| Is `tests/test_index_rebuild.py`'s 120-second watchdog tight for the fixture (defect 114)? | building one capsule costs **40 sync calls** on the platform dispatch; syncs are **67.7 %** of the corpus build's wall time (1969 ms with, 636 ms without); seal p50 **41.4 ms** with syncs against **14.4 ms** without | `tools/capsule_write_cost.py` → `bench/results/2026-11-20-capsule-write-cost.json` |
+| Is a 60-second Node subprocess budget tight (defect 113)? | a whole Node client process through the proxy: p50 **79.4 ms**, p95 81.2 ms, max **81.9 ms**; the budget is **733×** the slowest process here | `tools/node_client_cost.py` → `bench/results/2026-11-20-node-client-cost.json` |
+
+What that buys the next occurrence: 114's explanation is now arithmetic — 20 000 syncs for a 500-capsule fixture, and
+`FlushFileBuffers` plus a Defender scan per close is where NTFS and a loaded runner differ from this host — and 113's is
+the opposite, a budget three orders of magnitude past the work, which points at a hung connect rather than a slow one.
+Neither is called resolved: both need a Windows runner, and the entries say exactly which command to run there.
