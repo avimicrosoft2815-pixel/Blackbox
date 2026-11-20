@@ -22,6 +22,25 @@ Two reasons a pack is more useful to a reviewer than a status table:
 | [`malicious-files.md`](malicious-files.md) | the capsule attack corpus, hostile frames, the injected-markup corpus | builder-run here |
 | [`integrations-exports.md`](integrations-exports.md) | OTLP and JSONL exports, the importer matrix, the SDK matrix, the header contract | partially: three importers measured, three blocked |
 
+## When these were measured, and against what
+
+The last column of every pack belongs to one commit. These packs were written and re-read at **`133b0c3`** on the branch
+`arena/86af3334-blackbox`, whose CI run **`44809947917` is green on all eleven suite cells** (3 OSes × 3 Pythons, macOS
+included) plus `docs` and `go-reader`, with `1 586` tests collected on the build machine (1 584 passed, 2 skipped by name).
+A reviewer checking a *different* sha must re-run the commands: a number here is evidence about that commit and says
+nothing about another one, even when the file has not changed.
+
+Four things landed after the packs were first written, and none of them changes a row above:
+
+* `docs/getting-started.md` — the eight-step beginner path, checked against the product by `tests/test_getting_started.py`.
+* The Windows packaging path went green on a real runner (`44807593306`): built, installed silently, installed tree run,
+  uninstalled, recordings kept. That is packaging evidence, not a gate row; the window is still unrun.
+* Defect 117 — the 5 001-entry refusal went red once on Windows at 133.2 ms against a 50 ms bound and green on the next
+  commit. The budget did not move; the failure message now carries a second timed refusal so the next occurrence says
+  which half was slow.
+* Defect 116 stayed open on purpose: a Windows path reached the CLI as `D`, the cause is unsettled, and the workflow now
+  avoids the shell boundary rather than asserting a diagnosis.
+
 ## What none of these packs can contain
 
 * **A second reader.** That is the whole point of a gate.

@@ -2,7 +2,9 @@
 
 **Verdict: internal preview, not a release candidate.** The product is `0.1.0.dev0`, no tag, no published package, and no
 gate signed by an independent reviewer. What follows is the evidence-backed split the release checklist asks for, written
-on 2026-11-20 from this checkout (`arena/5a927240-blackbox`, cut from `4ed431f`, the merge of PR #20).
+on 2026-11-20 from this checkout (`arena/86af3334-blackbox`, cut from `03c781a`, the merge of PR #21) at `133b0c3`, whose
+CI run `44809947917` is green on all eleven suite cells — three operating systems × three Pythons, macOS included — plus
+`docs` and `go-reader`.
 
 Machine: Debian 12 (bookworm) x86_64, 2 vCPU, no display, no GTK/WebKit, no Windows host, no Go toolchain, no root,
 Python 3.11.2 with `pytest` 8.3.4, `hypothesis` 6.122.3, `httpx` 0.28.1, `openai` 3.51.0, `anthropic` 2.8.0.
@@ -22,7 +24,11 @@ Python 3.11.2 with `pytest` 8.3.4, `hypothesis` 6.122.3, `httpx` 0.28.1, `openai
 | **§24a's 10 000 streamed-response byte-identity row measured** — 10 000 of 10 000 identical, 2 195 560 bytes, p50 1.15 ms per response, plus a control that isolates a single corrupted response | `bench/results/2026-11-20-stream-identity.json`, `…-control.json`, `bench/bench_stream_identity.py` |
 | **Defect 108 read from its own recorded sample** — the 686.2 ms outlier contains **0 ms** of rebind work; a tool now splits every sample into rebind / dispatch / tick / unexplained, and the loop's own callback exceptions are recorded rather than only printed | `tools/outage_split.py`, `bench/results/2026-11-20-defect-108-split.json`, `tests/test_outage_split.py` (7) |
 | **User-facing documents a beginner needs** — `troubleshooting.md`, `privacy.md`, `limitations.md`, an index in `docs/README.md` keyed to what the reader is trying to do | this `docs/` directory |
-| **The full suite is green on this machine after every change**: 1 574 collected, 0 failed, 2 skipped (both POSIX-by-name) | `PYTHONPATH=src .venv/bin/python -m pytest tests -q` |
+| **The Windows installer is built, installed and uninstalled on a real Windows runner** — the staging script, `iscc`, a silent install into `%LOCALAPPDATA%\Programs\BlackBox`, the installed interpreter's `--version` and `doctor --json`, the uninstaller, and the recordings still present afterwards | `.github/workflows/package-windows.yml`, run `44807593306` (green); artefact `BlackBox-Setup-0.1.0.dev0.exe`, 12.3 MiB, sha256 `358c8125…` |
+| **Eight failures on the way to that run, each a real defect in the packaging path** — no `ensurepip` in the embeddable Python, a wheel directory the host pip never wrote, a drive letter the CLI received as `D` (defect 116, cause unsettled), an output directory resolved against the `.iss`, `Start-Process -Wait` waiting on a process tree, and a privacy `MsgBox` that ignores `/SUPPRESSMSGBOXES` | `docs/defects.md` 114–116, `tools/package/windows/README.md` (one row per run), `tests/test_windows_definition.py` (12) |
+| **A beginner-facing walkthrough that is checked against the product** — install → attach → confirm → open → findings → brief → approve → run the checks, with every command, refusal code and file path asserted by a test | `docs/getting-started.md`, `tests/test_getting_started.py` (11) |
+| **Six review packs for independent reviewers**, each row naming the command that settles it and what this machine saw — and none of them a gate file or a signature (`docs/gates/README.md` forbids a builder ticking) | `docs/reviews/`, `tests/test_review_packs.py` (5) |
+| **The full suite is green on this machine after every change**: 1 586 collected, 0 failed, 2 skipped (both POSIX-by-name) | `PYTHONPATH=src .venv/bin/python -m pytest tests -q` |
 
 ## 2. Checks that still need a real Linux desktop or a Windows machine
 
@@ -59,6 +65,10 @@ Python 3.11.2 with `pytest` 8.3.4, `hypothesis` 6.122.3, `httpx` 0.28.1, `openai
 * Recover a capsule from a process that was killed mid-stream, verify it, read the diagnosis, and open the offline page.
 * Ask for a repair, review the sheet, apply it with the token, and run the tests the proposal suggested — each step
   refused until the previous one is explicit.
+* On Windows, install the unsigned CI-built installer, run it from the Start menu (the CLI and the installed tree are
+  exercised unattended in CI; the window is not), and uninstall it without losing the recordings.
+* Follow one ordered path from nothing to a finished incident — `docs/getting-started.md`, eight steps, each with what to do
+  when it goes wrong.
 * Be told, in one sentence and with the flag that fixes it, when a run recorded no model call.
 * Run `blackbox doctor` when something does not work and get a table of what is fine, what is not, and what could not be
   checked.
@@ -67,9 +77,10 @@ Python 3.11.2 with `pytest` 8.3.4, `hypothesis` 6.122.3, `httpx` 0.28.1, `openai
 ## How to reproduce this page
 
 ```sh
-git clone --branch arena/5a927240-blackbox <repo> && cd Blackbox
+git clone --branch arena/86af3334-blackbox <repo> && cd Blackbox
 python -m venv .venv && .venv/bin/pip install -e ".[dev,capture,capture-sdks]"
-PYTHONPATH=src .venv/bin/python -m pytest tests -q                 # 1 574 collected
+PYTHONPATH=src .venv/bin/python -m pytest tests -q                 # 1 586 collected
+gh run list --workflow package-windows.yml --limit 1               # the installer's own run
 .venv/bin/python bench/journey.py --out /tmp/journey.json          # the seven-step journey, fresh venv
 sh tools/package/linux/build_deb.sh --out dist                     # the package (network once, for pywebview)
 PATH="$PWD/.venv/bin:$PATH" sh tools/desktop_journey.sh --automated-only --out /tmp/desktop.json
