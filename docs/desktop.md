@@ -65,6 +65,10 @@ It is not an installer that has been run, and the matrix row below says so.
 **Experimental and untested.** `pywebview` drives WKWebView there and the code path is the same, but nothing in this
 repository has been run on a Mac. Do not read the missing warning as support.
 
+## Start here if you have never used this
+
+The eight-step walkthrough lives in one place — [getting-started.md](getting-started.md): install, attach an app, confirm the recording, open the incident, read the findings, prepare a brief, approve a proposal, run the checks. This page is the reference for the window itself.
+
 ## What opening it gives you
 
 The window opens on one of three pages, and which one is a decision the app makes for you:
