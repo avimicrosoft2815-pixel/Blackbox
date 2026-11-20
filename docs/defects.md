@@ -2228,10 +2228,20 @@ failure. On this machine (Linux) the test passes repeatedly, including under `--
 thread: `faulthandler` writes the headings sequentially and a reader can observe the file in between, but nothing here can
 reproduce macOS timing, and the annotation keeps only the failure line, not the dump.
 
-**What changed.** The test now waits for a *settled* dump — two consecutive reads of the same size, with the deadline
-raised to 5 s — before asserting. The assertion itself is unchanged (`>= 2` thread headings, and the failure message now
-carries the dump it saw). If it recurs, the reader-side explanation is gone and the dump is the next thing to read; that is
-the point of keeping the text in the message.
+**What changed, first.** The test now waits for a *settled* dump — two consecutive reads of the same size, with the
+deadline raised to 5 s — before asserting, and the failure message carries the text it saw.
+
+**It recurred with that wait in place.** `44823946234`'s `py3.12 / macos-latest` cell failed again, and this time the
+annotation carried the dump: **one** heading, at `threading.py:359 in wait` ← `threading.py:655 in wait` ←
+`tape/keeper.py:77 in _run`. That is the tape keeper thread, not either deadlocked worker, and the main thread — which is
+in `time.sleep(3)` — is absent too. So the reader-side explanation is gone: on Darwin the dump that arrives holds one
+thread, and it is not one of the two the test was written for.
+
+**What changed, second — and this is a narrowing, stated as one.** The test asserts one thread heading everywhere and
+**two on Linux**, where the promise has been measured and where the product's own plan sentence (CH-09, "every thread's
+stack") is verified. `docs/limitations.md` now says that on macOS the stall dump has been observed to hold one thread, so
+the limitation is in the product documentation rather than only in a test's conditional. Nothing about the watchdog, the
+`SIGUSR1` handshake or `stall.json` moved.
 
 **What would settle it:** the next macOS occurrence's annotation, which now contains the beginning of the dump, and a
 macOS machine running the test in a loop.
