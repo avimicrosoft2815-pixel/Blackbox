@@ -48,6 +48,10 @@ const state = {
 
 let audio = null;
 
+// Built once, then reused: the chrome updates on every animation frame, and querying the document 60 times a second to
+// find the same seven nodes is work the browser does not need to repeat.
+const dom = { segments: [], transcript: [], tabs: [] };
+
 /* ── boot ───────────────────────────────────────────────────────────────────────────────────────────────────────── */
 
 async function boot() {
@@ -284,18 +288,18 @@ function syncChrome() {
   const caption = captionAt(scene.narration?.captions, pct);
   if (el("live-caption").textContent !== caption) el("live-caption").textContent = caption;
 
-  document.querySelectorAll(".segment").forEach((node, i) => {
-    node.dataset.active = String(i === state.index);
-    const fill = node.querySelector(".fill");
-    if (!fill) return;
-    if (i < state.index) fill.style.width = "100%";
-    else if (i > state.index) fill.style.width = "0%";
-    else fill.style.width = `${pct}%`;
+  dom.segments.forEach(({ node, fill }, i) => {
+    if (node.dataset.active !== String(i === state.index)) node.dataset.active = String(i === state.index);
+    const width = i < state.index ? "100%" : i > state.index ? "0%" : `${pct.toFixed(1)}%`;
+    if (fill.style.width !== width) fill.style.width = width;
   });
 
-  document.querySelectorAll(".transcript li").forEach((node) => {
-    node.dataset.active = String(Number(node.dataset.scene) === state.index);
-  });
+  if (dom.transcriptIndex !== state.index) {
+    dom.transcriptIndex = state.index;
+    dom.transcript.forEach((node) => {
+      node.dataset.active = String(Number(node.dataset.scene) === state.index);
+    });
+  }
 
   if (state.showEditor) refreshEditorNumbers();
 }
@@ -320,11 +324,12 @@ function buildSceneTabs() {
     item.append(button);
     list.append(item);
   });
+  dom.tabs = [...list.querySelectorAll(".scene-tab")];
   syncTabs();
 }
 
 function syncTabs() {
-  document.querySelectorAll(".scene-tab").forEach((node) => {
+  dom.tabs.forEach((node) => {
     node.setAttribute("aria-current", String(Number(node.dataset.index) === state.index));
   });
   if (state.showEditor) fillEditor();
@@ -355,6 +360,7 @@ function buildSegments() {
     });
     segments.append(node);
   });
+  dom.segments = [...segments.querySelectorAll(".segment")].map((node) => ({ node, fill: node.querySelector(".fill") }));
 
   let dragging = false;
   const scrubFrom = (event) => {
@@ -398,6 +404,8 @@ function buildTranscript() {
     });
     list.append(item);
   });
+  dom.transcript = [...list.querySelectorAll("li")];
+  dom.transcriptIndex = -1;
 }
 
 /* ── navigation ────────────────────────────────────────────────────────────────────────────────────────────────── */
