@@ -191,6 +191,12 @@ class ProxyThread:
         self.fd_limit: tuple[int, int] | None = None        # (before, after) descriptors, None where the OS has none
         self.pending_at_stop = 0                           # tasks still pending when the loop was drained (defect 61)
         self.undrained_at_stop = 0                         # ...and how many survived the drain (must be 0)
+        # Exceptions the loop's own callbacks raised, recorded rather than only printed (defect 108). One Windows cell
+        # failed the rebind budget with a 686 ms outlier and, beside it, a `ProactorEventLoop._start_serving` callback
+        # exception that existed only in the job log — which this sandbox cannot read (GitHub redirects logs to a host
+        # it cannot reach). A record is what lets the next occurrence be evidence instead of an annotation somebody has
+        # to re-learn how to read. The default handler still prints, so nothing is hidden.
+        self.loop_errors: list[dict[str, Any]] = []
         self._lock = threading.Lock()
 
     # -- lifecycle -----------------------------------------------------------------------------------------------
@@ -213,6 +219,7 @@ class ProxyThread:
             # would have served is, and that one is not decided here.
             self.fd_limit = raise_fd_limit()
             self._loop = asyncio.new_event_loop()
+            self._loop.set_exception_handler(self._record_loop_exception)
             asyncio.set_event_loop(self._loop)
             self._server = self._loop.run_until_complete(
                 ProxyServer(self.routes, receiver=self.receiver, port=self._wanted_port,
@@ -225,6 +232,22 @@ class ProxyThread:
             return
         self._ready.set()
         self._loop.run_forever()
+
+    def _record_loop_exception(self, loop: asyncio.AbstractEventLoop, context: dict[str, Any]) -> None:
+        """Keep what a callback raised, then behave exactly as before.
+
+        The record is bounded and carries the handle's type and the message, because the Windows sample named
+        `<_OverlappedF…>` and nothing else: which operation it was is the part that decides whether the fault is ours.
+        """
+        if len(self.loop_errors) < 256:
+            exception = context.get("exception")
+            self.loop_errors.append({
+                "message": str(context.get("message", ""))[:200],
+                "exception": type(exception).__name__ if exception is not None else None,
+                "handle": type(context.get("handle")).__name__,
+                "when": round(time.monotonic(), 6),
+            })
+        loop.default_exception_handler(context)
 
     def stop(self) -> None:
         if self._server is not None:
