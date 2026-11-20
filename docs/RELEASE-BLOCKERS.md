@@ -452,7 +452,7 @@ So the Windows rows now read:
 
 | Row | State |
 |---|---|
-| Build `BlackBox-Setup-<version>.exe` | **built by CI** (`44804247919`), unsigned; size and sha256 in that run's annotation |
+| Build `BlackBox-Setup-<version>.exe` | **built by CI**: `BlackBox-Setup-0.1.0.dev0.exe`, 12.3 MiB, sha256 `358c8125ee068267c6b6b72e9873f2b3cdd444ebe9323f1811f4194b3c95f1fb` (run `44807593306`, green). Unsigned |
 | Install on Windows 10/11, launch, record with a real SDK client, open the capsule, uninstall | **partly run, in CI**: silent install, installed `--version`, installed `doctor`, uninstall, recordings kept. **Not run**: the wizard with a mouse, the Start-menu entry, the window itself, an SDK client's key |
 | Data kept on uninstall (the installer says where it is) | **verified unattended in CI**: the `.bbx` count after uninstall is not lower than before it |
 | Signature so SmartScreen does not warn | **no certificate** — the owner's |
