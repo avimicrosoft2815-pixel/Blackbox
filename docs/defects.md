@@ -2054,3 +2054,30 @@ has a second data point, with the job URL above.
 through `_run_node()`, which keeps the child's `stderr` and prints it in the failure message instead of letting
 `TimeoutExpired` discard the only evidence the test had. That is a diagnostic, not a fix — the assertion is unchanged, the
 60-second budget is unchanged, and neither test is skipped.
+## Defect 114 — Windows cells now trip the 120-second watchdog in the index-rebuild tests, on commits that touch no index code (2026-11-20, CI, open)
+
+**What happened.** Three Windows cells on this branch were killed by the suite's per-test watchdog inside
+`tests/test_index_rebuild.py`, on three different commits:
+
+| Cell | Commit | Test | Where the watchdog fired |
+|---|---|---|---|
+| `py3.12 / windows-latest` | `65c600e` | `test_a_500_run_rebuild_reproduces_the_incremental_index` | `src/blackbox/index/ingest.py:73 capsule_rows` |
+| `py3.13 / windows-latest` | `a259a70` | `test_two_rebuilds_of_an_unchanged_corpus_are_the_same_bytes` | `src/blackbox/index/ingest.py:127 insert_rows` |
+| `py3.12 / windows-latest` | `a259a70` | `test_a_500_run_rebuild_reproduces_the_incremental_index` | `capsule_rows` |
+
+`a259a70` is a `docs/STATUS.md` one-liner. Nothing on this branch touches `src/blackbox/index/` or `tests/test_index_rebuild.py`,
+and the same files pass on the other eight cells of the same runs, on macOS and Ubuntu, and on the *identical* Windows job
+in a second run of the same commit. So this is not a code path this branch changed: it is how close these tests sit to the
+limit on a loaded Windows runner.
+
+**How close, measured here.** Whole file on this machine (2 vCPU, ext4): **21.8 s**, of which 15.5 s is the fixture
+building 500 capsules and 1.8 s is the rebuild under test; every other test in the file is under 2 s. A Windows runner is
+several times slower at creating and syncing 500 small files (NTFS plus Defender on every close), and the matrix runs six
+cells at once, so a 8× slowdown puts the heaviest case past 120 s. That is consistent with all three occurrences and with
+the passing neighbours, but it is an inference from this machine's numbers, not a measurement on a Windows runner.
+
+**Not changed.** The watchdog stays at 120 s, the test stays 500 runs, and nothing was skipped: a suite that lengthens its
+watchdog until Windows passes is a suite that has stopped measuring. What would settle it: a Windows runner with
+`--durations=0` on this file and Defender excluded, and the fixture's per-file cost recorded — if capsule creation alone
+is most of it, the honest fix is in the fixture's file count or in the way the capsule writer syncs, and either is a real
+change with its own evidence.

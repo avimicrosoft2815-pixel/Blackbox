@@ -400,6 +400,16 @@ out twice on a 60-second Node subprocess in `tests/proxy/test_client_matrix.py`;
 same commit, and the change to that file since is a diagnostic only. Defect 113 records what is ruled out (the framing
 change is not on that route) and keeps it open.
 
+The runs after that were **3 of 6 Windows cells failing**, each time killed by the 120-second per-test watchdog inside
+`tests/test_index_rebuild.py` -- on a commit whose only change was one line of this file, with the same job green on its
+sibling run. Defect 114 records the three occurrences, the stack each one died on, and the measurement that shows how
+close those tests sit to the limit here (21.8 s for the whole file, 15.5 s of it the fixture building 500 capsules). No
+budget was raised, no test was skipped, and it is not called a flake.
+
+Because of that, the honest statement about CI tonight is: **the code is green on this machine (1 558 collected, 0 failed),
+and 11 of 11 cells were green at `65c600e`; on `a259a70` one Windows cell at a time falls over on a slow-runner timeout.**
+The Windows cells are being re-run; the result is reported in the reply, not pre-judged here.
+
 **What did not change, and is still labelled below:** no gate is signed, the window has not been seen on a real desktop, no
 Windows installer exists, `run -- claude` with a kill is not run, and the bench-box rows still need a quiet host.
 
