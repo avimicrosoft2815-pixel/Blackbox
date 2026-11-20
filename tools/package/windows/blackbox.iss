@@ -80,8 +80,17 @@ Type: filesandordirs; Name: "{app}\win64"
 
 [Code]
 procedure InitializeWizard();
+var
+  Notice: String;
 begin
-  MsgBox('BlackBox stores everything on this computer: no account, no cloud, no telemetry.' + #13#10 +
-         'Your recordings are kept when you uninstall. Delete them yourself, deliberately, with:' + #13#10 +
-         '    blackbox ls   then   blackbox gc --dry-run', mbInformation, MB_OK);
+  Notice := 'BlackBox stores everything on this computer: no account, no cloud, no telemetry.' + #13#10 +
+            'Your recordings are kept when you uninstall. Delete them yourself, deliberately, with:' + #13#10 +
+            '    blackbox ls   then   blackbox gc --dry-run';
+  { A scripted MsgBox ignores /SUPPRESSMSGBOXES, so an unattended install waited on a button nobody could press: the
+    sixth and seventh Windows runs sat here until the step's own timeout. Silent installs get the same words in the
+    install log instead, and read this file to change them. }
+  if WizardSilent then
+    Log('Not showing an interactive notice (silent install). The notice reads: ' + Notice)
+  else
+    MsgBox(Notice, mbInformation, MB_OK);
 end;
