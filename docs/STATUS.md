@@ -290,10 +290,10 @@ correctness. `tests/test_index_rebuild.py` (9 tests) asserts the same equality i
 could have been false: an unchanged corpus rebuilt twice, a new capsule changing only its own rows, and two tapes of one
 run producing one run row and two artifacts.
 
-Suite: **Total: 1558 tests** — 1556 pass here and 2 are skipped on POSIX by name
+Suite: **Total: 1562 tests** — 1560 pass here and 2 are skipped on POSIX by name
 (`test_an_open_view_blocks_the_unlink_only_on_windows`: POSIX permits unlinking a file another fd still holds, so the
 open-view case exists only on Windows; and `test_on_windows_no_broad_principal_has_access`: mode bits are not access on
-Windows and `icacls` does not exist here). Measured on this machine on 2026-11-20: **1 558 collected, 0 failed,
+Windows and `icacls` does not exist here). Measured on this machine on 2026-11-20: **1 562 collected, 0 failed,
 0 errors, 2 skipped, 431.3 s** (`/tmp/full22.xml`) — the six added this round are the Windows rename- and read-retry
 tests (defects 105–106) and the adoption test that holds defect 107 down. The 117 added since the 1414-line are the desktop flows and the two things that
 could previously only be checked by a person with a screen or a Windows machine:
@@ -406,7 +406,7 @@ sibling run. Defect 114 records the three occurrences, the stack each one died o
 close those tests sit to the limit here (21.8 s for the whole file, 15.5 s of it the fixture building 500 capsules). No
 budget was raised, no test was skipped, and it is not called a flake.
 
-Because of that, the honest statement about CI tonight is: **the code is green on this machine (1 558 collected, 0 failed),
+Because of that, the honest statement about CI tonight is: **the code is green on this machine (1 562 collected, 0 failed),
 and 11 of 11 cells were green at `65c600e`; on `a259a70` one Windows cell at a time falls over on a slow-runner timeout.**
 The Windows cells are being re-run; the result is reported in the reply, not pre-judged here.
 

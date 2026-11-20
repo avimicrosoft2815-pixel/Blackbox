@@ -22,7 +22,7 @@ Python 3.11.2 with `pytest` 8.3.4, `hypothesis` 6.122.3, `httpx` 0.28.1, `openai
 | **§24a's 10 000 streamed-response byte-identity row measured** — 10 000 of 10 000 identical, 2 195 560 bytes, p50 1.15 ms per response, plus a control that isolates a single corrupted response | `bench/results/2026-11-20-stream-identity.json`, `…-control.json`, `bench/bench_stream_identity.py` |
 | **Defect 108 read from its own recorded sample** — the 686.2 ms outlier contains **0 ms** of rebind work; a tool now splits every sample into rebind / dispatch / tick / unexplained, and the loop's own callback exceptions are recorded rather than only printed | `tools/outage_split.py`, `bench/results/2026-11-20-defect-108-split.json`, `tests/test_outage_split.py` (7) |
 | **User-facing documents a beginner needs** — `troubleshooting.md`, `privacy.md`, `limitations.md`, an index in `docs/README.md` keyed to what the reader is trying to do | this `docs/` directory |
-| **The full suite is green on this machine after every change**: 1 558 collected, 0 failed, 2 skipped (both POSIX-by-name) | `PYTHONPATH=src .venv/bin/python -m pytest tests -q` |
+| **The full suite is green on this machine after every change**: 1 562 collected, 0 failed, 2 skipped (both POSIX-by-name) | `PYTHONPATH=src .venv/bin/python -m pytest tests -q` |
 
 ## 2. Checks that still need a real Linux desktop or a Windows machine
 
@@ -69,7 +69,7 @@ Python 3.11.2 with `pytest` 8.3.4, `hypothesis` 6.122.3, `httpx` 0.28.1, `openai
 ```sh
 git clone --branch arena/5a927240-blackbox <repo> && cd Blackbox
 python -m venv .venv && .venv/bin/pip install -e ".[dev,capture,capture-sdks]"
-PYTHONPATH=src .venv/bin/python -m pytest tests -q                 # 1 558 collected
+PYTHONPATH=src .venv/bin/python -m pytest tests -q                 # 1 562 collected
 .venv/bin/python bench/journey.py --out /tmp/journey.json          # the seven-step journey, fresh venv
 sh tools/package/linux/build_deb.sh --out dist                     # the package (network once, for pywebview)
 PATH="$PWD/.venv/bin:$PATH" sh tools/desktop_journey.sh --automated-only --out /tmp/desktop.json
