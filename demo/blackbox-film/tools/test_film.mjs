@@ -221,3 +221,50 @@ test("the film's own clock maps every scene boundary to the right scene", () => 
   });
   assert.equal(locate(spec, total).index, spec.scenes.length - 1);
 });
+
+/* ── the sound design ───────────────────────────────────────────────────────────────────────────────────────────── */
+
+test("every sound cue lands inside the film, on a file that exists, without piling up", async () => {
+  const { cuesFor, SFX_DIR } = await import("./sfx.mjs");
+  const cues = cuesFor(spec);
+  const total = totalDurationMs(spec);
+
+  assert.ok(cues.length >= 7, `expected a score, found ${cues.length} cues`);
+  // A cut on every boundary except the first (nothing to cut from) and the last (the end card is entered on its swell).
+  const cuts = cues.filter((cue) => cue.sound === "cut").length;
+  assert.equal(cuts, spec.scenes.length - 2, "a cut at every interior boundary and none in the middle of a scene");
+
+  for (const cue of cues) {
+    const file = path(`${SFX_DIR}/${cue.sound}.wav`);
+    const info = await stat(file).catch(() => null);
+    assert.ok(info, `no sound file for ${cue.sound} (${file})`);
+    assert.ok(info.size > 1000, `${cue.sound}.wav looks empty`);
+    assert.ok(cue.atMs >= 0 && cue.atMs < total, `${cue.sound} at ${cue.atMs} ms is outside the film`);
+    assert.ok(cue.gain > 0 && cue.gain <= 1, `${cue.sound} has a gain of ${cue.gain}`);
+  }
+
+  // Two effects on the same frame read as one louder effect, which is not the score anyone wrote.
+  const sorted = [...cues].sort((a, b) => a.atMs - b.atMs);
+  for (let i = 1; i < sorted.length; i += 1) {
+    assert.ok(sorted[i].atMs - sorted[i - 1].atMs >= 150,
+      `${sorted[i].sound} and ${sorted[i - 1].sound} are ${sorted[i].atMs - sorted[i - 1].atMs} ms apart`);
+  }
+});
+
+test("each scene's sound notes describe the cues it actually has", async () => {
+  const { cuesFor } = await import("./sfx.mjs");
+  const cues = cuesFor(spec);
+  spec.scenes.forEach((scene, index) => {
+    const notes = scene.narration?.sfxNotes ?? [];
+    assert.ok(notes.length > 0, `scene ${scene.step} declares no sound design`);
+    const start = sceneStartMs(spec, index);
+    const inside = cues.filter((cue) => cue.atMs >= start && cue.atMs < start + scene.durationMs);
+    const sounds = new Set(inside.map((cue) => cue.sound));
+    // The notes name what happens; the map below is the film's own vocabulary, not a copy of the prose.
+    const expected = { rise: "swell", pulse: "tick", stamp: "stamp", cut: "cut" };
+    for (const sound of sounds) {
+      assert.ok(notes.some((note) => note.includes(expected[sound])),
+        `scene ${scene.step} mixes ${sound} but its notes say ${JSON.stringify(notes)}`);
+    }
+  });
+});

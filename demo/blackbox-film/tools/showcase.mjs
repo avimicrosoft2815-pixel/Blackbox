@@ -20,6 +20,7 @@ import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { cuesFor } from "./sfx.mjs";
 
 const root = fileURLToPath(new URL("../", import.meta.url));            // demo/blackbox-film/
 const repo = fileURLToPath(new URL("../../../", import.meta.url));       // the repository root
@@ -155,6 +156,9 @@ const srtCues = (read(join(root, "export", "blackbox-film.srt")).match(/-->/g) ?
 
 row("blueprint", `${scenes.length} scenes · ${(totalMs / 1000).toFixed(1)} s · ${labelled.length} on-frame label(s)`);
 row("narration", `${narration.length} recorded clip(s)`);
+const cues = cuesFor(spec);
+const sounds = [...new Set(cues.map((cue) => cue.sound))];
+row("sound design", `${cues.length} cue(s) from ${sounds.length} sound(s): ${sounds.join(", ")}`);
 row("subtitles", `${srtCues} cue(s)`);
 
 for (const [label, file] of [["1080p", "blackbox-film-1080p.mp4"], ["4k", "blackbox-film-4k.mp4"]]) {
@@ -207,7 +211,7 @@ if (a.status !== 0 || b.status !== 0) {
 /* ── 4. the copy is checked, not asserted ───────────────────────────────────────────────────────────────────── */
 
 section("4  THE COPY AND THE PICTURES ARE CHECKED");
-const filmTests = run(process.execPath, ["--test", "tools/test_film.mjs", "tools/test_studio.mjs"]);
+const filmTests = run(process.execPath, ["--test", "tools/test_film.mjs", "tools/test_studio.mjs", "tools/test_start.mjs"]);
 const pass = Number((/# pass (\d+)/.exec(filmTests.stdout) ?? [0, 0])[1]);
 const failed = Number((/# fail (\d+)/.exec(filmTests.stdout) ?? [0, 0])[1]);
 row("npm test (node --test)", `${pass} pass · ${failed} fail`);
@@ -222,9 +226,23 @@ const urls = [join(root, "studio", "spec.json"), join(root, "studio", "js", "app
 row("network references", `${urls} in the blueprint, the stage and the renderer`);
 if (urls !== 0) fail("the studio's pages", `${urls} URL(s) found; the demo is meant to need none`);
 
-/* ── 5. what is usually not there ───────────────────────────────────────────────────────────────────────────── */
+/* ── 5. the tour page's numbers ─────────────────────────────────────────────────────────────────────────────── */
 
-section("5  WHAT IS USUALLY NOT THERE — each line is the measurement above");
+section("5  THE TOUR PAGE — numbers it did not type");
+const statsPath = join(root, "start", "stats.json");
+if (!existsSync(statsPath)) {
+  fail("the tour page's numbers", "start/stats.json is missing; run `node tools/stats.mjs`");
+} else {
+  const stats = JSON.parse(readFileSync(statsPath, "utf8"));
+  row("stats.json", `${stats.facts.length} fact(s) · measured at ${stats.commit || "an unknown commit"}`);
+  row("suites summarised", `${stats.suites.length} · ${stats.suites.reduce((sum, suite) => sum + suite.passed, 0)} check(s) passing`);
+  row("declared not run here", `${stats.notRun.length} item(s), listed on the page beside the numbers`);
+  if (stats.facts.length < 10) fail("the tour page's numbers", `only ${stats.facts.length} facts`);
+}
+
+/* ── 6. what is usually not there ───────────────────────────────────────────────────────────────────────────── */
+
+section("6  WHAT IS USUALLY NOT THERE — each line is the measurement above");
 const shorts = [
   `every frame of the failure is drawn, not screen-captured: ${srtCues} cues and 7 scenes come out of the same renderer, and the timeline scene re-draws the seq numbers in evidence/report.md`,
   `the pictures say they are pictures: ${labelled.length} of ${scenes.length} scenes carry an on-frame label, and the rest are diagrams of recorded frames rather than illustrations of a story`,
@@ -235,6 +253,7 @@ const shorts = [
   `the narration is the clock's source: ${narration.length} clips, and each scene's length is its clip plus a lead-in and a tail`,
   `the studio is deep-linkable to the frame: /studio/#scene=4&pct=62 opens exactly there, because the stage is the renderer, not a picture of it`,
   `the exit code is real: the app exited ${runSummary.exit_code ?? "?"} and the record says so rather than showing a clean run`,
+  `the score is in the blueprint: ${cues.length} cues computed from the same file that lays out the picture, so a scene that moves takes its sound with it`,
   `nothing here needs the network: ${urls} URL(s) in the studio's pages, the incident's provider is a loopback mock`,
 ];
 shorts.forEach((line, index) => say(`  ${String(index + 1).padStart(2)}. ${line}`));

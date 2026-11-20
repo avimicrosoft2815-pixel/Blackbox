@@ -3,6 +3,7 @@
  * A small static server for the film and the studio, with two conveniences:
  *
  *   /                     → the Director Studio
+ *   /tour                 → the sixty-second tour (start/index.html), the page that argues for the product
  *   /film.mp4             → the 1080p film, sent as a download (this is the link to paste into a browser)
  *   /film-4k.mp4          → the 4K film, same way
  *   /export/*.mp4         → the same files, playable inline (byte ranges supported, so seeking works)
@@ -38,6 +39,12 @@ const TYPES = {
   ".md": "text/markdown; charset=utf-8",
   ".txt": "text/plain; charset=utf-8",
 };
+
+const PAGES = new Map([
+  ["/tour", "start/index.html"],
+  ["/tour/", "start/index.html"],
+  ["/start", "start/index.html"],
+]);
 
 const DOWNLOADS = new Map([
   ["/film.mp4", { file: "export/blackbox-film-1080p.mp4", name: "blackbox-film-1080p.mp4" }],
@@ -102,6 +109,10 @@ const server = createServer(async (req, res) => {
 
   const pathname = req.url === "/" ? "/studio/index.html" : req.url;
 
+  if (PAGES.has(pathname.split("?")[0])) {
+    return serveFile(req, res, join(projectRoot, PAGES.get(pathname.split("?")[0])));
+  }
+
   if (DOWNLOADS.has(pathname.split("?")[0])) {
     const entry = DOWNLOADS.get(pathname.split("?")[0]);
     return serveFile(req, res, join(projectRoot, entry.file), { download: entry.name });
@@ -116,5 +127,6 @@ const server = createServer(async (req, res) => {
 server.listen(port, host, () => {
   console.log(`BlackBox film server on http://${host}:${port}`);
   console.log(`  studio   http://localhost:${port}/studio/`);
+  console.log(`  tour     http://localhost:${port}/tour`);
   console.log(`  download http://localhost:${port}/film.mp4`);
 });

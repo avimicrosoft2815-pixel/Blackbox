@@ -8,11 +8,12 @@ generated clips, and the incident is a synthetic run you can reproduce with one 
 |---|---|
 | **The film** | `export/blackbox-film-1080p.mp4` (1920×1080) and `export/blackbox-film-4k.mp4` (3840×2160) |
 | **Subtitles** | `export/blackbox-film.srt` — built from the same captions burned into the picture |
+| **The tour** | `npm run studio` → <http://localhost:8181/tour> — the sixty-second journey: install, point it at any OpenAI-compatible model, break it, read the evidence, approve a repair |
 | **The studio** | `npm run studio` → <http://localhost:8181/studio/> |
 | **Why this is different** | `docs/showcase.md` — ten things a demo usually does not show, each one re-measured by `npm run showcase` |
 | **Download link** | `/film.mp4` on the same server, sent as an attachment |
 | **The incident** | `incident/run_demo.sh` → writes `evidence/*` |
-| **Tests** | `npm test` (25 checks: blueprint, narration, renderer, studio behaviour) |
+| **Tests** | `npm test` (32 checks: blueprint, narration, sound cues, renderer, studio behaviour, the tour page) |
 
 ## Watch it
 
@@ -68,6 +69,7 @@ checkable. `tools/scrub_evidence.py` does the scrubbing and refuses to finish if
 
 ```
 studio/spec.json ──► studio/js/frame.js ──► canvas (browser, live stage)
+                    tools/sfx.mjs ──► studio/sfx/*.wav ──► mixed under the narration
                                   └──────► canvas (Node) ──► ffmpeg ──► export/*.mp4
 studio/assets/narration/scene-N.mp3 ─────────────┘  (mixed at each scene's measured offset)
 ```
@@ -118,13 +120,13 @@ demo/blackbox-film/
 
 ## Honest status
 
-- The film, the subtitles, the studio and the 25 tests exist and run in this checkout.
+- The film, the subtitles, the studio, the tour page and the 32 tests exist and run in this checkout.
 - The studio is tested in jsdom (boot, navigation, validation, storage, keys, deep links, drawer exclusivity,
   the scrub bars, the speed select, the export-size PNG), **not** in a real browser:
   no browser automation is available in this environment. The canvas itself is tested by rendering frames in Node and
   asserting they are non-blank, identical across two runs, and different across two percents.
 - The narration is generated speech, one clip per scene; it is in the export, mixed at each scene's offset and
-  verified present (`mean_volume −20.7 dB`). If you replace the clips, change `audioMs` in `spec.json` — the tests will
+  verified present (`mean_volume −20.3 dB`). If you replace the clips, change `audioMs` in `spec.json` — the tests will
   tell you if the scene is too short for the new audio.
 - macOS playback of the exported H.264/AAC file is unmeasured here; the encode uses `yuv420p`, `high` profile and
   `+faststart`, which is the combination QuickTime and Safari expect, but that is a claim about a format, not a test

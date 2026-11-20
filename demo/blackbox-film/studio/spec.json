@@ -165,11 +165,16 @@
         "pacing": "The hook lands inside the first five seconds: the request card, the partial response, the break.",
         "entrySfx": "impact-low",
         "sfxNotes": [
-          "sub drop on entry",
-          "soft pop as each card lands",
-          "a low tick where the event line breaks"
+          "a swell under the opening card"
         ]
-      }
+      },
+      "sfx": [
+        {
+          "sound": "rise",
+          "atMs": 0,
+          "gain": 0.09
+        }
+      ]
     },
     {
       "id": "scene-2-meet-blackbox",
@@ -313,8 +318,7 @@
         "pacing": "Steady walkthrough: each node lights as its name is spoken.",
         "entrySfx": "whoosh-ember",
         "sfxNotes": [
-          "soft harmonic sweep on the graph reveal",
-          "a quiet tick per edge as it activates"
+          "a cut as the scene arrives, then quiet"
         ]
       }
     },
@@ -387,8 +391,7 @@
         "pacing": "The divider sweeps while the sentence turns from \"clues\" to \"one place\".",
         "entrySfx": "whoosh-ember",
         "sfxNotes": [
-          "one sweep across the split",
-          "a tick as the divider lands"
+          "a cut as the scene arrives, then quiet"
         ]
       }
     },
@@ -579,8 +582,7 @@
         "pacing": "Playhead sweeps once; each track is spoken as the head passes it.",
         "entrySfx": "whoosh-ember",
         "sfxNotes": [
-          "warm sweep on entry",
-          "a tick per track as the playhead crosses"
+          "a cut as the scene arrives, then quiet"
         ]
       }
     },
@@ -684,9 +686,22 @@
         "pacing": "Counters climb once and lock; the CANNOT TELL card stays deliberately unfinished.",
         "entrySfx": "hud-lock",
         "sfxNotes": [
-          "dual-tone lock as each card settles"
+          "a cut as the scene arrives",
+          "a low tick on each diagnosis beat"
         ]
-      }
+      },
+      "sfx": [
+        {
+          "sound": "pulse",
+          "atMs": 500,
+          "gain": 0.11
+        },
+        {
+          "sound": "pulse",
+          "atMs": 3170,
+          "gain": 0.13
+        }
+      ]
     },
     {
       "id": "scene-6-the-decision",
@@ -786,10 +801,17 @@
         "pacing": "The diff lines light in order; the token and the PASS land on \"approve\" and \"the checks you choose\".",
         "entrySfx": "hud-lock",
         "sfxNotes": [
-          "clean confirmation tone on the token",
-          "a single soft chime on PASS"
+          "a cut as the scene arrives",
+          "a stamp as the approval lands"
         ]
-      }
+      },
+      "sfx": [
+        {
+          "sound": "stamp",
+          "atMs": 2810,
+          "gain": 0.13
+        }
+      ]
     },
     {
       "id": "scene-7-reveal",
@@ -846,10 +868,16 @@
         "pacing": "One slow surge, then stillness; the wordmark holds for the closing note.",
         "entrySfx": "warp-surge",
         "sfxNotes": [
-          "rising harmonic surge",
-          "one resolved low chord, no melody"
+          "a swell under the end card"
         ]
-      }
+      },
+      "sfx": [
+        {
+          "sound": "rise",
+          "atMs": 0,
+          "gain": 0.11
+        }
+      ]
     }
   ]
 }

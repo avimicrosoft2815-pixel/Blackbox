@@ -30,6 +30,29 @@ anywhere, on purpose).
 | 19 | Illustrative scenario | Scenes 1, 3, 6 (on frame) | These scenes draw an example; the label is part of the picture and cannot be cropped away by a screenshot of the stage | illustrative |
 | 20 | Representative repair, run on the synthetic demo repo | Scene 6 (on frame) | The repair in `incident/` really was applied and verified on `incident/repo/` | illustrative |
 
+## The tour page's claims
+
+`start/index.html` argues for the product, so its sentences get the same treatment as the film's. Status vocabulary as
+above; the numbers on the page are not repeated here — they are in `start/stats.json`, written by the command that ran
+them, at the commit it names.
+
+| # | Claim, as a reader takes it | Where | Backing | Status |
+|---|---|---|---|---|
+| 21 | One command puts a recorder in front of any OpenAI-compatible call, without changing the application | Tour hero, step 2 | `blackbox run --upstream NAME=URL[@/prefix]` points the client's base-URL variables at a loopback proxy; `incident/app.py` is an unmodified client and is what the recorded incident used | product |
+| 22 | "a capsule you can verify" | Tour hero | `blackbox verify` on the recorded capsules: every recomputable part agrees, and the one it cannot recompute is printed as declared (`evidence/verify.txt`) | recorded |
+| 23 | "a diagnosis that names what it cannot establish" | Tour hero | `evidence/diagnosis.json` → `cannot_know`, quoted in full on the showcase page | recorded |
+| 24 | "a repair a person approves by token" | Tour hero, step 5 | `repair preview` prints the token and `apply` refuses without it; `tests/test_repair_workflow.py` exercises preview → apply → verify | product |
+| 25 | Python 3.11 or newer, the standard library at run time | Step 1 | `pyproject.toml` `requires-python = ">=3.11"`; `tests/test_stdlib_only.py` forbids imports outside the standard library in `src/` | product |
+| 26 | "the proxy can only reach the endpoints in its own table" | Proof card | `Routes.destinations()` is exactly that set, and `tests/test_no_egress.py` asserts it | product |
+| 27 | "One corpus, every place a capsule can write, each asserted" | Proof card | `tests/test_redaction_every_sink.py`: the corpus and the sink list are in the file and the count is in `start/stats.json` | product |
+| 28 | A tampered capsule is refused, not rendered | Proof card | `tests/test_capsule_attacks.py` | product |
+| 29 | Markup cannot execute in the pages the viewer writes | Proof card | `tests/test_xss_corpus.py` | product |
+| 30 | Verify does not count what it cannot recompute | Proof card, step 3 | `tests/test_verify_cli.py`, and the `----` line in `evidence/verify.txt` | product |
+| 31 | The grid of numbers | Numbers section | `start/stats.json`, one card per fact, each naming the file or suite it came from | recorded |
+| 32 | "eleven sound cues" | Tour hero caption, film | `tools/sfx.mjs` computes them from the blueprint; the encoder prints the count it mixed, and `npm test` fails if a cue has no sound file or lands outside the film | product |
+| 33 | The page has its own sound design, off until asked for | Sound pill | `start/start.js` synthesises it; nothing plays before a click, so no autoplay policy is worked around | product |
+
+
 ## Not said anywhere
 
 Checked mechanically by `tools/test_film.mjs` over the film's own files, and by the repository's
@@ -40,6 +63,7 @@ Checked mechanically by `tools/test_film.mjs` over the film's own files, and by 
 | Any percentage, factor or time saved | No measurement exists; a film is not a benchmark |
 | The repository's own banned absolutes (marketing words about safety, certainty and precedence) | Banned by `tests/test_forbidden_words.py`; also untrue of a pre-alpha. That test is the authority and it enumerates them — repeating them here would fail it, which is why this row describes the list instead |
 | A competitor's name or a comparison | Not needed to explain the product, and unverifiable here |
+| That any of this makes a system safe, or that anything is 100 % safe | The tour page says the opposite in its own heading: a recorder records, and the limits are listed beside the tests |
 | A launch date, waitlist, price, availability | None is decided |
 | A confidence percentage | The tool reports `observed` + `high`; inventing a number would be worse than the word |
 | Line numbers of a real bug | The displayed lines are a representative repair, labelled as such |

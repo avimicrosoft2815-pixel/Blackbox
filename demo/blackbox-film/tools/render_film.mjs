@@ -18,6 +18,7 @@ import { createCanvas } from "@napi-rs/canvas";
 import { renderFrame } from "../studio/js/frame.js";
 import { locate, sceneStartMs, timecode, totalDurationMs } from "../studio/js/motionMath.js";
 import { registerFonts } from "./render_frames.mjs";
+import { SFX_DIR, cueFilter, cuesFor } from "./sfx.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, "..");
@@ -90,6 +91,9 @@ async function main() {
     path: join(root, "studio", scene.narration.audio),
     delayMs: sceneStartMs(spec, index) + LEAD_MS,
   }));
+  // The sound design is a list computed from the blueprint (see tools/sfx.mjs), mixed under the narration rather than
+  // on top of it: every gain here is small enough that the voice never has to compete.
+  const cues = args.audio ? cuesFor(spec) : [];
 
   const ffmpeg = ffmpegPath();
   const inputArgs = [
@@ -103,9 +107,21 @@ async function main() {
       inputArgs.push("-i", clip.path);
       filterParts.push(`[${index + 1}:a]adelay=${Math.round(clip.delayMs)}|${Math.round(clip.delayMs)}[a${index}]`);
     });
-    const mixed = narration.map((_, index) => `[a${index}]`).join("");
-    filterParts.push(`${mixed}amix=inputs=${narration.length}:normalize=0:dropout_transition=0[voice]`);
-    filterParts.push(`[voice]apad=whole_dur=${(total / 1000).toFixed(3)},atrim=0:${(total / 1000).toFixed(3)}[aout]`);
+    cues.forEach((cue, index) => {
+      const input = narration.length + index + 1;
+      inputArgs.push("-i", join(root, SFX_DIR, `${cue.sound}.wav`));
+      filterParts.push(cueFilter(cue, input));
+    });
+    const mixed = [
+      ...narration.map((_, index) => `[a${index}]`),
+      ...cues.map((_, index) => `[s${narration.length + index + 1}]`),
+    ].join("");
+    const inputs = narration.length + cues.length;
+    filterParts.push(`${mixed}amix=inputs=${inputs}:normalize=0:dropout_transition=0[voice]`);
+    // A limiter, not a compressor: effects land at a fraction of the narration's level, and the ceiling is there so a
+    // cue that coincides with a loud syllable cannot clip the AAC encoder.
+    filterParts.push(`[voice]alimiter=limit=0.95[limit]`);
+    filterParts.push(`[limit]apad=whole_dur=${(total / 1000).toFixed(3)},atrim=0:${(total / 1000).toFixed(3)}[aout]`);
     audioArgs.push("-filter_complex", filterParts.join(";"), "-map", "0:v:0", "-map", "[aout]",
       "-c:a", "aac", "-b:a", "192k", "-ar", "48000");
   } else {
@@ -172,6 +188,7 @@ async function main() {
   await writeFile(srtPath, buildSrt(spec), "utf8");
 
   const seconds = (Date.now() - started) / 1000;
+  if (args.audio) console.log(`sound: ${narration.length} narration clip(s) and ${cues.length} effect cue(s)`);
   console.log(`done in ${seconds.toFixed(1)} s → ${args.out}`);
   console.log(`subtitles → ${srtPath}`);
 }

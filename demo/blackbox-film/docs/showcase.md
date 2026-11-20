@@ -15,7 +15,7 @@ npm run showcase        # records the incident again and re-measures everything 
 The product is **in development**, the incident is **synthetic**, and nothing below is a performance claim. What follows
 is the list of things this demo has that a demo normally does not, where each one lives, and what it costs.
 
-## Ten things you would not normally see in a demo
+## Eleven things you would not normally see in a demo
 
 **1. The pictures are drawn from a recording, not from a screen.** No screen capture and no headless browser is involved:
 `tools/render_film.mjs` paints 55 seconds frame by frame through `studio/js/frame.js`, and scenes 4 and 5 re-draw the
@@ -106,37 +106,46 @@ is reproducible offline, in about six seconds.
 *Where:* `incident/mock_provider.py`, `incident/run_demo.sh`, the URL count in the showcase output · *Cost:* the demo
 cannot show a real provider's quirks, and does not.
 
+**11. The score is in the blueprint, not in someone's edit.** Ten sound cues are computed from `spec.json` — a cut on every interior boundary, a low tick on each diagnosis beat,
+a stamp when the approval lands, a swell under the first and last cards — and mixed under the narration by the
+encoder. Move a scene by 300 ms and its sound moves with it, because the cue list is derived from the same file that
+lays out the picture. Two effects landing on one frame is a test failure, not a louder moment.
+*Where:* `studio/spec.json` (`sfx`, `narration.sfxNotes`), `tools/sfx.mjs`, `tools/make_sfx.mjs` · *Cost:* a
+re-render whenever the score changes, and the sounds are synthesised here rather than recorded — honest for
+clicks and whooshes, and not something to do with a voice.
+
 ## Progress so far
 
 | Built | Where | State |
 |---|---|---|
 | One incident, recorded by this repository's CLI against a synthetic app | `evidence/`, `incident/` | recorded, committed, reproduced on demand — app exit code 3, two capsules, one uncheckable vantage printed as such |
-| A 55-second film, frame by frame, with a real recorded narration | `export/`, `studio/`, `tools/render_film.mjs` | 1080p 7.8 MB and 4K 15.0 MB, h264 high / yuv420p / 30 fps, AAC 48 kHz mono, 14 subtitle cues, poster in `docs/` |
+| A 55-second film, frame by frame, with a real recorded narration | `export/`, `studio/`, `tools/render_film.mjs` | 1080p 7.9 MB and 4K 15.1 MB, h264 high / yuv420p / 30 fps, AAC 48 kHz mono, 14 subtitle cues, 10 sound cues mixed under the narration, poster in `docs/` |
 | A studio that is the renderer, not a preview of it | `studio/` | seven scrub bars, one drawer at a time, blueprint editor with validation, export-size PNG, deep links |
-| Tests for both halves | `tools/test_film.mjs`, `tools/test_studio.mjs` | 25 checks, all passing |
+| Tests for the film, the studio and the tour page | `tools/test_film.mjs`, `tools/test_studio.mjs`, `tools/test_start.mjs` | 32 checks, all passing, plus 153 Python checks through `tools/stats.mjs` |
 | CI | `.github/workflows/ci.yml` | every job green on this branch — `docs`, `go-reader`, and the 3 Python versions on ubuntu, macOS and Windows |
 | Documents that carry their limits | `docs/` | storyboard, narration script, claims ledger, evidence, studio guide, this page |
+| A tour that argues for the product, with every number generated | `start/` (`/tour`) | the sixty-second journey, what used to be expensive, what is proven against what is not, and cards fed by `start/stats.json` |
 | A reviewable change | PR #20 | open, not merged, not tagged |
 
-**Measured here, and not measured.** Measured: the run, the capsules, the frames, the two masters, the subtitles, the 25
-tests, the poster's identity. Not measured: the studio in a real browser (there is none in this environment, so the stage
+**Measured here, and not measured.** Measured: the run, the capsules, the frames, the two masters, the subtitles, the score, the poster's identity,
+and 185 checks across ten suites. Not measured: the studio in a real browser (there is none in this environment, so the stage
 is tested in jsdom and the layout by eye), playback of the exported file on macOS, and a trackpad drag. Those stay on the
 "not measured" list until something here measures them.
 
 ## Live usage — one real run, pasted verbatim
 
-This is the output of `npm run showcase` on this checkout, at commit `e40e593`, with nothing edited. Two of the numbers
+This is the output of `npm run showcase` on this checkout, at commit `09c4ad5`, with nothing edited. Two of the numbers
 change every time (the run id and the id-derived capsule list), because the incident is recorded again rather than
 replayed from a fixture.
 
 ```
 BLACKBOX — the live showcase (a real run, no fixtures)
 2026-11-20 · linux/x64 · v22.22.3
-  commit                     e40e593
+  commit                     09c4ad5
 
 1  THE INCIDENT — recorded now
 ------------------------------
-  run                        r_78aff7de71b656b5
+  run                        r_dcdaf5032ce7e903
   capsules                   2 (launcher + sdk)
   app exit code              3
   verify                     2 capsule(s) · 10 check(s) ok · 2 declared, not checkable
@@ -146,9 +155,10 @@ BLACKBOX — the live showcase (a real run, no fixtures)
 --------------------------------------------
   blueprint                  7 scenes · 55.0 s · 3 on-frame label(s)
   narration                  7 recorded clip(s)
+  sound design               10 cue(s) from 4 sound(s): rise, cut, pulse, stamp
   subtitles                  14 cue(s)
-  1080p                      7.8 MB · 55.000 s · h264 high · yuv420p · 1920x1080 · 30 fps · aac LC · 48 kHz mono
-  4k                         15.0 MB · 55.000 s · h264 high · yuv420p · 3840x2160 · 30 fps · aac LC · 48 kHz mono
+  1080p                      7.9 MB · 55.000 s · h264 high · yuv420p · 1920x1080 · 30 fps · aac LC · 48 kHz mono
+  4k                         15.1 MB · 55.000 s · h264 high · yuv420p · 3840x2160 · 30 fps · aac LC · 48 kHz mono
 
 3  ONE RENDERER, TWO HOSTS
 --------------------------
@@ -160,22 +170,29 @@ BLACKBOX — the live showcase (a real run, no fixtures)
 
 4  THE COPY AND THE PICTURES ARE CHECKED
 ----------------------------------------
-  npm test (node --test)     25 pass · 0 fail
+  npm test (node --test)     32 pass · 0 fail
   the forbidden-word rule    pass (tree and commit messages)
   network references         0 in the blueprint, the stage and the renderer
 
-5  WHAT IS USUALLY NOT THERE — each line is the measurement above
+5  THE TOUR PAGE — numbers it did not type
+------------------------------------------
+  stats.json                 16 fact(s) · measured at 09c4ad5
+  suites summarised          10 · 185 check(s) passing
+  declared not run here      4 item(s), listed on the page beside the numbers
+
+6  WHAT IS USUALLY NOT THERE — each line is the measurement above
 -----------------------------------------------------------------
    1. every frame of the failure is drawn, not screen-captured: 14 cues and 7 scenes come out of the same renderer, and the timeline scene re-draws the seq numbers in evidence/report.md
    2. the pictures say they are pictures: 3 of 7 scenes carry an on-frame label, and the rest are diagrams of recorded frames rather than illustrations of a story
    3. the diagnosis names what it cannot know: 1 statement(s), each one a limit rather than a claim
    4. verification refuses to count what it cannot recompute: 2 check(s) printed as declared, not as a pass
    5. one module draws both the studio and the export: frame 6 at 96 % has the same sha256 in two renders and in docs/poster.png
-   6. the blueprint validates copy against the frame it will land in: headline width is measured on the studio's own canvas, and a duration shorter than its narration is refused (both in the 25 tests above)
+   6. the blueprint validates copy against the frame it will land in: headline width is measured on the studio's own canvas, and a duration shorter than its narration is refused (both in the 32 tests above)
    7. the narration is the clock's source: 7 clips, and each scene's length is its clip plus a lead-in and a tail
    8. the studio is deep-linkable to the frame: /studio/#scene=4&pct=62 opens exactly there, because the stage is the renderer, not a picture of it
    9. the exit code is real: the app exited 3 and the record says so rather than showing a clean run
-  10. nothing here needs the network: 0 URL(s) in the studio's pages, the incident's provider is a loopback mock
+  10. the score is in the blueprint: 10 cues computed from the same file that lays out the picture, so a scene that moves takes its sound with it
+  11. nothing here needs the network: 0 URL(s) in the studio's pages, the incident's provider is a loopback mock
 
 WHAT THIS DOES NOT PROVE
 ------------------------
@@ -186,7 +203,7 @@ WHAT THIS DOES NOT PROVE
   · that the recording survives a machine losing power: no such fault was injected for this demo.
 
   all measurements above matched the document
-  11.4 s, including the incident run
+  12.4 s, including the incident run
 ```
 
 ## A sixty-second walkthrough
@@ -206,7 +223,7 @@ Open `npm run studio` → <http://localhost:8181/studio/> and, in this order:
 5. **Press `frame PNG`.** The frame you are looking at, rendered at 1920 × 1080 by the same module that made the film.
 6. **Press `R`.** The film's own copy comes back, the draft is cleared.
 
-The studio's own tests drive steps 1–6 in jsdom (`tools/test_studio.mjs`, 14 of the 25 checks); the pointer drags in steps
+The studio's own tests drive steps 1–6 in jsdom (`tools/test_studio.mjs`, 14 of the 32 checks); the pointer drags in steps
 1–2 are the part a real browser would have to confirm, and none was available here.
 
 ## Run it yourself
@@ -215,7 +232,9 @@ The studio's own tests drive steps 1–6 in jsdom (`tools/test_studio.mjs`, 14 o
 cd demo/blackbox-film
 npm install                                        # @napi-rs/canvas, jsdom
 npm run showcase                                   # the block above, re-measured
-npm run studio                                     # http://localhost:8181/studio/
+npm run stats                                      # start/stats.json, the numbers on the tour page
+npm run studio                                     # http://localhost:8181/studio/ and /tour
+npm run sfx                                        # rewrite studio/sfx/*.wav from the synthesiser
 npm run film                                       # 1080p + .srt, about 93 s
 npm run film:4k                                    # 3840x2160, about 5.5 minutes
 ```

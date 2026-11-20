@@ -106,8 +106,9 @@ froze the clock outright; the test that plays at 1× and 2× and compares the tw
 
 ## Export
 
-The row under the stage links to the film, the subtitles and the storyboard, and the header carries the pills that render
-them:
+The row under the stage links to the film, the subtitles, the storyboard, the tour (`/tour`, the page that argues for the
+product with numbers it measured) and the page that lists what is different. The header carries the pills that render the
+two masters:
 
 ```bash
 npm run film        # 1080p + .srt

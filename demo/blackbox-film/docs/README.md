@@ -8,6 +8,7 @@
 | `evidence.md` | The incident the film animates: how to reproduce it, what was recorded, what the record cannot say. |
 | `studio.md` | How to drive the Director Studio: controls, keys, deep links, the editor's rules, what is tested. |
 | `showcase.md` | Ten things a demo usually does not show, the progress so far, and one real recorded run — re-measured every time by `npm run showcase`. |
+| `../start/index.html` | The tour: the sixty-second journey, what used to be expensive, what is proven and what is not, and every number with its source. Served at `/tour`. |
 
 The film itself is in `../export/`, the blueprint it renders from is `../studio/spec.json`, and the run behind it is in
 `../evidence/`.
