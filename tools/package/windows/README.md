@@ -67,6 +67,7 @@ The definition and the staging script are both checked on Linux (`tests/test_win
 | `44792394361`, `44793731849` | the installer landed in `tools\package\windows\dist\`; `OutputDir` is relative to the `.iss`, so `iscc` now gets `/Odist` |
 | `44798153576` | the compiled installer is real, and `Start-Process -Wait` waits for the whole process **tree**, which Inno's setup does not end |
 | `44799776336` | installing silently blocked on the privacy `MsgBox` — a scripted box ignores `/SUPPRESSMSGBOXES`; it is now guarded by `WizardSilent` and logged instead |
+| `44804247919` | **green end to end**: stage, `--version`, `doctor`, a real recording run, compile, silent install into `%LOCALAPPDATA%\Programs\BlackBox`, the *installed* interpreter's `--version` and `doctor --json`, uninstall, and the recordings still present afterwards |
 
 **Still unproven on a real machine:** that the installer's window appears with the product's icon, that a person can click
 through it, that the Start-menu entry opens the app, and that the uninstaller removes it while keeping recordings. Those
