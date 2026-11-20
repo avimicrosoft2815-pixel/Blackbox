@@ -28,7 +28,10 @@ Python 3.11.2 with `pytest` 8.3.4, `hypothesis` 6.122.3, `httpx` 0.28.1, `openai
 | **Eight failures on the way to that run, each a real defect in the packaging path** — no `ensurepip` in the embeddable Python, a wheel directory the host pip never wrote, a drive letter the CLI received as `D` (defect 116, cause unsettled), an output directory resolved against the `.iss`, `Start-Process -Wait` waiting on a process tree, and a privacy `MsgBox` that ignores `/SUPPRESSMSGBOXES` | `docs/defects.md` 114–116, `tools/package/windows/README.md` (one row per run), `tests/test_windows_definition.py` (12) |
 | **A beginner-facing walkthrough that is checked against the product** — install → attach → confirm → open → findings → brief → approve → run the checks, with every command, refusal code and file path asserted by a test | `docs/getting-started.md`, `tests/test_getting_started.py` (11) |
 | **Six review packs for independent reviewers**, each row naming the command that settles it and what this machine saw — and none of them a gate file or a signature (`docs/gates/README.md` forbids a builder ticking) | `docs/reviews/`, `tests/test_review_packs.py` (5) |
-| **The full suite is green on this machine after every change**: 1 586 collected, 0 failed, 2 skipped (both POSIX-by-name) | `PYTHONPATH=src .venv/bin/python -m pytest tests -q` |
+| **The recovery claim is published whole** — the lock used to be created empty and written afterwards, so a peer could read nothing, judge it stale and take a live claim; `44820329776` produced two recoverers for one run that way | defect 101 (update 3), `tests/test_recovery_identity.py` (5, two of them red against the old code) |
+| **Two CI-only failures turned into messages that can name their cause** — a macOS stall dump holding one thread (defect 118, now also stated in `docs/limitations.md`), and a killed `curl` run reporting no node statuses (defect 119); neither reproduced here, both now print the numbers that would settle them | `docs/defects.md` 118–119 |
+| **Six consecutive CI runs green on all eleven cells, both events, at the last three commits** | runs `44828064353`, `44828074962`, `44828434391`, `44828441722`, `44828446885`, `44828461054` |
+| **The full suite is green on this machine after every change**: 1 588 collected, 0 failed, 2 skipped (both POSIX-by-name) | `PYTHONPATH=src .venv/bin/python -m pytest tests -q` |
 
 ## 2. Checks that still need a real Linux desktop or a Windows machine
 
@@ -79,7 +82,7 @@ Python 3.11.2 with `pytest` 8.3.4, `hypothesis` 6.122.3, `httpx` 0.28.1, `openai
 ```sh
 git clone --branch arena/86af3334-blackbox <repo> && cd Blackbox
 python -m venv .venv && .venv/bin/pip install -e ".[dev,capture,capture-sdks]"
-PYTHONPATH=src .venv/bin/python -m pytest tests -q                 # 1 586 collected
+PYTHONPATH=src .venv/bin/python -m pytest tests -q                 # 1 588 collected
 gh run list --workflow package-windows.yml --limit 1               # the installer's own run
 .venv/bin/python bench/journey.py --out /tmp/journey.json          # the seven-step journey, fresh venv
 sh tools/package/linux/build_deb.sh --out dist                     # the package (network once, for pywebview)

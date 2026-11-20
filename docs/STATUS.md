@@ -231,6 +231,14 @@ the wizard, the Start-menu entry and the window are still unrun by a person, and
 3 Pythons, macOS included — plus `docs` and `go-reader`, which is also the run that carries the new
 `tests/test_getting_started.py` and the defect-117 failure message onto Windows and macOS.
 
+**Then six runs in a row, both events, all green.** `86f92b3`, `726b217` and `cdf82cc` each produced a `push` and a
+`pull_request` run and **all six are green on all eleven cells** (`44828064353`, `44828074962`, `44828434391`,
+`44828441722`, `44828446885`, `44828461054`). Two of the three commits are repairs rather than writing: the recovery claim
+is now published whole (`os.link` of a fully written temporary file, defect 101 update 3) after `44820329776` produced two
+recoverers for one run, and the macOS stall-dump assertion now says what Darwin actually does (defect 118) instead of what
+Linux does. The fact worth keeping is not the streak — a green run is not a diagnosis — but that the two failures which
+started this stretch (`44820329776`, `44823859540`) have not recurred under the changes made for them.
+
 **The CLI contract** (`docs/cli.md`, `tests/test_cli_contract.py`, 21). Every command, its machine-readable form and its
 exit codes in one table, checked against the binary: the table's set equals the front door's, every `--json` row is
 accepted, and the documented code is measured on a failing invocation (`diagnose`'s `1` for "nothing readable" against
@@ -310,8 +318,8 @@ run producing one run row and two artifacts.
 Suite: **Total: 1588 tests** — 1586 pass here and 2 are skipped on POSIX by name
 (`test_an_open_view_blocks_the_unlink_only_on_windows`: POSIX permits unlinking a file another fd still holds, so the
 open-view case exists only on Windows; and `test_on_windows_no_broad_principal_has_access`: mode bits are not access on
-Windows and `icacls` does not exist here). Measured on this machine on 2026-11-20, after the recovery-lock and stall-dump changes: **1 588 collected, 0 failed,
-0 errors, 2 skipped, 434.7 s** (`/tmp/full26.xml`) — the six added this round are the Windows rename- and read-retry
+Windows and `icacls` does not exist here). Measured on this machine on 2026-11-20, after the recovery-lock, stall-dump and killed-curl changes: **1 588 collected, 0 failed,
+0 errors, 2 skipped, 442.9 s** (`/tmp/full27.xml`) — the six added this round are the Windows rename- and read-retry
 tests (defects 105–106) and the adoption test that holds defect 107 down. The 117 added since the 1414-line are the desktop flows and the two things that
 could previously only be checked by a person with a screen or a Windows machine:
 
