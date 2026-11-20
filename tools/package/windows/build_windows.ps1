@@ -49,9 +49,12 @@ Invoke-Checked 'pip download (pywebview, pythonnet)' { python -m pip download --
 if (-not (Get-ChildItem $wheelDir -Filter '*.whl')) { throw "no wheels landed in $wheelDir" }
 
 Write-Host '== 4/5 install into the embedded interpreter'
-Invoke-Checked 'ensurepip' { & "$py\python.exe" -m ensurepip }
-Invoke-Checked 'pip install into the embedded interpreter' {
-    & "$py\python.exe" -m pip install --no-index --find-links $wheelDir --target "$py\Lib\site-packages" blackbox-recorder pywebview
+# The Windows *embeddable* distribution ships no pip and no ensurepip: `python -m ensurepip` fails there,
+# which is why the first staging run installed nothing at all while printing "5/5". The install is done by
+# the build machine's own interpreter instead -- same Python minor version (3.11), so the binary wheels match --
+# with `--target` writing into the embedded tree.
+Invoke-Checked 'pip install into the embedded tree' {
+    python -m pip install --no-index --find-links $wheelDir --target "$py\Lib\site-packages" blackbox-recorder pywebview
 }
 # Say what the staged tree can actually import, in the script's own words, before anything claims "done".
 & "$py\python.exe" -c "import sys; sys.path.insert(0, r'$py\Lib\site-packages'); import blackbox; print('staged import:', blackbox.__version__)"
