@@ -2285,9 +2285,23 @@ work in the slow case.
 process's own CPU time — because 123 ms of wall with 11 ms of CPU is a machine that descheduled the process, and 123 ms of
 both is work this project did. That number is what the next occurrence will carry.
 
-**A proposal, for the owner rather than for a test.** If the next occurrence shows wall ≫ CPU, the assertion is measuring
-the runner's scheduler and could be stated as a CPU-time budget with the same 50 ms, keeping wall time as the printed
-diagnostic. That is a budget change, so it is written here as a proposal and not made.
+**Second recurrence, with the CPU clock.** `ci` run `44873321027` (`7bf02b8`) failed the same test on `py3.12 /
+ubuntu-latest` (102.9 ms, re-read 17.9 ms) and `py3.12 / windows-latest` (79.7 ms, re-read 10.7 ms); run `44875051713`
+(`b115f02`), the first with the two-clock message, failed it on `py3.12 / windows-latest` with **112.4 ms wall and 109.4 ms
+of this process's own CPU**, the re-read at 18.8 ms / 15.6 ms CPU. So the slow case is not a descheduled runner: on that cell
+the reader itself spent ~110 ms, six times the warm cost, on the first refusal of a 5 002-entry archive. `py3.12 /
+ubuntu-latest` passed in that run with the same code, so it is intermittent on py3.12 and has never been seen on 3.11 or 3.13.
+
+**What the failure now prints.** A third measurement: the same bytes copied to a fresh name, opened and listed with both
+clocks. A fast copy would put the cost on the original file's cache story (a scanner, a write-back); a slow one puts it on
+parsing 5 002 central-directory records, which is the entire work `read_capsule` does before line 205 refuses — there is no
+cache to blame, the second call re-parses everything.
+
+**A proposal, for the owner rather than for a test.** The `b115f02` numbers rule out the scheduler as the cause, so the
+choice is between two budget changes and neither is a test's to make: state this one row's budget for a 5 002-entry archive
+at a number a first-touch parse actually meets (it is the largest input the format allows, and the 50 ms bound was measured
+against 15.7 ms on smaller refusals), or accept the first refusal of such an archive as slower by design and assert only
+that the second is under the bound. Both are owner decisions; the budget is untouched here.
 
 ## Defect 118 — the stall dump showed one deadlocked thread on macOS, where the test needs two (2026-11-20, CI, open)
 

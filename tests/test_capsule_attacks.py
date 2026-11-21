@@ -145,13 +145,25 @@ def test_check_2_more_entries_than_the_format_allows(tmp_path: Path) -> None:
         # now carries the second measurement that tells "the filesystem was cold" from "the validator did real work":
         # a re-read of the same file that is also over the bound means the reader, and one far under means the machine.
         again, again_cpu = _reject(path, "BBX-E402")
+        # A third measurement, on a fresh *name*: the same bytes copied to a new path, opened and listed with the two clocks
+        # separated. If that copy is fast, the cost lives in the original file's cache story (a scanner, a write-back); if it
+        # is slow too, the cost is in parsing 5 002 central-directory records and the budget is the thing to talk about.
+        copy_path = path.with_name("hostile-copy.bbx")
+        copy_path.write_bytes(path.read_bytes())
+        import zipfile as _zipfile
+        open_wall, open_cpu = time.perf_counter_ns(), time.process_time_ns()
+        with _zipfile.ZipFile(copy_path) as _zf:
+            infos = _zf.infolist()
+        list_wall = (time.perf_counter_ns() - open_wall) / 1e6
+        list_cpu = (time.process_time_ns() - open_cpu) / 1e6
         raise AssertionError(
             f"refusing {len(entries)} entries took {elapsed:.1f} ms of wall time, over the {BUDGET_MS:.0f} ms budget, "
             f"and {cpu:.1f} ms of that was this process's own CPU time; the same file refused again in {again:.1f} ms "
             f"({again_cpu:.1f} ms CPU; {path.stat().st_size} bytes, {sys.platform}). "
-            "CPU close to the wall time means the validator did the work; CPU far under it means the machine took the "
-            "rest; a second reading far under the bound points at the filesystem or a scanner. The budget is unchanged "
-            "either way, and deciding whether it should be a CPU-time budget is an owner decision, not a test's."
+            f"a fresh copy opened and listed {len(infos)} entries in {list_wall:.1f} ms ({list_cpu:.1f} ms CPU). "
+            "CPU close to the wall time means the reader did the work; CPU far under it means the machine took the rest. "
+            "A fast copy points at the original file's cache story, a slow one at parsing 5 002 central-directory records "
+            "— and then the budget is the thing to discuss, with the owner, not a test."
         )
 
 
