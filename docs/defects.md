@@ -2275,7 +2275,19 @@ still fails on a slow refusal, and now it fails with something a reader can act 
 a profile of `read_capsule` over a 5 001-entry archive on Windows (`cProfile`, cold and warm) which this environment cannot
 produce because it has no Windows and no 5 001-entry capsule large enough to be interesting on Linux.
 
-**State, 2026-11-21.** Not seen since: `44868739519` (`0ca6951`) and `44868905760` (`f86c3d1`) were green on every Windows cell for this test, and the bound is unchanged.
+**State, 2026-11-21 — it recurred, on a third platform.** `ci` run `44873282602` (`416652b`) failed this test on **two
+cells in the same run**: `py3.12 / ubuntu-latest` at **123.4 ms** and `py3.12 / windows-latest` at **85.0 ms**, while the
+second refusal of the same file in the same process took **11.1 ms** and **11.2 ms**, and eight consecutive local runs here
+take 19.5 ms cold and 12.9 ms warm (wall and CPU identical). So "Windows-only" was wrong, and the validator is not doing the
+work in the slow case.
+
+**What that changes.** Nothing in the budget. The failure message now prints two clocks — the refusal's wall time and this
+process's own CPU time — because 123 ms of wall with 11 ms of CPU is a machine that descheduled the process, and 123 ms of
+both is work this project did. That number is what the next occurrence will carry.
+
+**A proposal, for the owner rather than for a test.** If the next occurrence shows wall ≫ CPU, the assertion is measuring
+the runner's scheduler and could be stated as a CPU-time budget with the same 50 ms, keeping wall time as the printed
+diagnostic. That is a budget change, so it is written here as a proposal and not made.
 
 ## Defect 118 — the stall dump showed one deadlocked thread on macOS, where the test needs two (2026-11-20, CI, open)
 
@@ -2339,7 +2351,16 @@ the archive's `node_statuses` is the suspect and the fix is on the reporting sid
 ordering under a killed client is.
 
 
-**State, 2026-11-21.** Not seen since: the macOS cells were green at `0ca6951` and at `f86c3d1`; the four numbers are in the tree and stay unread until an occurrence prints them.
+**State, 2026-11-21 — it recurred, and the four numbers answered the first half.** `ci` run `44873282602` (`416652b`),
+cell `py3.13 / macos-latest`: `statuses=[]`, the origin pushed **5 chunks / 835 bytes**, and the launcher's own JSON summary
+is present and complete. Frames are therefore **absent** from the capsule rather than lost on the way to the report, which is
+the branch of the earlier decision tree that names the proxy's write ordering under a killed client, not the archive's
+`node_statuses`. The origin did send data, so the client was talking to a server that answered.
+
+**What that leaves.** The proxy forwarded and recorded nothing for a stream whose origin produced 835 bytes before the kill:
+either the kill arrived before any frame was flushed, or the flush was lost with the process. Distinguishing those needs a
+run in which the burst is *watched* — the proxy's own frame count at the moment of the kill — which is instrumentation, and
+the next step for whoever picks this up. It stays open; nothing here is a fix.
 
 ## Defect 120 — a Windows cell called `ingest` 155 ms slower than the front door, and the next commit's identical cell called it fine (2026-11-21, CI, open)
 

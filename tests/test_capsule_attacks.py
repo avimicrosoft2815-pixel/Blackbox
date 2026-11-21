@@ -101,14 +101,20 @@ def _manifest(**overrides: object) -> bytes:
     return json.dumps(document).encode()
 
 
-def _reject(path: Path, code: str) -> float:
-    """Assert `path` is refused with `code`, and return how long the refusal took in milliseconds."""
-    started = time.perf_counter_ns()
+def _reject(path: Path, code: str) -> tuple[float, float]:
+    """Assert `path` is refused with `code`, and return (wall ms, process CPU ms) for the refusal.
+
+    Two clocks, because on a shared runner they answer different questions: 123 ms of wall time with 11 ms of CPU is a
+    machine that descheduled the process, and 123 ms of both is work this project did (defect 117).
+    """
+    wall_started = time.perf_counter_ns()
+    cpu_started = time.process_time_ns()
     with pytest.raises(BlackBoxError) as caught:
         cap.read_capsule(str(path))
-    elapsed_ms = (time.perf_counter_ns() - started) / 1e6
+    cpu_ms = (time.process_time_ns() - cpu_started) / 1e6
+    wall_ms = (time.perf_counter_ns() - wall_started) / 1e6
     assert caught.value.code == code, f"expected {code}, got {caught.value.code}: {caught.value}"
-    return elapsed_ms
+    return wall_ms, cpu_ms
 
 
 # ── §13.4 check 1–2: size and shape ────────────────────────────────────────────────────────────────────────────────
@@ -125,24 +131,27 @@ def test_check_1_a_capsule_over_the_byte_limit_is_refused_before_it_is_opened(tm
 def test_check_2_bytes_that_are_not_a_zip_are_a_capsule_that_cannot_be_read(tmp_path: Path) -> None:
     path = tmp_path / "not.zip"
     path.write_bytes(b"PK\x03\x04" + bytes(range(256)) * 4)
-    assert _reject(path, "BBX-E402") < BUDGET_MS
+    wall, _cpu = _reject(path, "BBX-E402")
+    assert wall < BUDGET_MS, f"refusing a non-zip took {wall:.1f} ms of wall time"
 
 
 def test_check_2_more_entries_than_the_format_allows(tmp_path: Path) -> None:
     entries = [(f"events/part-{index:04d}.txt", b"x") for index in range(cap.MAX_ENTRIES + 1)]
     path = _write(tmp_path, entries, manifest=_manifest())
-    elapsed = _reject(path, "BBX-E402")
+    elapsed, cpu = _reject(path, "BBX-E402")
     if elapsed >= BUDGET_MS:
         # Defect 117: this one went red once on `py3.12 / windows-latest` with 133.2 ms against the 50 ms budget, and
         # green on the next commit with the same test and the same reader. One sample is not a diagnosis, so the failure
         # now carries the second measurement that tells "the filesystem was cold" from "the validator did real work":
         # a re-read of the same file that is also over the bound means the reader, and one far under means the machine.
-        again = _reject(path, "BBX-E402")
+        again, again_cpu = _reject(path, "BBX-E402")
         raise AssertionError(
-            f"refusing {len(entries)} entries took {elapsed:.1f} ms, over the {BUDGET_MS:.0f} ms budget; "
-            f"the same file refused again in {again:.1f} ms ({path.stat().st_size} bytes, {sys.platform}). "
-            "A second reading far under the bound points at the filesystem or a scanner rather than at the validator; "
-            "the budget itself is unchanged either way."
+            f"refusing {len(entries)} entries took {elapsed:.1f} ms of wall time, over the {BUDGET_MS:.0f} ms budget, "
+            f"and {cpu:.1f} ms of that was this process's own CPU time; the same file refused again in {again:.1f} ms "
+            f"({again_cpu:.1f} ms CPU; {path.stat().st_size} bytes, {sys.platform}). "
+            "CPU close to the wall time means the validator did the work; CPU far under it means the machine took the "
+            "rest; a second reading far under the bound points at the filesystem or a scanner. The budget is unchanged "
+            "either way, and deciding whether it should be a CPU-time budget is an owner decision, not a test's."
         )
 
 
@@ -159,7 +168,8 @@ def test_check_2_more_entries_than_the_format_allows(tmp_path: Path) -> None:
 def test_check_3_a_member_name_that_leaves_the_capsule_root_is_refused(tmp_path: Path, label: str,
                                                                        entry_name: str) -> None:
     path = _write(tmp_path, [(entry_name, b"x")], manifest=_manifest(), name=f"{label}.bbx".replace(" ", "-"))
-    assert _reject(path, "BBX-E403") < BUDGET_MS
+    wall, _cpu = _reject(path, "BBX-E403")
+    assert wall < BUDGET_MS, f"refusing a BBX-E403 took {wall:.1f} ms of wall time"
 
 
 def test_check_3_a_symlink_member_is_refused_even_though_nothing_is_ever_extracted(tmp_path: Path) -> None:
@@ -176,7 +186,8 @@ def test_check_3_a_symlink_member_is_refused_even_though_nothing_is_ever_extract
 
 def test_check_4_a_case_folded_duplicate_is_two_entries_that_one_filesystem_would_collide(tmp_path: Path) -> None:
     path = _write(tmp_path, [("events/seg-0001.bin", b"a"), ("events/SEG-0001.BIN", b"b")], manifest=_manifest())
-    assert _reject(path, "BBX-E404") < BUDGET_MS
+    wall, _cpu = _reject(path, "BBX-E404")
+    assert wall < BUDGET_MS, f"refusing a BBX-E404 took {wall:.1f} ms of wall time"
 
 
 def test_check_5_a_member_that_expands_a_thousandfold_is_a_bomb(tmp_path: Path) -> None:
@@ -189,13 +200,15 @@ def test_check_5_a_member_that_expands_a_thousandfold_is_a_bomb(tmp_path: Path) 
 
 def test_check_6_an_encrypted_member_is_refused_rather_than_decoded(tmp_path: Path) -> None:
     path = _mark_members_encrypted(_write(tmp_path, [("events/seg-0001.bin", b"x")], manifest=_manifest()))
-    assert _reject(path, "BBX-E406") < BUDGET_MS
+    wall, _cpu = _reject(path, "BBX-E406")
+    assert wall < BUDGET_MS, f"refusing a BBX-E406 took {wall:.1f} ms of wall time"
 
 
 def test_check_6_a_compression_method_this_format_does_not_define_is_refused(tmp_path: Path) -> None:
     path = _write(tmp_path, [("events/seg-0001.bin", b"x" * 4096)], manifest=_manifest(),
                   decorate={"events/seg-0001.bin": {"compress_type": zipfile.ZIP_BZIP2}})
-    assert _reject(path, "BBX-E406") < BUDGET_MS
+    wall, _cpu = _reject(path, "BBX-E406")
+    assert wall < BUDGET_MS, f"refusing a BBX-E406 took {wall:.1f} ms of wall time"
 
 
 # ── §13.4 check 7–8: the manifest, and what it claims the archive contains ────────────────────────────────────────
@@ -216,13 +229,15 @@ def test_check_7_a_manifest_that_is_not_an_object_is_a_capsule_that_cannot_be_re
     """The two cases that used to escape as `AttributeError` and `RecursionError` (defect 83) are the list and the deep one."""
     path = _write(tmp_path, [("events/seg-0001.bin", b"x")], manifest=body, stored={cap.MANIFEST_NAME},
                   name=f"manifest-{label.replace(' ', '-')}.bbx")
-    assert _reject(path, "BBX-E407") < BUDGET_MS
+    wall, _cpu = _reject(path, "BBX-E407")
+    assert wall < BUDGET_MS, f"refusing a BBX-E407 took {wall:.1f} ms of wall time"
 
 
 def test_check_7_a_newer_format_version_is_refused_rather_than_guessed_at(tmp_path: Path) -> None:
     path = _write(tmp_path, [("events/seg-0001.bin", b"x")],
                   manifest=_manifest(format_version=cap.CAPSULE_FORMAT_VERSION + 1))
-    assert _reject(path, "BBX-E407") < BUDGET_MS
+    wall, _cpu = _reject(path, "BBX-E407")
+    assert wall < BUDGET_MS, f"refusing a BBX-E407 took {wall:.1f} ms of wall time"
 
 
 def test_check_8_a_manifest_that_lists_a_part_the_archive_does_not_carry_is_refused(tmp_path: Path) -> None:
