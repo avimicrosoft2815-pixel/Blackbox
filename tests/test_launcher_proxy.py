@@ -432,5 +432,9 @@ def test_the_proxy_keeps_its_own_record_in_the_tape_not_only_in_memory(tmp_path,
     assert mark["loop_error_count"] == 0, mark
     assert mark["loop_errors"] == [], mark
     assert mark["rebinds_ms"] == [], mark
+    # Defect 108: wall and CPU travel together, so an outlier can be read from the capsule rather than guessed at. With no
+    # rebind there is no sample, and the two lists are always the same length when there is one.
+    assert mark["rebind_cpu_ms"] == [], mark
+    assert len(mark["rebinds_ms"]) == len(mark["rebind_cpu_ms"]), mark
     assert mark["port_changed"] is False, mark
     assert mark["requests"] == result.proxy["stats"]["requests"] >= 1, mark

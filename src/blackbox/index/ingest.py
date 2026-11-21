@@ -103,10 +103,22 @@ def _payload(fields: dict[str, Any]) -> dict[str, Any]:
 
 
 def insert_rows(con: sqlite3.Connection, rows: dict[str, Any]) -> dict[str, int]:
-    """Insert one capsule's rows, idempotently. Returns how many rows were new (a re-ingest adds none)."""
-    added = 0
-    before = schema.count_rows(con)
-    con.execute("BEGIN IMMEDIATE")
+    """Insert one capsule's rows, idempotently. Returns how many rows were new (a re-ingest adds none).
+
+    Two things here are load-bearing for a 500-capsule build on a slow filesystem, and both were measured (defect 114):
+
+    * **The count comes from `total_changes`, not from two `COUNT(*)` sweeps.** The first version counted every table
+      before and after each capsule — 1 928 `SELECT`s for a 120-capsule corpus, and eight sweeps of a 4 500-row table per
+      capsule at 500. `size` now costs nothing.
+    * **The transaction is the caller's if one is open.** `build()` wraps the whole loop in one `BEGIN IMMEDIATE`, so a
+      500-capsule build issues one `COMMIT` instead of 500. A commit is a journal write plus a sync, which is the part a
+      Windows runner with a scanner on the volume pays most for; the index is derived data, so a crash that loses a
+      partial build costs a rebuild and nothing else.
+    """
+    before = con.total_changes
+    owns = not con.in_transaction
+    if owns:
+        con.execute("BEGIN IMMEDIATE")
     try:
         con.execute(
             "INSERT INTO run (run_id, capsule, root, status, status_cause, completeness, events, nodes, bytes) "
@@ -124,13 +136,13 @@ def insert_rows(con: sqlite3.Connection, rows: dict[str, Any]) -> dict[str, int]
         con.execute(
             "INSERT INTO artifact (artifact_id, run_id, kind, path, bytes, sha256, created_ns) VALUES (:artifact_id, "
             ":run_id, :kind, :path, :bytes, :sha256, :created_ns) ON CONFLICT (artifact_id) DO NOTHING", artifact)
-        con.execute("COMMIT")
+        if owns:
+            con.execute("COMMIT")
     except BaseException:
-        con.execute("ROLLBACK")
+        if owns and con.in_transaction:
+            con.execute("ROLLBACK")
         raise
-    after = schema.count_rows(con)
-    added = sum(after[name] - before[name] for name in after)
-    return {"added": added}
+    return {"added": con.total_changes - before}
 
 
 

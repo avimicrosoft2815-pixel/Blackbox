@@ -2113,6 +2113,31 @@ watchdog until Windows passes is a suite that has stopped measuring. What would 
 `--durations=0` on this file and Defender excluded, and the fixture's per-file cost recorded — if capsule creation alone
 is most of it, the honest fix is in the fixture's file count or in the way the capsule writer syncs, and either is a real
 change with its own evidence.
+
+**Update (2026-11-21): the cost was ours, it was countable on Linux, and it is fixed.** Reading the code rather than the
+runner found what the fixture made expensive: `index.build()` called `insert_rows()` once per capsule, and `insert_rows`
+did `BEGIN IMMEDIATE` … `COMMIT` plus **two full `COUNT(*)` sweeps** (four tables each) so that it could report how many
+rows were new. For the acceptance corpus that is 500 commits and 8 008 selects per build. A commit is a journal write and
+a sync; on the Windows cell where this fired, 500 of them is the only part of the test large enough to reach 120 s, and
+every other test in the file (which builds no such corpus) passed on the same cells.
+
+Measured with `tools/index_build_cost.py` over the same 500-capsule corpus, before and after
+(`bench/results/2026-11-21-index-build-cost.json`):
+
+| | commits | selects | incremental | rebuild |
+|---|---|---|---|---|
+| before (`2ab7636`) | 1 000 | 8 008 | 922.2 ms | 1 068.2 ms |
+| after | **2** | **8** | **311.7 ms** | **298.7 ms** |
+
+**Fixed** by making the transaction the caller's: `build()` wraps the whole ingest loop in one `BEGIN IMMEDIATE`, and
+`insert_rows()` counts new rows with `con.total_changes` instead of sweeping the tables. The rows are identical — the
+500-run dump hash assertion passes unchanged — and the index is derived data, so a crash that loses a partial build costs
+one rebuild and no evidence. `test_a_build_of_many_capsules_commits_once` asserts one `BEGIN`, one `COMMIT` and at most
+eight selects for a four-capsule corpus, and it fails against the old code (`one transaction per build, not 4`).
+
+**Not changed, and this is the part worth repeating:** the watchdog stays at 120 s, the fixture stays 500 real runs, and no
+assertion moved. What is claimed is the ratio of sync points and the wall time on this host; what is **not** claimed is a
+Windows wall-clock prediction, because this machine cannot produce one.
 ## Defect 115 — the `curl`+`kill -9` test killed the child before `curl` had sent anything (2026-11-20, CI, fixed)
 
 **What happened.** `py3.12 / ubuntu-latest` failed on `6bc057d` with
@@ -2164,6 +2189,26 @@ What that buys the next occurrence: 114's explanation is now arithmetic — 20 0
 `FlushFileBuffers` plus a Defender scan per close is where NTFS and a loaded runner differ from this host — and 113's is
 the opposite, a budget three orders of magnitude past the work, which points at a hung connect rather than a slow one.
 Neither is called resolved: both need a Windows runner, and the entries say exactly which command to run there.
+
+## Defect 108 (update 3, 2026-11-21) — the sample now records whether the process was running at all
+
+The three columns the split tool reads (rebind, dispatch, tick) all live inside the process, so none of them can say
+whether the *process* was on a CPU during the 686.2 ms. That is the one fact that separates "our rebind was slow" from
+"the runner starved us", and it was not being recorded.
+
+`ProxyThread.rebind()` and the loop-side restore path now record `rebind_cpu_ms` beside `rebinds`, using
+`time.process_time()` — process-wide CPU, so it counts whatever any thread did. The pair travels into the capsule's
+`proxy_loop` mark (`rebind_cpu_ms`), and `tools/outage_split.py` reads it: a sample of 686.2 ms with 3 ms of CPU is labelled
+`not-running`, the same outage with 600 ms of CPU is `running` and, if it came from the rebind, `ours:rebind`. Absent the
+field the tool prints `unknown` rather than a story.
+
+Two tests hold it: `tests/test_supervisor_loop_errors.py::test_a_rebind_records_its_cpu_time_beside_its_wall_time` drives a
+sleeping rebind (wall ≥ 100 ms, CPU under half) and then a CPU-burning one (CPU > 80 ms), and
+`tests/test_outage_split.py::test_process_cpu_separates_a_starved_wait_from_slow_work` holds the labels. The budget is
+untouched at 100 ms and the recorded 2026-11-20 sample still says its 686.2 ms put none of itself in the rebind.
+
+**Still open:** the Windows cell that started this has not been re-run with the new field, so the *cause* of the 686.2 ms
+remains unknown; what changed is that the next occurrence answers it without a maintainer guessing.
 ## Defect 116 — on a Windows runner the CLI received `D` where the script passed `D:\a\…\x.bbx` (2026-11-20, CI, open)
 
 **What happened.** The Windows packaging workflow's smoke step runs `blackbox verify <capsule>` against a capsule a real
@@ -2188,6 +2233,20 @@ leaving the question open.
 `blackbox verify D:\tmp\x.bbx` typed at a `cmd` prompt. If the CLI alone refuses an absolute Windows path, it is ours and
 this becomes a bug in `cmd_verify`; if only the PowerShell invocation mangles it, it is the harness and the docs should say
 so. Either way the answer is one command on a machine with Windows.
+
+**Update (2026-11-21): the half that is ours is now tested, and the refusal is legible.** Two tests in
+`tests/test_verify_cli.py` settle what Linux can settle:
+
+* `test_a_windows_style_path_is_reported_whole_not_cut_at_the_colon` hands `verify` the *whole* Windows path and requires
+  the whole string back in the refusal. So `cmd_verify` does not split an argument on `:` — a regression that did would
+  fail here on every platform. The cut happened before `argv`, which leaves the shell boundary as the remaining place.
+* `test_a_bare_drive_letter_says_what_it_probably_was` covers the shape that actually arrived (`D`): `blackbox verify D`
+  now prints "`D` is a single drive letter, so the rest of the path never reached this command", names defect 116, and says
+  what avoids it (quote it, or pass it from the shell). The exit code is unchanged at 2, and an ordinary missing file gets
+  the plain refusal without the advice.
+
+The cause of the cut is **still unknown** — the two commands above remain the way to find it — but a user who hits it now
+has a sentence that does not read like a corrupted file.
 ## Defect 117 — the 5 001-entry refusal took 133 ms on one Windows cell and 15 ms on the next commit (2026-11-20, open)
 
 **What happened.** `tests/test_capsule_attacks.py::test_check_2_more_entries_than_the_format_allows` failed on

@@ -220,3 +220,43 @@ def test_the_command_reports_what_it_did_and_refuses_a_missing_directory(tmp_pat
     assert report["mode"] == "rebuild" and report["counts"]["run"] == 1
     assert len(report["dump_sha256"]) == 64 and report["dump_rows"] == 12
     assert cmd_index.main(["--data", str(tmp_path / "nope")]) == 2
+
+
+def test_a_build_of_many_capsules_commits_once(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """One transaction per build, and no per-capsule `COUNT(*)` sweep — the cost that made this test miss a watchdog.
+
+    Defect 114: three Windows cells were killed by the suite's 120 s watchdog inside this file, on commits that touch no
+    index code. The work under the watchdog is 500 capsules × (BEGIN, nine inserts, COMMIT, four `COUNT(*)` before, four
+    after): 1 000 commits and 8 008 selects for the corpus, measured at `2ab7636` with `tools/index_build_cost.py`. A
+    commit is a journal write and a sync, which is the one cost on that platform large enough to reach 120 s.
+
+    The assertion is on the *statements*, so it holds on any host: a regression that reintroduces a per-capsule commit
+    fails here in milliseconds rather than as a watchdog kill on a runner nobody can read the log of.
+    """
+    for run in range(4):
+        _tape(tmp_path, run_id=f"commit-{run}")
+    _seal_everything(tmp_path)
+
+    statements: list[str] = []
+    real_connect = index_build.schema.connect
+
+    def traced(*args, **kwargs):
+        con = real_connect(*args, **kwargs)
+        con.set_trace_callback(lambda sql: statements.append(sql.strip().split()[0].upper()) if sql.strip() else None)
+        return con
+
+    monkeypatch.setattr(index_build.schema, "connect", traced)
+    report = index_build.build(tmp_path)
+    assert report["capsules_seen"] == 4
+    assert statements.count("BEGIN") == 1, f"one transaction per build, not {statements.count('BEGIN')}"
+    assert statements.count("COMMIT") == 1, f"one commit per build, not {statements.count('COMMIT')}"
+    # `SELECT COUNT` may run once for the report; it must not run per capsule (four capsules × two sweeps × four tables).
+    assert statements.count("SELECT") <= 8, f"{statements.count('SELECT')} selects for four capsules"
+
+    # The rows are still the same rows: idempotence and the dump hash are what I8 actually asserts.
+    before = index_build.dump_hash(tmp_path)
+    statements.clear()
+    again = index_build.build(tmp_path)
+    assert again["rows_added"] == 0, again
+    assert index_build.dump_hash(tmp_path) == before
+    assert statements.count("COMMIT") == 1

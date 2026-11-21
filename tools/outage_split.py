@@ -46,8 +46,15 @@ def _round(values: list[float], digits: int = 3) -> list[float]:
 
 
 def split_one(outage_ms: float, *, rebind_ms: float | None, dispatch_ms: float | None = None,
-              wake_late_ms: float | None = None, budget_ms: float = BUDGET_MS) -> dict:
-    """One sample, split. Every share is clamped at zero: a clock may over-report by a rounding error, not by a story."""
+              wake_late_ms: float | None = None, budget_ms: float = BUDGET_MS,
+              cpu_ms: float | None = None) -> dict:
+    """One sample, split. Every share is clamped at zero: a clock may over-report by a rounding error, not by a story.
+
+    `cpu_ms` is the process CPU the supervisor recorded beside the wall time (defect 108). It is the one field that can say
+    *whether the process was running at all*: an outage of 686 ms with 3 ms of CPU was not our code being slow, and no
+    amount of reading the other three columns can tell those apart. Absent it, `process` reads `unknown` rather than
+    guessing.
+    """
     rebind = max(0.0, float(rebind_ms or 0.0))
     dispatch = max(0.0, float(dispatch_ms or 0.0))
     tick = max(0.0, float(wake_late_ms or 0.0))
@@ -65,8 +72,17 @@ def split_one(outage_ms: float, *, rebind_ms: float | None, dispatch_ms: float |
         label = "mixed"
     else:
         label = "not-ours:tick-or-loop"
+    if cpu_ms is None:
+        process = "unknown"
+    else:
+        cpu = max(0.0, float(cpu_ms))
+        # A quarter of the outage is a generous floor for "we were on a CPU for part of this": a descheduled or swapped
+        # process spends almost none of it, and a slow syscall spends nearly all of it.
+        process = "running" if cpu >= 0.25 * outage else "not-running"
     return {
         "outage_ms": round(outage, 3),
+        "cpu_ms": None if cpu_ms is None else round(max(0.0, float(cpu_ms)), 3),
+        "process": process,
         "rebind_ms": round(rebind, 3),
         "dispatch_ms": round(dispatch, 3),
         "wake_late_ms": round(tick, 3),
@@ -78,10 +94,12 @@ def split_one(outage_ms: float, *, rebind_ms: float | None, dispatch_ms: float |
 
 
 def split(outages: list[float], rebinds: list[float] | None = None, dispatch: list[float] | None = None,
-          wake_late: list[float] | None = None, budget_ms: float = BUDGET_MS) -> dict:
+          wake_late: list[float] | None = None, budget_ms: float = BUDGET_MS,
+          cpu: list[float] | None = None) -> dict:
     rebinds = list(rebinds or [])
     dispatch = list(dispatch or [])
     wake_late = list(wake_late or [])
+    cpu = list(cpu or [])
     samples = []
     for index, outage in enumerate(outages):
         samples.append(split_one(
@@ -90,6 +108,7 @@ def split(outages: list[float], rebinds: list[float] | None = None, dispatch: li
             dispatch_ms=dispatch[index] if index < len(dispatch) else None,
             wake_late_ms=wake_late[index] if index < len(wake_late) else None,
             budget_ms=budget_ms,
+            cpu_ms=cpu[index] if index < len(cpu) else None,
         ))
     worst = max(samples, key=lambda s: s["outage_ms"]) if samples else None
     over = [s for s in samples if s["over_budget"]]
@@ -101,6 +120,7 @@ def split(outages: list[float], rebinds: list[float] | None = None, dispatch: li
         "worst": worst,
         "over_budget": len(over),
         "labels": sorted({s["label"] for s in samples}),
+        "process": sorted({s["process"] for s in samples}),
         "verdict": (
             "no sample is over the budget" if not over
             else f"{len(over)} of {len(samples)} sample(s) over {budget_ms:.0f} ms; "
@@ -116,6 +136,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--rebinds", help="comma-separated per-sample rebind in ms")
     parser.add_argument("--dispatch", help="comma-separated per-sample dispatch in ms")
     parser.add_argument("--wake-late", help="comma-separated per-sample tick lateness in ms")
+    parser.add_argument("--cpu", help="comma-separated per-sample process CPU in ms (the `rebind_cpu_ms` a capsule "
+                                      "carries since defect 108)")
     parser.add_argument("--budget", type=float, default=BUDGET_MS)
     parser.add_argument("--out", type=Path, help="write the split here as JSON")
     parser.add_argument("--json", action="store_true", help="print the split as JSON")
@@ -132,12 +154,14 @@ def main(argv: list[str] | None = None) -> int:
             numbers(",".join(str(v) for v in payload.get("dispatch_ms", []))) if payload.get("dispatch_ms") else None,
             numbers(",".join(str(v) for v in payload["wake_late_ms"])) if payload.get("wake_late_ms") else None,
             payload.get("budget_ms", args.budget),
+            numbers(",".join(str(v) for v in payload["rebind_cpu_ms"])) if payload.get("rebind_cpu_ms") else None,
         )
     else:
         outages = numbers(args.outages)
         if not outages:
             parser.error("give --sample or --outages")
-        result = split(outages, numbers(args.rebinds), numbers(args.dispatch), numbers(args.wake_late), args.budget)
+        result = split(outages, numbers(args.rebinds), numbers(args.dispatch), numbers(args.wake_late), args.budget,
+                       numbers(args.cpu))
 
     if args.out:
         args.out.parent.mkdir(parents=True, exist_ok=True)
@@ -147,9 +171,10 @@ def main(argv: list[str] | None = None) -> int:
     else:
         print(f"budget {result['budget_ms']:.0f} ms · {result['n']} sample(s)")
         for index, sample in enumerate(result["samples"]):
+            cpu = "" if sample.get("cpu_ms") is None else f" · cpu {sample['cpu_ms']:7.3f} ({sample['process']})"
             print(f"  {index}: outage {sample['outage_ms']:8.3f} · rebind {sample['rebind_ms']:7.3f} "
                   f"({sample['rebind_share_of_outage'] * 100:5.1f} %) · unexplained {sample['unexplained_ms']:8.3f} "
-                  f"· {sample['label']}")
+                  f"· {sample['label']}{cpu}")
         print(f"  {result['verdict']}")
     return 0
 

@@ -1,0 +1,36 @@
+{
+  "after": {
+    "begins": 2,
+    "commits": 2,
+    "corpus_build_s": 16.9,
+    "incremental_ms": 311.7,
+    "inserts": 12004,
+    "rebuild_ms": 298.7,
+    "selects": 8
+  },
+  "after_note": "measured in the working tree that becomes the commit after 2ab7636",
+  "before": {
+    "begins": 1000,
+    "commits": 1000,
+    "corpus_build_s": 17.27,
+    "incremental_ms": 922.2,
+    "inserts": 12004,
+    "rebuild_ms": 1068.2,
+    "selects": 8008
+  },
+  "before_commit": "2ab7636",
+  "command": "PYTHONPATH=src .venv/bin/python tools/index_build_cost.py --runs 500",
+  "host": {
+    "cpus": 2,
+    "machine": "x86_64",
+    "platform": "Linux-6.1.158+-x86_64-with-glibc2.36",
+    "python": "3.11.2"
+  },
+  "measured_at": "2026-11-21T04:55:22Z",
+  "not_claimed": "this 2-vCPU Linux host cannot reproduce the Windows timeout \u2014 the numbers here are the cost *this* machine sees, and the claim is the ratio of sync points, not a Windows wall-clock prediction.",
+  "row": "I8 acceptance corpus (500 recorded runs) and defect 114",
+  "runs": 500,
+  "tool": "tools/index_build_cost.py",
+  "what_changed": "`build()` now wraps the whole ingest loop in one transaction and `insert_rows()` counts new rows with `total_changes` instead of two `COUNT(*)` sweeps. Same rows, same dump: `commits` fell from 1 000 (one per capsule per build) to 2, and `selects` from 8 008 to 8.",
+  "why_it_matters": "a COMMIT is a journal write and a sync. On the Windows runners where defect 114 fired three times, 500 of them per build is the only part of this test large enough to reach the 120 s watchdog; the watchdog, the 500-run fixture and every assertion are unchanged."
+}

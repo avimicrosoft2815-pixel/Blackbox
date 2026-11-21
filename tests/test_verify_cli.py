@@ -297,3 +297,37 @@ def test_a_batch_naming_one_unreadable_file_exits_2(tmp_path, capsys):
     out = capsys.readouterr().out
     assert "cannot read" in out and absent in out, out
     assert "could not be read" in out, out
+
+
+def test_a_windows_style_path_is_reported_whole_not_cut_at_the_colon(capsys):
+    """Defect 116, as far as Linux can answer it: the CLI does not itself cut a path at the drive colon.
+
+    The failing Windows step passed `D:\\a\\…\\x.bbx` and the CLI received `D`. Where the cut happened was between the step
+    and the child, and this environment has no Windows and no PowerShell. What it *can* settle is the half that is ours:
+    given the whole string, `verify` reports the whole string. A regression that split arguments on `:` would fail here on
+    every platform, including the one nobody can run.
+    """
+    from blackbox.cli import cmd_verify
+
+    code = cmd_verify.main([r"D:\a\Blackbox\data\capsules\c_0000000000000001.bbx"])
+    out = capsys.readouterr().out
+    assert code == 2, out
+    assert r"D:\a\Blackbox\data\capsules\c_0000000000000001.bbx" in out, out
+    assert "cannot read D:" in out, out
+
+
+def test_a_bare_drive_letter_says_what_it_probably_was(capsys):
+    """The shape defect 116 actually produced — `D` — is refused with the reason and the two ways to avoid it."""
+    from blackbox.cli import cmd_verify
+
+    code = cmd_verify.main(["D"])
+    out = capsys.readouterr().out
+    assert code == 2, out
+    assert "single drive letter" in out, out
+    assert "defect 116" in out and "quote it" in out, out
+    # The advice is for that shape only: a missing ordinary file gets the plain refusal.
+    code = cmd_verify.main(["/nonexistent/capsules/none.bbx"])
+    out = capsys.readouterr().out
+    assert code == 2, out
+    assert "single drive letter" not in out, out
+    assert "cannot read /nonexistent/capsules/none.bbx" in out, out

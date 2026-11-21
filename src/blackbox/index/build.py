@@ -42,16 +42,27 @@ def build(data_dir: str | os.PathLike[str], *, incremental: bool = True) -> dict
         disagreements: list[str] = []
         paths = capsules(data_dir)
         added = 0
-        for path in paths:
-            try:
-                rows = ingest.capsule_rows(path)
-            except Exception as exc:                 # one broken capsule must not stop the index
-                unreadable.append({"capsule": os.path.basename(path), "error": f"{type(exc).__name__}: {exc}"})
-                continue
-            disagreements.extend(rows.pop("disagreements"))
-            added += ingest.insert_rows(con, rows)["added"]
-        con.execute("INSERT INTO index_meta (k, v) VALUES ('last_rebuild_ns', ?) "
-                    "ON CONFLICT (k) DO UPDATE SET v = excluded.v", (str(time.time_ns()),))
+        # One transaction for the whole build. Each capsule used to commit its own rows, which is 500 journal writes and
+        # 500 syncs for the acceptance corpus — the cost that put this test past the 120 s watchdog on Windows runners
+        # (defect 114). The index is *derived*: the capsules are the durable thing, so losing a half-built index to a crash
+        # costs one rebuild and no evidence. `capsule_rows` reads files and never writes, so it stays outside.
+        con.execute("BEGIN IMMEDIATE")
+        try:
+            for path in paths:
+                try:
+                    rows = ingest.capsule_rows(path)
+                except Exception as exc:             # one broken capsule must not stop the index
+                    unreadable.append({"capsule": os.path.basename(path), "error": f"{type(exc).__name__}: {exc}"})
+                    continue
+                disagreements.extend(rows.pop("disagreements"))
+                added += ingest.insert_rows(con, rows)["added"]
+            con.execute("INSERT INTO index_meta (k, v) VALUES ('last_rebuild_ns', ?) "
+                        "ON CONFLICT (k) DO UPDATE SET v = excluded.v", (str(time.time_ns()),))
+            con.execute("COMMIT")
+        except BaseException:
+            if con.in_transaction:
+                con.execute("ROLLBACK")
+            raise
         counts = schema.count_rows(con)
     finally:
         con.close()
