@@ -2292,6 +2292,16 @@ of this process's own CPU**, the re-read at 18.8 ms / 15.6 ms CPU. So the slow c
 the reader itself spent ~110 ms, six times the warm cost, on the first refusal of a 5 002-entry archive. `py3.12 /
 ubuntu-latest` passed in that run with the same code, so it is intermittent on py3.12 and has never been seen on 3.11 or 3.13.
 
+**Third recurrence, and the third measurement answers it.** `ci` run `44876854246` (`64281d4`) failed the same test on
+`py3.12 / macos-latest` and `py3.12 / windows-latest`, while **a fresh copy of the same bytes opened and listed 5 002 entries
+in 12.4 ms (12.1 ms CPU) and 18.6 ms** — so parsing the largest archive the format allows is *not* the slow part, and the
+budget is not being spent on the validator. The ~90 ms belongs to the first read of that particular file in that process, and
+disappears on the second read of the same file and on the first read of an identical copy.
+
+**What that means for the budget.** A user's first `verify` of a just-written archive can pay it; a second verify, or a verify
+of a copy, does not. Whether that is a number this project owes a bound on is an owner decision, and the options are written
+out below.
+
 **What the failure now prints.** A third measurement: the same bytes copied to a fresh name, opened and listed with both
 clocks. A fast copy would put the cost on the original file's cache story (a scanner, a write-back); a slow one puts it on
 parsing 5 002 central-directory records, which is the entire work `read_capsule` does before line 205 refuses — there is no
