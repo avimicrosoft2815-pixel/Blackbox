@@ -65,6 +65,10 @@ It is not an installer that has been run, and the matrix row below says so.
 **Experimental and untested.** `pywebview` drives WKWebView there and the code path is the same, but nothing in this
 repository has been run on a Mac. Do not read the missing warning as support.
 
+## Start here if you have never used this
+
+The eight-step walkthrough lives in one place — [getting-started.md](getting-started.md): install, attach an app, confirm the recording, open the incident, read the findings, prepare a brief, approve a proposal, run the checks. This page is the reference for the window itself.
+
 ## What opening it gives you
 
 The window opens on one of three pages, and which one is a decision the app makes for you:
@@ -161,7 +165,7 @@ the listening socket is closed afterwards.
 |---|---|---|---|---|
 | **Debian 12 (bookworm), x86_64** | **run here, 2026-11-20**: the full suite, `blackbox view/serve`, `desktop --selftest`, `doctor`, the library and setup pages over loopback, and `tools/desktop_journey.sh --automated-only` (records an incident, lists it, verifies it, diagnoses it — `bench/results/2026-11-20-desktop-journey-automated.json`) | **not launched here** — the build machine has no display, no GTK and no WebKit | **`.deb` built and extracted here, 2026-11-20**: 373 entries, `usr/bin/blackbox --version` and `desktop --selftest` both run from the extracted tree (`tests/test_desktop_package.py`, 9) | The window path is covered by `tests/test_desktop.py` with a fake webview; the real window needs a machine with `python3-gi` + `gir1.2-webkit2-4.1` |
 | **Ubuntu 24.04 LTS, x86_64** | same code, CI's `ubuntu-latest` cells | **not launched** | same `.deb` recipe (`gir1.2-webkit2-4.1` is the package name there too) | `ubuntu-latest` CI runs the CLI, not a GUI |
-| **Windows 10/11, x64** | **CI only**: `windows-latest` cells run the suite (3/3 at `1ec8be9`, the CLI — not the window) | **not run** — no Windows machine, no `makensis`/`iscc`, no `wine`, no PowerShell here (re-checked 2026-11-19) | installer definition written, **not built**, **unsigned** | Read as *unverified*: no Windows desktop journey has happened |
+| **Windows 10/11, x64** | **CI, 2026-11-20 (run `44804247919`, green end to end)**: on a `windows-latest` runner the staged embeddable tree answers `--version`, `doctor --json` (storage probe `ok`) and **records a real run** with the real launcher; and the built installer installs silently into `%LOCALAPPDATA%\Programs\BlackBox`, the *installed* interpreter answers `--version` and runs `doctor --json`, the uninstaller removes the program, and the recordings in `%LOCALAPPDATA%\BlackBox` are still there afterwards. The `windows-latest` suite cells also run the CLI | **not run** — a runner has no interactive desktop, and this build machine has no Windows, no `iscc`, no `wine` and no PowerShell | **built by CI now, unsigned**: `BlackBox-Setup-0.1.0.dev0.exe`, 12.3 MiB, sha256 `358c8125ee068267…` (run `44807593306`). `.github/workflows/package-windows.yml` compiles `blackbox.iss` with Inno Setup 6 and exercises install → run → uninstall. The first eight attempts each found one real defect in the path (no `ensurepip` in the embeddable Python, a mangled drive letter — defect 116, an output directory resolved against the `.iss`, `Start-Process -Wait` waiting on a process tree, and a `MsgBox` that ignores `/SUPPRESSMSGBOXES`); all five are fixed and the ninth run is green | Read as *verified unattended, unverified by a person*: no human has clicked through the wizard, opened the Start-menu entry or seen the window on Windows |
 | **macOS** | CI `macos-latest` cells when a runner is granted (cancelled by capacity at the last two commits) | **not run** | none | **Experimental / unsupported** |
 
 The distinction that matters: *"the code path is tested on Linux"* is not *"the app has been used on Windows"*. The

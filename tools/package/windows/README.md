@@ -16,11 +16,13 @@ file is the difference.
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tools\package\windows\build_windows.ps1
-iscc tools\package\windows\blackbox.iss /DAppVersion=0.1.0.dev0
+iscc tools\package\windows\blackbox.iss /DAppVersion=0.1.0.dev0 /Odist
 ```
 
 `build_windows.ps1` downloads the Windows embeddable Python 3.11, the package wheel and `pywebview`/`pythonnet`, installs
-them into `win64\python\`, and writes the launcher. `blackbox.iss` then produces `dist\BlackBox-Setup-<version>.exe`.
+them into `win64\python\`, and writes the launcher. `blackbox.iss` then produces `dist\BlackBox-Setup-<version>.exe` — `/Odist` is not decoration: the definition's
+`OutputDir=dist` is relative to the script's own directory, so without it the installer lands in
+`tools\package\windows\dist\` and the next step looks in the wrong place.
 
 Requirements on the build machine: Windows 10/11 x64, PowerShell 5+, [Inno Setup 6](https://jrsoftware.org/isdl.php)
 (`iscc` on `PATH`), and network access for the downloads. The icon is committed: `blackbox.ico` is generated from the same
@@ -48,3 +50,26 @@ The launcher runs `pythonw.exe`, so no console window appears beside the app; it
 
 When those exist, update `docs/desktop.md`'s platform matrix from *not run* to the observed result, with the Windows
 version and the installer hash.
+
+## What only a Windows machine can settle, and what has been settled
+
+The definition and the staging script are both checked on Linux (`tests/test_windows_definition.py`,
+`tests/test_windows_installer_workflow.py`), but that checks *shape*, not behaviour. Since 2026-11-20 the workflow
+`.github/workflows/package-windows.yml` also runs on a real `windows-latest` runner, and each run has settled one thing:
+
+| Run | What it settled |
+|---|---|
+| `44786485120` | the combined smoke step failed and said only "exit code 1" — split into named steps that each announce themselves |
+| `44787275995`, `44787465611` | the staged tree could not `import blackbox`; the embeddable Python had no packages |
+| `44788539840` | the embeddable Python has **no pip and no ensurepip**; staging now installs with the host interpreter `--target` |
+| `44789729288` | staging, `--version`, `doctor` and **a real recording run** all pass on Windows; `verify` then received `D` where the step passed `D:\a\…` (defect 116 — cause unsettled, path now found inside Python) |
+| `44790942762` | compile reached `ISCC` and failed inside the step, not in the definition |
+| `44792394361`, `44793731849` | the installer landed in `tools\package\windows\dist\`; `OutputDir` is relative to the `.iss`, so `iscc` now gets `/Odist` |
+| `44798153576` | the compiled installer is real, and `Start-Process -Wait` waits for the whole process **tree**, which Inno's setup does not end |
+| `44799776336` | installing silently blocked on the privacy `MsgBox` — a scripted box ignores `/SUPPRESSMSGBOXES`; it is now guarded by `WizardSilent` and logged instead |
+| `44804247919` | **green end to end**: stage, `--version`, `doctor`, a real recording run, compile, silent install into `%LOCALAPPDATA%\Programs\BlackBox`, the *installed* interpreter's `--version` and `doctor --json`, uninstall, and the recordings still present afterwards; the artefact is `BlackBox-Setup-0.1.0.dev0.exe`, 12.3 MiB, sha256 `358c8125ee068267c6b6b72e9873f2b3cdd444ebe9323f1811f4194b3c95f1fb` |
+
+**Still unproven on a real machine:** that the installer's window appears with the product's icon, that a person can click
+through it, that the Start-menu entry opens the app, and that the uninstaller removes it while keeping recordings. Those
+need a machine with a desktop, not a runner.
+

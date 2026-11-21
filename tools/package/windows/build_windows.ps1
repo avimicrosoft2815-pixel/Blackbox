@@ -11,6 +11,17 @@
 # platform matrix and the release gate for Windows stays open until a person does the journey on Windows.
 $ErrorActionPreference = 'Stop'
 
+# Native commands do not throw in Windows PowerShell 5.1 when they fail: `$ErrorActionPreference` only covers cmdlets.
+# The first CI run of this script staged a tree whose pip install had failed and said "5/5 done" anyway, and the only
+# symptom was a `ModuleNotFoundError` three steps later. Every external command below goes through this.
+function Invoke-Checked {
+    param([string]$What, [scriptblock]$Command)
+    & $Command
+    if ($LASTEXITCODE -ne 0) {
+        throw "$What exited $LASTEXITCODE"
+    }
+}
+
 $root = Resolve-Path (Join-Path $PSScriptRoot '..\..\..')
 $stage = Join-Path $PSScriptRoot 'win64'
 $py = Join-Path $stage 'python'
@@ -33,12 +44,21 @@ $pth = Get-ChildItem -Path $py -Filter 'python311._pth' | Select-Object -First 1
 Write-Host '== 3/5 wheels: this package + the desktop window'
 $wheelDir = Join-Path $env:TEMP 'blackbox-wheels'
 New-Item -ItemType Directory -Force -Path $wheelDir | Out-Null
-& python -m pip wheel $root --no-deps -w $wheelDir
-& python -m pip download --only-binary=:all: pywebview pythonnet -d $wheelDir
+Invoke-Checked 'pip wheel (this package)' { python -m pip wheel $root --no-deps -w $wheelDir }
+Invoke-Checked 'pip download (pywebview, pythonnet)' { python -m pip download --only-binary=:all: pywebview pythonnet -d $wheelDir }
+if (-not (Get-ChildItem $wheelDir -Filter '*.whl')) { throw "no wheels landed in $wheelDir" }
 
 Write-Host '== 4/5 install into the embedded interpreter'
-& "$py\python.exe" -m ensurepip
-& "$py\python.exe" -m pip install --no-index --find-links $wheelDir --target "$py\Lib\site-packages" blackbox-recorder pywebview
+# The Windows *embeddable* distribution ships no pip and no ensurepip: `python -m ensurepip` fails there,
+# which is why the first staging run installed nothing at all while printing "5/5". The install is done by
+# the build machine's own interpreter instead -- same Python minor version (3.11), so the binary wheels match --
+# with `--target` writing into the embedded tree.
+Invoke-Checked 'pip install into the embedded tree' {
+    python -m pip install --no-index --find-links $wheelDir --target "$py\Lib\site-packages" blackbox-recorder pywebview
+}
+# Say what the staged tree can actually import, in the script's own words, before anything claims "done".
+& "$py\python.exe" -c "import sys; sys.path.insert(0, r'$py\Lib\site-packages'); import blackbox; print('staged import:', blackbox.__version__)"
+if ($LASTEXITCODE -ne 0) { throw "the staged tree cannot import blackbox" }
 
 Write-Host '== 5/5 launcher'
 # A .cmd whose interpreter is `pythonw.exe`: pythonw is the GUI-subsystem build, so no console window appears beside the
@@ -64,5 +84,8 @@ if errorlevel 1 (
 )
 '@ | Set-Content -Encoding ASCII (Join-Path $stage 'blackbox.cmd')
 
+Get-ChildItem $py | Select-Object -First 12 | ForEach-Object { Write-Host "  $($_.Name)" }
+Get-ChildItem (Join-Path $py 'Lib\site-packages') -ErrorAction SilentlyContinue | Select-Object -First 12 |
+    ForEach-Object { Write-Host "  site-packages/$($_.Name)" }
 Write-Host "staged: $stage"
 Write-Host "next:   iscc tools\package\windows\blackbox.iss /DAppVersion=$(python -c "import tomllib;print(tomllib.load(open(r'$(Join-Path $root 'pyproject.toml')','rb'))['project']['version'])")"

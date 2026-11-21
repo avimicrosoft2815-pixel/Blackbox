@@ -15,9 +15,11 @@ asserts the observable consequences: one file, one hash, one winner.
 from __future__ import annotations
 
 import hashlib
+import errno
 import json
 import os
 import subprocess
+import time
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -154,3 +156,63 @@ def test_a_recoverer_that_adopts_after_the_claim_reports_no_work_of_its_own(data
     assert set(adopted.steps_skipped) == set(recovery.STEPS)
     assert adopted.capsule_path == winner.capsule_path and adopted.capsule_root == winner.capsule_root
     assert len(list((Path(directory) / "capsules").glob("*.bbx"))) == 1
+
+
+def _live_claim() -> bytes:
+    """A lock document that names *this* process, so the staleness check has to call it live."""
+    plat = recovery._plat
+    document = {"pid": os.getpid(), "start_ticks": plat.proc_start_ticks(os.getpid()),
+                "boot_id": plat.boot_id(), "at_ns": time.time_ns()}
+    return json.dumps(document, sort_keys=True).encode() + b"\n"
+
+
+
+def test_a_lock_is_never_observable_without_its_content(data_dir, monkeypatch, tmp_path):
+    """The claim is published whole, so a peer cannot read an empty lock and conclude it is stale.
+
+    The first version created the lock with `O_EXCL` and wrote the content afterwards. A reader arriving in that window
+    saw a file with no pid in it, the staleness check answered "nobody live", and it unlinked a live claim — two
+    recoverers both owning one run. `44820329776` failed exactly that way on `py3.13 / ubuntu-latest`.
+
+    This test watches the publication itself: what `os.link` was handed must already be the full document, and what the
+    lock path then holds must be the same bytes.
+    """
+    directory, uuid = data_dir
+    recorder = recovery.Recovery(directory, uuid, now_ns=NOW)
+    lock_path = str(tmp_path / "run" / "recovery.lock")
+    os.makedirs(os.path.dirname(lock_path), exist_ok=True)
+    content = _live_claim()
+
+    published: list[int] = []
+    real_link = os.link
+
+    def watching_link(src, dst, *args, **kwargs):
+        published.append(os.path.getsize(src))       # the bytes at publication time, before the name exists
+        return real_link(src, dst, *args, **kwargs)
+
+    monkeypatch.setattr(os, "link", watching_link)
+    assert recorder._take_lock(lock_path, content) is True
+    assert published == [len(content)], f"the lock was published with {published} bytes, not {len(content)}"
+    assert Path(lock_path).read_bytes() == content
+    # A second claimant now reads a complete document and is refused rather than stealing it.
+    assert recorder._take_lock(lock_path, b'{"pid": 9}\n') is False
+    assert Path(lock_path).read_bytes() == content
+    # No temporary file is left beside it.
+    assert [p.name for p in Path(lock_path).parent.iterdir()] == ["recovery.lock"]
+
+
+def test_a_filesystem_without_hard_links_still_claims(data_dir, monkeypatch, tmp_path):
+    """The fallback is real: when `os.link` is refused, the in-place create still elects one winner."""
+    directory, uuid = data_dir
+    recorder = recovery.Recovery(directory, uuid, now_ns=NOW)
+    lock_path = str(tmp_path / "run2" / "recovery.lock")
+    os.makedirs(os.path.dirname(lock_path), exist_ok=True)
+
+    def no_links(*_args, **_kwargs):
+        raise OSError(errno.EPERM, "hard links are not supported here")
+
+    monkeypatch.setattr(os, "link", no_links)
+    content = _live_claim()
+    assert recorder._take_lock(lock_path, content) is True
+    assert Path(lock_path).read_bytes() == content
+    assert recorder._take_lock(lock_path, b'{"pid": 9}\n') is False

@@ -1,0 +1,66 @@
+{
+  "schema": "blackbox.capsule-write-cost/1",
+  "what_this_measures": "the cost of building the index fixture's corpus on this host, split by phase, and again with the platform's sync calls disabled. It is a test-fixture measurement for defect 114, not a product benchmark.",
+  "machine": {
+    "system": "Linux",
+    "release": "6.1.158+",
+    "python": "3.11.2",
+    "cpus": 2
+  },
+  "runs": 40,
+  "with_syncs": {
+    "wall_ms": 1969.061,
+    "sync_calls_per_capsule": 40.0,
+    "tape_ms": {
+      "n": 40,
+      "total_ms": 241.061,
+      "per_item_p50_ms": 5.409,
+      "per_item_p95_ms": 7.762,
+      "per_item_max_ms": 16.251
+    },
+    "seal_ms": {
+      "n": 40,
+      "total_ms": 1720.297,
+      "per_item_p50_ms": 41.432,
+      "per_item_p95_ms": 52.93,
+      "per_item_max_ms": 75.577
+    },
+    "move_ms": {
+      "n": 40,
+      "total_ms": 1.844,
+      "per_item_p50_ms": 0.043,
+      "per_item_p95_ms": 0.063,
+      "per_item_max_ms": 0.096
+    }
+  },
+  "with_syncs_disabled": {
+    "wall_ms": 636.488,
+    "tape_ms": {
+      "n": 40,
+      "total_ms": 40.409,
+      "per_item_p50_ms": 0.995,
+      "per_item_p95_ms": 1.244,
+      "per_item_max_ms": 1.508
+    },
+    "seal_ms": {
+      "n": 40,
+      "total_ms": 590.0,
+      "per_item_p50_ms": 14.354,
+      "per_item_p95_ms": 17.6,
+      "per_item_max_ms": 18.212
+    },
+    "move_ms": {
+      "n": 40,
+      "total_ms": 1.659,
+      "per_item_p50_ms": 0.036,
+      "per_item_p95_ms": 0.076,
+      "per_item_max_ms": 0.091
+    }
+  },
+  "sync_share_of_wall": 0.6768,
+  "extrapolated_to_the_fixture": {
+    "500_capsules_ms_here": 24613.3,
+    "note": "linear extrapolation of this host's per-capsule cost; the fixture also moves each capsule into one directory, which is not linear on every filesystem, so this is an order-of-magnitude figure"
+  },
+  "what_a_windows_runner_would_have_to_pay": "the same phases, with `FlushFileBuffers` per sync and a Defender scan per close. The sync share above is the part of this fixture whose cost differs most between ext4 and NTFS; the tape and seal phases are the same work everywhere."
+}

@@ -13,6 +13,7 @@
 
 | If you want to | Read |
 |---|---|
+| start from nothing and finish one incident, in order | **[getting-started.md](getting-started.md)** — eight steps, each with what you should see and what to do when it goes wrong |
 | install it and record something in five minutes | `onboarding.md`, then `desktop.md` for the window |
 | know what it will and will not do | `limitations.md`, then `guarantees.md` |
 | fix something that went wrong | `troubleshooting.md`, then `errors.md` for the code |

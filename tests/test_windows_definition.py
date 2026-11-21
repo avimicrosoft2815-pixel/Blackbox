@@ -202,3 +202,31 @@ def test_the_icon_generator_is_reproducible() -> None:
         assert again.read_bytes()[:4] == ICO.read_bytes()[:4]
     # The committed file is the six-size build the tests above read, and small enough that every shortcut copies it fast.
     assert len(ICO.read_bytes()) < 64 * 1024
+
+
+def test_nothing_in_the_definition_waits_for_a_button() -> None:
+    """An unattended install has nobody to click OK, and a scripted `MsgBox` ignores `/SUPPRESSMSGBOXES`.
+
+    The sixth and seventh Windows runs hung here for fifteen minutes each: `InitializeWizard` opened the privacy notice
+    unconditionally, and `iscc`-built setup waits for a button that never gets pressed. The rule is narrow and checkable —
+    inside `[Code]`, every `MsgBox` sits under a `WizardSilent` test, so a silent install logs the words instead.
+    """
+    import re as _re
+
+    code = _iss().split("[Code]", 1)
+    assert len(code) == 2, "the definition has no [Code] section"
+    body = code[1]
+    lines = body.splitlines()
+    for index, line in enumerate(lines):
+        if "MsgBox(" not in line or line.strip().startswith("{"):
+            continue
+        # Look back for the guard. `if WizardSilent then ... else MsgBox(...)` puts it a few lines up, and the guard may
+        # itself be followed by other statements, so allow a small window rather than requiring the previous line.
+        window = "\n".join(lines[max(0, index - 12) : index])
+        assert "WizardSilent" in window, (
+            f"MsgBox on line {index + 1} of [Code] is not guarded by `if WizardSilent` — an unattended install would "
+            "block on it forever: " + line.strip()
+        )
+    # And the notice still reaches a silent install, in the log rather than a window.
+    assert _re.search(r"Log\(", body), "a silent install learns nothing about the privacy notice"
+    assert "no cloud" in body or "no account" in body

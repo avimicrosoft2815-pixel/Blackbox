@@ -428,7 +428,7 @@ exit 2 alone), and an unreadable path in a batch exiting 2. Defect 74 in `docs/d
 
 ---
 
-## B9 — The Windows desktop app: installer definition written, install journey **not run**
+## B9 — The Windows desktop app: installer built and installed in CI, window still **not run**
 
 **What exists.** `blackbox desktop` (a real window, not a tab) with its three pages — first-run setup, the incident
 library, and a run — on top of `ui/app.py`'s loopback routes; a `.deb` that installs it on Debian/Ubuntu; and
@@ -437,22 +437,33 @@ the Windows embeddable Python, the package wheel and `pywebview`/`pythonnet`, so
 user's machine. The Windows installer is **unsigned**: signing is the owner's separate task and no certificate exists in
 this environment.
 
-**What has not happened.** The installer has never been built and the journey has never been done: this build environment
-is Linux, with no Windows machine, no `wine`, no Inno Setup and no Authenticode certificate. So the Windows rows read:
+**What has happened since (2026-11-20).** No Windows machine exists in this build environment, so the packaging path was
+moved onto a real `windows-latest` runner instead of being argued about. Run `44804247919` is green end to end:
+`build_windows.ps1` stages the embeddable interpreter, `iscc` compiles `blackbox.iss`, the installer runs
+`/VERYSILENT`, the **installed** tree answers `--version` and runs `doctor --json`, the uninstaller removes the program,
+and the recordings under `%LOCALAPPDATA%\BlackBox` are still there afterwards. Eight earlier runs each found one real
+defect in the path — the embeddable Python's missing `ensurepip`, a wheel directory the host pip never wrote, a drive
+letter the CLI received as `D` (defect 116, cause unsettled), `OutputDir` resolved against the `.iss`, `Start-Process -Wait`
+waiting on the whole process tree, and a privacy `MsgBox` that ignores `/SUPPRESSMSGBOXES` and blocked the silent
+install for fifteen minutes. All are fixed; the definition now has a test that fails any `MsgBox` without a
+`WizardSilent` guard.
+
+So the Windows rows now read:
 
 | Row | State |
 |---|---|
-| Build `BlackBox-Setup-<version>.exe` | **not built** |
-| Install on Windows 10/11, launch, record with a real SDK client, open the capsule, uninstall | **not run** |
-| Data kept on uninstall (the installer says where it is) | designed and stated; unverified on Windows |
+| Build `BlackBox-Setup-<version>.exe` | **built by CI**: `BlackBox-Setup-0.1.0.dev0.exe`, 12.3 MiB, sha256 `358c8125ee068267c6b6b72e9873f2b3cdd444ebe9323f1811f4194b3c95f1fb` (run `44807593306`, green). Unsigned |
+| Install on Windows 10/11, launch, record with a real SDK client, open the capsule, uninstall | **partly run, in CI**: silent install, installed `--version`, installed `doctor`, uninstall, recordings kept. **Not run**: the wizard with a mouse, the Start-menu entry, the window itself, an SDK client's key |
+| Data kept on uninstall (the installer says where it is) | **verified unattended in CI**: the `.bbx` count after uninstall is not lower than before it |
 | Signature so SmartScreen does not warn | **no certificate** — the owner's |
 
-**What would close it**, exactly: on a Windows 10 and a Windows 11 machine (or two real Windows VMs), run
-`build_windows.ps1`, then `iscc …`, install, launch `blackbox desktop`, record `openai` with the user's own key, open the
-capsule in the window, uninstall, and check that the recordings are still there. Then move the row in `docs/desktop.md`
-from *not run* to the observed result with the installer hash. Until then, "Windows desktop" is **unverified**, and
-nothing in this repository claims otherwise — the Linux `.deb` is verified by extraction and by a launcher run, and the
-window's code path is verified with a fake backend, which is a test and not a desktop.
+**What would close it**, exactly: on a Windows 10 and a Windows 11 machine (or two real Windows VMs), install the CI-built
+installer with a mouse, launch `blackbox desktop` from the Start menu, record with the user's own key, open the capsule in
+the window, uninstall, and check that the recordings are still there. What CI cannot do is click: a runner has no
+interactive desktop, so the wizard, the shortcut and the window are the part a person owns. Until someone does it,
+"Windows desktop" is **verified unattended and unverified as an experience**, and nothing in this repository claims
+otherwise — the Linux `.deb` is verified by extraction and by a launcher run, and the window's code path is verified with
+a fake backend, which is a test and not a desktop.
 
 ## 2026-11-20 — what changed on this list
 
@@ -461,7 +472,7 @@ window's code path is verified with a fake backend, which is a test and not a de
 | B4 (node-level edges) | **unchanged** — measured, the tick is still the owner's | `bench/results/2026-11-18-p3b03-acceptance.json` |
 | B5 (OTLP importers) | **unchanged** — three products and one second transport still unmeasured, and their downloads are still blocked from this sandbox | this file, above |
 | B6 (release machine, rebind p95) | **unchanged**, and now with a tool for the rebind half: `tools/outage_split.py` reads a failing sample and says how much of the outage was the rebind | `bench/results/2026-11-20-defect-108-split.json` |
-| B9 (Windows desktop) | **unchanged in substance**: still not built, still not run, still unsigned. What moved is the Linux half — the `.deb` built and ran from the extracted tree on 2026-11-20, and the automated desktop journey ran headless | `bench/results/2026-11-20-desktop-journey-automated.json`, `tests/test_desktop_package.py` |
+| B9 (Windows desktop) | **moved on 2026-11-20**: the installer is now built by CI, installed silently on a real Windows runner, the installed tree answers `--version` and `doctor --json`, the uninstaller removes it and the recordings survive. Still **unsigned**, and the wizard, the Start-menu entry and the window still have no human behind them. The Linux half moved the same day — the `.deb` built and ran from the extracted tree, and the automated desktop journey ran headless | `.github/workflows/package-windows.yml` run `44807593306`; `bench/results/2026-11-20-desktop-journey-automated.json`; `tests/test_desktop_package.py` |
 
 Two new defects were found and fixed while closing the attach row, and they are the reason this list has a new shape
 rather than a shorter one:

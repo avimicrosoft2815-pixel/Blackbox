@@ -1,0 +1,58 @@
+{
+  "schema": "blackbox.node-client-cost/1",
+  "what_this_measures": "wall time of a whole client process per request through the proxy, on this host. It measures the *test's* budget against the work, not the product's latency: the proxy's own per-response time is measured in bench/results/*-stream-identity.json.",
+  "machine": {
+    "system": "Linux",
+    "python": "3.11.2",
+    "node": "v22.22.3",
+    "curl": "curl 7.88.1 (x86_64-pc-linux-gnu) libcurl/7.88.1 OpenSSL/3.0.20 zlib/1.2.13 brotli/1.0.9 zstd/1.5.4 libidn2/2.3.3 libpsl/0.21.2 (+libidn2/2.3.3) libssh2/1.10.0 nghttp2/1.52.0 librtmp/2.3 OpenLDAP/2.5.13",
+    "cpus": 2
+  },
+  "test_budget_ms": 60000,
+  "node": {
+    "n": 25,
+    "p50_ms": 79.4,
+    "p95_ms": 81.2,
+    "max_ms": 81.9,
+    "sampled_ms": [
+      75.0,
+      80.9,
+      79.1,
+      80.0,
+      81.2,
+      78.3,
+      80.2,
+      80.4,
+      80.1,
+      41.4,
+      78.7,
+      75.3,
+      80.2,
+      81.9,
+      44.5,
+      77.5,
+      80.1,
+      76.9,
+      79.8,
+      79.0,
+      76.2,
+      80.4,
+      80.6,
+      79.4,
+      79.4
+    ]
+  },
+  "curl": {
+    "n": 25,
+    "p50_ms": 50.3,
+    "p95_ms": 52.3,
+    "max_ms": 52.3
+  },
+  "proxy_stats": {
+    "requests": 52
+  },
+  "budget_relative_to_this_host": {
+    "max_over_budget": 732.6,
+    "note": "how many times the slowest whole Node process here fits inside the test's 60-second budget. A runner several times slower than this host moves the figure, not the order of magnitude; a runner that hangs a connect does not, which is why the defect is left open rather than called a flake."
+  }
+}

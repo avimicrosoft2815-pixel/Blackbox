@@ -3,6 +3,8 @@
 This page exists so that the human-only item in `docs/STATUS.md` ("3-person stranger test") is **one command plus
 three tasks**, not a plan. Nothing here has been run by anyone outside this session, and the STATUS row says so.
 
+If you want a single ordered path rather than three tasks, [getting-started.md](getting-started.md) is that path; this page is the stranger test.
+
 ## Setup (one command, from the repository root)
 
 ```

@@ -127,8 +127,9 @@ partial on purpose: it has since moved, when the Windows and macOS cells of `1d4
   attack corpus was the fifth until 2026-11-19, when `tests/test_capsule_attacks.py` moved it out of this list. None of these appear in `docs/RELEASE-BLOCKERS.md`, because none of them is something a user of the
   current build would hit — which is exactly why the blocker list cannot be read as the gate list.
 * **Seven rows are partial**, each with the uncovered part named in its cell. The ones worth a reviewer's time first are the
-  rows whose remaining half is a *machine*: the Windows desktop journey (an installer that has never been compiled) and the
-  two matrix rows. The Windows permissions arm is no longer one of them — it ran green at `1d42e0c`.
+  rows whose remaining half is a *machine*: the Windows desktop journey (the installer is compiled, installed and
+  uninstalled by CI at `44804247919`; the wizard, the shortcut and the window still need a Windows desktop) and the two
+  matrix rows. The Windows permissions arm is no longer one of them — it ran green at `1d42e0c`.
 * **Twenty-seven rows are evidenced** on this branch — a test or a committed artefact exists, and a reviewer still has to
   re-read it. That is the honest sense in which this branch is close: close on the mechanism, not on the paperwork.
 * **Three rows need people** (the 3-person onboarding test, the blinded diagnosis benchmark, the S17 `sudo` control) and

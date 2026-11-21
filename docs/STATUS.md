@@ -209,10 +209,35 @@ and the annotation could not say which, so the budget did not move and the failu
 lateness, rebind, dispatch, probe cycle) in the characters an annotation keeps. It did not recur at `382c80f`, which is twenty-two of twenty-two green and is now the pinned commit — one green sample
 after one red one is not a diagnosis, and defect 108 stays open saying so.
 
-What this does **not** measure, and still does not: a Windows **installer** — nothing here compiled or ran one — the
-desktop journey on either non-Linux OS (`desktop --selftest` needs a display and CI has none), or a macOS *installer*.
+What this does **not** measure, and still does not: the **interactive** Windows install — CI now compiles, installs
+silently, runs the installed tree and uninstalls it (run `44804247919`, green), but a runner has no wizard, no Start-menu
+click and no window; the desktop journey on either non-Linux OS (`desktop --selftest` needs a display and CI has none); or
+a macOS *installer*.
 `docs/gates/READINESS.md` now reads 36 rows → **27 evidenced / 7 partial / 0 with nothing behind them / 2 needing
 people**, and the two rows that moved are the Go reader (its cell is green) and permissions (its other two OSes are).
+
+**2026-11-20, the Windows packaging path, measured on a runner rather than argued on Linux.** `.github/workflows/package-windows.yml`
+puts the staging script and the Inno Setup definition in front of a real `windows-latest` machine. Eight runs each found
+exactly one real defect in the path — a pip failure hidden by PowerShell 5.1's silence on native exit codes, the embeddable
+Python having no `pip` and no `ensurepip` at all, a wheel directory the host interpreter never wrote, a drive letter the CLI
+received as `D` (defect 116, **cause unsettled and recorded as unsettled**), `OutputDir` resolved against the `.iss`,
+`Start-Process -Wait` waiting for Inno's whole process tree, and a privacy `MsgBox` that ignores `/SUPPRESSMSGBOXES` and
+blocked the silent install for fifteen minutes. Run **`44807593306` is green end to end**: staging, `--version`, `doctor`,
+a real recording run, compile, silent install, the *installed* interpreter's `--version` and `doctor --json`, uninstall,
+recordings kept — artefact `BlackBox-Setup-0.1.0.dev0.exe`, 12.3 MiB, sha256 `358c8125…`. What a runner cannot do is click:
+the wizard, the Start-menu entry and the window are still unrun by a person, and the installer is still unsigned.
+
+**And the suite cells at that commit:** CI run `44809947917` (`133b0c3`) is green on **all eleven suite cells** — 3 OSes ×
+3 Pythons, macOS included — plus `docs` and `go-reader`, which is also the run that carries the new
+`tests/test_getting_started.py` and the defect-117 failure message onto Windows and macOS.
+
+**Then six runs in a row, both events, all green.** `86f92b3`, `726b217` and `cdf82cc` each produced a `push` and a
+`pull_request` run and **all six are green on all eleven cells** (`44828064353`, `44828074962`, `44828434391`,
+`44828441722`, `44828446885`, `44828461054`). Two of the three commits are repairs rather than writing: the recovery claim
+is now published whole (`os.link` of a fully written temporary file, defect 101 update 3) after `44820329776` produced two
+recoverers for one run, and the macOS stall-dump assertion now says what Darwin actually does (defect 118) instead of what
+Linux does. The fact worth keeping is not the streak — a green run is not a diagnosis — but that the two failures which
+started this stretch (`44820329776`, `44823859540`) have not recurred under the changes made for them.
 
 **The CLI contract** (`docs/cli.md`, `tests/test_cli_contract.py`, 21). Every command, its machine-readable form and its
 exit codes in one table, checked against the binary: the table's set equals the front door's, every `--json` row is
@@ -290,11 +315,11 @@ correctness. `tests/test_index_rebuild.py` (9 tests) asserts the same equality i
 could have been false: an unchanged corpus rebuilt twice, a new capsule changing only its own rows, and two tapes of one
 run producing one run row and two artifacts.
 
-Suite: **Total: 1558 tests** — 1556 pass here and 2 are skipped on POSIX by name
+Suite: **Total: 1588 tests** — 1586 pass here and 2 are skipped on POSIX by name
 (`test_an_open_view_blocks_the_unlink_only_on_windows`: POSIX permits unlinking a file another fd still holds, so the
 open-view case exists only on Windows; and `test_on_windows_no_broad_principal_has_access`: mode bits are not access on
-Windows and `icacls` does not exist here). Measured on this machine on 2026-11-20: **1 558 collected, 0 failed,
-0 errors, 2 skipped, 431.3 s** (`/tmp/full22.xml`) — the six added this round are the Windows rename- and read-retry
+Windows and `icacls` does not exist here). Measured on this machine on 2026-11-20, after the recovery-lock, stall-dump and killed-curl changes: **1 588 collected, 0 failed,
+0 errors, 2 skipped, 442.9 s** (`/tmp/full27.xml`) — the six added this round are the Windows rename- and read-retry
 tests (defects 105–106) and the adoption test that holds defect 107 down. The 117 added since the 1414-line are the desktop flows and the two things that
 could previously only be checked by a person with a screen or a Windows machine:
 
@@ -307,10 +332,15 @@ could previously only be checked by a person with a screen or a Windows machine:
   refused with `BBX-` codes and no traceback; a capsule name from the URL never reaching outside the data directory; the
   data directory byte-identical after every page load; a non-form `POST` refused; and a run whose process was killed still
   listing, opening, verifying and diagnosing.
-* `tests/test_windows_definition.py` (11) — the Windows installer definition checked as far as Linux allows: every
+* `tests/test_windows_definition.py` (12) — the Windows installer definition checked as far as Linux allows: every
   `Source:` exists, the icon is a real ICO with the product's colours, the installer is per-user, `HKCU`-only, deletes
-  only its own directory, claims no signature, and the staging script and the definition agree on the launcher. **This is
-  a definition that would compile, not an installer that has been run.**
+  only its own directory, claims no signature, the staging script and the definition agree on the launcher, and **no
+  `MsgBox` in `[Code]` sits outside a `WizardSilent` guard** (the seventh CI run hung on exactly that). What CI adds is
+  `tests/test_windows_installer_workflow.py` reading the workflow that compiles and installs it on a real Windows runner.
+* `tests/test_getting_started.py` (11) — the beginner walkthrough `docs/getting-started.md` checked against the product:
+  the eight steps exist in the mandate's order, every `blackbox <cmd>` it tells a beginner to type is in `KNOWN`, every
+  `BBX-E…` it quotes is in the register and on `docs/errors.md`, every file it points at exists, every step carries an
+  evidence sentence naming something openable, and the page says which parts no person has done.
 * `tests/test_desktop_journey.py` (3) — the harness a person with a Linux desktop runs refuses on a headless machine, and
   its `--automated-only` mode records a real incident, lists it, checks it, diagnoses it, and writes
   `"verdict": "automated-only"` with every window answer `"not-attempted"`.
@@ -406,7 +436,7 @@ sibling run. Defect 114 records the three occurrences, the stack each one died o
 close those tests sit to the limit here (21.8 s for the whole file, 15.5 s of it the fixture building 500 capsules). No
 budget was raised, no test was skipped, and it is not called a flake.
 
-Because of that, the honest statement about CI tonight is: **the code is green on this machine (1 558 collected, 0 failed),
+Because of that, the honest statement about CI tonight is: **the code is green on this machine (1 562 collected, 0 failed),
 and 11 of 11 cells were green at `65c600e`; on `a259a70` one Windows cell at a time falls over on a slow-runner timeout.**
 The Windows cells are being re-run; the result is reported in the reply, not pre-judged here.
 
@@ -517,7 +547,7 @@ Windows installer exists, `run -- claude` with a kill is not run, and the bench-
 | Item | Label (requires humans / requires time / not testable here / blocked) | Reason / fix attempts |
 |---|---|---|
 | The desktop window on a real desktop | not testable here | the build machine has no display, no `python3-gi` and no `gir1.2-webkit2-4.1`; the code path runs against a fake webview. `sh tools/desktop_journey.sh` on a Debian/Ubuntu desktop closes it, and `bench/results/2026-11-20-desktop-journey-automated.json` records what the machine could decide for itself |
-| The Windows installer and its install journey | not testable here | no Windows host, no `iscc`, no `wine`, no PowerShell and no certificate. `tools/package/windows/README.md` is the hand-off; `tests/test_windows_definition.py` (11) checks the definition that would compile |
+| The Windows installer with a person in front of it | requires humans | **the build is no longer the gap**: CI run `44804247919` compiles the installer, installs it silently, runs the installed tree and uninstalls it while the recordings survive. What no runner can do is the wizard, the Start-menu entry and the window. `tools/package/windows/README.md` tables what each run settled; still **unsigned**, and that is the owner's certificate |
 | `run -- claude` with `kill -9` | not testable here | the CLI is not installed here and its install needs an account. `tests/test_attach_curl_kill.py` closes the `curl` half of the same row; the `claude` half stays named |
 | The bench-box rows (cold start, rebind p95) | requires time | this 2-vCPU sandbox reads p95 44.5 ms against a 40 ms gate with 32 ms of it in the interpreter and the CLI's imports (`bench/results/2026-11-19-ingest-cold-start.json`, `row_satisfied_here: false`); the quiet host is B6 |
 | Three OTLP products and Phoenix's gRPC listener | blocked | their Go binaries come from `objects.githubusercontent.com`, which this sandbox cannot reach; the three measured importers are in `bench/results/2026-11-18-otlp-importers.json` |
@@ -544,7 +574,7 @@ extra imported only by the window code, and `tests/test_stdlib_only.py` still ho
 |---|---|---|
 | The shell: loopback URL, secret path, `debug=False`, server stopped on close, refusal instead of a browser tab | `src/blackbox/ui/desktop.py` | `tests/test_desktop.py` (12) with a fake webview backend; `desktop --selftest --json` on a real machine |
 | Linux package: `.deb` with launcher, `.desktop` entry, icon, `.bbx` MIME type, vendored `pywebview`, `Depends: python3 (>= 3.11), python3-gi, gir1.2-webkit2-4.1` | `tools/package/linux/build_deb.sh`, `debian/` | `tests/test_desktop_package.py` (6): built here, extracted with `dpkg-deb -x`, `usr/bin/blackbox --version` and `desktop --selftest` run from the extracted tree |
-| Windows installer | `tools/package/windows/{blackbox.iss,build_windows.ps1}` | **not built, not run**: no Windows, no Inno Setup, no wine here. The journey is the open gate row |
+| Windows installer | `tools/package/windows/{blackbox.iss,build_windows.ps1}` | **built, installed and uninstalled by CI** (`44804247919`, green): silent install, installed `--version` + `doctor --json`, uninstall, recordings kept. Unsigned; the wizard and the window have not been used by a person |
 | macOS | — | experimental and untested; no package |
 
 **Not claimed:** that a window has appeared on any machine. This environment has no display, no `python3-gi` and no
@@ -704,10 +734,10 @@ row in the same commit.
 ## What is next
 
 0a. **What the 2026-11-16 additions still need, stated so a machine's absence is not mistaken for a pass.**
-    * **Windows, a real machine or CI with a GUI**: the `icacls` arm of `tests/test_permissions.py` has never run; the
-      unsigned installer's install → launch → attach → record → view → diagnose → uninstall journey is still unrun; the
-      desktop's own flows on Windows remain unmeasured (the window is the only untested part of the product that a user
-      touches first). **Nothing in this turn claims any of that.**
+    * **Windows with a desktop**: the unsigned installer is built by CI and installs, runs and uninstalls unattended
+      (`44804247919`), but the install → **attach → record → view → diagnose** journey in the *window* is still unrun, and
+      no person has clicked through the wizard or the Start-menu entry. The `icacls` arm of `tests/test_permissions.py` ran
+      green on `windows-latest` at `1d42e0c`. **Nothing in this turn claims the window.**
     * **Linux with a display**: this sandbox has none, so `blackbox desktop --selftest` still reports `gtk_ready:false`
       and exits 3. The window's flows are covered over HTTP by `tests/test_ui_flows.py`, which is not the same thing.
     * **CI**: every file named in the six sections above is a builder run on this machine. The workflows have not run

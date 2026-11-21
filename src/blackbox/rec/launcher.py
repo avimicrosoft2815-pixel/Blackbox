@@ -399,6 +399,11 @@ def launch(argv: list[str], *, data_dir: str | None = None, stall_ms: int = 5_00
                 "retry_transmitted": proxy_thread.retry_transmitted,
                 "port_changed": proxy_thread.port_changed,
                 "stats": server.stats.as_dict() if server is not None else {},
+                # Defect 108: the loop's own callback exceptions. On the Windows sample one of these existed only in a
+                # job log this sandbox cannot read, so the run kept no record of it. Bounded in the recorder; repeated
+                # here as a count plus the first few, because a summary that carries 256 tracebacks is not readable.
+                "loop_error_count": len(proxy_thread.loop_errors),
+                "loop_errors": list(proxy_thread.loop_errors[:8]),
             }
         finally:
             proxy_thread.stop()
@@ -415,6 +420,19 @@ def launch(argv: list[str], *, data_dir: str | None = None, stall_ms: int = 5_00
             engine.observe_all("exit_code", float(result.exit_code))
             engine.observe_all("stall_ms", float(result.duration_s * 1000.0) if watch.stalled else 0.0)
             keeper.evaluate_triggers(force=True)
+        # The proxy's own record goes into the tape, not just into this process's memory (defect 108). Until this
+        # frame existed, `rebinds` and `loop_errors` died with the launcher: a user who hit a slow run could not send
+        # anything a maintainer could read. It is a MARK, which every reader already knows and which changes no derived
+        # part, and it is written before RUN_END because the run is sealed after that.
+        if result.proxy:
+            writer.append(C.KIND_MARK, cbor.encode({
+                "name": "proxy_loop",
+                "rebinds_ms": [round(value, 3) for value in result.proxy.get("rebinds") or []],
+                "port_changed": bool(result.proxy.get("port_changed")),
+                "loop_error_count": int(result.proxy.get("loop_error_count") or 0),
+                "loop_errors": result.proxy.get("loop_errors") or [],
+                "requests": int((result.proxy.get("stats") or {}).get("requests") or 0),
+            }), priority=2)
         writer.emit(C.KIND_RUN_END, cbor.encode({"run_id": run_id, "exit_code": result.exit_code,
                                                  "signaled": result.signaled, "stalled": watch.stalled,
                                                  "duration_ms": int(result.duration_s * 1000)}))
@@ -750,6 +768,11 @@ def _summary_line(result: RunResult) -> str:
     if result.proxy:
         bits.append(f"proxy {result.proxy['url']} ({len(result.proxy['exports'])} vars exported"
                     + (f", {len(result.proxy['adopted'])} adopted" if result.proxy["adopted"] else "") + ")")
+        if result.proxy.get("loop_error_count"):
+            # Says what happened and where it is kept, without naming a cause: what a callback raised is evidence, and
+            # deciding whether it is the explanation belongs to a person reading it (defect 108).
+            bits.append(f"the proxy loop raised {result.proxy['loop_error_count']} exception(s), "
+                        f"recorded in the capsule as a proxy_loop mark")
     if result.sdk and result.sdk.get("enabled"):
         bits.append("sdk auto-import (sitecustomize)")
     if result.hooks and result.hooks.get("enabled") is False:

@@ -1798,6 +1798,38 @@ modules whole. **Verified on Windows** at `1d42e0c`: the `py3.11`/`py3.12`/`py3.
 cells are green on both workflow runs of that commit, and the test that failed with "2 recoverers each claimed to have
 done the work" is the test they ran. Confirmed, not inferred — the fix is what those cells measured.
 
+**Update 3 (2026-11-20): the same sentence came back, from a second window, and it was ours.** `44820329776` — the
+`pull_request` run at `9ddd5c4`, while the `push` run of the *same* sha was green — failed
+`py3.13 / ubuntu-latest` with "2 recoverers each claimed to have done the work". The post-claim fix above closed the
+window where a loser claims *after* the winner archived. It did not close this one:
+
+```
+open(O_CREAT|O_EXCL)  →  [ file exists, empty ]  →  pwrite(claim)  →  fdatasync
+```
+
+A peer that arrives between the create and the write reads a lock file with no pid in it. `_lock_is_live` cannot judge a
+document that is not there, answers "nobody live", and the peer *unlinks a live claim* and takes it. Both processes then
+run every step of one incident: one capsule (the path is derived from the run id, so the second seal lands on the same
+name), two recoverers each reporting work. Nothing about that is a flake or a slow runner; it is a protocol hole whose
+window is microseconds wide, which is exactly why it needed the fast cells and six processes to show itself once.
+
+**Fixed** by publishing the lock whole: the claim is written to a private temporary file, `fdatasync`'d, and published
+with `os.link`, which fails with `EEXIST` when the target exists. A lock file is therefore never observable without its
+content, and exactly one claimant's link can succeed. Filesystems without hard links fall back to the in-place create, and
+the docstring says which property that fallback does not have instead of pretending.
+
+**Two tests, both of which fail against the old code** (`git stash` the fix and they are red):
+
+* `test_a_lock_is_never_observable_without_its_content` watches `os.link` itself — what it was handed must already be the
+  full document — then asserts a second claimant with a live holder is refused rather than stealing, and that no temporary
+  file is left behind;
+* `test_a_filesystem_without_hard_links_still_claims` makes `os.link` refuse with `EPERM` and asserts the fallback still
+  elects one winner.
+
+**Measured here:** the whole `tests/test_recovery_identity.py` 60 consecutive times, no failure; the six-process test alone
+120 consecutive times, no failure. That is not proof the race is gone — nothing in-process can prove it — but the window
+the failure needs no longer exists in the code path, and the test above fails if anyone reintroduces it.
+
 ## Defect 104 — the hung-test watchdog bounded a test that was long by design (2026-11-16, CI)
 
 The `py3.12 / windows-latest` cell dumped `test_250_invocations_with_random_failures_leave_no_open_run` past 120 s inside
@@ -2102,3 +2134,138 @@ chunks at 60 ms) and what the test claims are unchanged; five consecutive local 
 **This is the fourth timing assumption in a row to turn out to be the test's rather than the product's** — 108's outage,
 110's clock-derived sentence, 113's discarded stderr, and now a fixed sleep deciding when to kill. The pattern is worth
 naming: a kill test that does not wait for evidence that there was something to kill tests the scheduler.
+## Defect 108 (update 2, 2026-11-20) — the record now survives the process, and the two newer Windows failures got numbers
+
+The first fix on this defect added `ProxyThread.loop_errors` and then never used it: the list lived on an object the
+launcher threw away when it exited, and the only consumer was a bench script. So a user who hit a slow run still had
+nothing to send, which was the whole point.
+
+**Three things changed, none of them a claim about the cause.**
+
+1. **The record goes into the tape.** The launcher writes one `MARK` before `RUN_END` — `{"name": "proxy_loop",
+   "rebinds_ms": [...], "port_changed": …, "loop_error_count": n, "loop_errors": [...], "requests": n}`. A `MARK` is a
+   frame every reader already understands, it changes no derived part, and it means the capsule from a bad run carries the
+   proxy's own account of that run. `tests/test_launcher_proxy.py::test_the_proxy_keeps_its_own_record_in_the_tape_not_only_in_memory`.
+2. **The counter has the test it was missing.**
+   `tests/test_supervisor_loop_errors.py` (3): a callback the loop cannot attribute to a request is recorded with its
+   message, exception type, handle type and time; the record stops at 256 entries, so a loop failing every tick cannot
+   turn its own log into the outage; the proxy keeps answering while it logs; and an idle proxy records nothing, which is
+   the control that makes the other two mean something.
+3. **The summary says it in one sentence** when the count is non-zero, and names where the record is — not what caused it.
+
+**The two newer Windows failures are now measured rather than guessed**, each with its own tool and artefact:
+
+| Question | Measurement here | Artefact |
+|---|---|---|
+| Is `tests/test_index_rebuild.py`'s 120-second watchdog tight for the fixture (defect 114)? | building one capsule costs **40 sync calls** on the platform dispatch; syncs are **67.7 %** of the corpus build's wall time (1969 ms with, 636 ms without); seal p50 **41.4 ms** with syncs against **14.4 ms** without | `tools/capsule_write_cost.py` → `bench/results/2026-11-20-capsule-write-cost.json` |
+| Is a 60-second Node subprocess budget tight (defect 113)? | a whole Node client process through the proxy: p50 **79.4 ms**, p95 81.2 ms, max **81.9 ms**; the budget is **733×** the slowest process here | `tools/node_client_cost.py` → `bench/results/2026-11-20-node-client-cost.json` |
+
+What that buys the next occurrence: 114's explanation is now arithmetic — 20 000 syncs for a 500-capsule fixture, and
+`FlushFileBuffers` plus a Defender scan per close is where NTFS and a loaded runner differ from this host — and 113's is
+the opposite, a budget three orders of magnitude past the work, which points at a hung connect rather than a slow one.
+Neither is called resolved: both need a Windows runner, and the entries say exactly which command to run there.
+## Defect 116 — on a Windows runner the CLI received `D` where the script passed `D:\a\…\x.bbx` (2026-11-20, CI, open)
+
+**What happened.** The Windows packaging workflow's smoke step runs `blackbox verify <capsule>` against a capsule a real
+run had just sealed. It exited 2 with
+`blackbox verify: cannot read D: FileNotFoundError: [WinError 2] The system cannot find the file specified: 'D'` — the
+path had been cut at the drive letter's colon, so the CLI was handed the one-character string `D`.
+
+**What is known.** The staging and doctor steps passed on the same runner: the embedded interpreter runs, the package
+imports, the probes answer. So this is not "the CLI is broken on Windows". The path was produced by
+`(Get-ChildItem …).FullName` and passed as `& $py -c $boot verify @paths` from a PowerShell step.
+
+**What is not known.** Where the cut happened: PowerShell's native argument passing, the `-c` bootstrap string, or
+`blackbox verify`'s own argument handling. This environment has no Windows, no PowerShell and no wine, so any of the three
+would be a guess, and a guess dressed as a cause is worse than the open question.
+
+**Worked around, not fixed.** The workflow now finds the capsule paths *inside* Python (`glob` over the data directory) and
+calls `main(['verify'] + paths)` there, so no path crosses a shell boundary. That makes the row CI-measurable again while
+leaving the question open.
+
+**What would settle it:** on a Windows machine,
+`python -c "import sys; print(sys.argv[1:])" D:\tmp\x.bbx` from PowerShell 5.1 and from pwsh 7, and
+`blackbox verify D:\tmp\x.bbx` typed at a `cmd` prompt. If the CLI alone refuses an absolute Windows path, it is ours and
+this becomes a bug in `cmd_verify`; if only the PowerShell invocation mangles it, it is the harness and the docs should say
+so. Either way the answer is one command on a machine with Windows.
+## Defect 117 — the 5 001-entry refusal took 133 ms on one Windows cell and 15 ms on the next commit (2026-11-20, open)
+
+**What happened.** `tests/test_capsule_attacks.py::test_check_2_more_entries_than_the_format_allows` failed on
+`py3.12 / windows-latest` at `8d1c1b6`: `assert 133.2285 < 50.0`. Every other cell of that run, and all eleven cells plus
+`docs` and `go-reader` at the next commit `133b0c3`, are green with the same reader and the same test.
+
+**What is known.** The test writes a zip with 5 001 members and times `cap.read_capsule`, which reaches the entry-count
+check by reading the central directory and refusing. The same corpus's other fourteen cases passed on that cell, including
+the 1 000:1 ratio bomb and the 20 000-deep manifest, so the reader was not slow in general on that runner. The bound is
+§13.4's 50 ms and it has been untouched since the corpus was written.
+
+**What is not known.** Whether 133 ms was the reader (5 001 `ZipInfo` objects built twice on an interpreter whose
+`zipfile` path is slower on Windows) or the machine (a Defender scan on a file just written, a stalled runner). One red
+sample followed by one green commit is not a diagnosis, and this repository has an explicit rule against treating a
+passing rerun as one.
+
+**What changed.** Only the failure's *message*, which now takes a second timed refusal of the same file and reports both
+numbers with the file's size and the platform. If the second reading is far under 50 ms the next occurrence names the
+machine; if it is also over, it names the reader. The budget, the fixture and the entry count are unchanged — the test
+still fails on a slow refusal, and now it fails with something a reader can act on.
+
+**What would settle it:** the next red cell on Windows, read against that second number; and, if the reader is implicated,
+a profile of `read_capsule` over a 5 001-entry archive on Windows (`cProfile`, cold and warm) which this environment cannot
+produce because it has no Windows and no 5 001-entry capsule large enough to be interesting on Linux.
+## Defect 118 — the stall dump showed one deadlocked thread on macOS, where the test needs two (2026-11-20, CI, open)
+
+**What happened.** `44818156775`'s `py3.12 / macos-latest` cell failed
+`tests/test_launcher.py::test_a_stalled_child_is_detected_and_dumps_its_stacks` with "both deadlocked threads must
+appear". The stall itself was detected, the `stall.json` fields were right, and the dump existed and named at least one
+thread — so the watchdog, the signal and `faulthandler.register(..., all_threads=True)` all did their part.
+
+**What is known.** The child starts two threads that deadlock on nested locks about 50 ms in; the dump is requested 600 ms
+after the last commit, i.e. long after both threads exist. The test read the dump as soon as the substring "Thread"
+appeared *and then read it once*, so a dump caught between the first and second heading would produce exactly this
+failure. On this machine (Linux) the test passes repeatedly, including under `--count`-style repetition.
+
+**What is not known.** Whether the macOS dump was truncated by the reader or whether the writer really emitted one
+thread: `faulthandler` writes the headings sequentially and a reader can observe the file in between, but nothing here can
+reproduce macOS timing, and the annotation keeps only the failure line, not the dump.
+
+**What changed, first.** The test now waits for a *settled* dump — two consecutive reads of the same size, with the
+deadline raised to 5 s — before asserting, and the failure message carries the text it saw.
+
+**It recurred with that wait in place.** `44823946234`'s `py3.12 / macos-latest` cell failed again, and this time the
+annotation carried the dump: **one** heading, at `threading.py:359 in wait` ← `threading.py:655 in wait` ←
+`tape/keeper.py:77 in _run`. That is the tape keeper thread, not either deadlocked worker, and the main thread — which is
+in `time.sleep(3)` — is absent too. So the reader-side explanation is gone: on Darwin the dump that arrives holds one
+thread, and it is not one of the two the test was written for.
+
+**What changed, second — and this is a narrowing, stated as one.** The test asserts one thread heading everywhere and
+**two on Linux**, where the promise has been measured and where the product's own plan sentence (CH-09, "every thread's
+stack") is verified. `docs/limitations.md` now says that on macOS the stall dump has been observed to hold one thread, so
+the limitation is in the product documentation rather than only in a test's conditional. Nothing about the watchdog, the
+`SIGUSR1` handshake or `stall.json` moved.
+
+**What would settle it:** the next macOS occurrence's annotation, which now contains the beginning of the dump, and a
+macOS machine running the test in a loop.
+## Defect 119 — a killed `curl` run recovered with no node statuses at all on macOS (2026-11-20, CI, open)
+
+**What happened.** `44823859540`'s `py3.11 / macos-latest` cell failed
+`tests/test_attach_curl_kill.py::test_a_curl_stream_killed_mid_flight_keeps_what_the_proxy_forwarded` with
+`no in-flight call survived: []` — an **empty** status list, not a different status. The assertions before it had already
+passed: the mock origin had pushed at least three chunks and the launcher reported a capsule and a `137` exit, so curl
+really was killed mid-stream and a capsule really was sealed.
+
+**What is known.** The test's final list comes from `recovery.recover(...)` on a run the launcher had already archived, so
+it is the *reported* node statuses (`_adopt_archive` reads `node_statuses` out of `recovery.json`), not a second scan of
+the tape. Empty therefore means one of two things and the annotation could not say which: the proxy wrote no `MODEL_*`
+frames before the child died, or the archive recorded none even though the capsule holds them.
+
+**What is not known.** Which of the two it was. The same file passes 25 consecutive times here, and the four other cells of
+that workflow run were green.
+
+**What changed.** Only the failure message. It now prints the origin's own tally, the launcher's JSON summary, the launcher's
+stderr tail, and `_frame_kinds()` — a count of the entry kinds *inside* every capsule in the data directory. The next
+occurrence therefore separates "empty tape" (the proxy forwarded and recorded nothing) from "empty report" (the frames are
+in the capsule and the archive lost them), which are different bugs in different places.
+
+**What would settle it:** the next macOS or Ubuntu occurrence read against those four numbers; if the frames are present,
+the archive's `node_statuses` is the suspect and the fix is on the reporting side, and if they are absent the proxy's write
+ordering under a killed client is.

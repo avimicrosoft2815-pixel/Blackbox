@@ -1,0 +1,268 @@
+# Build the Windows installer on a Windows runner, then install it, run it and uninstall it.
+#
+# B9 says no Windows installer has been produced or run. This workflow is the smallest honest way to change that from this
+# repository: it runs on GitHub's Windows image, so the machine is real even though the build environment that wrote
+# `tools/package/windows/` had no Windows at all.
+#
+# What it proves, when it passes:
+#
+#   * `build_windows.ps1` stages an embeddable interpreter and the package from wheels, with no network at install time;
+#   * the staged tree answers `blackbox --version`, `blackbox doctor --json`, and records a real run to a capsule that
+#     `blackbox verify` accepts — on Windows, with the real launcher;
+#   * Inno Setup compiles `blackbox.iss` into `dist\BlackBox-Setup-<version>.exe`;
+#   * that installer installs silently into `%LOCALAPPDATA%\Programs\BlackBox`, the installed launcher answers, and the
+#     uninstaller removes the program while **keeping** the recordings.
+#
+# What it does not prove: that the window opens (no interactive session on a runner), that the app is signed, or that a
+# person can finish the install with a mouse. `docs/desktop.md` keeps those rows unverified, and this workflow's summary
+# says the same thing rather than implying otherwise.
+name: package-windows
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["**"]
+    paths:
+      - ".github/workflows/package-windows.yml"
+      - "tools/package/windows/**"
+
+jobs:
+  installer:
+    name: build and smoke-test the installer
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Inno Setup
+        run: choco install innosetup --yes --no-progress
+
+      - name: Stage the install tree (embeddable Python + wheels)
+        run: powershell -ExecutionPolicy Bypass -File tools\package\windows\build_windows.ps1
+
+      - name: Show what was staged (annotations, because the log is not always reachable)
+        if: always()
+        shell: pwsh
+        run: |
+          $stage = "tools\package\windows\win64\python"
+          if (-not (Test-Path $stage)) { Write-Host "::error::nothing was staged at $stage"; exit 0 }
+          $top = (Get-ChildItem $stage | Select-Object -First 15 | ForEach-Object { $_.Name }) -join ", "
+          Write-Host "::warning::staged tree top level: $top"
+          $site = Join-Path $stage "Lib\site-packages"
+          if (Test-Path $site) {
+            $names = (Get-ChildItem $site | Select-Object -First 20 | ForEach-Object { $_.Name }) -join ", "
+            Write-Host "::warning::site-packages: $names"
+          } else {
+            Write-Host "::error::there is no Lib\site-packages in the staged tree"
+          }
+
+      # Every check below announces its own outcome through a workflow command (`::error::`), because job logs are
+      # redirected to a host that some environments cannot reach: an annotation is readable through the API, a log is
+      # not. The first attempt at this step failed with nothing but "Process completed with exit code 1", which is
+      # exactly the kind of failure this project keeps having to re-learn how to read.
+      - name: Smoke the staged tree — version and doctor
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $py = "tools\package\windows\win64\python\python.exe"
+          $site = (Resolve-Path "tools\package\windows\win64\python\Lib\site-packages").Path
+          if (-not (Test-Path $py)) {
+            Write-Host "::error::the embeddable interpreter was not staged at $py"
+            exit 1
+          }
+          $boot = "import sys; sys.path[:0] = [r'$site']; from blackbox.__main__ import main; raise SystemExit(main(sys.argv[1:]))"
+          $env:BLACKBOX_HOME = Join-Path $env:RUNNER_TEMP "bbx-smoke"
+          New-Item -ItemType Directory -Force -Path $env:BLACKBOX_HOME | Out-Null
+
+          $version = & $py -c $boot --version 2>&1 | Out-String
+          Write-Host "version output: $version"
+          if ($LASTEXITCODE -ne 0) {
+            # An annotation keeps its first lines and drops the rest, and the useful part of a Python failure is the
+            # last line. So the tail goes out as its own single-line annotation.
+            $tail = ($version -split "`r?`n" | Where-Object { $_.Trim() } | Select-Object -Last 6) -join " | "
+            Write-Host "::error::staged tree --version exited $LASTEXITCODE; tail: $tail"
+            exit 1
+          }
+
+          $doctorText = & $py -c $boot doctor --json 2>&1 | Out-String
+          $doctorExit = $LASTEXITCODE
+          $doctorText | Out-File -Encoding utf8 "$env:RUNNER_TEMP\doctor.json"
+          Write-Host $doctorText
+          if ($doctorExit -ne 0) {
+            Write-Host "::error::staged tree doctor --json exited $doctorExit; output: $doctorText"
+            exit 1
+          }
+          $storage = ($doctorText | ConvertFrom-Json).probes | Where-Object { $_.probe -eq 'storage' }
+          if (-not $storage -or $storage.status -ne 'ok') {
+            Write-Host "::error::the storage probe did not report ok on this runner: $($storage | ConvertTo-Json -Compress)"
+            exit 1
+          }
+          Write-Host "staged tree: version ok, doctor ok ($($storage.summary))"
+
+      - name: Smoke the staged tree — record a real run and verify it
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $py = "tools\package\windows\win64\python\python.exe"
+          $site = (Resolve-Path "tools\package\windows\win64\python\Lib\site-packages").Path
+          $boot = "import sys; sys.path[:0] = [r'$site']; from blackbox.__main__ import main; raise SystemExit(main(sys.argv[1:]))"
+          $env:BLACKBOX_HOME = Join-Path $env:RUNNER_TEMP "bbx-smoke"
+
+          # A real recording, with the real launcher, on Windows. The child is a one-line Python program quoted so the
+          # shell cannot eat it: single quotes keep PowerShell out of it, and Python sees `print("hello from windows")`.
+          $child = 'print("hello from windows")'
+          $runOut = & $py -c $boot run --data-dir $env:BLACKBOX_HOME -- python -c $child 2>&1 | Out-String
+          $runExit = $LASTEXITCODE
+          Write-Host "run exit: $runExit"
+          Write-Host $runOut
+          if ($runExit -ne 0) {
+            Write-Host "::error::a trivial run exited $runExit on Windows; output: $runOut"
+            exit 1
+          }
+
+          $capsules = @(Get-ChildItem -Recurse -Path $env:BLACKBOX_HOME -Filter *.bbx -ErrorAction SilentlyContinue)
+          Write-Host "capsules: $($capsules.Count)"
+          if ($capsules.Count -lt 1) {
+            Write-Host "::error::the run left no capsule in $env:BLACKBOX_HOME"
+            exit 1
+          }
+
+          # The capsule paths are found *inside* Python rather than passed through PowerShell. The first attempt passed
+          # `D:\a\...\x.bbx` as an argument and the CLI received `D`: the drive letter was cut at the colon somewhere
+          # between this script and the child. Whether that is PowerShell's native-argument handling or something in the
+          # CLI could not be settled from this environment, so the workflow avoids the question instead of guessing —
+          # and the open question is recorded in docs/desktop.md rather than assumed away.
+          $verify = "import glob, sys; sys.path[:0] = [r'$site']; from blackbox.__main__ import main; " +
+                    "paths = sorted(glob.glob(r'$env:BLACKBOX_HOME\**\*.bbx', recursive=True)); " +
+                    "print('verifying:', *paths); raise SystemExit(main(['verify'] + paths))"
+          $verifyOut = & $py -c $verify 2>&1 | Out-String
+          $verifyExit = $LASTEXITCODE
+          Write-Host "verify exit: $verifyExit"
+          Write-Host $verifyOut
+          if ($verifyExit -ne 0) {
+            Write-Host "::error::a capsule from a Windows run did not verify (exit $verifyExit); output: $verifyOut"
+            exit 1
+          }
+
+      - name: Compile the installer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { Write-Host "::error::ISCC.exe was not installed where Inno Setup 6 puts it"; exit 1 }
+          # `/Odist` puts the artefact in the repository's `dist\`: the definition's `OutputDir=dist` is relative to the
+          # script's own directory, so without it the installer landed beside the .iss and the next step looked in the
+          # wrong place and reported only "exit code 1" (found on the fourth Windows run).
+          $compileOut = & $iscc "tools\package\windows\blackbox.iss" "/DAppVersion=0.1.0.dev0" "/Odist" 2>&1 | Out-String
+          $compileExit = $LASTEXITCODE
+          Write-Host $compileOut
+          if ($compileExit -ne 0) {
+            # An annotation keeps the head of a long message; the line that says what is wrong is usually further down.
+            $lines = ($compileOut -split "`r?`n" | Where-Object { $_.Trim() } )
+            $tail = ($lines | Select-Object -Last 6) -join " | "
+            $errors = ($lines | Where-Object { $_ -match 'Error|error:' } | Select-Object -First 3) -join " | "
+            Write-Host "::error::ISCC failed with exit $compileExit; errors: $errors; tail: $tail"
+            exit 1
+          }
+          $setup = @(
+              Get-ChildItem -Path dist -Filter "BlackBox-Setup-*.exe" -ErrorAction SilentlyContinue
+              Get-ChildItem -Path "tools\package\windows\dist" -Filter "BlackBox-Setup-*.exe" -ErrorAction SilentlyContinue
+          ) | Select-Object -First 1
+          if (-not $setup) {
+            $where = (Get-ChildItem -Recurse -Filter "BlackBox-Setup-*.exe" -ErrorAction SilentlyContinue |
+                      ForEach-Object { $_.FullName }) -join ", "
+            Write-Host "::error::ISCC reported success but no installer was found; searched dist, tools\package\windows\dist and the tree: $where"
+            exit 1
+          }
+          $hash = (Get-FileHash $setup.FullName -Algorithm SHA256).Hash.ToLower()
+          $mb = [math]::Round($setup.Length / 1MB, 1)
+          Write-Host "installer: $($setup.FullName) ($mb MiB, sha256 $hash)"
+          # The artefact is reachable only from this run; the numbers a release note needs go in an annotation a later
+          # reader can still see.
+          Write-Host "::warning::installer $($setup.Name): $mb MiB, sha256 $hash"
+          Get-FileHash $setup.FullName -Algorithm SHA256 | ForEach-Object { Write-Host "sha256: $($_.Hash)" }
+
+      - name: Install it, run the installed launcher, uninstall, and check the recordings survive
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $setup = (Get-ChildItem -Path dist -Filter "BlackBox-Setup-*.exe" | Select-Object -First 1).FullName
+          $recordedBefore = (Get-ChildItem -Recurse -Path $env:BLACKBOX_HOME -Filter *.bbx -ErrorAction SilentlyContinue).Count
+          Write-Host "recordings before the install: $recordedBefore"
+
+          # `Start-Process -Wait` waits for the whole process *tree*, and Inno's setup leaves a helper behind, so the
+          # fifth run sat here for eighteen minutes and would have been killed by the job timeout. `-PassThru` plus
+          # `WaitForExit(ms)` waits for the setup itself, which is what has a result.
+          # LZMA2/max over a whole interpreter plus pythonnet and cffi is real work on a Defender-scanned runner, and the
+          # sixth run's five-minute bound was too short to tell "slow" from "stuck". Fifteen minutes, with the install
+          # log's tail in the annotation if it does not make it, so the next run answers the question instead of repeating
+          # it.
+          $logPath = "$env:RUNNER_TEMP\install.log"
+          $installer = Start-Process -FilePath $setup -PassThru -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/LOG=$logPath"
+          $finished = $installer.WaitForExit(900000)
+          if (-not $finished) {
+            $tail = ""
+            if (Test-Path $logPath) {
+              $tail = ((Get-Content $logPath -Tail 8) -join " | ")
+            }
+            Write-Host "::error::the installer did not finish within fifteen minutes; install log tail: $tail"
+            exit 1
+          }
+          Write-Host "installer finished in $([int]((Get-Date) - $installer.StartTime).TotalSeconds) s"
+          Write-Host "installer exit code: $($installer.ExitCode)"
+          if ($installer.ExitCode -ne 0) {
+            Write-Host "::error::the installer exited $($installer.ExitCode); see the install log in the artefact"
+            exit 1
+          }
+          $installed = Join-Path $env:LOCALAPPDATA "Programs\BlackBox"
+          if (-not (Test-Path $installed)) { throw "the installer did not create $installed" }
+          Write-Host "installed: $(Get-ChildItem $installed -Recurse -File | Measure-Object | Select-Object -ExpandProperty Count) files"
+
+          $cli = Join-Path $installed "python\python.exe"
+          $site = Join-Path $installed "python\Lib\site-packages"
+          $boot = "import sys; sys.path[:0] = [r'$site']; from blackbox.__main__ import main; raise SystemExit(main(sys.argv[1:]))"
+          $env:BLACKBOX_HOME = Join-Path $env:LOCALAPPDATA "BlackBox"
+          & $cli -c $boot --version
+          if ($LASTEXITCODE -ne 0) { throw "the installed tree could not answer --version (exit $LASTEXITCODE)" }
+          & $cli -c $boot doctor --json | Out-File -Encoding utf8 "$env:RUNNER_TEMP\installed-doctor.json"
+          Write-Host "installed doctor written"
+
+          $uninstaller = Get-ChildItem $installed -Filter "unins*.exe" | Select-Object -First 1
+          if (-not $uninstaller) { throw "no uninstaller next to the installed program" }
+          $remover = Start-Process -FilePath $uninstaller.FullName -PassThru -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"
+          if (-not $remover.WaitForExit(300000)) {
+            Write-Host "::error::the uninstaller did not finish within five minutes"
+            exit 1
+          }
+          Start-Sleep -Seconds 3
+          if (Test-Path (Join-Path $installed "python")) { throw "the uninstaller left the program behind" }
+
+          $recordings = (Get-ChildItem -Recurse -Path $env:BLACKBOX_HOME -Filter *.bbx -ErrorAction SilentlyContinue).Count
+          if ($recordings -lt $recordedBefore) {
+            throw "the uninstaller removed recordings ($recordedBefore before, $recordings after): that is the one thing it must not do"
+          }
+          Write-Host "recordings kept: $recordings"
+
+      - name: Upload the installer and both reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: blackbox-windows-installer
+          path: |
+            dist/BlackBox-Setup-*.exe
+            ${{ runner.temp }}/doctor.json
+            ${{ runner.temp }}/installed-doctor.json
+            ${{ runner.temp }}/install.log
+          if-no-files-found: error
+
+      - name: Say what this run does and does not prove
+        if: always()
+        run: |
+          Write-Host "This job builds the Windows installer on a real Windows machine, installs it, runs the installed"
+          Write-Host "tree, uninstalls it and checks that the recordings survive. It does NOT open the window: a runner has"
+          Write-Host "no interactive desktop. docs/desktop.md keeps that row unverified until a person runs it."
