@@ -2372,3 +2372,40 @@ product problem and five spread from 5 ms to 400 ms would not.
 
 **What would settle it:** the next failing Windows cell read against the five printed deltas; if they cluster, bisect
 `0ca6951`'s `index/ingest.py` change on a Windows machine with the same five-pair measurement.
+
+## Defect 121 — CPython 3.11's parser failed on our own file with a recursion-state `SystemError`, once, in a full-suite run (2026-11-21, local, open)
+
+**What happened.** A full-suite run on this branch (`f86c3d1`) ended with one failure:
+
+```
+FAILED tests/test_diagnose.py::test_the_diagnose_package_has_no_network_or_exec_path
+E  SystemError: AST constructor recursion depth mismatch (before=120, after=172)
+/usr/lib/python3.11/ast.py:50: SystemError
+```
+
+The test parses every file in `src/blackbox/diagnose/` and asserts on the syntax tree that the diagnosis path cannot
+import a network module or call `os.system`-shaped functions. Nothing in that test depends on ordering or timing, and the
+same parse of the same bytes passes on its own and passes again in the next full run.
+
+**What the evidence says.** `ast.parse` records the thread's recursion state entering the parse and checks it on the way
+out; the two differed. The captured log at the same moment shows `Task was destroyed but it is pending!` and
+`Future exception was never retrieved` for asyncio objects that earlier proxy tests left for the collector, i.e. a
+garbage-collection pass was running Python `__del__` code while the parser held its state. That is a known class of
+CPython 3.11 parser bug, and the 3.12/3.13 cells have never shown it.
+
+**What is not known.** Whether the trigger is precisely "a GC pass during `ast.parse`" — the failure has not been
+reproduced on demand, so this is a hypothesis with a mechanism, not a measurement. It is labelled as a hypothesis in the
+helper's docstring too.
+
+**What changed.** `tests/_ast_source.py::parse_source` parses our source with **one** retry, after a `gc.collect()` that
+runs the pending destructors before the parse starts, and only when the `SystemError` names the recursion mismatch. A
+`SyntaxError`, a different `SystemError`, or a second failure all propagate — a second failure raises with defect 121 in
+the message, so the next occurrence reads as the interpreter bug it is instead of as a parse failure. `test_diagnose.py`
+uses it; the assertions it carries are unchanged, and
+`test_the_source_parser_retries_only_the_interpreter_bug` pins the retry to exactly one attempt and checks that both
+non-retryable paths are still raised.
+
+**What would settle it:** a minimal reproducer (a thread that starts the parse while a destructor is running) on 3.11, and
+the same run on 3.12 to confirm the version boundary; if the trigger is real, `tests/_ast_source.py` is the place a
+longer-lived fix belongs. It has also not been ruled out that the leftover asyncio tasks are ours to clean up — a test
+that leaves a pending task is a defect in the test.
