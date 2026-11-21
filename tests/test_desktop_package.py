@@ -117,3 +117,67 @@ def test_the_icon_is_the_product_black_and_gold(built: dict[str, Path]) -> None:
     assert svg.startswith("<?xml")
     assert "#e6c46a" in svg and "#0b0b0d" in svg, "the icon must use the product's own palette"
     ET.fromstring(svg)                                    # noqa: S314 - our own file; see above
+
+
+def _entries(deb: Path) -> list[str]:
+    listing = subprocess.run(["dpkg-deb", "-c", str(deb)], capture_output=True, text=True, check=True).stdout
+    paths = []
+    for line in listing.splitlines():
+        if " -> " in line:                         # a symlink prints its target after an arrow
+            line = line.split(" -> ", 1)[0]
+        entry = line.split()[-1]
+        for prefix in ("./", "/"):
+            if entry.startswith(prefix):
+                entry = entry[len(prefix):]
+        if entry and entry != ".":
+            paths.append(entry)
+    return paths
+
+
+def test_removing_the_package_cannot_delete_recordings(built: dict[str, Path]) -> None:
+    """Upgrade and uninstall are the two moments a recorder's data is at risk, and a package is where that is decided.
+
+    The recordings live in `~/.blackbox` (or `%LOCALAPPDATA%\\BlackBox` on Windows), which this package never touches: it
+    ships files under `usr/` only and has no `postrm`/`prerm` that could remove anything. That is why `apt remove blackbox`
+    keeps the capsules, and why an upgrade cannot lose them either — the same property, from two directions.
+    """
+    paths = _entries(built["deb"])
+    assert paths, "the package listed no files"
+    outside = [path for path in paths if not path.startswith("usr/") and path not in ("", ".")]
+    assert outside == [], f"the package installs outside /usr: {outside}"
+    # No packaged path can *be* a data directory: nothing under a home directory, nothing under /etc, nothing named
+    # `.blackbox`. (Every path legitimately contains "blackbox" as the product's own name under /usr/lib.)
+    data_like = [path for path in paths
+                 if path.startswith(("home/", "root/", "etc/")) or "/.blackbox" in path or path == ".blackbox"]
+    assert data_like == [], f"the package would own part of a data directory: {data_like}"
+
+    control = subprocess.run(["dpkg-deb", "-e", str(built["deb"]), str(built["root"] / "control")],
+                             capture_output=True, text=True, check=True)
+    assert control.returncode == 0, control.stderr
+    scripts = {path.name for path in (built["root"] / "control").glob("*")}
+    # `postinst` only refreshes desktop caches; a removal script would be the one that could take data with it.
+    assert "postrm" not in scripts and "prerm" not in scripts, f"a removal script appeared: {sorted(scripts)}"
+    for script in scripts:
+        if not script.startswith(("postinst", "preinst", "postrm", "prerm")):
+            continue
+        body = (built["root"] / "control" / script).read_text(errors="replace")
+        assert ".blackbox" not in body and "BLACKBOX_HOME" not in body, f"{script} mentions the data directory:\n{body}"
+
+
+def test_the_version_is_one_dpkg_can_order_so_an_upgrade_replaces_the_old_one(built: dict[str, Path]) -> None:
+    """An upgrade is `apt install ./newer.deb`; dpkg decides by `Version:`, so the field has to be orderable."""
+    version = ""
+    for line in _control(built["deb"]).splitlines():
+        if line.strip().lower().startswith("version:"):
+            version = line.strip().split(":", 1)[1].strip()
+    assert version, _control(built["deb"])
+    # The same scheme the wheel uses, and a newer one that dpkg must call newer.
+    newer = version.rsplit(".", 1)[0] + ".dev1" if version.endswith(".dev0") else version + "1"
+    for comparison in (("lt", newer), ("gt", newer)):
+        done = subprocess.run(["dpkg", "--compare-versions", version, comparison[0], comparison[1]],
+                              capture_output=True, text=True)
+        assert done.returncode in (0, 1), done.stderr
+    assert subprocess.run(["dpkg", "--compare-versions", version, "lt", newer],
+                          capture_output=True).returncode == 0, f"{version} is not older than {newer} to dpkg"
+    assert subprocess.run(["dpkg", "--compare-versions", version, "eq", version],
+                          capture_output=True).returncode == 0

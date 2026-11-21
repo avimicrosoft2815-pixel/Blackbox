@@ -188,7 +188,7 @@ jobs:
           Write-Host "::warning::installer $($setup.Name): $mb MiB, sha256 $hash"
           Get-FileHash $setup.FullName -Algorithm SHA256 | ForEach-Object { Write-Host "sha256: $($_.Hash)" }
 
-      - name: Install it, run the installed launcher, uninstall, and check the recordings survive
+      - name: Install it, run the installed launcher, install it again, uninstall, and check the recordings survive
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -233,6 +233,36 @@ jobs:
           & $cli -c $boot doctor --json | Out-File -Encoding utf8 "$env:RUNNER_TEMP\installed-doctor.json"
           Write-Host "installed doctor written"
 
+          # An upgrade is the second install over the first, and the property it must not break is the same one an
+          # uninstall must not break: the recordings live in %LOCALAPPDATA%\BlackBox, not in the install directory, so
+          # replacing the program has to leave every capsule where it was. Nothing here is a claim about *newer*
+          # versions — the same artefact is installed twice, which exercises the installer's overwrite path and nothing
+          # more; that is stated in the step's own name.
+          $beforeUpgrade = (Get-ChildItem -Recurse -Path $env:BLACKBOX_HOME -Filter *.bbx -ErrorAction SilentlyContinue).Count
+          Write-Host "upgrade: $beforeUpgrade recording(s) before the second install"
+          $upgradeLog = "$env:RUNNER_TEMP\upgrade.log"
+          $upgrade = Start-Process -FilePath $setup -PassThru -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/LOG=$upgradeLog"
+          if (-not $upgrade.WaitForExit(900000)) {
+            $tail = if (Test-Path $upgradeLog) { (Get-Content $upgradeLog -Tail 8) -join " | " } else { "" }
+            Write-Host "::error::the second install (upgrade) did not finish within fifteen minutes; log tail: $tail"
+            exit 1
+          }
+          if ($upgrade.ExitCode -ne 0) {
+            Write-Host "::error::the second install (upgrade) exited $($upgrade.ExitCode)"
+            exit 1
+          }
+          & $cli -c $boot --version
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::error::the upgraded tree could not answer --version (exit $LASTEXITCODE)"
+            exit 1
+          }
+          $afterUpgrade = (Get-ChildItem -Recurse -Path $env:BLACKBOX_HOME -Filter *.bbx -ErrorAction SilentlyContinue).Count
+          if ($afterUpgrade -lt $beforeUpgrade) {
+            Write-Host "::error::the upgrade removed recordings ($beforeUpgrade before, $afterUpgrade after)"
+            exit 1
+          }
+          Write-Host "upgrade: $afterUpgrade recording(s) kept, and the upgraded tree answers --version"
+
           $uninstaller = Get-ChildItem $installed -Filter "unins*.exe" | Select-Object -First 1
           if (-not $uninstaller) { throw "no uninstaller next to the installed program" }
           $remover = Start-Process -FilePath $uninstaller.FullName -PassThru -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"
@@ -264,5 +294,8 @@ jobs:
         if: always()
         run: |
           Write-Host "This job builds the Windows installer on a real Windows machine, installs it, runs the installed"
-          Write-Host "tree, uninstalls it and checks that the recordings survive. It does NOT open the window: a runner has"
-          Write-Host "no interactive desktop. docs/desktop.md keeps that row unverified until a person runs it."
+          Write-Host "tree, installs the same artefact again over the first (the installer's overwrite path), uninstalls"
+          Write-Host "it, and checks that the recordings survive all three. It does NOT open the window: a runner has no"
+          Write-Host "interactive desktop. docs/desktop.md keeps that row unverified until a person runs it."
+          Write-Host "Nor does it prove anything about a newer version replacing an older one: one artefact is installed"
+          Write-Host "twice and the version strings are identical by construction."
