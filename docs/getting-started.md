@@ -90,6 +90,20 @@ For example `blackbox run -- python my_agent.py`, or `blackbox run -- node agent
 launcher exports `OPENAI_BASE_URL` and `ANTHROPIC_BASE_URL` into the child, and a Python child additionally gets a
 temporary `sitecustomize.py` on its `PYTHONPATH`, so the capture layer loads before your first line.
 
+**Where it writes.** The data directory is **the directory you ran the command in**, so the recordings land in `capsules/`,
+`runs/` and `tape/` beside your project. That is deliberate — an incident stays with the code that produced it — and it is
+also the first thing that confuses a beginner, because the steps below use the same directory and a different terminal
+window would not see it:
+
+```sh
+blackbox run --data-dir ~/.blackbox -- python my_agent.py  # put this run's recordings in ~/.blackbox instead
+BLACKBOX_HOME=~/.blackbox blackbox run -- node agent.mjs  # the same choice, as an environment variable
+```
+
+`run` spells it `--data-dir`; `ls`, `verify`, `retention` and `doctor` spell it `--data`; `view` and `diagnose` take the
+directory as their ordinary path argument (`blackbox diagnose ~/.blackbox`). Whichever you use, the read-only command has
+to be pointed at the directory the recording went to rather than the one you happen to be standing in.
+
 **You should see** one line naming the loopback port it started, then your program's own output, then a line naming the
 capsule it sealed when the program exited or died. Nothing is printed about prompts or completions by default.
 
@@ -120,10 +134,10 @@ the killed-child recovery by `tests/test_attach_curl_kill.py`.
 
 ```sh
 blackbox ls
-blackbox verify ~/.blackbox/capsules/*.bbx
+blackbox verify capsules/*.bbx     # the directory you ran `blackbox run` in
 ```
 
-`blackbox ls` lists what is in the data directory. `blackbox verify` recomputes the capsule's integrity index from the
+`blackbox ls` lists what is in the data directory (the current one by default — see Step 2). `blackbox verify` recomputes the capsule's integrity index from the
 bytes in the file and prints the root, the entry count, the size, and every problem it found.
 
 **You should see** one row per run, newest first, with the run id, when it was recorded, the provider and model seen, and
@@ -155,7 +169,7 @@ programs' traffic, browser AI websites, or your source code. `docs/privacy.md` i
 
 ```sh
 blackbox desktop
-blackbox view ~/.blackbox/capsules/
+blackbox view capsules/            # or `blackbox view ~/.blackbox` if that is where you recorded
 ```
 
 The window opens on the **library** when there is already something to show, and on **setup** when there is not — that
@@ -177,7 +191,9 @@ you open it.
   gives (`BBX-E402`, `BBX-E406`), not an error page.
 * `blackbox desktop` printing a message about GTK or WebKit and exiting 3 means this machine has no display or no
   `python3-gi`/`gir1.2-webkit2-4.1`. Use `blackbox view` in a browser, which serves the same pages.
-* A window that opens on setup when you expected rows means the data directory it looked in is not the one you wrote to.
+* A window that opens on setup when you expected rows means the data directory it looked in is not the one you wrote
+  to — the window reads the current directory by default, exactly as `blackbox run` writes it (Step 2). Start the desktop
+  from the directory you recorded in, or pass `--data`.
   `blackbox doctor` names the directory it used; `--data` and `BLACKBOX_HOME` point it elsewhere.
 
 **Evidence.** `tests/test_desktop.py` (window shell, fake backend), `tests/test_ui_library.py` (the library's columns,
@@ -189,7 +205,7 @@ page load). The real window on a real display has **not** been run here — `doc
 **Do this.** Press *diagnose* on the run, or:
 
 ```sh
-blackbox diagnose ~/.blackbox/capsules/      # a capsule, or a data directory (newest capsule wins)
+blackbox diagnose capsules/              # a capsule, or a data directory (newest capsule wins)
 ```
 
 **You should see** findings in four words, and the word is the point:
@@ -223,7 +239,7 @@ only implies. The same four words are what the repair sheet in step 7 renders (`
 **Do this.**
 
 ```sh
-blackbox diagnose ~/.blackbox/capsules/ --brief repair-brief.md
+blackbox diagnose capsules/ --brief repair-brief.md
 ```
 
 or, in the window, *save the brief*.

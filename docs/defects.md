@@ -2409,3 +2409,32 @@ non-retryable paths are still raised.
 the same run on 3.12 to confirm the version boundary; if the trigger is real, `tests/_ast_source.py` is the place a
 longer-lived fix belongs. It has also not been ruled out that the leftover asyncio tasks are ours to clean up — a test
 that leaves a pending task is a defect in the test.
+
+## Defect 122 — the beginner walkthrough sent the reader to `~/.blackbox`, and the product writes to the current directory (2026-11-21, found by re-running the walkthrough, fixed)
+
+**What happened.** Ran the walkthrough's own commands the way its reader would, in an empty directory: Step 2's
+`blackbox run -- python my_agent.py` wrote `capsules/`, `runs/` and `tape/` into that directory, and Step 3's
+`blackbox verify ~/.blackbox/capsules/*.bbx` then found nothing, because `~/.blackbox` holds the hook inbox and the keys, not
+the capsules of a run started elsewhere. The data directory is the current directory (`cli/paths.default_data_dir`, and
+`rec/launcher.launch` for `run`); the page assumed the opposite.
+
+Two flags in the same page were wrong in the same way: `blackbox run --data` (the launcher spells it `--data-dir`) and
+`blackbox view --data` (`view` takes a path and has no `--data` flag). None of these is a typo a reader can spot, and all
+three change **where the recording is looked for** — which is the one fact a beginner cannot debug by reading output.
+
+**What changed.** Step 2 now says where the recordings go, with the three ways to move them (`run --data-dir`,
+`BLACKBOX_HOME`, and picking the right command for the read-only side: `--data` for `ls`/`verify`/`retention`/`doctor`, a
+path argument for `view`/`diagnose`). Steps 3–8 use `capsules/` and say why. Three tests now hold the page to the product:
+
+* `test_every_flag_the_page_uses_is_a_flag_that_command_has` runs `blackbox <verb> --help` for every verb the page uses in a
+  fenced block and compares **whole flag names** — a substring check would have passed `run --data`, because `--data-dir`
+  contains it;
+* `test_the_flag_check_would_have_caught_the_two_mistakes_it_was_written_for` pins the two verbs, so the test cannot rot into
+  decoration;
+* `test_the_page_says_where_recordings_go_and_the_product_writes_there` records in a `tmp_path` and looks: `capsules/*.bbx`
+  exists there, `blackbox ls` lists it, `blackbox verify` exits 0.
+
+**What is not changed, and is an owner decision.** Whether the default should be the current directory at all. It is a
+reasonable default for a recorder — the incident stays with the code that produced it — and it is also the reason the page
+had to be rewritten. Changing it would be a product decision with a migration story for anybody who already has recordings
+beside their project, so this entry records the behaviour, documents it, and leaves the default alone.
