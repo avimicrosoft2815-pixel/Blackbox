@@ -1,0 +1,27 @@
+WEBVTT
+
+00:00.000 --> 00:25.000
+In this walkthrough, we'll install BlackBox on Windows, record a local mock app, and inspect the recording in the BlackBox UI.
+Download the blackbox-windows-installer artifact from GitHub Actions run 44885626025 (commit 72398c8).
+
+00:25.000 --> 00:55.000
+Extract the ZIP and run BlackBox-Setup-0.1.0.dev0.exe.
+Because the preview installer is unsigned, Windows may show an unknown-publisher warning. Only proceed if you trust this build.
+
+00:55.000 --> 01:25.000
+Launch BlackBox from the Start menu or installer. On first run with no recordings, it opens the setup view.
+
+01:25.000 --> 01:55.000
+Open PowerShell, point $bb at $env:LOCALAPPDATA\Programs\BlackBox\python\python.exe, and run & $bb -m blackbox --version.
+
+01:55.000 --> 02:35.000
+Create BlackBox-Test and run mock_test.py. The mock server binds only to 127.0.0.1. No real OpenAI request is made.
+
+02:35.000 --> 03:05.000
+Run & $bb -m blackbox ls and & $bb -m blackbox verify capsules\*.bbx from the same folder.
+
+03:05.000 --> 03:50.000
+Run & $bb -m blackbox desktop from BlackBox-Test. Open the recording, click Check this capsule, and view Diagnose / Brief.
+
+03:50.000 --> 04:15.000
+Summary: unsigned Windows preview installed, local loopback mock recorded, capsule verified and diagnosed. No external provider called.
