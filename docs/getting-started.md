@@ -59,10 +59,24 @@ which SDK it found (naming the exact command for the one you have), and where th
 * If `blackbox --version` prints a different format number than this page, read `docs/format.md` before recording
   anything — a reader and a writer that disagree about the format is the one mismatch worth stopping for.
 
-**Evidence.** The package is built and extracted on Linux in `tests/test_desktop_package.py`; the installed package is
-installed, run and uninstalled on a real Windows runner in `.github/workflows/package-windows.yml` (run `44807593306`,
-green, installer sha256 `358c8125…`). The wizard has **not** been used by a person on Windows 10 or 11 yet — see
-`docs/desktop.md`.
+**Later — upgrading and removing it.** The package and your recordings are separate things, on both targets:
+
+```sh
+sudo apt install ./blackbox_<newer>.deb      # upgrade in place
+sudo apt remove blackbox                     # removes the program, keeps the recordings
+blackbox ls                                  # nothing recorded? then there was nothing to keep
+```
+
+Nothing above deletes a capsule: on Linux the `.deb` ships only files under `/usr` and has no removal script, and the
+Windows uninstaller leaves `%LOCALAPPDATA%\BlackBox` in place — the installer says so during the uninstall rather than
+letting you find out afterwards. Removing recordings is deliberate, with `blackbox retention --json` (which reports and
+never deletes).
+
+**Evidence.** The package is built and extracted on Linux in `tests/test_desktop_package.py`, which also asserts from the
+built package that nothing installs outside `/usr`, that there is no `postrm`/`prerm`, and that `Version:` is orderable;
+the installer is installed, run, installed a **second time over itself**, run again, uninstalled and the recordings counted
+on a real Windows runner in `.github/workflows/package-windows.yml` (run `44868905784`, green, installer sha256
+`a883f9a3…`). The wizard has **not** been used by a person on Windows 10 or 11 yet — see `docs/desktop.md`.
 
 ## Step 2 — Attach an app you already use
 

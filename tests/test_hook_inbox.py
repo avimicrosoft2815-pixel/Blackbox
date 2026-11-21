@@ -247,11 +247,38 @@ def _median_ms(cmd: list[str], *, n: int, stdin: bytes | None = None, env: dict[
     return times[len(times) // 2]
 
 
+def _paired_deltas_ms(slow: list[str], *, fast: list[str], n: int, stdin: bytes | None = None,
+                      env: dict[str, str] | None = None) -> list[float]:
+    """`slow - fast`, measured in interleaved pairs so a busy moment lands in both halves of a pair.
+
+    Two separate medians of five runs answer "how fast was the runner while each batch ran", which is not the same
+    question: at `0ca6951` a `windows-latest` cell reported a 155 ms delta against an 80 ms budget, and the same cell on the
+    next commit reported a passing one. Alternating the two commands within each pair, and swapping which goes first,
+    leaves the budget alone and makes each delta a measurement of the same seconds. The median of the deltas is the
+    statistic the budget was always meant to bound.
+    """
+    deltas = []
+    for index in range(n):
+        first, second = (fast, slow) if index % 2 else (slow, fast)
+        one = _once_ms(first, stdin=stdin, env=env)
+        two = _once_ms(second, stdin=stdin, env=env)
+        deltas.append((one - two) if index % 2 else (two - one))
+    return deltas
+
+
+def _once_ms(cmd: list[str], *, stdin: bytes | None = None, env: dict[str, str] | None = None) -> float:
+    started = time.perf_counter()
+    finished = subprocess.run(cmd, input=stdin, capture_output=True, env=env, timeout=120)
+    seconds = (time.perf_counter() - started) * 1000
+    assert finished.returncode == 0, finished.stderr[-500:]
+    return seconds
+
+
 def test_the_ingest_command_costs_the_agent_tens_of_milliseconds(tmp_path: Path) -> None:
     """P3B-07's cold-start row, measured the way a hook pays it: a whole interpreter, stdin to file.
 
-    The number that matters is the **marginal** cost over a bare interpreter, because that is the part this project
-    owns: an absolute bound on a shared runner measures the runner's mood (macOS 3.11 in run 44225232306 took 948 ms
+    The number that matters is the **marginal** cost over the product's own front door, measured in interleaved pairs
+    (defect 120), because that is the part this project owns: an absolute bound on a shared runner measures the runner's mood (macOS 3.11 in run 44225232306 took 948 ms
     against a 900 ms ceiling on a commit where every other cell passed). Defect 64 was exactly a marginal cost — the
     front door imported all eleven commands to run one, 72 ms of a 101 ms hook — so the assertion is the delta, with an
     absolute ceiling kept only as a sanity bound. The plan's own gate (40 ms p95 on the bench box) is a separate row and
@@ -260,18 +287,24 @@ def test_the_ingest_command_costs_the_agent_tens_of_milliseconds(tmp_path: Path)
     payload = json.dumps({"session_id": "s1", "tool_name": "Bash", "tool_input": {"command": "ls"}}).encode()
     env = {**os.environ, "PYTHONPATH": str(ROOT / "src")}
     bare = _median_ms([sys.executable, "-c", "pass"], n=5)
+    ingest_cmd = [sys.executable, "-m", "blackbox", "ingest", "--tool", "claude-code",
+                  "--event", "PreToolUse", "--inbox", str(tmp_path / "inbox")]
+    front_door = [sys.executable, "-m", "blackbox", "--version"]
     # The floor to compare against is the product's *own* front door, not a bare interpreter. `blackbox --version` imports
     # `__main__` and the constants and nothing else, so the difference between it and `ingest` is what `ingest` itself
     # costs. Comparing against a bare interpreter measures the interpreter plus the package layout, which on a Windows
     # runner is 160 ms before any of our imports run — run 44581057445 failed on 191 vs 31 ms with the product behaving
     # exactly as designed (defect 99).
-    floor = _median_ms([sys.executable, "-m", "blackbox", "--version"], n=5, env=env)
-    ingest = _median_ms([sys.executable, "-m", "blackbox", "ingest", "--tool", "claude-code",
-                         "--event", "PreToolUse", "--inbox", str(tmp_path / "inbox")], n=5, stdin=payload, env=env)
-    assert len(inbox.pending(str(tmp_path / "inbox"))) == 5
+    deltas = _paired_deltas_ms(ingest_cmd, fast=front_door, n=5, stdin=payload, env=env)
+    deltas.sort()
+    delta = deltas[len(deltas) // 2]
+    floor = _median_ms(front_door, n=5, env=env)
+    ingest = _median_ms(ingest_cmd, n=5, stdin=payload, env=env)
+    assert len(inbox.pending(str(tmp_path / "inbox"))) == 10
     assert ingest < 900, f"cold start took {ingest:.0f} ms"
-    assert ingest - floor <= 80.0, (
-        f"`ingest` cost {ingest - floor:.0f} ms more than the front door alone ({ingest:.0f} vs {floor:.0f} ms; "
+    assert delta <= 80.0, (
+        f"`ingest` cost {delta:.0f} ms more than the front door alone (paired medians over 5 interleaved pairs: "
+        f"{', '.join(f'{value:.0f}' for value in deltas)} ms; separate medians {ingest:.0f} vs {floor:.0f} ms; "
         f"bare interpreter {bare:.0f} ms). Before defect 64 the front door imported every command and this delta was "
         f"~90 ms; the import-list test below is the machine-independent half of the same assertion.")
 

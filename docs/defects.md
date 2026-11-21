@@ -2086,6 +2086,9 @@ has a second data point, with the job URL above.
 through `_run_node()`, which keeps the child's `stderr` and prints it in the failure message instead of letting
 `TimeoutExpired` discard the only evidence the test had. That is a diagnostic, not a fix — the assertion is unchanged, the
 60-second budget is unchanged, and neither test is skipped.
+
+**State, 2026-11-21.** Not seen since: `44868739519` (`0ca6951`) had `py3.12` and `py3.13 / windows-latest` green (its one red cell was the timing failure recorded as defect 120), and `44868905760` (`f86c3d1`) was eleven of eleven. The diagnostic stays until a cell that reproduces it prints the child's stderr.
+
 ## Defect 114 — Windows cells now trip the 120-second watchdog in the index-rebuild tests, on commits that touch no index code (2026-11-20, CI, open)
 
 **What happened.** Three Windows cells on this branch were killed by the suite's per-test watchdog inside
@@ -2271,6 +2274,9 @@ still fails on a slow refusal, and now it fails with something a reader can act 
 **What would settle it:** the next red cell on Windows, read against that second number; and, if the reader is implicated,
 a profile of `read_capsule` over a 5 001-entry archive on Windows (`cProfile`, cold and warm) which this environment cannot
 produce because it has no Windows and no 5 001-entry capsule large enough to be interesting on Linux.
+
+**State, 2026-11-21.** Not seen since: `44868739519` (`0ca6951`) and `44868905760` (`f86c3d1`) were green on every Windows cell for this test, and the bound is unchanged.
+
 ## Defect 118 — the stall dump showed one deadlocked thread on macOS, where the test needs two (2026-11-20, CI, open)
 
 **What happened.** `44818156775`'s `py3.12 / macos-latest` cell failed
@@ -2304,6 +2310,9 @@ the limitation is in the product documentation rather than only in a test's cond
 
 **What would settle it:** the next macOS occurrence's annotation, which now contains the beginning of the dump, and a
 macOS machine running the test in a loop.
+
+**State, 2026-11-21.** Not seen since: the three macOS cells were green at `0ca6951` and at `f86c3d1`, which narrows nothing — the failure is intermittent by construction — and the annotation now carries the dump's first lines.
+
 ## Defect 119 — a killed `curl` run recovered with no node statuses at all on macOS (2026-11-20, CI, open)
 
 **What happened.** `44823859540`'s `py3.11 / macos-latest` cell failed
@@ -2328,3 +2337,38 @@ in the capsule and the archive lost them), which are different bugs in different
 **What would settle it:** the next macOS or Ubuntu occurrence read against those four numbers; if the frames are present,
 the archive's `node_statuses` is the suspect and the fix is on the reporting side, and if they are absent the proxy's write
 ordering under a killed client is.
+
+
+**State, 2026-11-21.** Not seen since: the macOS cells were green at `0ca6951` and at `f86c3d1`; the four numbers are in the tree and stay unread until an occurrence prints them.
+
+## Defect 120 — a Windows cell called `ingest` 155 ms slower than the front door, and the next commit's identical cell called it fine (2026-11-21, CI, open)
+
+**What happened.** `ci` run `44868739519` (`0ca6951`, the index-transaction commit), cell `py3.11 / windows-latest`:
+`tests/test_hook_inbox.py::test_the_ingest_command_costs_the_agent_tens_of_milliseconds` failed with
+
+```
+`ingest` cost 155 ms more than the front door alone (225 vs 69 ms; bare interpreter 27 ms)
+```
+
+against an 80 ms bound. The other ten cells of that run were green, and the same cell at the next commit (`f86c3d1`, run
+`44868905760`) was green with every product file unchanged for this path — so this is the shared-runner-timing class again,
+the same class as defects 99 and 117, not a regression in `ingest`.
+
+**Why the measurement allowed it.** The test took two separate medians of five subprocesses: the front door first, `ingest`
+second. A runner that becomes busy between the two batches shows up entirely in the delta, because each half was measured
+in a different few seconds. That is a measurement of the runner's mood, which is the thing the same test's docstring says
+it is trying to avoid.
+
+**What changed.** The two commands now run in **interleaved pairs** — five pairs, alternating which goes first, so each
+delta is a difference of two runs from the same seconds — and the bound is applied to the median of the five deltas.
+The bound is still **80 ms**, the absolute 900 ms ceiling is unchanged, the run count per command is unchanged, and the
+machine-independent half of the same claim (`test_the_ingest_path_imports_only_what_it_uses`) is untouched. The failure
+message now prints all five deltas as well as the separate medians, so the next occurrence says whether it was one busy
+pair or a genuinely slower `ingest`.
+
+**What is not known.** Whether the 155 ms was runner load or something in `ingest` that this machine does not reproduce.
+The paired statistic is chosen because it answers that after the fact: five deltas tightly around 150 ms would be a
+product problem and five spread from 5 ms to 400 ms would not.
+
+**What would settle it:** the next failing Windows cell read against the five printed deltas; if they cluster, bisect
+`0ca6951`'s `index/ingest.py` change on a Windows machine with the same five-pair measurement.
