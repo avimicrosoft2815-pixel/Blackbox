@@ -1,5 +1,8 @@
 # Review pack — privacy (this is not a gate file, and carries no verdict) — unsigned builder evidence
 
+**Re-read at `1466f43`, 2026-11-21.** Every command in this pack was re-run against that tree (the one this file now
+ships in): 48 tests, all pass, exit 0. No row changed and no row was added; a re-run is not a review.
+
 The privacy question has three parts, and they are checked in three different ways: **what is recorded at all**, **where
 it can go** (nowhere), and **who on this machine can read it**. A row that only checks one of the three would let a
 product claim the other two.
