@@ -1,5 +1,8 @@
 # Review pack — recovery (this is not a gate file, and carries no verdict) — unsigned builder evidence
 
+**Re-read at `1466f43`, 2026-11-21** (shipped in `044c1f8`, whose only change is this line). Every command in this pack was re-run
+against that tree: 110 tests, all pass, exit 0. No row changed and no row was added; a re-run is not a review.
+
 Recovery is where a recorder either keeps its promises or loses them quietly. The three questions a reviewer can settle
 here are: **does a killed run come back with what it had**, **is recovery idempotent** (ten attempts, one capsule), and
 **does a damaged tape produce a documented code instead of a traceback**.

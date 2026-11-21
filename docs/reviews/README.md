@@ -30,7 +30,27 @@ included) plus `docs` and `go-reader`, with `1 586` tests collected on the build
 A reviewer checking a *different* sha must re-run the commands: a number here is evidence about that commit and says
 nothing about another one, even when the file has not changed.
 
-Four things landed after the packs were first written, and none of them changes a row above:
+## Re-read at `1466f43`, shipped in `044c1f8`, 2026-11-21
+
+The builder re-ran every pack's commands against `1466f43`, because a pack pinned at `133b0c3` is evidence about
+`133b0c3`. The commit these files ship in is `044c1f8`, whose only difference from `1466f43` is the table below; `ci` run
+`44871213580` was green on all eleven cells at `1466f43`. This is a re-read, not a verdict: it says the commands still answer the same way here, and nothing about whether
+the rows are true.
+
+| Pack | Command it names | Collected | Result |
+|---|---|---|---|
+| [`capture.md`](capture.md) | `pytest tests/test_day14_kill.py tests/test_failopen.py tests/test_preflight.py tests/test_capture_failopen.py -q` | 43 | all pass, exit 0 |
+| [`privacy.md`](privacy.md) | `pytest tests/test_desktop_beginner_journey.py tests/test_launcher_capture_warning.py tests/test_netguard_reads.py tests/test_no_egress.py tests/test_permissions.py tests/test_proxy_routes.py tests/test_launcher_proxy.py -q` | 48 | all pass, exit 0 |
+| [`redaction.md`](redaction.md) | `pytest tests/test_redaction.py tests/test_redaction_every_sink.py -q` | 142 | all pass, exit 0 |
+| [`recovery.md`](recovery.md) | `pytest tests/test_capsule.py tests/test_content_modes.py tests/test_day14_kill.py tests/test_attach_curl_kill.py tests/test_fault_codes.py tests/test_launcher_proxy.py tests/test_proxy_supervisor.py tests/test_supervisor_loop_errors.py tests/test_recovery_identity.py tests/test_verify_cli.py tests/test_retention.py tests/test_retention_dry_run.py -q` | 110 | all pass, exit 0 |
+| [`malicious-files.md`](malicious-files.md) | `pytest tests/test_capsule_attacks.py tests/test_fault_codes.py tests/test_xss_corpus.py tests/test_conformance.py tests/test_independent_reader.py tests/test_no_egress.py -q` | 60 | all pass, exit 0 |
+| [`integrations-exports.md`](integrations-exports.md) | `pytest tests/test_attach_sdks.py tests/proxy/test_client_matrix.py tests/test_export_jsonl.py tests/test_export_otlp.py tests/test_export_otlp_pb.py tests/test_headers.py -q` | 51 | all pass, exit 0 |
+
+The whole suite at the same commit: **1 598 tests collected, `pytest -q` exit 0 in 444.7 s** on this 2-CPU Linux box
+(1 596 pass, 2 skipped by name on POSIX). The rows these packs cannot fill — no second reader, no display, no Windows or
+macOS desktop, no quiet host — are unchanged, and re-running a command here does not fill any of them.
+
+Six things landed after the packs were first written; five of them sharpen a row, none of them ticks one:
 
 * `docs/getting-started.md` — the eight-step beginner path, checked against the product by `tests/test_getting_started.py`.
 * The Windows packaging path went green on a real runner (`44807593306`): built, installed silently, installed tree run,
@@ -40,6 +60,19 @@ Four things landed after the packs were first written, and none of them changes 
   which half was slow.
 * Defect 116 stayed open on purpose: a Windows path reached the CLI as `D`, the cause is unsettled, and the workflow now
   avoids the shell boundary rather than asserting a diagnosis.
+* **Defect 114 is fixed and measured** (`0ca6951`): the index build ran one transaction per capsule — 1 000 commits for 500
+  capsules, 922 ms incremental and 1 068 ms rebuild — and now runs one per build, 2 commits, 311.7 ms and 298.7 ms, with the
+  dump hash unchanged (`bench/results/2026-11-21-index-build-cost.json`). The I8 row is the one this moves, from "reproduced
+  the dump" to "reproduced the dump at a stated cost".
+* **The installer was installed twice over itself** (run `44868905784`): install, run, install the same artefact again, run
+  again, uninstall, recordings counted across all three. One artefact twice is the overwrite path, not a newer version
+  replacing an older one, and the workflow prints that sentence itself.
+* **Defect 120 records a red Windows cell this work caused nobody**: `ingest` measured 155 ms slower than the front door
+  against an 80 ms budget, on a commit touching no hook code, and green on the next. The measurement is now five
+  interleaved pairs with the same 80 ms bound, so the number describes our code rather than the runner's mood.
+* **Defect 121 is an interpreter bug in the tree's own tests**: CPython 3.11's parser raised
+  `SystemError: AST constructor recursion depth mismatch` once, mid-suite, on a file that parses fine alone. The static
+  tests take one retry for that error and raise for everything else.
 * **The recovery claim is published whole** (defect 101, update 3): the lock was created empty and written afterwards, so a
   peer could read nothing, judge it stale and take a live claim — which is how `44820329776` produced two recoverers for one
   run. It is now written to a temporary file and published with `os.link`, and two tests fail against the old code.

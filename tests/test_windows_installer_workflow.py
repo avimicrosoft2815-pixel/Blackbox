@@ -68,3 +68,24 @@ def test_it_says_what_it_does_not_prove() -> None:
     assert "does not open the window" in text or "not open the window" in text, (
         "a runner has no interactive desktop; the job must say so rather than let a green cell imply a window")
     assert "unverified" in text, "docs/desktop.md keeps the window row unverified, and the job should say so"
+
+
+def test_it_installs_the_artefact_a_second_time_and_checks_the_recordings() -> None:
+    """Upgrade, as much as one artefact can show it: the second install must not take the capsules with it.
+
+    The uninstall check already proves the recordings live outside the install directory. An upgrade is the same property
+    from the other direction — the installer writing over its own tree — and it is the moment a user is most likely to lose
+    data by accident. What this **cannot** show is a *newer* version replacing an older one in place: the job installs one
+    artefact twice, and the workflow's summary says so.
+    """
+    text = _text()
+    assert "the second install (upgrade)" in text, "the upgrade step's failures have to be named for the annotation"
+    assert text.count("BlackBox-Setup-") >= 1
+    upgrade = text.split("$beforeUpgrade", 1)
+    assert len(upgrade) == 2, "the step does not count the recordings before the second install"
+    after = upgrade[1]
+    assert "$afterUpgrade" in after, "the step never counts them again"
+    assert "the upgrade removed recordings" in after, (
+        "a second install that drops capsules must fail loudly, not print a number")
+    assert "one artefact is installed" in text, (
+        "the summary must say that this is not a newer version replacing an older one")

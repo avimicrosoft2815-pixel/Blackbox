@@ -2086,6 +2086,9 @@ has a second data point, with the job URL above.
 through `_run_node()`, which keeps the child's `stderr` and prints it in the failure message instead of letting
 `TimeoutExpired` discard the only evidence the test had. That is a diagnostic, not a fix — the assertion is unchanged, the
 60-second budget is unchanged, and neither test is skipped.
+
+**State, 2026-11-21.** Not seen since: `44868739519` (`0ca6951`) had `py3.12` and `py3.13 / windows-latest` green (its one red cell was the timing failure recorded as defect 120), and `44868905760` (`f86c3d1`) was eleven of eleven. The diagnostic stays until a cell that reproduces it prints the child's stderr.
+
 ## Defect 114 — Windows cells now trip the 120-second watchdog in the index-rebuild tests, on commits that touch no index code (2026-11-20, CI, open)
 
 **What happened.** Three Windows cells on this branch were killed by the suite's per-test watchdog inside
@@ -2113,6 +2116,31 @@ watchdog until Windows passes is a suite that has stopped measuring. What would 
 `--durations=0` on this file and Defender excluded, and the fixture's per-file cost recorded — if capsule creation alone
 is most of it, the honest fix is in the fixture's file count or in the way the capsule writer syncs, and either is a real
 change with its own evidence.
+
+**Update (2026-11-21): the cost was ours, it was countable on Linux, and it is fixed.** Reading the code rather than the
+runner found what the fixture made expensive: `index.build()` called `insert_rows()` once per capsule, and `insert_rows`
+did `BEGIN IMMEDIATE` … `COMMIT` plus **two full `COUNT(*)` sweeps** (four tables each) so that it could report how many
+rows were new. For the acceptance corpus that is 500 commits and 8 008 selects per build. A commit is a journal write and
+a sync; on the Windows cell where this fired, 500 of them is the only part of the test large enough to reach 120 s, and
+every other test in the file (which builds no such corpus) passed on the same cells.
+
+Measured with `tools/index_build_cost.py` over the same 500-capsule corpus, before and after
+(`bench/results/2026-11-21-index-build-cost.json`):
+
+| | commits | selects | incremental | rebuild |
+|---|---|---|---|---|
+| before (`2ab7636`) | 1 000 | 8 008 | 922.2 ms | 1 068.2 ms |
+| after | **2** | **8** | **311.7 ms** | **298.7 ms** |
+
+**Fixed** by making the transaction the caller's: `build()` wraps the whole ingest loop in one `BEGIN IMMEDIATE`, and
+`insert_rows()` counts new rows with `con.total_changes` instead of sweeping the tables. The rows are identical — the
+500-run dump hash assertion passes unchanged — and the index is derived data, so a crash that loses a partial build costs
+one rebuild and no evidence. `test_a_build_of_many_capsules_commits_once` asserts one `BEGIN`, one `COMMIT` and at most
+eight selects for a four-capsule corpus, and it fails against the old code (`one transaction per build, not 4`).
+
+**Not changed, and this is the part worth repeating:** the watchdog stays at 120 s, the fixture stays 500 real runs, and no
+assertion moved. What is claimed is the ratio of sync points and the wall time on this host; what is **not** claimed is a
+Windows wall-clock prediction, because this machine cannot produce one.
 ## Defect 115 — the `curl`+`kill -9` test killed the child before `curl` had sent anything (2026-11-20, CI, fixed)
 
 **What happened.** `py3.12 / ubuntu-latest` failed on `6bc057d` with
@@ -2164,6 +2192,26 @@ What that buys the next occurrence: 114's explanation is now arithmetic — 20 0
 `FlushFileBuffers` plus a Defender scan per close is where NTFS and a loaded runner differ from this host — and 113's is
 the opposite, a budget three orders of magnitude past the work, which points at a hung connect rather than a slow one.
 Neither is called resolved: both need a Windows runner, and the entries say exactly which command to run there.
+
+## Defect 108 (update 3, 2026-11-21) — the sample now records whether the process was running at all
+
+The three columns the split tool reads (rebind, dispatch, tick) all live inside the process, so none of them can say
+whether the *process* was on a CPU during the 686.2 ms. That is the one fact that separates "our rebind was slow" from
+"the runner starved us", and it was not being recorded.
+
+`ProxyThread.rebind()` and the loop-side restore path now record `rebind_cpu_ms` beside `rebinds`, using
+`time.process_time()` — process-wide CPU, so it counts whatever any thread did. The pair travels into the capsule's
+`proxy_loop` mark (`rebind_cpu_ms`), and `tools/outage_split.py` reads it: a sample of 686.2 ms with 3 ms of CPU is labelled
+`not-running`, the same outage with 600 ms of CPU is `running` and, if it came from the rebind, `ours:rebind`. Absent the
+field the tool prints `unknown` rather than a story.
+
+Two tests hold it: `tests/test_supervisor_loop_errors.py::test_a_rebind_records_its_cpu_time_beside_its_wall_time` drives a
+sleeping rebind (wall ≥ 100 ms, CPU under half) and then a CPU-burning one (CPU > 80 ms), and
+`tests/test_outage_split.py::test_process_cpu_separates_a_starved_wait_from_slow_work` holds the labels. The budget is
+untouched at 100 ms and the recorded 2026-11-20 sample still says its 686.2 ms put none of itself in the rebind.
+
+**Still open:** the Windows cell that started this has not been re-run with the new field, so the *cause* of the 686.2 ms
+remains unknown; what changed is that the next occurrence answers it without a maintainer guessing.
 ## Defect 116 — on a Windows runner the CLI received `D` where the script passed `D:\a\…\x.bbx` (2026-11-20, CI, open)
 
 **What happened.** The Windows packaging workflow's smoke step runs `blackbox verify <capsule>` against a capsule a real
@@ -2188,6 +2236,20 @@ leaving the question open.
 `blackbox verify D:\tmp\x.bbx` typed at a `cmd` prompt. If the CLI alone refuses an absolute Windows path, it is ours and
 this becomes a bug in `cmd_verify`; if only the PowerShell invocation mangles it, it is the harness and the docs should say
 so. Either way the answer is one command on a machine with Windows.
+
+**Update (2026-11-21): the half that is ours is now tested, and the refusal is legible.** Two tests in
+`tests/test_verify_cli.py` settle what Linux can settle:
+
+* `test_a_windows_style_path_is_reported_whole_not_cut_at_the_colon` hands `verify` the *whole* Windows path and requires
+  the whole string back in the refusal. So `cmd_verify` does not split an argument on `:` — a regression that did would
+  fail here on every platform. The cut happened before `argv`, which leaves the shell boundary as the remaining place.
+* `test_a_bare_drive_letter_says_what_it_probably_was` covers the shape that actually arrived (`D`): `blackbox verify D`
+  now prints "`D` is a single drive letter, so the rest of the path never reached this command", names defect 116, and says
+  what avoids it (quote it, or pass it from the shell). The exit code is unchanged at 2, and an ordinary missing file gets
+  the plain refusal without the advice.
+
+The cause of the cut is **still unknown** — the two commands above remain the way to find it — but a user who hits it now
+has a sentence that does not read like a corrupted file.
 ## Defect 117 — the 5 001-entry refusal took 133 ms on one Windows cell and 15 ms on the next commit (2026-11-20, open)
 
 **What happened.** `tests/test_capsule_attacks.py::test_check_2_more_entries_than_the_format_allows` failed on
@@ -2212,6 +2274,57 @@ still fails on a slow refusal, and now it fails with something a reader can act 
 **What would settle it:** the next red cell on Windows, read against that second number; and, if the reader is implicated,
 a profile of `read_capsule` over a 5 001-entry archive on Windows (`cProfile`, cold and warm) which this environment cannot
 produce because it has no Windows and no 5 001-entry capsule large enough to be interesting on Linux.
+
+**State, 2026-11-21 — it recurred, on a third platform.** `ci` run `44873282602` (`416652b`) failed this test on **two
+cells in the same run**: `py3.12 / ubuntu-latest` at **123.4 ms** and `py3.12 / windows-latest` at **85.0 ms**, while the
+second refusal of the same file in the same process took **11.1 ms** and **11.2 ms**, and eight consecutive local runs here
+take 19.5 ms cold and 12.9 ms warm (wall and CPU identical). So "Windows-only" was wrong, and the validator is not doing the
+work in the slow case.
+
+**What that changes.** Nothing in the budget. The failure message now prints two clocks — the refusal's wall time and this
+process's own CPU time — because 123 ms of wall with 11 ms of CPU is a machine that descheduled the process, and 123 ms of
+both is work this project did. That number is what the next occurrence will carry.
+
+**Second recurrence, with the CPU clock.** `ci` run `44873321027` (`7bf02b8`) failed the same test on `py3.12 /
+ubuntu-latest` (102.9 ms, re-read 17.9 ms) and `py3.12 / windows-latest` (79.7 ms, re-read 10.7 ms); run `44875051713`
+(`b115f02`), the first with the two-clock message, failed it on `py3.12 / windows-latest` with **112.4 ms wall and 109.4 ms
+of this process's own CPU**, the re-read at 18.8 ms / 15.6 ms CPU. So the slow case is not a descheduled runner: on that cell
+the reader itself spent ~110 ms, six times the warm cost, on the first refusal of a 5 002-entry archive. `py3.12 /
+ubuntu-latest` passed in that run with the same code, so it is intermittent on py3.12 and has never been seen on 3.11 or 3.13.
+
+**Third recurrence, and the third measurement answers it.** `ci` run `44876854246` (`64281d4`) failed the same test on
+`py3.12 / macos-latest` and `py3.12 / windows-latest`, while **a fresh copy of the same bytes opened and listed 5 002 entries
+in 12.4 ms (12.1 ms CPU) and 18.6 ms** — so parsing the largest archive the format allows is *not* the slow part, and the
+budget is not being spent on the validator. The ~90 ms belongs to the first read of that particular file in that process, and
+disappears on the second read of the same file and on the first read of an identical copy.
+
+**What that means for the budget.** A user's first `verify` of a just-written archive can pay it; a second verify, or a verify
+of a copy, does not. Whether that is a number this project owes a bound on is an owner decision, and the options are written
+out below.
+
+**What the failure now prints.** A third measurement: the same bytes copied to a fresh name, opened and listed with both
+clocks. A fast copy would put the cost on the original file's cache story (a scanner, a write-back); a slow one puts it on
+parsing 5 002 central-directory records, which is the entire work `read_capsule` does before line 205 refuses — there is no
+cache to blame, the second call re-parses everything.
+
+**Root cause and fix (2026-11-21).** Instrumentation inside `read_capsule` (`timing=` dict with wall, process CPU, and
+thread CPU per stage) showed that on a 5 001-entry archive almost all of the time was spent inside `zipfile.ZipFile(path)`
+(`open` stage: 21–180 ms wall and thread CPU on this machine) parsing every central-directory record before `_check_infos`
+could count them. Reading the end-of-central-directory record (`PK\x05\x06`, last 22 + ≤65 535 bytes) takes ~0.07 ms.
+
+`read_capsule` and `read_manifest` now call `declared_entry_count(path)` before `zipfile.ZipFile(path)` and refuse with
+`BBX-E402` when the end record declares `> MAX_ENTRIES`. `None` (missing/short/non-zip/`0xFFFF` zip64) falls through to
+`zipfile`, and `_check_infos` remains the authority so a lying end record is still refused after parsing. Three tests in
+`tests/test_capsule_attacks.py` pin this (`test_an_oversized_archive_is_refused_from_its_end_record_before_it_is_parsed`,
+`test_a_lying_end_record_is_still_refused_after_the_parse`, `test_the_end_record_reader_says_nothing_when_it_cannot_speak_for_the_archive`).
+The 50 ms budget is unchanged.
+
+**A proposal, for the owner rather than for a test.** The `b115f02` numbers rule out the scheduler as the cause, so the
+choice is between two budget changes and neither is a test's to make: state this one row's budget for a 5 002-entry archive
+at a number a first-touch parse actually meets (it is the largest input the format allows, and the 50 ms bound was measured
+against 15.7 ms on smaller refusals), or accept the first refusal of such an archive as slower by design and assert only
+that the second is under the bound. Both are owner decisions; the budget is untouched here.
+
 ## Defect 118 — the stall dump showed one deadlocked thread on macOS, where the test needs two (2026-11-20, CI, open)
 
 **What happened.** `44818156775`'s `py3.12 / macos-latest` cell failed
@@ -2245,6 +2358,9 @@ the limitation is in the product documentation rather than only in a test's cond
 
 **What would settle it:** the next macOS occurrence's annotation, which now contains the beginning of the dump, and a
 macOS machine running the test in a loop.
+
+**State, 2026-11-21.** Not seen since: the three macOS cells were green at `0ca6951` and at `f86c3d1`, which narrows nothing — the failure is intermittent by construction — and the annotation now carries the dump's first lines.
+
 ## Defect 119 — a killed `curl` run recovered with no node statuses at all on macOS (2026-11-20, CI, open)
 
 **What happened.** `44823859540`'s `py3.11 / macos-latest` cell failed
@@ -2269,3 +2385,117 @@ in the capsule and the archive lost them), which are different bugs in different
 **What would settle it:** the next macOS or Ubuntu occurrence read against those four numbers; if the frames are present,
 the archive's `node_statuses` is the suspect and the fix is on the reporting side, and if they are absent the proxy's write
 ordering under a killed client is.
+
+
+**State, 2026-11-21 — it recurred, and the four numbers answered the first half.** `ci` run `44873282602` (`416652b`),
+cell `py3.13 / macos-latest`: `statuses=[]`, the origin pushed **5 chunks / 835 bytes**, and the launcher's own JSON summary
+is present and complete. Frames are therefore **absent** from the capsule rather than lost on the way to the report, which is
+the branch of the earlier decision tree that names the proxy's write ordering under a killed client, not the archive's
+`node_statuses`. The origin did send data, so the client was talking to a server that answered.
+
+**What that leaves.** The proxy forwarded and recorded nothing for a stream whose origin produced 835 bytes before the kill:
+either the kill arrived before any frame was flushed, or the flush was lost with the process. Distinguishing those needs a
+run in which the burst is *watched* — the proxy's own frame count at the moment of the kill — which is instrumentation, and
+the next step for whoever picks this up. **Test synchronization fix (2026-11-21).** `_run_and_kill_mid_stream` in `tests/test_attach_curl_kill.py` previously
+waited only for `provider.sent_chunks >= min_chunks` (origin → proxy) before touching `BBX_KILL_WHEN`, which did not
+guarantee that the proxy had forwarded any bytes to `curl` yet. It now redirects `curl` stdout to `$BBX_OUT` and waits
+until both `provider.sent_chunks >= min_chunks` and `$BBX_OUT` is non-empty before triggering `SIGKILL`. Stays open until
+macOS CI confirms.
+
+## Defect 120 — a Windows cell called `ingest` 155 ms slower than the front door, and the next commit's identical cell called it fine (2026-11-21, CI, open)
+
+**What happened.** `ci` run `44868739519` (`0ca6951`, the index-transaction commit), cell `py3.11 / windows-latest`:
+`tests/test_hook_inbox.py::test_the_ingest_command_costs_the_agent_tens_of_milliseconds` failed with
+
+```
+`ingest` cost 155 ms more than the front door alone (225 vs 69 ms; bare interpreter 27 ms)
+```
+
+against an 80 ms bound. The other ten cells of that run were green, and the same cell at the next commit (`f86c3d1`, run
+`44868905760`) was green with every product file unchanged for this path — so this is the shared-runner-timing class again,
+the same class as defects 99 and 117, not a regression in `ingest`.
+
+**Why the measurement allowed it.** The test took two separate medians of five subprocesses: the front door first, `ingest`
+second. A runner that becomes busy between the two batches shows up entirely in the delta, because each half was measured
+in a different few seconds. That is a measurement of the runner's mood, which is the thing the same test's docstring says
+it is trying to avoid.
+
+**What changed.** The two commands now run in **interleaved pairs** — five pairs, alternating which goes first, so each
+delta is a difference of two runs from the same seconds — and the bound is applied to the median of the five deltas.
+The bound is still **80 ms**, the absolute 900 ms ceiling is unchanged, the run count per command is unchanged, and the
+machine-independent half of the same claim (`test_the_ingest_path_imports_only_what_it_uses`) is untouched. The failure
+message now prints all five deltas as well as the separate medians, so the next occurrence says whether it was one busy
+pair or a genuinely slower `ingest`.
+
+**What is not known.** Whether the 155 ms was runner load or something in `ingest` that this machine does not reproduce.
+The paired statistic is chosen because it answers that after the fact: five deltas tightly around 150 ms would be a
+product problem and five spread from 5 ms to 400 ms would not.
+
+**What would settle it:** the next failing Windows cell read against the five printed deltas; if they cluster, bisect
+`0ca6951`'s `index/ingest.py` change on a Windows machine with the same five-pair measurement.
+
+## Defect 121 — CPython 3.11's parser failed on our own file with a recursion-state `SystemError`, once, in a full-suite run (2026-11-21, local, open)
+
+**What happened.** A full-suite run on this branch (`f86c3d1`) ended with one failure:
+
+```
+FAILED tests/test_diagnose.py::test_the_diagnose_package_has_no_network_or_exec_path
+E  SystemError: AST constructor recursion depth mismatch (before=120, after=172)
+/usr/lib/python3.11/ast.py:50: SystemError
+```
+
+The test parses every file in `src/blackbox/diagnose/` and asserts on the syntax tree that the diagnosis path cannot
+import a network module or call `os.system`-shaped functions. Nothing in that test depends on ordering or timing, and the
+same parse of the same bytes passes on its own and passes again in the next full run.
+
+**What the evidence says.** `ast.parse` records the thread's recursion state entering the parse and checks it on the way
+out; the two differed. The captured log at the same moment shows `Task was destroyed but it is pending!` and
+`Future exception was never retrieved` for asyncio objects that earlier proxy tests left for the collector, i.e. a
+garbage-collection pass was running Python `__del__` code while the parser held its state. That is a known class of
+CPython 3.11 parser bug, and the 3.12/3.13 cells have never shown it.
+
+**What is not known.** Whether the trigger is precisely "a GC pass during `ast.parse`" — the failure has not been
+reproduced on demand, so this is a hypothesis with a mechanism, not a measurement. It is labelled as a hypothesis in the
+helper's docstring too.
+
+**What changed.** `tests/_ast_source.py::parse_source` parses our source with **one** retry, after a `gc.collect()` that
+runs the pending destructors before the parse starts, and only when the `SystemError` names the recursion mismatch. A
+`SyntaxError`, a different `SystemError`, or a second failure all propagate — a second failure raises with defect 121 in
+the message, so the next occurrence reads as the interpreter bug it is instead of as a parse failure. `test_diagnose.py`
+uses it; the assertions it carries are unchanged, and
+`test_the_source_parser_retries_only_the_interpreter_bug` pins the retry to exactly one attempt and checks that both
+non-retryable paths are still raised.
+
+**What would settle it:** a minimal reproducer (a thread that starts the parse while a destructor is running) on 3.11, and
+the same run on 3.12 to confirm the version boundary; if the trigger is real, `tests/_ast_source.py` is the place a
+longer-lived fix belongs. It has also not been ruled out that the leftover asyncio tasks are ours to clean up — a test
+that leaves a pending task is a defect in the test.
+
+## Defect 122 — the beginner walkthrough sent the reader to `~/.blackbox`, and the product writes to the current directory (2026-11-21, found by re-running the walkthrough, fixed)
+
+**What happened.** Ran the walkthrough's own commands the way its reader would, in an empty directory: Step 2's
+`blackbox run -- python my_agent.py` wrote `capsules/`, `runs/` and `tape/` into that directory, and Step 3's
+`blackbox verify ~/.blackbox/capsules/*.bbx` then found nothing, because `~/.blackbox` holds the hook inbox and the keys, not
+the capsules of a run started elsewhere. The data directory is the current directory (`cli/paths.default_data_dir`, and
+`rec/launcher.launch` for `run`); the page assumed the opposite.
+
+Two flags in the same page were wrong in the same way: `blackbox run --data` (the launcher spells it `--data-dir`) and
+`blackbox view --data` (`view` takes a path and has no `--data` flag). None of these is a typo a reader can spot, and all
+three change **where the recording is looked for** — which is the one fact a beginner cannot debug by reading output.
+
+**What changed.** Step 2 now says where the recordings go, with the three ways to move them (`run --data-dir`,
+`BLACKBOX_HOME`, and picking the right command for the read-only side: `--data` for `ls`/`verify`/`retention`/`doctor`, a
+path argument for `view`/`diagnose`). Steps 3–8 use `capsules/` and say why. Three tests now hold the page to the product:
+
+* `test_every_flag_the_page_uses_is_a_flag_that_command_has` runs `blackbox <verb> --help` for every verb the page uses in a
+  fenced block and compares **whole flag names** — a substring check would have passed `run --data`, because `--data-dir`
+  contains it;
+* `test_the_flag_check_would_have_caught_the_two_mistakes_it_was_written_for` pins the two verbs, so the test cannot rot into
+  decoration;
+* `test_the_page_says_where_recordings_go_and_the_product_writes_there` records in a `tmp_path` and looks: `capsules/*.bbx`
+  exists there, `blackbox ls` lists it, `blackbox verify` exits 0.
+
+**What is not changed, and is an owner decision.** Whether the default should be the current directory at all. It is a
+reasonable default for a recorder — the incident stays with the code that produced it — and it is also the reason the page
+had to be rewritten. Changing it would be a product decision with a migration story for anybody who already has recordings
+beside their project, so this entry records the behaviour, documents it, and leaves the default alone.

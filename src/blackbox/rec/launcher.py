@@ -396,6 +396,7 @@ def launch(argv: list[str], *, data_dir: str | None = None, stall_ms: int = 5_00
                 "adopted": dict(sorted(proxy_plan.adopted.items())),
                 "overridden": dict(sorted(proxy_plan.overridden.items())),
                 "rebinds": list(proxy_thread.rebinds),
+                "rebind_cpu_ms": list(proxy_thread.rebind_cpu_ms),
                 "retry_transmitted": proxy_thread.retry_transmitted,
                 "port_changed": proxy_thread.port_changed,
                 "stats": server.stats.as_dict() if server is not None else {},
@@ -428,6 +429,8 @@ def launch(argv: list[str], *, data_dir: str | None = None, stall_ms: int = 5_00
             writer.append(C.KIND_MARK, cbor.encode({
                 "name": "proxy_loop",
                 "rebinds_ms": [round(value, 3) for value in result.proxy.get("rebinds") or []],
+                # The pair that makes an outlier readable from the tape: wall and CPU for the same rebind (defect 108).
+                "rebind_cpu_ms": [round(value, 3) for value in result.proxy.get("rebind_cpu_ms") or []],
                 "port_changed": bool(result.proxy.get("port_changed")),
                 "loop_error_count": int(result.proxy.get("loop_error_count") or 0),
                 "loop_errors": result.proxy.get("loop_errors") or [],

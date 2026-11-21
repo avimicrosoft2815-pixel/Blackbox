@@ -170,6 +170,11 @@ class ProxyThread:
 
         self._start_error: BaseException | None = None
         self.rebinds: list[float] = []                     # milliseconds each rebind took
+        # CPU milliseconds this *process* burned during each rebind, recorded beside the wall time (defect 108). The
+        # measurement is a cross-thread `.result()` wait, so wall time includes however long the loop thread waited to be
+        # scheduled: 686 ms of wall with 3 ms of CPU is a machine that did not run us, and 686 ms of wall with 600 ms of
+        # CPU is our own work. `time.process_time()` is process-wide, which is what makes the pair readable.
+        self.rebind_cpu_ms: list[float] = []
         # How late each watchdog tick woke, in milliseconds: `interval - tick`. A rebind cannot start before the
         # watchdog notices, so a starved thread (a loaded CI runner, a stopped-the-world GC pause) spends the budget
         # before a line of our code runs. Recording it is how a red row distinguishes "our rebind was slow" from "the
@@ -395,6 +400,7 @@ class ProxyThread:
             return
         self._restoring = True
         started = time.monotonic()
+        cpu_started = time.process_time()
         try:
             if current is not None:
                 current.lost_cb = None
@@ -404,6 +410,7 @@ class ProxyThread:
             self._port = self._server.port
             self._server.lost_cb = self._listener_lost
             self.rebinds.append((time.monotonic() - started) * 1000.0)
+            self.rebind_cpu_ms.append((time.process_time() - cpu_started) * 1000.0)
             self.restores_from_loop += 1
         except Exception as exc:                   # the watchdog tick is the backstop; do not kill the loop
             self._start_error = exc
@@ -471,6 +478,7 @@ class ProxyThread:
         """
         with self._lock:
             started = time.monotonic()
+            cpu_started = time.process_time()
             loop = self._loop
             if loop is None:
                 raise RuntimeError("the proxy thread is not running")
@@ -485,6 +493,7 @@ class ProxyThread:
                 self._server.lost_cb = self._listener_lost
             elapsed = (time.monotonic() - started) * 1000.0
             self.rebinds.append(elapsed)
+            self.rebind_cpu_ms.append((time.process_time() - cpu_started) * 1000.0)
             return elapsed
 
     def _restart(self, loop: asyncio.AbstractEventLoop, timeout: float) -> ProxyServer:

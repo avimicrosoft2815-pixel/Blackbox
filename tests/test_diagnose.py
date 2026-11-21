@@ -14,6 +14,8 @@ What these tests are actually defending, in order of how badly it would hurt to 
 """
 from __future__ import annotations
 
+import ast
+
 import dataclasses
 import json
 import os
@@ -378,7 +380,7 @@ def test_diagnose_rejects_a_nonsense_bound(tmp_path: Path, capsys: pytest.Captur
 # ── the property that makes the rest safe ──────────────────────────────────
 def test_the_diagnose_package_has_no_network_or_exec_path() -> None:
     """Checked on the syntax tree, not on the prose: a substring search flags the word "requests" in a docstring."""
-    import ast
+    from _ast_source import parse_source
 
     banned_modules = {"subprocess", "socket", "ssl", "urllib", "http", "ftplib", "smtplib", "asyncio",
                       "requests", "httpx", "aiohttp", "ctypes", "multiprocessing", "webbrowser", "pty", "pdb"}
@@ -386,7 +388,7 @@ def test_the_diagnose_package_has_no_network_or_exec_path() -> None:
                     "kill", "killpg", "which", "run", "call", "check_output", "Popen"}
     offenders: list[str] = []
     for path in sorted((ROOT / "src" / "blackbox" / "diagnose").glob("*.py")):
-        tree = ast.parse(path.read_text(encoding="utf-8"))
+        tree = parse_source(path)
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
                 offenders += [f"{path.name}: import {a.name}" for a in node.names
@@ -600,3 +602,52 @@ def test_a_complete_call_is_never_reported_as_cut_short(tmp_path: Path) -> None:
     report = build(load(capsule))
     cut = [f.id for f in report.findings if "stream" in f.id or "interrupted" in f.id or "status" in f.id]
     assert cut == [], cut
+
+
+
+def test_the_source_parser_retries_only_the_interpreter_bug(monkeypatch) -> None:
+    """Defect 121's mitigation is one retry for one `SystemError`, and nothing else.
+
+    A retry that also caught `SyntaxError` would turn a file this project cannot parse into a pass, which is the exact
+    failure mode a static test exists to catch. This drives the helper with a fake parser, so the check does not depend on
+    the interpreter bug turning up.
+    """
+    from _ast_source import RECURSION_MISMATCH, parse_source
+
+    source = ROOT / "src" / "blackbox" / "diagnose" / "cli.py"
+    real_parse = ast.parse
+    calls: list[str] = []
+
+    def first_attempt_fails(text, filename="<unknown>", mode="exec", *args, **kwargs):
+        calls.append(str(filename))
+        if len(calls) == 1:
+            raise SystemError(f"{RECURSION_MISMATCH} (before=120, after=172)")
+        return real_parse(text, filename=filename, mode=mode)
+
+    monkeypatch.setattr(ast, "parse", first_attempt_fails)
+    tree = parse_source(source)
+    assert len(calls) == 2, f"one retry is the contract, got {len(calls)} calls"
+    assert tree.body, "the retry has to return the tree, not just stop raising"
+
+    calls.clear()
+
+    def always_broken(text, filename="<unknown>", mode="exec", *args, **kwargs):
+        calls.append(str(filename))
+        raise SystemError(f"{RECURSION_MISMATCH} (before=120, after=172)")
+
+    monkeypatch.setattr(ast, "parse", always_broken)
+    with pytest.raises(SystemError) as raised:
+        parse_source(source)
+    assert "defect 121" in str(raised.value), str(raised.value)
+    assert len(calls) == 2, f"a retry loop would hide the bug behind more attempts: {len(calls)}"
+
+    calls.clear()
+
+    def syntax_error(text, filename="<unknown>", mode="exec", *args, **kwargs):
+        calls.append(str(filename))
+        raise SyntaxError("not a retryable error")
+
+    monkeypatch.setattr(ast, "parse", syntax_error)
+    with pytest.raises(SyntaxError):
+        parse_source(source)
+    assert len(calls) == 1, "a SyntaxError is the finding, and must not be retried"

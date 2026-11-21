@@ -118,3 +118,49 @@ def test_an_unused_proxy_records_nothing(upstream: LocalUpstream) -> None:
         assert proxy.loop_errors == [], proxy.loop_errors
     finally:
         proxy.stop()
+
+
+def test_a_rebind_records_its_cpu_time_beside_its_wall_time(upstream: LocalUpstream, monkeypatch) -> None:
+    """The pair that reads a defect-108 outlier from the tape: wall says how long, CPU says whether we were running.
+
+    `rebind()` measures a cross-thread `.result()` wait, so wall time includes however long the loop thread waited to be
+    scheduled. A 686 ms sample with 3 ms of process CPU is a machine that starved the process; the same 686 ms with
+    600 ms of CPU is our own work. Before this, every sample looked identical and the only way to tell them apart was a
+    tool reading a number that was never recorded.
+    """
+    proxy = ProxyThread(_routes(upstream.base), supervise_ms=0.0)
+    proxy.start()
+    try:
+        # A rebind that *waits* rather than works: the loop is asked to restart the listener after a sleep on this thread,
+        # so wall climbs and process CPU does not. `_restart` is the seam, and it is the same call the real path makes.
+        real_restart = proxy._restart
+
+        def slow_restart(loop, timeout):
+            time.sleep(0.12)
+            return real_restart(loop, timeout)
+
+        monkeypatch.setattr(proxy, "_restart", slow_restart)
+        wall_ms = proxy.rebind()
+        assert wall_ms >= 100.0, f"the seam did not slow the rebind: {wall_ms:.1f} ms"
+        assert len(proxy.rebind_cpu_ms) == len(proxy.rebinds) == 1
+        cpu_ms = proxy.rebind_cpu_ms[0]
+        assert cpu_ms < wall_ms / 2, (
+            f"a sleeping rebind must not look like work: wall {wall_ms:.1f} ms, cpu {cpu_ms:.1f} ms")
+
+        # And the other direction: a rebind that burns CPU shows it. The loop's own work is small, so this measures the
+        # waiting thread spinning, which is what a busy sample would also contain.
+        monkeypatch.setattr(proxy, "_restart", real_restart)
+
+        def busy_restart(loop, timeout):
+            deadline = time.process_time() + 0.12
+            while time.process_time() < deadline:
+                pass
+            return real_restart(loop, timeout)
+
+        monkeypatch.setattr(proxy, "_restart", busy_restart)
+        wall_ms = proxy.rebind()
+        assert proxy.rebind_cpu_ms[1] > 80.0, (
+            f"a rebind that spent CPU must record it: cpu {proxy.rebind_cpu_ms[1]:.1f} ms of {wall_ms:.1f} ms")
+        assert len(proxy.rebinds) == len(proxy.rebind_cpu_ms) == 2, "one CPU sample per wall sample, always"
+    finally:
+        proxy.stop()

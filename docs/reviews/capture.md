@@ -1,5 +1,8 @@
 # Review pack — capture (this is not a gate file, and carries no verdict)
 
+**Re-read at `1466f43`, 2026-11-21** (shipped in `044c1f8`, whose only change is this line). Every command in this pack was re-run
+against that tree: 43 tests, all pass, exit 0. No row changed and no row was added; a re-run is not a review.
+
 Rows from `docs/BLACKBOX_FINAL_ARCHITECTURE_v1.1.md` §24 (Capture) and §5 of the gate protocol. `docs/gates/README.md`
 decides what a gate file is; this is the builder's evidence for one area, unsigned.
 

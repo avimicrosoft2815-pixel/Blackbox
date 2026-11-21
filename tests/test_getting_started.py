@@ -127,3 +127,96 @@ def test_the_privacy_promise_is_stated_in_the_page(phrase: str) -> None:
     # Prose wraps, so match across line breaks rather than forcing the sentence onto one line.
     flat = re.sub(r"\s+", " ", _page()).lower()
     assert phrase in flat, f"the walkthrough lost its privacy sentence ({phrase!r})"
+
+
+def _documented_command_lines() -> list[str]:
+    """Every line in a fenced block that starts with `blackbox `, minus the comments to its right."""
+    lines = []
+    in_block = False
+    for line in _page().splitlines():
+        if line.startswith("```"):
+            in_block = not in_block
+            continue
+        if not in_block:
+            continue
+        command = line.split("#", 1)[0].strip()
+        if command.startswith("blackbox "):
+            lines.append(command)
+    return lines
+
+
+def test_every_flag_the_page_uses_is_a_flag_that_command_has() -> None:
+    """The command-exists test above checks the verb; this checks the flag, which is where a page rots quietly.
+
+    These two were wrong when this test was written: the page told a beginner `blackbox run --data` (the launcher spells it
+    `--data-dir`) and `blackbox view --data` (which takes a path, not a flag). Neither is a typo a reader can spot — both
+    answers change where the recording is looked for — so the page is now measured against `--help` instead of trusted.
+    """
+    import subprocess
+    import sys
+
+    commands: dict[str, set[str]] = {}
+    for line in _documented_command_lines():
+        words = line.split()
+        verb = words[1]
+        if verb.startswith("-"):
+            continue                                   # `blackbox --version` and friends
+        flags = {word.split("=", 1)[0] for word in words[2:] if word.startswith("--") and word != "--"}
+        commands.setdefault(verb, set()).update(flags)
+    assert commands, "the page has no command lines to check, which would make this test vacuous"
+    for verb, flags in sorted(commands.items()):
+        done = subprocess.run([sys.executable, "-m", "blackbox", verb, "--help"],
+                              capture_output=True, text=True, timeout=120,
+                              env={**__import__("os").environ, "PYTHONPATH": str(ROOT / "src")})
+        assert done.returncode == 0, f"`blackbox {verb} --help` failed: {done.stderr[-300:]}"
+        # Whole flags, not substrings: `--data-dir` contains `--data`, so a substring test would have passed the page's
+        # `blackbox run --data` while `run` does not have that flag at all. This is the check that catches that pair.
+        offered = set(re.findall(r"--[a-z0-9][a-z0-9-]*", done.stdout))
+        missing = sorted(flag for flag in flags if flag not in offered)
+        assert not missing, f"the page uses {missing} with `blackbox {verb}`, which offers {sorted(offered)}"
+
+
+def test_the_flag_check_would_have_caught_the_two_mistakes_it_was_written_for() -> None:
+    """A test that cannot fail is decoration: this pins the two commands whose flags the page got wrong.
+
+    `run` has `--data-dir` and no `--data`; `view` takes a path and no `--data` flag at all. Both were in the page, and both
+    were found by a reader re-running the walkthrough rather than by any test — so the test now states them.
+    """
+    import subprocess
+    import sys
+
+    for verb, absent, present in (("run", "--data", "--data-dir"), ("view", "--data", None)):
+        done = subprocess.run([sys.executable, "-m", "blackbox", verb, "--help"],
+                              capture_output=True, text=True, timeout=120,
+                              env={**__import__("os").environ, "PYTHONPATH": str(ROOT / "src")})
+        offered = set(re.findall(r"--[a-z0-9][a-z0-9-]*", done.stdout))
+        assert absent not in offered, f"`blackbox {verb}` now takes {absent}; the page may use it again"
+        if present:
+            assert present in offered, f"`blackbox {verb}` lost {present}, which the page tells a beginner to use"
+
+
+def test_the_page_says_where_recordings_go_and_the_product_writes_there(tmp_path: Path) -> None:
+    """Step 2 tells a beginner the data directory is the directory they ran in; this runs the product and looks.
+
+    The page used to send the reader to `~/.blackbox/capsules/` after telling them to run `blackbox run -- python app.py`,
+    which writes to the current directory. Nothing in the page was self-contradictory enough for a text test to see it, and
+    a beginner would have found an empty directory at the end of Step 3. So the claim is now a subprocess: record here, look
+    here.
+    """
+    import os
+    import subprocess
+    import sys
+
+    env = {**os.environ, "PYTHONPATH": str(ROOT / "src")}
+    recorded = subprocess.run([sys.executable, "-m", "blackbox", "run", "--", sys.executable, "-c", "print(1)"],
+                              cwd=tmp_path, capture_output=True, text=True, timeout=300, env=env)
+    assert recorded.returncode == 0, recorded.stderr[-800:]
+    capsules = sorted((tmp_path / "capsules").glob("*.bbx"))
+    assert capsules, f"the page says the recording lands beside the project; nothing is in {tmp_path / 'capsules'}"
+    listed = subprocess.run([sys.executable, "-m", "blackbox", "ls"], cwd=tmp_path,
+                            capture_output=True, text=True, timeout=300, env=env)
+    assert listed.returncode == 0, listed.stderr[-400:]
+    assert capsules[0].stem in listed.stdout, "`blackbox ls` in that directory has to list the capsule the page names"
+    verified = subprocess.run([sys.executable, "-m", "blackbox", "verify", str(capsules[0])],
+                              cwd=tmp_path, capture_output=True, text=True, timeout=300, env=env)
+    assert verified.returncode == 0, verified.stderr[-400:]

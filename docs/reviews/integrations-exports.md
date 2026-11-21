@@ -1,5 +1,8 @@
 # Review pack — integrations and exports (this is not a gate file, and carries no verdict) — unsigned builder evidence
 
+**Re-read at `1466f43`, 2026-11-21** (shipped in `044c1f8`, whose only change is this line). Every command in this pack was re-run
+against that tree: 51 tests, all pass, exit 0. No row changed and no row was added; a re-run is not a review.
+
 Two different promises live here, and they are easy to conflate:
 
 * **Exports** — the capsule's own `otlp/spans.{json,pb}` and `events/events.jsonl` are derived parts, regenerated

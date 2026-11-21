@@ -34,7 +34,7 @@ from typing import Any
 
 from blackbox.cap import format as cap
 from blackbox.cap import manifest as manifest_mod
-from blackbox.cli.paths import default_data_dir
+from blackbox.cli.paths import default_data_dir, path_refusal_advice
 
 
 def _capsules_in(data_dir: str) -> list[str]:
@@ -151,7 +151,7 @@ def main(argv: list[str] | None = None) -> int:
         try:
             capsule = cap.read_capsule(path)
         except Exception as exc:
-            print(f"blackbox verify: cannot read {path}: {type(exc).__name__}: {exc}")
+            print(f"blackbox verify: cannot read {path}: {type(exc).__name__}: {exc}{path_refusal_advice(path)}")
             unreadable += 1
             continue
         report = manifest_mod.verify(capsule)

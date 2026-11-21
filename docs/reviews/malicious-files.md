@@ -1,5 +1,8 @@
 # Review pack — malicious and malformed files (this is not a gate file, and carries no verdict) — unsigned builder evidence
 
+**Re-read at `1466f43`, 2026-11-21** (shipped in `044c1f8`, whose only change is this line). Every command in this pack was re-run
+against that tree: 60 tests, all pass, exit 0. No row changed and no row was added; a re-run is not a review.
+
 A `.bbx` capsule is a file a user may have been sent. The reader therefore treats it as hostile input: it must refuse
 early, with a documented code, inside a time bound — and the pages that render recorded content must never let that
 content become markup.

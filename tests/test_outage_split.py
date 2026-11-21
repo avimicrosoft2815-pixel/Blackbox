@@ -95,3 +95,44 @@ def test_the_tool_runs_from_the_command_line_with_the_numbers_in_the_document():
     payload = json.loads(completed.stdout)
     assert payload["worst"]["outage_ms"] == 686.2
     assert payload["n"] == 8
+
+
+def test_process_cpu_separates_a_starved_wait_from_slow_work() -> None:
+    """The column that can finally answer the question the other three leave open (defect 108).
+
+    An outage of 686.2 ms with 3 ms of process CPU was not this code being slow: the process was not on a CPU. The same
+    outage with 600 ms of CPU is our own work. Neither number is inferable from the wall clock, which is why the supervisor
+    now records both (`ProxyThread.rebind_cpu_ms`, carried into the capsule's `proxy_loop` mark).
+    """
+    starved = split_one(686.2, rebind_ms=0.0, cpu_ms=3.0)
+    assert starved["process"] == "not-running", starved
+    assert starved["label"] == "not-ours:tick-or-loop", starved
+
+    working = split_one(686.2, rebind_ms=600.0, cpu_ms=600.0)
+    assert working["process"] == "running", working
+    assert working["label"] == "ours:rebind", working
+
+    # Absent the field, the tool says it does not know rather than defaulting to a story.
+    assert split_one(686.2, rebind_ms=0.0)["process"] == "unknown"
+
+    # And a whole run keeps one entry per sample, from the payload shape a capsule carries.
+    result = split([20.6, 686.2], [16.0, 0.0], cpu=[15.0, 3.0])
+    assert [s["process"] for s in result["samples"]] == ["running", "not-running"]
+    assert result["process"] == ["not-running", "running"]
+
+
+def test_the_tool_reads_a_capsule_shaped_sample_with_cpu(tmp_path) -> None:
+    """`rebind_cpu_ms` is the name the launcher writes into the tape; the tool has to accept that spelling."""
+    payload = {**RECORDED, "rebind_cpu_ms": [0.0] * len(RECORDED["rebinds_ms"])}
+    source = tmp_path / "sample-with-cpu.json"
+    try:
+        source.write_text(json.dumps(payload))
+        completed = subprocess.run(
+            [sys.executable, str(ROOT / "tools" / "outage_split.py"), "--sample", str(source), "--json"],
+            capture_output=True, text=True, timeout=120,
+        )
+    finally:
+        source.unlink(missing_ok=True)
+    assert completed.returncode == 0, completed.stderr[-800:]
+    split_doc = json.loads(completed.stdout)
+    assert split_doc["process"] == ["not-running"], split_doc["process"]
