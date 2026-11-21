@@ -31,6 +31,8 @@ import hashlib
 import io
 import json
 import os
+import struct
+import time
 import zipfile
 from dataclasses import dataclass, field
 from typing import Any
@@ -196,6 +198,47 @@ def _read_entry(zf: zipfile.ZipFile, info: zipfile.ZipInfo, *, remaining: int) -
     return bytes(out)
 
 
+
+# ── refusing an oversized archive without parsing it (defect 117) ─────────────────────────────────────────────────────
+
+_EOCD_SIGNATURE = b"PK\x05\x06"
+_EOCD_MIN = 22
+_ZIP_COMMENT_MAX = 65_535
+
+
+def declared_entry_count(path: str) -> int | None:
+    """The entry count the archive's **end-of-central-directory record** declares, or `None` if it cannot be read.
+
+    `zipfile.ZipFile(path)` parses every central-directory record before anything in this module can count them, and that
+    parse is proportional to the number of entries: 20 000 entries cost 159 ms on this machine while reading the end record
+    costs 0.07 ms (defect 117). The end record is fixed-size and sits in the last 22 bytes plus at most 65 535 bytes of
+    comment, so the count is available before the directory is touched — which is what lets an oversized archive be refused
+    in constant work, and what makes the 50 ms budget reachable on a machine that is slow at parsing.
+
+    `None` means "ask the parser": the file is too short, has no end record in its last 65 557 bytes, or declares 0xFFFF,
+    which is the marker zip64 uses when the real count lives in a second record. This function never decides that an archive
+    is *acceptable* — only `_check_infos` does that, after the parse, so a lying end record still gets refused.
+    """
+    try:
+        size = os.path.getsize(path)
+        with open(path, "rb") as handle:
+            start = max(0, size - (_EOCD_MIN + _ZIP_COMMENT_MAX))
+            handle.seek(start)
+            tail = handle.read()
+    except OSError:
+        return None
+    index = tail.rfind(_EOCD_SIGNATURE)
+    if index < 0 or len(tail) - index < _EOCD_MIN:
+        return None
+    try:
+        total = struct.unpack_from("<H", tail, index + 10)[0]
+    except struct.error:                                       # pragma: no cover - len() already guarantees 22
+        return None
+    if total == 0xFFFF:                                        # zip64: the real count is elsewhere
+        return None
+    return total
+
+
 def _check_infos(path: str, infos: list[zipfile.ZipInfo]) -> None:
     """The checks that need only the archive's own headers — §13.4 checks 2, 3, 4, 5 and 6, before any body is read.
 
@@ -237,6 +280,9 @@ def read_manifest(path: str, *, max_bytes: int = 1 << 30) -> dict[str, Any]:
     size = os.path.getsize(path)
     if size > max_bytes:
         raise bbx("BBX-E401", f"{path} is {size} B, over the {max_bytes} B limit")
+    declared = declared_entry_count(path)
+    if declared is not None and declared > MAX_ENTRIES:
+        raise bbx("BBX-E402", f"{path}: {declared} entries > {MAX_ENTRIES}")
     try:
         zf = zipfile.ZipFile(path)
     except (zipfile.BadZipFile, OSError) as exc:
@@ -287,21 +333,69 @@ def _check_declared_parts(path: str, manifest: dict[str, Any], names: set[str]) 
             raise bbx("BBX-E408", f"manifest lists {name!r}, which the archive does not contain")
 
 
-def read_capsule(path: str, *, max_bytes: int = 1 << 30) -> Capsule:
-    """Read and verify a capsule. Never extracts; never trusts the archive's own claims."""
+def _clock() -> tuple[int, int, int]:
+    """(monotonic ns, this process's CPU ns, this thread's CPU ns) — three different questions (defect 117).
+
+    Wall time says how long the caller waited; process CPU says how much CPU *anything in this process* burned; thread CPU
+    says how much of it was this call. A refusal that shows 112 ms of wall, 109 ms of process CPU and 12 ms of thread CPU is
+    a call that waited while something else in the same process ran, and the older two-clock message could not say that.
+    `time.thread_time` is available on POSIX and Windows; where it is not, the thread figure is reported as -1 rather than
+    guessed.
+    """
+    try:
+        thread = time.thread_time_ns()
+    except (AttributeError, OSError):     # pragma: no cover - platform without a thread clock
+        thread = -1
+    return time.perf_counter_ns(), time.process_time_ns(), thread
+
+
+def _record(timing: dict[str, Any] | None, stage: str, started: tuple[int, int, int]) -> None:
+    """Add one stage's three durations to `timing`, if the caller asked for them. Costs nothing when it did not."""
+    if timing is None:
+        return
+    wall, cpu, thread = _clock()
+    wall_ms = (wall - started[0]) / 1e6
+    cpu_ms = (cpu - started[1]) / 1e6
+    thread_ms = -1.0 if thread < 0 or started[2] < 0 else (thread - started[2]) / 1e6
+    timing[stage] = {"wall_ms": round(wall_ms, 3), "process_ms": round(cpu_ms, 3), "thread_ms": round(thread_ms, 3)}
+
+
+def read_capsule(path: str, *, max_bytes: int = 1 << 30, timing: dict[str, Any] | None = None) -> Capsule:
+    """Read and verify a capsule. Never extracts; never trusts the archive's own claims.
+
+    `timing` is an optional dict — passed by tests and by `tools/` when a refusal misses its budget — that receives one
+    `{wall_ms, process_ms, thread_ms}` entry per stage (`size`, `open`, `infolist`, `entries`, `manifest`, `integrity`). It is
+    measurement only: no stage behaves differently when it is passed, and nothing here is imported unless it is used.
+    """
+    stage = _clock()
     size = os.path.getsize(path)
+    _record(timing, "size", stage)
     if size > max_bytes:
         raise bbx("BBX-E401", f"{path} is {size} B, over the {max_bytes} B limit")
+    stage = _clock()
+    declared = declared_entry_count(path)
+    if declared is not None and declared > MAX_ENTRIES:
+        raise bbx("BBX-E402", f"{path}: {declared} entries > {MAX_ENTRIES}")
     try:
         zf = zipfile.ZipFile(path)
     except (zipfile.BadZipFile, OSError) as exc:
+        _record(timing, "open", stage)
         raise bbx("BBX-E402", f"{path}: {exc}") from None
+    _record(timing, "open", stage)
     with zf:
+        stage = _clock()
         infos = zf.infolist()
-        _check_infos(path, infos)
+        _record(timing, "infolist", stage)
+        stage = _clock()
+        try:
+            _check_infos(path, infos)
+        finally:
+            _record(timing, "check_infos", stage)
+        stage = _clock()
         entries: dict[str, bytes] = {}
         for info in infos:
             entries[info.filename] = _read_entry(zf, info, remaining=MAX_TOTAL_BYTES - sum(len(v) for v in entries.values()))
+        _record(timing, "entries", stage)
     if MANIFEST_NAME not in entries:
         raise bbx("BBX-E407", "capsule has no manifest.json")
     # Shared with `read_manifest` (defect 83's guards: non-object, deep nesting, schema, version).

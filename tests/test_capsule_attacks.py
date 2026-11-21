@@ -346,3 +346,73 @@ def test_the_cli_reports_the_documented_code_and_does_not_print_a_python_excepti
     assert finished.returncode == 2, finished.stdout + finished.stderr
     assert "BBX-E407" in finished.stdout + finished.stderr
     assert "AttributeError" not in finished.stdout + finished.stderr
+
+
+# ── defect 117: the oversized-archive refusal is constant work, and the end record is never the authority ─────────────
+
+
+def test_an_oversized_archive_is_refused_from_its_end_record_before_it_is_parsed(tmp_path: Path) -> None:
+    """5 001 entries must not cost a full central-directory parse before the count check can refuse them.
+
+    Measured with the same three clocks the budget uses: parsing 20 000 records cost 159 ms on this machine, and the end
+    record's declared count cost 0.07 ms. The observability is structural rather than a stopwatch — `timing` carries a
+    `size` stage and **no** `open` stage, which is only possible if `zipfile` never saw the file — plus the budget applied to
+    the total, which this path now meets with four orders of magnitude to spare.
+    """
+    entries = [(f"events/part-{index:04d}.txt", b"x") for index in range(cap.MAX_ENTRIES + 1)]
+    path = _write(tmp_path, entries, manifest=_manifest())
+    timing: dict[str, dict[str, float]] = {}
+    with pytest.raises(BlackBoxError) as caught:
+        cap.read_capsule(str(path), timing=timing)
+    assert caught.value.code == "BBX-E402"
+    declared = cap.declared_entry_count(str(path))
+    assert declared == len(entries) + 1, f"the fixture should declare {len(entries) + 1} entries, not {declared}"  # + manifest
+    assert f"{declared} entries > {cap.MAX_ENTRIES}" in str(caught.value), str(caught.value)
+    assert "size" in timing, f"the refusal should still be measured: {timing}"
+    assert "open" not in timing, f"the archive was parsed before it was refused: {sorted(timing)}"
+    total = sum(stage["wall_ms"] for stage in timing.values())
+    assert total < BUDGET_MS, f"constant-work refusal took {total:.1f} ms"
+
+
+def test_a_lying_end_record_is_still_refused_after_the_parse(tmp_path: Path) -> None:
+    """The end record may only *start* the refusal: an archive that understates its own count must still be refused.
+
+    This is the test that keeps the fast path from becoming the authority. The count in the end record is rewritten to 3 and
+    the file is still refused — with the true count in the message, which is the parser's number, not the record's.
+    """
+    entries = [(f"events/part-{index:04d}.txt", b"x") for index in range(cap.MAX_ENTRIES + 1)]
+    path = _write(tmp_path, entries, manifest=_manifest())
+    blot = bytearray(path.read_bytes())
+    end = blot.rfind(b"PK\x05\x06")
+    assert end > 0, "the fixture has no end-of-central-directory record"
+    blot[end + 10:end + 12] = (3).to_bytes(2, "little")
+    path.write_bytes(bytes(blot))
+    assert cap.declared_entry_count(str(path)) == 3, "the fixture's lie did not take"
+    with pytest.raises(BlackBoxError) as caught:
+        cap.read_capsule(str(path))
+    assert caught.value.code == "BBX-E402"
+    assert f"{len(entries) + 1} entries > {cap.MAX_ENTRIES}" in str(caught.value), str(caught.value)
+
+
+def test_the_end_record_reader_says_nothing_when_it_cannot_speak_for_the_archive(tmp_path: Path) -> None:
+    """`None` means "ask the parser", and every shape that needs the parser has to get it.
+
+    Three of them: bytes that are not a zip at all, a file too short to hold an end record, and the `0xFFFF` marker zip64
+    uses when the real count lives in a separate record. A reader that guessed a number here would refuse a healthy archive
+    or open a hostile one.
+    """
+    junk = tmp_path / "not.zip"
+    junk.write_bytes(b"PK\x03\x04" + bytes(range(64)))
+    assert cap.declared_entry_count(str(junk)) is None
+    tiny = tmp_path / "tiny.bbx"
+    tiny.write_bytes(b"PK\x05\x06")
+    assert cap.declared_entry_count(str(tiny)) is None
+    zip64 = bytearray(b"\x00" * 30 + b"PK\x05\x06" + b"\x00" * 6 + b"\xff\xff" + b"\x00" * 10)   # total = 0xFFFF
+    marker = tmp_path / "zip64-marker.bbx"
+    marker.write_bytes(bytes(zip64))
+    assert cap.declared_entry_count(str(marker)) is None, "the zip64 marker must fall back to the parser"
+    missing = tmp_path / "absent.bbx"
+    assert cap.declared_entry_count(str(missing)) is None
+    # and a real small archive answers with its true count
+    good = _write(tmp_path, [("events/a.txt", b"x")], manifest=_manifest())
+    assert cap.declared_entry_count(str(good)) == 2

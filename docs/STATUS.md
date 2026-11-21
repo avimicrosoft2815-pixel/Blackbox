@@ -315,7 +315,7 @@ correctness. `tests/test_index_rebuild.py` (9 tests) asserts the same equality i
 could have been false: an unchanged corpus rebuilt twice, a new capsule changing only its own rows, and two tapes of one
 run producing one run row and two artifacts.
 
-Suite: **Total: 1601 tests** — 1599 pass here and 2 are skipped on POSIX by name
+Suite: **Total: 1604 tests** — 1602 pass here and 2 are skipped on POSIX by name
 (`test_an_open_view_blocks_the_unlink_only_on_windows`: POSIX permits unlinking a file another fd still holds, so the
 open-view case exists only on Windows; and `test_on_windows_no_broad_principal_has_access`: mode bits are not access on
 Windows and `icacls` does not exist here). Measured on this machine on 2026-11-20, after the recovery-lock, stall-dump and killed-curl changes: **1 588 collected, 0 failed,

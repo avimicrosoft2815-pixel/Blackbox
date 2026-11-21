@@ -2307,6 +2307,18 @@ clocks. A fast copy would put the cost on the original file's cache story (a sca
 parsing 5 002 central-directory records, which is the entire work `read_capsule` does before line 205 refuses — there is no
 cache to blame, the second call re-parses everything.
 
+**Root cause and fix (2026-11-21).** Instrumentation inside `read_capsule` (`timing=` dict with wall, process CPU, and
+thread CPU per stage) showed that on a 5 001-entry archive almost all of the time was spent inside `zipfile.ZipFile(path)`
+(`open` stage: 21–180 ms wall and thread CPU on this machine) parsing every central-directory record before `_check_infos`
+could count them. Reading the end-of-central-directory record (`PK\x05\x06`, last 22 + ≤65 535 bytes) takes ~0.07 ms.
+
+`read_capsule` and `read_manifest` now call `declared_entry_count(path)` before `zipfile.ZipFile(path)` and refuse with
+`BBX-E402` when the end record declares `> MAX_ENTRIES`. `None` (missing/short/non-zip/`0xFFFF` zip64) falls through to
+`zipfile`, and `_check_infos` remains the authority so a lying end record is still refused after parsing. Three tests in
+`tests/test_capsule_attacks.py` pin this (`test_an_oversized_archive_is_refused_from_its_end_record_before_it_is_parsed`,
+`test_a_lying_end_record_is_still_refused_after_the_parse`, `test_the_end_record_reader_says_nothing_when_it_cannot_speak_for_the_archive`).
+The 50 ms budget is unchanged.
+
 **A proposal, for the owner rather than for a test.** The `b115f02` numbers rule out the scheduler as the cause, so the
 choice is between two budget changes and neither is a test's to make: state this one row's budget for a 5 002-entry archive
 at a number a first-touch parse actually meets (it is the largest input the format allows, and the 50 ms bound was measured
