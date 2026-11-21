@@ -1,7 +1,7 @@
 # Review pack — redaction (this is not a gate file, and carries no verdict) — unsigned builder evidence
 
-**Re-read at `1466f43`, 2026-11-21.** Every command in this pack was re-run against that tree (the one this file now
-ships in): 142 tests, all pass, exit 0. No row changed and no row was added; a re-run is not a review.
+**Re-read at `1466f43`, 2026-11-21** (shipped in `044c1f8`, whose only change is this line). Every command in this pack was re-run
+against that tree: 142 tests, all pass, exit 0. No row changed and no row was added; a re-run is not a review.
 
 The claim redaction has to support is narrow and testable: **for a corpus of secrets, no sink this product renders
 contains one**, and the same run with redaction deliberately switched off *does* contain them — because a green list of

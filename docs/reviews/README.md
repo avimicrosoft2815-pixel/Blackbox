@@ -30,10 +30,11 @@ included) plus `docs` and `go-reader`, with `1 586` tests collected on the build
 A reviewer checking a *different* sha must re-run the commands: a number here is evidence about that commit and says
 nothing about another one, even when the file has not changed.
 
-## Re-read at `1466f43`, 2026-11-21
+## Re-read at `1466f43`, shipped in `044c1f8`, 2026-11-21
 
-The builder re-ran every pack's commands against the current tree, because a pack pinned at `133b0c3` is evidence about
-`133b0c3`. This is a re-read, not a verdict: it says the commands still answer the same way here, and nothing about whether
+The builder re-ran every pack's commands against `1466f43`, because a pack pinned at `133b0c3` is evidence about
+`133b0c3`. The commit these files ship in is `044c1f8`, whose only difference from `1466f43` is the table below; `ci` run
+`44871213580` was green on all eleven cells at `1466f43`. This is a re-read, not a verdict: it says the commands still answer the same way here, and nothing about whether
 the rows are true.
 
 | Pack | Command it names | Collected | Result |
