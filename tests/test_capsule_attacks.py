@@ -385,6 +385,7 @@ def test_a_lying_end_record_is_still_refused_after_the_parse(tmp_path: Path) -> 
     blot = bytearray(path.read_bytes())
     end = blot.rfind(b"PK\x05\x06")
     assert end > 0, "the fixture has no end-of-central-directory record"
+    blot[end + 8:end + 10] = (3).to_bytes(2, "little")
     blot[end + 10:end + 12] = (3).to_bytes(2, "little")
     path.write_bytes(bytes(blot))
     assert cap.declared_entry_count(str(path)) == 3, "the fixture's lie did not take"
@@ -416,3 +417,24 @@ def test_the_end_record_reader_says_nothing_when_it_cannot_speak_for_the_archive
     # and a real small archive answers with its true count
     good = _write(tmp_path, [("events/a.txt", b"x")], manifest=_manifest())
     assert cap.declared_entry_count(str(good)) == 2
+
+
+def test_a_comment_containing_eocd_signature_is_not_a_false_positive(tmp_path: Path) -> None:
+    """A valid archive whose ZIP comment contains `PK\\x05\\x06` + `> MAX_ENTRIES` bytes must not be falsely refused."""
+    import zipfile as _zipfile
+
+    path = _write(tmp_path, [("events/a.txt", b"x")], manifest=_manifest())
+    fake_eocd = b"PK\x05\x06" + b"\x00" * 6 + (cap.MAX_ENTRIES + 99).to_bytes(2, "little") + b"\x00" * 10 + b"!"
+    with _zipfile.ZipFile(path, "a") as zf:
+        zf.comment = fake_eocd
+    assert cap.declared_entry_count(str(path)) is None
+
+
+def test_read_manifest_also_refuses_oversized_archive_with_the_same_code(tmp_path: Path) -> None:
+    """`read_manifest` and `read_capsule` share the early EOCD check and refuse with the same `BBX-E402`."""
+    entries = [(f"events/part-{index:04d}.txt", b"x") for index in range(cap.MAX_ENTRIES + 1)]
+    path = _write(tmp_path, entries, manifest=_manifest())
+    with pytest.raises(BlackBoxError) as caught:
+        cap.read_manifest(str(path))
+    assert caught.value.code == "BBX-E402"
+    assert f"{len(entries) + 1} entries > {cap.MAX_ENTRIES}" in str(caught.value)

@@ -231,8 +231,16 @@ def declared_entry_count(path: str) -> int | None:
     if index < 0 or len(tail) - index < _EOCD_MIN:
         return None
     try:
-        total = struct.unpack_from("<H", tail, index + 10)[0]
+        _sig, disk, cd_disk, on_disk, total, _cd_size, _cd_off, comment_len = struct.unpack_from(
+            "<4s4H2IH", tail, index
+        )
     except struct.error:                                       # pragma: no cover - len() already guarantees 22
+        return None
+    # A valid EOCD sits at the exact end of the file: its declared comment length must match the trailing bytes.
+    # Otherwise `PK\x05\x06` inside an entry payload or comment could trigger a false-positive refusal.
+    if comment_len != len(tail) - index - _EOCD_MIN:
+        return None
+    if disk != 0 or cd_disk != 0 or on_disk != total:
         return None
     if total == 0xFFFF:                                        # zip64: the real count is elsewhere
         return None
