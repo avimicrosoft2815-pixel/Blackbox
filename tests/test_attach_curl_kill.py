@@ -45,16 +45,20 @@ CHILD = """\
 set -eu
 ( while [ ! -f "$BBX_KILL_WHEN" ]; do sleep 0.05; done; kill -9 -$$ 2>/dev/null || kill -9 $$ ) &
 curl -sS -N -H 'content-type: application/json' -d '{"model":"gpt-4","stream":true,"messages":[{"role":"user","content":"hi"}]}' \\
-  "$OPENAI_BASE_URL/chat/completions" >/dev/null
+  "$OPENAI_BASE_URL/chat/completions" >"$BBX_OUT"
 """
 
 
 def _run_and_kill_mid_stream(data_dir: Path, provider: MockProvider, *, min_chunks: int = 3,
                              deadline_s: float = 60.0) -> subprocess.CompletedProcess:
-    """Start the child, wait until the origin has pushed real chunks, then let the child SIGKILL its own group."""
+    """Start the child, wait until the origin has pushed real chunks AND curl has received bytes from the proxy,
+    then let the child SIGKILL its own group."""
     flag = data_dir / "kill-mid-stream.flag"
     flag.unlink(missing_ok=True)
-    env = {**os.environ, "PYTHONPATH": str(ROOT / "src"), "BLACKBOX_HOME": str(data_dir), "BBX_KILL_WHEN": str(flag)}
+    out_file = data_dir / "curl-out.bin"
+    out_file.unlink(missing_ok=True)
+    env = {**os.environ, "PYTHONPATH": str(ROOT / "src"), "BLACKBOX_HOME": str(data_dir),
+           "BBX_KILL_WHEN": str(flag), "BBX_OUT": str(out_file)}
     env.pop("BLACKBOX_DISABLED", None)
     env["BLACKBOX_CONTENT"] = "full"
     proc = subprocess.Popen(
@@ -64,7 +68,8 @@ def _run_and_kill_mid_stream(data_dir: Path, provider: MockProvider, *, min_chun
     )
     give_up = time.monotonic() + deadline_s
     try:
-        while provider.sent_chunks < min_chunks and time.monotonic() < give_up and proc.poll() is None:
+        while ((provider.sent_chunks < min_chunks or not out_file.exists() or out_file.stat().st_size == 0)
+               and time.monotonic() < give_up and proc.poll() is None):
             time.sleep(0.01)
     finally:
         # Touched either way: if the stream never started the test has to fail with the launcher's own output rather than

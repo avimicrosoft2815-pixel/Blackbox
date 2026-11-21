@@ -2396,7 +2396,11 @@ the branch of the earlier decision tree that names the proxy's write ordering un
 **What that leaves.** The proxy forwarded and recorded nothing for a stream whose origin produced 835 bytes before the kill:
 either the kill arrived before any frame was flushed, or the flush was lost with the process. Distinguishing those needs a
 run in which the burst is *watched* — the proxy's own frame count at the moment of the kill — which is instrumentation, and
-the next step for whoever picks this up. It stays open; nothing here is a fix.
+the next step for whoever picks this up. **Test synchronization fix (2026-11-21).** `_run_and_kill_mid_stream` in `tests/test_attach_curl_kill.py` previously
+waited only for `provider.sent_chunks >= min_chunks` (origin → proxy) before touching `BBX_KILL_WHEN`, which did not
+guarantee that the proxy had forwarded any bytes to `curl` yet. It now redirects `curl` stdout to `$BBX_OUT` and waits
+until both `provider.sent_chunks >= min_chunks` and `$BBX_OUT` is non-empty before triggering `SIGKILL`. Stays open until
+macOS CI confirms.
 
 ## Defect 120 — a Windows cell called `ingest` 155 ms slower than the front door, and the next commit's identical cell called it fine (2026-11-21, CI, open)
 
